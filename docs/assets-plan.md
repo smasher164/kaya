@@ -1,8 +1,19 @@
 # kaya assets: one root, three readers
 
-Status: **RATIFIED 2026-08-18 (maintainer)** — the ruling is stated plainly below; the survey and evidence sections follow unchanged. Nothing here is built and
-nothing here blocks the app-identity slice, which ships under the
-convention the tree already has. This brief answers the maintainer's
+Status: **RATIFIED 2026-08-18 (maintainer), AND BUILT 2026-08-18** — the
+ruling is stated plainly below; the survey and evidence sections follow
+unchanged. What landed, against the ruling: `asset(name)` is a core call
+(crates/kaya/src/assets.rs, six C exports beside `kaya_blob_register`)
+with the blob and bytes redemptions and no descriptor anywhere; the
+resolution rule and the miss sentence live once, in Rust, with every
+branch made to print; the file-like reader is binding-side sugar over
+bytes in each language's own idiom; the eight typeface guests collapsed
+from a ten-line preamble to one line; the asset root moved as a UNIT on
+every lane that stages one; guests/assets/win/minimal-resources.pri moved under
+the root with a provenance README; and tools/check-assets.sh holds all of
+it. STREAMING and Go's `fs.FS` façade stayed refused behind their named
+triggers, as ruled. The two carve-outs the build itself forced are stated
+in A3's walls and in A8. This brief answers the maintainer's
 question of 2026-08-18: "we have some examples right now where we declare
 binary data in a source file that can probably be replaced with an asset
 that's packaged/bundled." It surveyed every such place first and designs
@@ -66,9 +77,11 @@ job is to prove that kaya decodes a picture must not be able to fail
 because a file was not staged to a device. They stay.
 
 What is genuinely mis-filed is one file, and it is not a guest at all:
-tools/guest/minimal-resources.pri, an opaque 1040-byte Windows resource
-index sitting beside a shell script with no provenance and no way to
-regenerate it [MEASURED]. That is an asset filed as a tool.
+an opaque 1040-byte Windows resource index that sat beside a shell
+script under tools/guest/ with no provenance and no way to regenerate it
+[MEASURED]. That was an asset filed as a tool. It now lives at
+guests/assets/win/minimal-resources.pri with a README that says, among
+other things, that nobody knows who produced it.
 
 ### 2. kaya already has three assets, and has only ever named one.
 
@@ -187,10 +200,12 @@ and a file on disk invites the next reader to fix it.
    the design input that matters most below: the path, and
    `KAYA_SELFTEST_SCRIPT` carrying the content itself, because an iOS
    bundle and an Android intent have no shared filesystem with the runner.
-3. **The Windows resource index**, tools/guest/minimal-resources.pri:
-   1040 bytes of opaque MRT data, committed once, not regenerable, no
-   provenance file, mode `-rw----r-x`. It is shipped to the VM by
-   tools/deploy-win.sh and hashed into the deploy stamp, so it is
+3. **The Windows resource index**, surveyed at
+   guests/assets/win/minimal-resources.pri and now at
+   guests/assets/win/minimal-resources.pri: 1040 bytes of opaque MRT
+   data, committed once, not regenerable, no provenance file, working-
+   tree mode `-rw----r-x`. It was shipped to the VM by
+   tools/deploy-win.sh and hashed into the deploy stamp, so it was
    already treated as data by the machinery and as a tool by the layout.
 
 ### One layering note
@@ -464,9 +479,9 @@ does not exist yet.
 **Gate 3, provenance.** Every family directory under the asset root has a
 README naming what the files are, where they came from, the licence, and
 how to regenerate them. This is three lines of shell and it is the thing
-that makes vendoring safe. guests/assets/fonts/README.md passes it today;
-tools/guest/minimal-resources.pri is the file that fails it, which is how
-the survey found it.
+that makes vendoring safe. guests/assets/fonts/README.md passes it today, and
+guests/assets/win/minimal-resources.pri is the file that FAILED it,
+which is how the survey found it at all.
 
 ## A7. Refused, stated once
 
@@ -521,9 +536,10 @@ the survey found it.
    eight-way binding sweep plus the C floor, then the typeface guests
    collapse from a ten-line preamble to one line in each of eight
    languages, and the identity guest is written that way from the start.
-5. **tools/guest/minimal-resources.pri moves** under the root with a
-   README stating its provenance and how to regenerate it, or an honest
-   note that nobody knows.
+5. **The Windows resource index moves** under the root with a README
+   stating its provenance and how to regenerate it, or an honest note
+   that nobody knows. LANDED: guests/assets/win/minimal-resources.pri,
+   and the note is the honest one.
 6. **iOS gains the bundle copy** in `make_bundle`, which is both the
    lane's missing staging route and the icon's iOS packaging reader.
 7. **The packaging milestone consumes all of it** (docs/deferred.md:2059,

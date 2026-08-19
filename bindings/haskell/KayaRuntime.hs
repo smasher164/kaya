@@ -18,6 +18,11 @@ module KayaRuntime
     waitOccurrences,
     wake,
     registerBlob,
+    Asset,
+    openAsset,
+    assetBytes,
+    assetBlob,
+    assetClose,
     openPicked,
     UndoDelta (..),
     UndoText (..),
@@ -32,13 +37,21 @@ import qualified Data.ByteString as BS
 import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32, Int64)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CSize (..))
-import Foreign.Marshal.Alloc (alloca, mallocBytes)
+import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekByteOff, poke)
+-- GHC.Foreign, not Foreign.C.String: the latter marshals through the
+-- LOCALE's encoding, so an asset name and the core's sentence would
+-- round-trip differently under LANG=C than under a UTF-8 locale. These
+-- two calls name utf8 explicitly, which is what the core reads and
+-- writes on every platform. Both modules are base — no dependency joins
+-- the guests' build for this.
+import qualified GHC.Foreign as GHCF
+import GHC.IO.Encoding (utf8)
 import GHC.IO.Handle.FD (fdToHandle)
 import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
@@ -82,6 +95,27 @@ foreign import ccall unsafe "kaya_submit"
 
 foreign import ccall unsafe "kaya_blob_register"
   c_kaya_blob_register :: Ptr Word8 -> CSize -> IO Word64
+
+-- THE ASSET SURFACE (docs/assets-plan.md, ratified 2026-08-18): a file
+-- the guest's own BUILD put where the running program can find it, read
+-- by the core and held by handle. Unsafe rather than safe: each of
+-- these is a map lookup plus at most one file read, none of them parks,
+-- and the open is called from a build closure that is already on the
+-- app thread.
+foreign import ccall unsafe "kaya_asset_open"
+  c_kaya_asset_open :: Ptr Word8 -> CSize -> IO Word64
+
+foreign import ccall unsafe "kaya_asset_bytes"
+  c_kaya_asset_bytes :: Word64 -> Ptr CSize -> IO (Ptr Word8)
+
+foreign import ccall unsafe "kaya_asset_blob"
+  c_kaya_asset_blob :: Word64 -> IO Word64
+
+foreign import ccall unsafe "kaya_asset_release"
+  c_kaya_asset_release :: Word64 -> IO ()
+
+foreign import ccall unsafe "kaya_asset_why_not"
+  c_kaya_asset_why_not :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize
 
 foreign import ccall unsafe "kaya_occurrence_blob"
   c_kaya_occurrence_blob :: Word64 -> Ptr CSize -> IO (Ptr Word8)
@@ -153,6 +187,115 @@ registerBlob :: BS.ByteString -> IO Word64
 registerBlob bytes =
   unsafeUseAsCStringLen bytes $ \(p, len) ->
     c_kaya_blob_register (castPtr p) (fromIntegral len)
+
+-- | An open asset: the bytes kaya read, held by the core until this is
+-- released.
+--
+-- AN IORef AND NOT A BARE Word64, for two reasons that agree: the cell
+-- is what 'mkWeakIORef' attaches a finalizer to, and it is what makes a
+-- use after 'assetClose' say so instead of asking the core about a
+-- handle it has forgotten.
+data Asset = Asset {assetCell :: IORef Word64}
+
+-- | Open an asset by name; a miss raises with the core's sentence,
+-- verbatim.
+--
+-- 'errorWithoutStackTrace' rather than KayaApp's usual 'error': 'error'
+-- appends a GHC CallStack to the message, and this sentence has exactly
+-- one author (@asset_why_not@ in crates/kaya/src/assets.rs). What a
+-- Haskell guest prints and what a Java guest prints are the same bytes,
+-- which is what lets a scene freeze them once.
+openAsset :: String -> IO Asset
+openAsset name = do
+  handle <- withName name c_kaya_asset_open
+  if handle == 0
+    then errorWithoutStackTrace =<< assetMissSentence name
+    else do
+      cell <- newIORef handle
+      -- THE FINALIZER CLOSES OVER THE HANDLE NUMBER, NEVER THE CELL: a
+      -- finalizer that mentioned `cell` would keep it reachable forever
+      -- and never run. Safe because the core mints handles
+      -- monotonically and never reuses one, so a release arriving after
+      -- an explicit close cannot land on somebody else's asset — and it
+      -- is idempotent there anyway.
+      _ <- mkWeakIORef cell (c_kaya_asset_release handle)
+      return (Asset cell)
+
+-- The core's sentence for why a name would miss, fetched whole.
+--
+-- IT DOES NOT COMPOSE THE SENTENCE, it carries it: the one author is
+-- @asset_why_not@ in crates/kaya/src/assets.rs, which is where the
+-- naming convention (and tools/check-diagnostics.sh's rule) belongs.
+-- This is named for the carrying so it cannot be mistaken for the
+-- writing.
+--
+-- SIZED, THEN READ. The C entry writes into the caller's buffer and
+-- returns the sentence's TRUE length, so the first call asks how long it
+-- is and the second fills it. A guessed buffer would cut the half that
+-- names the root and the route — the half a reader is chasing.
+assetMissSentence :: String -> IO String
+assetMissSentence name = do
+  len <- withName name $ \p n -> c_kaya_asset_why_not p n nullPtr 0
+  allocaBytes (fromIntegral len) $ \out -> do
+    _ <- withName name $ \p n -> c_kaya_asset_why_not p n out len
+    GHCF.peekCStringLen utf8 (castPtr out, fromIntegral len)
+
+-- The name as UTF-8 bytes plus its length — what every asset entry
+-- takes. NOT NUL-terminated as far as the core is concerned: it reads
+-- exactly the length handed to it, so a name is whatever the guest
+-- typed.
+withName :: String -> (Ptr Word8 -> CSize -> IO a) -> IO a
+withName name body =
+  GHCF.withCStringLen utf8 name $ \(p, n) -> body (castPtr p) (fromIntegral n)
+
+-- | THE BYTES REDEMPTION: this asset's bytes, copied out of core
+-- memory. For a guest that is itself the consumer — a licence text, a
+-- JSON table, a shader.
+--
+-- The pointer the core hands back borrows its own buffer and stays valid
+-- until release, so the copy happens here and the ByteString that comes
+-- out is the caller's.
+assetBytes :: Asset -> IO BS.ByteString
+assetBytes asset = do
+  handle <- liveHandle asset
+  alloca $ \lenPtr -> do
+    poke lenPtr 0
+    dat <- c_kaya_asset_bytes handle lenPtr
+    len <- peek lenPtr
+    if dat == nullPtr || len == 0
+      then return BS.empty
+      else BS.packCStringLen (castPtr dat, fromIntegral len)
+
+-- | THE BLOB REDEMPTION, for the consumers inside this binding:
+-- register these bytes into the pending table and answer with the
+-- handle the record carries. The bytes never enter the Haskell heap —
+-- the core clones its own reference — which is the whole reason this is
+-- a different call from 'assetBytes' followed by 'registerBlob'.
+assetBlob :: Asset -> IO Word64
+assetBlob asset = liveHandle asset >>= c_kaya_asset_blob
+
+-- | Let the core drop these bytes. Idempotent here as well as in the
+-- core, so a close followed by the weak-reference finalizer costs one C
+-- call.
+assetClose :: Asset -> IO ()
+assetClose asset = do
+  handle <- readIORef (assetCell asset)
+  if handle == 0
+    then return ()
+    else do
+      writeIORef (assetCell asset) 0
+      c_kaya_asset_release handle
+
+liveHandle :: Asset -> IO Word64
+liveHandle asset = do
+  handle <- readIORef (assetCell asset)
+  if handle == 0
+    then
+      errorWithoutStackTrace
+        "kaya: this asset is closed — an asset's bytes live in the core until \
+        \assetClose, and a use after that has nothing to read; open it again \
+        \with asset"
+    else return handle
 
 data Ring = Ring (Ptr Word8) Word32 (Ptr Word32) (Ptr Word32) Word32
 

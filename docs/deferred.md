@@ -2743,8 +2743,32 @@ holding all eight level, or whether guests keep deriving it from platform
 predicates. Invariant 2 makes it a sweep across all eight either way. No
 arm took it.
 
-## No gate compiles a Swift GUEST for iOS (gate gap, found 2026-08-18)
+## ~~No gate compiles a Swift GUEST for iOS (gate gap, found 2026-08-18)~~
 KEY: swift-typecheck, iOS guest, guests/swift, gate gap, os(iOS)
+
+CLOSED 2026-08-18. tools/swift-typecheck.sh grew the pass: the guests
+the iOS lane ships, compiled against the iphonesimulator SDK with the
+LANE's flags. Both halves of "the lane's" are read out of
+tools/ios/run-sim.sh rather than restated here — the guest list
+(IOS_SWIFT_SCENES, 28 of the 37 sources; window/panels and friends are
+desktop-only by design) and the deployment target (IOS_MIN = 16.0, which
+is NOT the 17.0 the interpreter passes use, and the older target is the
+stricter one for availability diagnostics). A gate that invented either
+number would be looser or tighter than the lane it stands in for.
+
+Watched red, the asymmetry that is the whole argument for the pass: an
+`import AppKit` + `NSWorkspace` use planted in guests/swift/identity.swift
+OUTSIDE its `#if !os(iOS)` fails the iOS pass (RC=1, 2 diagnostics,
+"no such module 'AppKit'") while the macOS pass over the same bytes stays
+green (RC=0, 0 diagnostics). Every pass now names the file set it walked
+in the verdict, and a pass handed nothing to compile REFUSES rather than
+passes — driven three ways: an empty guests/swift, a run-sim.sh that no
+longer declares IOS_SWIFT_SCENES, and a lane entry naming a guest with no
+source. No keying change was needed: `tools/` rides every gate key
+(tools/build-id.sh), so reading run-sim.sh is already inside
+swift-typecheck's declared input set.
+
+The original entry is kept below for the record.
 
 tools/swift-typecheck.sh's iOS pass covers swift/KayaSwiftUI.swift,
 swift/KayaSwiftUIEntry.swift and tools/ios/clipctl. Nothing in the gate
@@ -2811,7 +2835,7 @@ wall disabled → the scene PASSES with a byte-identical verdict. The wall
 the gap. Closing it: a UIA read of the caption band's mark element,
 likely alongside the system-menu binding work above.
 
-## The pasteboard needs a foreign-writer witness (measured 2026-08-18)
+## ~~The pasteboard needs a foreign-writer witness (measured 2026-08-18)~~
 KEY: pasteboard changeCount, clipboard legs, foreign writer, human at the machine
 
 Two mac clipboard legs failed mid-matrix with pastes reading "" while
@@ -2819,10 +2843,37 @@ six siblings passed and the same legs pass standalone: the machine's
 one pasteboard was written under the legs (a human ⌘C anywhere does
 it — the maintainer was at the keyboard, and IDE activity timestamps
 align). The failure SENTENCE cost the investigation: "reads empty"
-cannot discriminate a broken paste from a foreign writer. The guard:
-NSPasteboard.changeCount snapshotted before the paste; on mismatch the
-leg says "the pasteboard changed under this leg: foreign writer" and
-the red names the cause in one line instead of one rerun.
+cannot discriminate a broken paste from a foreign writer.
+
+CLOSED 2026-08-18, swift/KayaSwiftUI.swift. Every stage of a clip — the
+app's copy, a seed that settled, a native cut or copy — records the
+changeCount it left (kayaClipStaging/kayaClipOwned), and every read or
+paste that consumes it compares first (kayaClipWitness). On a mismatch
+the step fails with what was measured and nothing more: "the pasteboard
+changed under this leg (changeCount N -> M): a foreign writer replaced
+the staged content — <consumer> is reading a board this leg did not
+stage, and it now offers [types]". WHO wrote it is not on the
+pasteboard, so the sentence names nobody. The script then stops — no
+assertion after that point is about this leg's clip.
+
+THE DOOR, not the read, is where a paste is witnessed. A paste whose
+staged clip was replaced is usually DISABLED, and on macOS the harness
+dispatches the REAL NSMenuItem, so kaya gets no say once AppKit has
+greyed it: the first placement (inside kayaPerformClipboardRole) never
+fired, and the leg still failed "entry#1 reads """. The witness sits in
+kayaRoleInertNote, ahead of the enablement question, which every
+activation route reaches.
+
+Watched both ways, the perturbation measured rather than assumed
+(scratchpad/chrome/pasteboard-witness.md): a driver waits for the leg's
+own trace to reach the step after the seed, writes the machine's
+pasteboard from OUTSIDE the leg, and reads pbpaste before and after.
+With the witness disabled the leg says `label#0 reads "empty", wanted
+"text from another app"` — the incident's own sentence; with it, the
+transition. All three consumption sites were seen firing. And the
+FALSE POSITIVE is watched too: with the cut/copy stage removed, a
+native Copy — the leg's own write — is reported as a foreign writer,
+and with it the same leg passes. All eight mac clipboard legs green.
 
 ## iOS identity packaging is proven on the simulator only (2026-08-18)
 KEY: iOS signing, device install, bundle packaging, simulator-only
@@ -3476,3 +3527,137 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   decoded the core's derived words per bit); a `BRAND_MASK_LIGHT`/
   `BRAND_MASK_DARK` pair in the spec moves the agreement from measured
   to structural. Spec-hash move + regeneration + seven callsite edits.
+
+## The APK's own assets/ is not read (asset packaging, Android)
+KEY: assets, Android, AssetManager, APK, packaging, KAYA_ASSET_DIR
+
+`asset(name)` resolves through a DIRECTORY on every platform
+(crates/kaya/src/assets.rs's `Place::Dir`), and Android is the one
+platform whose packaged assets are not files: an entry inside an APK has
+no path and is read through the platform's AssetManager. The lane pushes
+the root to /data/local/tmp and names it in KAYA_ASSET_DIR, which is
+what docs/assets-plan.md's A4 table calls the "staged to the lane today"
+column and what A5.1 asks for in those words.
+
+What is NOT built is the packaging reader — a `Place::Apk` arm calling
+`AssetManager.open`/`list` through the JNI glue. It was designed and
+deliberately not written, for invariant 3's reason rather than for
+effort: with the lane taking the directory route, the APK arm would be a
+branch no run reaches, and a branch nobody has taken is a guess about a
+state nobody has been in. The trigger is the packaging milestone: the
+moment a kaya APK ships without a runner beside it to push a directory,
+the arm is written and the emulator lane stops pushing.
+
+The shape, so the next person does not re-derive it: cache a GlobalRef
+to the Activity at attach (crates/kaya/src/android.rs already caches the
+JVM and KayaPresent for exactly this class of later, off-thread call),
+add a small `dev.kaya.KayaAssets` Kotlin object with `read(Context,
+String): ByteArray?` and a recursive `list(Context)`, and call it from
+the new arm. The Kotlin side does the stream reading because
+`InputStream.readAllBytes` is API 33 and this tree's minSdk is 26.
+
+## The identity guests still resolve their own icon path
+KEY: assets, identity, KAYA_ICON_FILE, one resolver, check-assets EXEMPT
+
+The eight typeface guests collapsed to `asset("fonts/sora-wght.ttf")`;
+the eight identity guests did not, and still read `KAYA_ICON_FILE` with
+a repo-relative default. They are eight of the entries in
+tools/check-assets.sh's EXEMPT table, so the gate names them every run
+rather than letting them pass quietly, and that table now refuses an
+exemption that is no longer earned.
+
+The reason it was not done in the same slice is a real coupling and not
+a scheduling one: tools/check-app-identity.sh's C3 clause REQUIRES that
+every file naming `KAYA_ICON_FILE` also spells the declared path out of
+guests/assets/identity.toml. A guest rewritten to
+`asset("icons/kaya-mark.png")` names neither, so C3 has to learn the new
+form in the same move — and C3 is the clause that caught a real drift on
+its first run, a deploy staging the mark by glob. Changing an identity
+gate's rule while migrating the guests it watches, on the day after the
+identity slice landed, is two risks in one commit for no gain.
+
+When it happens: C3 gains an arm that accepts `asset("<the declared
+icon's path under the root>")` as naming the declaration, the eight
+guests lose their environment read, and the eight EXEMPT entries come
+out of check-assets.sh together.
+
+## The C floor has no asset guest
+KEY: assets, C floor, guests/c, longhand, invariant 5
+
+The C guests are the explicit floor and document every primitive
+longhand, and none of them calls `kaya_asset_open`. The floor's spelling
+is settled and stated in crates/kaya/src/capi.rs's doc comments —
+`kaya_asset_open`, then `kaya_blob(kaya_asset_blob(handle))` into
+whichever generated packer wants the blob, then `kaya_asset_release` —
+but nothing under guests/c/ runs it.
+
+It was not bolted onto an EXISTING C guest because every one of them is
+wired to a scene whose assertions a brand typeface would move:
+guests/c/styling.c is the closest fit and its scene asserts insets and
+shares, which a font swap changes. It belongs with the assets
+conformance scene below, which is where a C guest can exercise it
+against assertions written for it.
+
+## The assets conformance scene
+KEY: assets, scene, assets.steps, miss diagnostic, census, expect image
+
+Not built. What the slice DOES prove today: `asset()`'s happy path
+through a real surface, on four lanes in five to seven languages each —
+the typeface scene's guests now call `asset("fonts/sora-wght.ttf")` and
+`expect_typeface "Sora"` reads the family the real text system ended up
+with, which is the strongest bytes-reached-the-platform observation kaya
+owns. The miss diagnostic's eight answers are each made to print by
+`assets::tests::why_not_answers_in_facts` and audited by
+tools/check-diagnostics.sh at answers=8, measured=8.
+
+What is NOT proven cross-platform is the miss SENTENCE: that the census
+of what the package carries is the same eight names on five platforms.
+The scene is designed, and the design is the part worth keeping:
+
+    expect label#0 "assets"
+    expect image#0 "64x64"
+    expect label#1 "<the miss sentence's first line, census and all>"
+
+`expect image#0` is the observation with teeth and it needs NO new verb,
+no interpreter arm and no wire constant: the guest hands the vendored
+mark's asset to an Image, the platform's own decoder decodes it, and the
+harness reads the decoded size off the real image view — the gallery
+scene's shape (tools/scenes/gallery.steps:12) with an asset on the input
+side. `expect_typeface` was rejected for this scene precisely because
+iOS depth-stubs it, which would have exempted the one lane whose asset
+delivery is the real packaging mechanism.
+
+The frozen census is the forcing function: it can only pass if every
+lane stages the WHOLE root, which is exactly the property A5.1 asks for
+and which nothing else observes at run time. It also means adding an
+asset reddens the scene, so tools/check-assets.sh should gain a clause
+holding that frozen string equal to the root's listing — one gate red
+naming the .steps file, before any lane runs, rather than five red lanes.
+
+Cost, measured against the identity scene's own landing: a .steps file,
+a guest per language, and legs on all five runners (check-steps'
+`wired()` demands every runner or a depth stub, and a depth stub would
+be dishonest here because every backend CAN decode a PNG). That is a
+breadth commit, and it did not fit beside a migration that had to leave
+every lane green.
+
+## A Swift guest cannot catch an asset miss
+KEY: assets, Swift, fatalError, uniform semantics, invariant 1
+
+`asset(name)` raises on a miss in every binding, carrying the core's
+sentence verbatim. Seven of the eight raise something the guest could
+catch — a Python RuntimeError, a Go panic, a JVM IllegalStateException,
+an OCaml Failure, a Haskell exception, a C# InvalidOperationException, a
+Rust panic. Swift's is `fatalError`, which is the free-function idiom in
+bindings/swift/KayaApp.swift and which traps rather than unwinding, so a
+Swift guest cannot recover from a missing asset.
+
+Whether that is idiom or divergence is a maintainer question and not an
+agent's (the carve-out rule). The case for idiom: kaya's Swift surface
+has no `throws` anywhere, and adding one to `asset` alone would make it
+the only call in the binding a guest must `try`. The case for
+divergence: "the guest may observe the failure" is a semantics, and on
+one platform it is not available. Nothing in the tree depends on the
+answer today, because no scene catches a miss — which is the assets
+conformance scene's job above, and the reason that scene reads the
+sentence through a query rather than through a catch.

@@ -26,33 +26,19 @@ let () =
      (* The typeface is set BEFORE THE FIRST MOUNT, per the set-once wall:
         brand is identity, not state. The blob registers with the
         platform's app-font machinery and the "Sora" request then resolves
-        to it. *)
-     let font_path =
-       match Sys.getenv_opt "KAYA_FONT_FILE" with
-       | Some path -> path
-       | None -> "guests/assets/fonts/sora-wght.ttf"
-     in
-     let missing reason =
-       failwith
-         (Printf.sprintf
-            "kaya: the typeface scene needs the vendored font at %s (set \
-             KAYA_FONT_FILE or run from the repo root): %s" font_path reason)
-     in
-     let font =
-       match open_in_bin font_path with
-       | exception Sys_error msg -> missing msg
-       | ic ->
-         Fun.protect
-           ~finally:(fun () -> close_in_noerr ic)
-           (fun () ->
-             let len = in_channel_length ic in
-             let buf = Bytes.create len in
-             match really_input ic buf 0 len with
-             | () -> buf
-             | exception End_of_file ->
-               missing "the file ended before its stated length")
-     in
-     brand_typeface ~font "Sora";
+        to it.
+
+        ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
+        override and the sentence for a miss were all hand-written here
+        (and in seven sibling scenes) until [asset] arrived; they live in
+        the core now (crates/kaya/src/assets.rs), which is also why the
+        bytes never enter this guest's heap — the handle goes straight to
+        the blob channel. The close is explicit and the redemption has
+        already happened by then: [brand_typeface] registered the bytes
+        into the pending blob table, which keeps its own reference. *)
+     let font = asset "fonts/sora-wght.ttf" in
+     brand_typeface ~font_asset:font "Sora";
+     asset_close font;
      window ~title:"typeface" ~width:480.0 ~height:360.0 ();
 
      let heading = signal (Str "typeface") in

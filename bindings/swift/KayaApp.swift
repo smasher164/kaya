@@ -804,6 +804,152 @@ struct KayaClipReadRef {
     }
 }
 
+/// AN ASSET — a file this app's own BUILD put where the running program
+/// can find it (docs/assets-plan.md, ratified 2026-08-18): the vendored
+/// typeface, the app's mark, a licence text.
+///
+/// `KayaAsset("fonts/sora-wght.ttf")` opens one. The name is a relative
+/// path under the asset root, spelled with `/`, and THE ROOT IS KAYA'S
+/// PROBLEM AND NOT AN APP'S: a directory beside the program on the
+/// desktops, the bundle's own resources on iOS, and one environment
+/// variable (`KAYA_ASSET_DIR`) overrides the whole root for a lane that
+/// staged it elsewhere. No guest reads an environment variable and no
+/// guest carries a repo-relative default; both used to be hand-written
+/// once per language, and one of those eight copies had a
+/// language-specific trap severe enough to have earned its own gate.
+///
+/// A MISS IS FATAL, with the core's sentence and nothing added. There is
+/// one author for that sentence (crates/kaya/src/assets.rs) so a Swift
+/// guest and a Haskell guest name the same fault in the same words, and
+/// a scene can freeze them once. `fatalError` rather than a `throws` is
+/// this file's idiom for a DECLARATION bug — `kayaAcceptList`'s spelling,
+/// one function up — and a name the build did not ship is exactly that:
+/// the same class of mistake as a wrong scene name, with an answer that
+/// never changes on a retry. THE CONSEQUENCE, STATED PLAINLY: a Swift
+/// guest cannot catch a miss. `KayaPickedFile.open` throws because a
+/// provider can fail transiently; this cannot.
+///
+/// TWO REDEMPTIONS, and the whole point of there being two.
+/// `brandTypeface(_:platforms:font:)` and `appIdentity(_:icon:)` take
+/// the asset itself, and the bytes never enter the guest's heap — the
+/// core hands its own buffer to the blob table. `bytes` is for a guest
+/// that is ITSELF the consumer, and copies once.
+///
+/// FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and never a
+/// core surface. Six of the eight bindings wrap them in the language's
+/// own standard in-memory reader — std::io::Cursor, io.BytesIO,
+/// bytes.NewReader, MemoryStream, java.io.ByteArrayInputStream,
+/// Foundation's InputStream(data:) — and OCaml and Haskell wrap them in
+/// nothing, because neither language's dependency set carries one
+/// (OCaml's In_channel only wraps a real channel; base has no in-memory
+/// Handle) and kaya will not add a package to a guest's build to invent
+/// one. In those two the byte value IS the reader — Bytes.t and
+/// Data.ByteString.ByteString — and every reading idiom the language has
+/// applies to it directly. That is the whole of the carve-out (DESIGN.md,
+/// Binding conventions): the idiom decides the spelling, and here two
+/// idioms have no second spelling to decide on.
+///
+/// READ-ONLY, STRUCTURALLY: no mode argument anywhere on this surface,
+/// and no file descriptor either. A descriptor was `KayaPickedFile`'s
+/// necessity — a provider-opened file with no path behind it — and it is
+/// not ours: kaya resolved the name and produced the bytes itself.
+///
+/// EACH CALL READS. No cache, no watch, no reload.
+///
+/// A CLASS RATHER THAN A STRUCT, for the one reason a class earns here:
+/// `deinit`. Release is explicit (`close()`) AND automatic, so a guest
+/// that forgets leaks nothing.
+final class KayaAsset {
+    private var handle: UInt64
+
+    init(_ name: String) {
+        let utf8 = Array(name.utf8)
+        let opened = utf8.withUnsafeBufferPointer { raw in
+            kaya_asset_open(raw.baseAddress, UInt(raw.count))
+        }
+        guard opened != 0 else {
+            // NO SWIFT FUNCTION IS NAMED FOR THIS, deliberately. The
+            // sentence has exactly one author — `asset_why_not` in
+            // crates/kaya/src/assets.rs, which is where
+            // tools/check-diagnostics.sh's rule belongs — and a Swift
+            // helper called `…WhyNot` would claim to compose a diagnosis
+            // it only carries. This is the carrying, inline, so the
+            // naming convention keeps pointing at the one place a
+            // sentence is written.
+            //
+            // SIZED, THEN READ: the C entry writes into the caller's
+            // buffer and returns the sentence's TRUE length, so the
+            // first call asks how long it is and the second fills it.
+            // A guessed buffer would cut the half that names the root
+            // and the route, which is the half a reader is chasing.
+            let len = utf8.withUnsafeBufferPointer { raw in
+                kaya_asset_why_not(raw.baseAddress, UInt(raw.count), nil, 0)
+            }
+            var sentence = [UInt8](repeating: 0, count: Int(len))
+            sentence.withUnsafeMutableBufferPointer { out in
+                _ = utf8.withUnsafeBufferPointer { raw in
+                    kaya_asset_why_not(raw.baseAddress, UInt(raw.count), out.baseAddress, len)
+                }
+            }
+            fatalError(String(decoding: sentence, as: UTF8.self))
+        }
+        handle = opened
+    }
+
+    /// THE BYTES REDEMPTION: this asset's bytes, copied out of core
+    /// memory. For a guest that is itself the consumer — a licence text,
+    /// a JSON table, a shader.
+    ///
+    /// The pointer the core hands back borrows its buffer and stays
+    /// valid until release, so the copy happens here and the `Data` that
+    /// comes out is yours.
+    var bytes: Data {
+        alive()
+        var len = UInt(0)
+        guard let p = kaya_asset_bytes(handle, &len), len > 0 else { return Data() }
+        return Data(bytes: p, count: Int(len))
+    }
+
+    /// The same bytes as a stream, for the Foundation consumers that
+    /// want one.
+    ///
+    /// IN-MEMORY AND NOT A FILE: `InputStream(data:)` over `bytes`,
+    /// binding-side sugar with no core surface behind it and no
+    /// descriptor anywhere. Nothing here blocks and nothing here fails.
+    func stream() -> InputStream {
+        InputStream(data: bytes)
+    }
+
+    /// THE BLOB REDEMPTION, for the consumers inside this binding:
+    /// register these bytes into the pending table and answer with the
+    /// handle the record carries. The bytes never enter the guest's
+    /// heap. `fileprivate` on purpose — a guest names the asset at
+    /// `brandTypeface`/`appIdentity` and never handles a blob id.
+    fileprivate func blob() -> UInt64 {
+        alive()
+        return kaya_asset_blob(handle)
+    }
+
+    /// Let the core drop these bytes. Idempotent, and `deinit` calls the
+    /// same release, which the core also treats as a no-op.
+    func close() {
+        kaya_asset_release(handle)
+        handle = 0
+    }
+
+    deinit {
+        kaya_asset_release(handle)
+    }
+
+    private func alive() {
+        precondition(
+            handle != 0,
+            "kaya: this asset is closed — an asset's bytes live in the core until "
+                + "close(), and a use after that has nothing to read; open it again "
+                + "with KayaAsset(_:)")
+    }
+}
+
 struct KayaPickedFile {
     let handle: UInt64
     let name: String
@@ -3002,6 +3148,37 @@ final class KayaAppTx {
             font.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
     }
 
+    /// The ASSET form of the font slot: the same call, with the font
+    /// NAMED rather than read — `tx.brandTypeface("Sora", font:
+    /// KayaAsset("fonts/sora-wght.ttf"))`.
+    ///
+    /// THE BYTES NEVER ENTER THE GUEST'S HEAP. The core already holds
+    /// them; this hands the same buffer to the blob table, so a font file
+    /// costs one refcount here and no `Data`. That is the whole reason an
+    /// asset is a handle rather than a bytes factory — `font:
+    /// asset.bytes` would work and would copy a megabyte through Swift
+    /// for nothing.
+    ///
+    /// `font:` has no default here, which is what keeps the two overloads
+    /// apart: `brandTypeface("Georgia")` is unambiguously the `Data?`
+    /// one.
+    ///
+    /// Everything else — the family, the per-platform rows, the set-once
+    /// wall, register-then-resolve — is
+    /// `brandTypeface(_:platforms:font:)`'s, verbatim.
+    func brandTypeface(
+        _ family: String,
+        platforms: KeyValuePairs<KayaPlatform, String> = [:],
+        font: KayaAsset
+    ) {
+        var pairs: [KayaValue] = []
+        for (platform, name) in platforms {
+            pairs.append(.i64(platform.rawValue))
+            pairs.append(.str(name))
+        }
+        tx.setBrandTypeface(1, .str(family), pairs, .blob(font.blob()))
+    }
+
     /// DECLARE the app's identity (docs/app-identity-plan.md): the name
     /// it goes by and the picture that stands for it, as the bytes of
     /// one image file. One name covers both forms, the
@@ -3043,6 +3220,19 @@ final class KayaAppTx {
         tx.setAppIdentity(
             icon == nil ? 0 : 1, .str(name),
             icon.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
+    }
+
+    /// The ASSET form of the icon slot: the same declaration, with the
+    /// mark NAMED rather than read — `tx.appIdentity("Aurora Notes",
+    /// icon: KayaAsset("icons/kaya-mark.png"))`.
+    ///
+    /// THE BYTES NEVER ENTER THE GUEST'S HEAP: the core hands its own
+    /// buffer to the blob table, so a picture costs one refcount here and
+    /// no `Data`. `icon:` has no default, which is what keeps this apart
+    /// from the `Data?` overload. Everything else is
+    /// `appIdentity(_:icon:)`'s, verbatim.
+    func appIdentity(_ name: String, icon: KayaAsset) {
+        tx.setAppIdentity(1, .str(name), .blob(icon.blob()))
     }
 
     /// Create an auxiliary window (capability-gated: phone hosts

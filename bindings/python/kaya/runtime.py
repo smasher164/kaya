@@ -67,6 +67,26 @@ _lib.kaya_open_picked.argtypes = [
     ctypes.POINTER(ctypes.c_uint32),
 ]
 _lib.kaya_open_picked.restype = ctypes.c_int32
+# THE ASSET TABLE: a file the guest's own BUILD put beside the program,
+# resolved and read by the CORE (docs/assets-plan.md). No mode argument
+# anywhere on this floor — assets are read-only structurally — and no
+# descriptor: kaya produced the bytes itself, so PickedFile's necessity
+# does not arise. Nothing here is generated; the whole surface is these
+# six entry points.
+_lib.kaya_asset_open.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_asset_open.restype = ctypes.c_uint64
+_lib.kaya_asset_bytes.argtypes = [ctypes.c_uint64,
+                                  ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_asset_bytes.restype = ctypes.POINTER(ctypes.c_uint8)
+_lib.kaya_asset_len.argtypes = [ctypes.c_uint64]
+_lib.kaya_asset_len.restype = ctypes.c_size_t
+_lib.kaya_asset_blob.argtypes = [ctypes.c_uint64]
+_lib.kaya_asset_blob.restype = ctypes.c_uint64
+_lib.kaya_asset_release.argtypes = [ctypes.c_uint64]
+_lib.kaya_asset_release.restype = None
+_lib.kaya_asset_why_not.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                    ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_asset_why_not.restype = ctypes.c_size_t
 
 _occ_record = ctypes.POINTER(ctypes.c_uint8)()
 
@@ -165,6 +185,100 @@ def run():
     """Enter the core on the calling thread (must be the process main
     thread); returns the exit code when the app ends."""
     return _lib.kaya_run()
+
+
+def asset_open(name):
+    """Open an asset by name; 0 is the MISS, and asset_miss_sentence says why.
+
+    ZERO RATHER THAN A RAISE FROM THE CORE, because a panic inside an
+    `extern "C"` frame is an uncatchable process abort in every guest
+    language. The core answers a value and the BINDING raises — in
+    Python's idiom, carrying the core's sentence (kaya/__init__.py's
+    `asset`).
+
+    The name travels as UTF-8 bytes with an explicit length rather than
+    a NUL-terminated string: the C floor takes (pointer, len) so every
+    binding hands its own string type's bytes with no copy through a
+    terminator it would have to add.
+    """
+    raw = name.encode("utf-8")
+    return _lib.kaya_asset_open(raw, len(raw))
+
+
+def asset_bytes(handle):
+    """An open asset's bytes, copied out of core memory.
+
+    ONE COPY, AND IT IS NOT AVOIDABLE HERE: the pointer borrows the
+    core's allocation, `bytes` objects are immutable and own their
+    storage, and a `memoryview` over borrowed memory would outlive the
+    release. The copy is the price of `bytes()`; the BLOB redemption
+    (asset_blob) is the route that pays nothing, and it is the one a
+    font or an icon takes.
+    """
+    length = ctypes.c_size_t(0)
+    data = _lib.kaya_asset_bytes(handle, ctypes.byref(length))
+    return b"" if not data else ctypes.string_at(data, length.value)
+
+
+def asset_len(handle):
+    """An open asset's byte count. 0 means the HANDLE is dead, never the
+    file: the core refuses a zero-byte asset at the open."""
+    return _lib.kaya_asset_len(handle)
+
+
+def asset_blob(handle):
+    """THE BLOB REDEMPTION: register this asset's bytes into the pending
+    table and get the handle the next submit consumes.
+
+    The bytes never enter Python. The core clones one refcount, the
+    record carries the handle, and a hundred kilobytes of font reaches
+    the platform's font API without a `bytes` object ever existing for
+    it — which is the whole difference between this and
+    `register_blob(asset.bytes())`.
+    """
+    return _lib.kaya_asset_blob(handle)
+
+
+def asset_release(handle):
+    """Drop an open asset. Idempotent, so a double close and a finalizer
+    that runs after one cost nothing and raise nothing."""
+    _lib.kaya_asset_release(handle)
+
+
+# NAMED FOR THE CARRYING, not for the answering, and deliberately not
+# `asset_why_not`. tools/check-diagnostics.sh reads any *why_not by
+# that name alone and holds it to the rule that every branch must
+# print what it measured — which is right, and which the function
+# that EARNED the name already satisfies: `asset_why_not` in
+# crates/kaya/src/assets.rs stats the root, lists what is there and
+# reads the io error, and the gate audits it at answers=8,
+# measured=8. This copies that sentence's bytes into a str. It
+# observes nothing and could not print a second sentence if it tried,
+# so calling it a why-not would put a diagnostic's name on a memcpy —
+# and three other bindings in this same slice named theirs the same
+# way (OCaml's asset_miss_sentence).
+def asset_miss_sentence(name):
+    """The core's sentence for why `asset(name)` would fail — empty when
+    it would succeed.
+
+    ASKED TWICE ON PURPOSE. The first call passes a NULL buffer to learn
+    the length; the second one fills a buffer of exactly that size. The
+    alternative is a fixed buffer, and what a fixed buffer truncates is
+    the END of the sentence — where the census of what the package
+    actually carries lives, which is the half that answers the reader's
+    next question.
+
+    THE PROSE IS THE CORE'S, whole and unedited. This binding adds
+    nothing to it: one author for the sentence, nine spellings of the
+    raise (crates/kaya/src/assets.rs).
+    """
+    raw = name.encode("utf-8")
+    needed = _lib.kaya_asset_why_not(raw, len(raw), None, 0)
+    if needed == 0:
+        return ""
+    out = ctypes.create_string_buffer(needed)
+    written = _lib.kaya_asset_why_not(raw, len(raw), out, needed)
+    return out.raw[:min(written, needed)].decode("utf-8", "replace")
 
 
 def open_picked(handle, mode):

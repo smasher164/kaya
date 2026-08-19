@@ -4,11 +4,7 @@
    every lane; guests/rust/typeface.rs carries the canonical note, and
    the byte-frozen contract is tools/scenes/typeface.steps. -}
 
-import Control.Exception (IOException, try)
-import qualified Data.ByteString as BS
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Maybe (fromMaybe)
-import System.Environment (lookupEnv)
 
 import KayaApp
 import KayaWire (Value (..))
@@ -16,22 +12,21 @@ import KayaWire (Value (..))
 main :: IO ()
 main = kayaMain $ \app -> do
   draftRef <- newIORef ""
-  -- Read out here rather than below: Build is a pure state monad, so the
-  -- one IO the brand call needs happens before the transaction opens.
-  fontPath <- fromMaybe "guests/assets/fonts/sora-wght.ttf" <$> lookupEnv "KAYA_FONT_FILE"
-  loaded <- try (BS.readFile fontPath) :: IO (Either IOException BS.ByteString)
-  font <- case loaded of
-    Right bytes -> pure bytes
-    Left err ->
-      errorWithoutStackTrace $
-        "kaya: the typeface scene needs the vendored font at "
-          ++ fontPath
-          ++ " (set KAYA_FONT_FILE or run from the repo root): "
-          ++ show err
+  -- Opened out here rather than below: Build is a pure state monad, so
+  -- the one IO the brand call needs happens before the transaction
+  -- opens.
+  --
+  -- ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
+  -- override and the sentence for a miss were all hand-written here (and
+  -- in seven sibling scenes) until asset arrived; they live in the core
+  -- now (crates/kaya/src/assets.rs), which is also why the bytes never
+  -- enter this guest's heap — the handle goes straight to the blob
+  -- channel.
+  font <- asset "fonts/sora-wght.ttf"
   buildTx app $ do
     -- BEFORE THE FIRST MOUNT, per the set-once wall: brand is identity,
     -- not state.
-    brandTypeface "Sora" [TFont font]
+    brandTypeface "Sora" [TFontAsset font]
     window 0 [WTitle "typeface", WSize 480 360]
 
     -- The signals come first so the click handler can close over
@@ -60,3 +55,7 @@ main = kayaMain $ \app -> do
             )
         ]
     mount root
+  -- The close is explicit and the redemption has already happened:
+  -- buildTx ran the transaction's IO, so brandTypeface registered the
+  -- bytes into the pending blob table, which keeps its own reference.
+  assetClose font

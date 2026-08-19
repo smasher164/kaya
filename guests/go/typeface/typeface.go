@@ -3,12 +3,19 @@
 // ramp alone. The scene names NO SIZE anywhere. The bundled-font
 // reasoning is guests/rust/typeface.rs; the byte-frozen contract is
 // tools/scenes/typeface.steps.
+//
+// THE FONT IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+// This scene used to resolve the file itself — kaya.Env("KAYA_FONT_FILE")
+// with a repo-relative default, os.ReadFile, and a panic in its own
+// words — as its seven siblings each did in their own language.
+// tx.Asset(name) is the whole thing now: where the file lives is the
+// core's knowledge, and the failure sentence has one author. The
+// kaya.Env-not-os.Getenv rule this file used to carry is not merely
+// obeyed here any more, it is unreachable: the scene reads no
+// environment at all.
 package typeface
 
 import (
-	"fmt"
-	"os"
-
 	kaya "dev.kaya/bindings/go"
 )
 
@@ -19,20 +26,12 @@ func App() *kaya.App {
 	draft := ""
 
 	app.Build(func(tx *kaya.Tx) {
-		// Set BEFORE THE FIRST MOUNT, per the set-once wall. kaya.Env
-		// and never os.Getenv — tools/check-go-env.sh.
-		fontPath := kaya.Env("KAYA_FONT_FILE")
-		if fontPath == "" {
-			fontPath = "guests/assets/fonts/sora-wght.ttf"
-		}
-		font, err := os.ReadFile(fontPath)
-		if err != nil {
-			panic(fmt.Sprintf(
-				"kaya: the typeface scene needs the vendored font at %s "+
-					"(set KAYA_FONT_FILE or run from the repo root): %v",
-				fontPath, err))
-		}
-		tx.BrandTypeface("Sora", kaya.FontBytes(font))
+		// Set BEFORE THE FIRST MOUNT, per the set-once wall. The
+		// asset's bytes go from the core's read straight to the
+		// platform's font API: this scene never holds them.
+		font := tx.Asset("fonts/sora-wght.ttf")
+		defer font.Close()
+		tx.BrandTypeface("Sora", kaya.FontAsset(font))
 		tx.Window(0).Title("typeface").Size(480, 360)
 
 		heading := tx.Signal("typeface")

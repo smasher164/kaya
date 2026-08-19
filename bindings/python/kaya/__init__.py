@@ -49,6 +49,7 @@ core never calls into the guest. The wire vocabulary underneath
 """
 
 import dataclasses
+import io
 import operator
 import sys
 import threading
@@ -2475,6 +2476,197 @@ def _platform_value(platform):
     return platform
 
 
+class Asset:
+    """One open asset: the bytes of a file the app's own BUILD shipped,
+    held by the core and named the same way on five platforms
+    (docs/assets-plan.md, ratified 2026-08-18).
+
+        with kaya.asset("fonts/sora-wght.ttf") as font:
+            kaya.brand_typeface("Sora", font=font)
+
+    WHERE that name resolves is the core's knowledge and never the
+    app's: a directory in a repo checkout, a `.app` bundle's Resources,
+    an APK's packaged `assets/` which is not a directory and has no path
+    at all. Before this existed the rule was hand-written once per guest
+    language — eight environment-variable reads, eight repo-relative
+    defaults, eight sentences for one failure — and the Go copy read
+    `os.Getenv` from a c-shared library, where the environment is empty
+    forever.
+
+    TWO REDEMPTIONS, and the first is the interesting one:
+
+    - HAND IT TO KAYA. `kaya.brand_typeface(family, font=asset)` and
+      `kaya.app_identity(name, icon=asset)` take an Asset, and the bytes
+      never enter Python: the core clones a refcount into the blob table
+      the wire already has.
+    - READ IT YOURSELF. `bytes()` copies them out and `reader()` wraps
+      that copy in a `BytesIO`, for an asset the app is the consumer of.
+
+    FILE-LIKE READING IS THIS BINDING'S SUGAR, with zero core surface:
+    `reader()` is a `BytesIO` the way Go's is a `bytes.Reader` and C#'s a
+    `MemoryStream`. THERE IS NO FILE DESCRIPTOR anywhere on the asset
+    surface — a descriptor was `PickedFile`'s necessity, because a
+    provider-opened file has no path behind it, and kaya resolved this
+    name and produced these bytes itself. Read-only structurally, too:
+    no call here takes a mode.
+
+    CLOSING. `close()` releases the core's handle, `with` closes on the
+    way out, and the finalizer closes an asset a guest forgot — so a
+    guest that never closes leaks nothing, and one that closes twice
+    pays nothing (the core's release is idempotent).
+    """
+
+    __slots__ = ("_handle", "_name")
+
+    def __init__(self, handle, name):
+        self._handle = handle
+        self._name = name
+
+    @property
+    def name(self):
+        """The name this asset was asked for — what `asset(name)` was
+        given, not a path. There is no path to hand back on Android at
+        all, so none of the nine bindings offers one."""
+        return self._name
+
+    def bytes(self):
+        """The asset's bytes, copied out of core memory.
+
+        Raises if the asset is closed, rather than answering `b""`: an
+        empty answer here would be indistinguishable from an asset that
+        legitimately had no bytes — except that none can, because the
+        core refuses a zero-byte asset at the open. Reading a released
+        handle is a bug in the guest, and it says so.
+        """
+        self._alive("bytes()")
+        return runtime.asset_bytes(self._handle)
+
+    def reader(self):
+        """The asset as a file-like object: `io.BytesIO` over a copy of
+        the bytes. Seekable, closable, and entirely Python's — the core
+        knows nothing about it."""
+        return io.BytesIO(self.bytes())
+
+    def _blob(self):
+        """THE BLOB REDEMPTION, used by the two consumers that take an
+        Asset. Registers the core's own bytes into the pending table and
+        returns the handle the next submit consumes — no copy, and
+        nothing passes through Python.
+
+        PRIVATE, because the redemption is the binding's business and
+        not the guest's: `brand_typeface(font=...)` and
+        `app_identity(icon=...)` are the whole offer, and they are the
+        same offer in all nine languages.
+        """
+        self._alive("a blob redemption")
+        return runtime.asset_blob(self._handle)
+
+    def close(self):
+        """Release the core's handle. Idempotent, and the finalizer
+        calls it too."""
+        handle, self._handle = self._handle, 0
+        if handle:
+            runtime.asset_release(handle)
+
+    def _alive(self, what):
+        if not self._handle:
+            raise RuntimeError(
+                f"kaya: {what} on a closed asset ({self._name!r}) — the "
+                "handle was released, and the bytes it borrowed are the "
+                "core's. Read inside the `with`, or keep the bytes rather "
+                "than the asset."
+            )
+
+    def __len__(self):
+        self._alive("len()")
+        return runtime.asset_len(self._handle)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.close()
+        return False
+
+    def __del__(self):
+        # The forgetting guest's net. Interpreter teardown can already
+        # have torn down what close() reaches, and a finalizer that
+        # raises prints an unraisable-exception warning nobody asked
+        # for, so this one is deliberately silent.
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __repr__(self):
+        state = "closed" if not self._handle else f"{len(self)} bytes"
+        return f"Asset(name={self._name!r}, {state})"
+
+
+def asset(name):
+    """Open an asset — a file the app's own BUILD shipped beside it,
+    named by a relative path under the asset root.
+
+        font = kaya.asset("fonts/sora-wght.ttf")
+
+    Returns an `Asset`. Callable anywhere, including outside a
+    transaction: opening one queues no record and touches no ambient
+    state, so it is not the app thread's business the way a widget is.
+
+    A MISS RAISES, WITH THE CORE'S SENTENCE AND NOTHING ADDED. A
+    missing, unreadable, empty or malformed-name asset is a scene error
+    in every binding — the wall an app hits at startup, before it can
+    have drawn anything — and each raises in its own idiom: a panic in
+    Rust, an `InvalidOperationException` in C#, a `RuntimeError` here.
+    Every one of them carries `kaya_asset_why_not`'s sentence VERBATIM.
+    THIS BINDING WRITES NO PROSE OF ITS OWN for that failure, and it is
+    a rule rather than a habit: one author for the diagnostic means the
+    words a Python guest is handed and the words a Haskell guest is
+    handed are the same bytes, and one scene can freeze them.
+
+    That sentence names what the process measured — the name asked for,
+    the census of what the package does carry, the place it resolved and
+    the route that chose it — because a why-not may only print what it
+    went and got.
+
+    EACH CALL READS. No cache, no watch, no reload.
+    """
+    if not isinstance(name, str):
+        raise TypeError(
+            f"kaya: asset() takes a name as str ('fonts/sora-wght.ttf'), "
+            f"not {type(name).__name__} — a relative path under the asset "
+            "root, spelled with `/` on every platform"
+        )
+    handle = runtime.asset_open(name)
+    if handle:
+        return Asset(handle, name)
+    sentence = runtime.asset_miss_sentence(name)
+    raise RuntimeError(sentence or (
+        # Reachable only if the two calls disagree, which they can do
+        # because they are two calls: the open answered a miss and the
+        # why-not answered that it resolves. Both facts were measured;
+        # this binding has no third one to offer and does not invent a
+        # cause for them.
+        f"kaya: asset({name!r}) did not open, and the core's own why-not "
+        "answers that it resolves — those two facts were measured a "
+        "moment apart, and this binding has nothing further to report"
+    ))
+
+
+def _blob_of(source):
+    """The one place a blob-taking consumer turns its argument into a
+    handle: an `Asset` redeems (no copy, nothing through Python), and
+    bytes register the way they always have (one copy into core memory).
+
+    ONE HELPER RATHER THAN TWO BRANCHES AT EACH CONSUMER, because the
+    two consumers must agree: `font=` and `icon=` are the same offer in
+    two records, and a per-callsite `isinstance` is how one of them
+    would quietly grow a third behaviour.
+    """
+    return source._blob() if isinstance(source, Asset) \
+        else runtime.register_blob(source)
+
+
 def _typeface_family(what, family):
     """The wire field's domain and NOTHING SEMANTIC: this binding's
     spelling of the `&str` the other seven take at compile time.
@@ -2562,12 +2754,12 @@ def brand_typeface(family, platforms=None, font=None):
             pairs.append(tag)
             pairs.append(_typeface_family(
                 f"family for {_PLATFORM_NAME_OF.get(tag, tag)}", value))
-    if font is not None and not isinstance(font, (bytes, bytearray,
+    if font is not None and not isinstance(font, (Asset, bytes, bytearray,
                                                   memoryview)):
         raise TypeError(
             f"kaya: brand_typeface font= takes a font FILE's bytes, not "
             f"{type(font).__name__} — a family NAME is the first argument, "
-            "and a path is the app's to read"
+            "and a font the app's BUILD shipped is kaya.asset('fonts/...')"
         )
     _records().append(wire.tx_set_brand_typeface(
         # Bit 0 says a blob rides; the slot is written either way, as an
@@ -2575,8 +2767,7 @@ def brand_typeface(family, platforms=None, font=None):
         1 if font is not None else 0,
         _typeface_family("family", family),
         pairs,
-        wire.BlobHandle(runtime.register_blob(font)) if font is not None
-        else "",
+        wire.BlobHandle(_blob_of(font)) if font is not None else "",
     ))
 
 
@@ -2615,12 +2806,12 @@ def app_identity(name, icon=None):
     in place — which is why `expect_app_icon` reads what the DECODER
     produced rather than echoing what was sent.
     """
-    if icon is not None and not isinstance(icon, (bytes, bytearray,
+    if icon is not None and not isinstance(icon, (Asset, bytes, bytearray,
                                                   memoryview)):
         raise TypeError(
             f"kaya: app_identity icon= takes an image FILE's bytes, not "
             f"{type(icon).__name__} — the NAME is the first argument, and a "
-            "path is the app's to read"
+            "mark the app's BUILD shipped is kaya.asset('icons/...')"
         )
     if not isinstance(name, str):
         raise TypeError(
@@ -2633,8 +2824,7 @@ def app_identity(name, icon=None):
         # empty Str when it does not (the record's shape is fixed).
         1 if icon is not None else 0,
         name,
-        wire.BlobHandle(runtime.register_blob(icon)) if icon is not None
-        else "",
+        wire.BlobHandle(_blob_of(icon)) if icon is not None else "",
     ))
 
 

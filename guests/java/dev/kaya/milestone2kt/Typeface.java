@@ -21,25 +21,22 @@ final class Typeface {
         app.build(tx -> {
             // BEFORE THE FIRST MOUNT, per the set-once wall.
             //
-            // Files.readAllBytes(Paths.get(..)), not Path.of or
-            // InputStream.readAllBytes: this guest is compiled for
-            // Android too, at minSdk 26 — java.nio.file arrived at 26,
-            // while Path.of needs 34 and the stream overload 33.
-            String fontPath = System.getenv("KAYA_FONT_FILE");
-            if (fontPath == null || fontPath.isEmpty()) {
-                fontPath = "guests/assets/fonts/sora-wght.ttf";
+            // ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the
+            // environment override and the sentence for a miss were all
+            // hand-written here (and in seven sibling scenes) until
+            // asset() arrived; they live in the core now
+            // (crates/kaya/src/assets.rs), which is also why the bytes
+            // never enter this JVM's heap — the handle goes straight to
+            // the blob channel.
+            //
+            // try-with-resources because the release is explicit here
+            // and the redemption has already happened: brandTypeface
+            // registered the bytes into the pending blob table, which
+            // keeps its own reference, so letting go of the asset at the
+            // brace costs the transaction nothing.
+            try (KayaApp.Asset font = KayaApp.asset("fonts/sora-wght.ttf")) {
+                tx.brandTypeface("Sora", null, font);
             }
-            byte[] font;
-            try {
-                font = java.nio.file.Files.readAllBytes(
-                        java.nio.file.Paths.get(fontPath));
-            } catch (java.io.IOException e) {
-                throw new IllegalStateException(
-                        "kaya: the typeface scene needs the vendored font at "
-                                + fontPath + " (set KAYA_FONT_FILE or run from"
-                                + " the repo root): " + e, e);
-            }
-            tx.brandTypeface("Sora", null, font);
             tx.window(0).title("typeface").size(480.0, 360.0);
             KayaApp.Signal<String> heading = tx.signal("typeface");
             KayaApp.Signal<String> status = tx.signal("ready");

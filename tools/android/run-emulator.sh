@@ -314,82 +314,96 @@ cliphelper_prepare() { # serial
     echo "  answer null, which is what an empty clipboard answers too" >&2
     return 1
 }
-# THE TYPEFACE SCENE'S FONT, ON EVERY POOL DEVICE BEFORE ANY LEG RUNS.
-# The scene asks for the VENDORED font's BYTES rather than a family name
-# (guests/assets/fonts/sora-wght.ttf, OFL): "Sora" is a family no
-# platform preinstalls, so a registration that failed reads as the real
-# fallback instead of a false pass — tools/scenes/typeface.steps argues
-# it at length. The guests' default path for those bytes is
-# repo-relative, which is a path no device has, so the file is pushed
-# here and every typeface leg names the pushed copy in KAYA_FONT_FILE;
-# MainActivity maps KAYA_* extras to environment variables, so it reaches
-# the guest exactly the way KAYA_SELFTEST does.
+# THE ASSET ROOT, ON EVERY POOL DEVICE BEFORE ANY LEG RUNS.
+# `asset(name)` resolves every asset out of ONE root
+# (docs/assets-plan.md A2) and the core finds that root through
+# KAYA_ASSET_DIR, so what a device needs is the root, once, rather than
+# one push per asset. This block used to be TWO: font_prepare pushed
+# guests/assets/fonts/sora-wght.ttf and icon_prepare pushed the declared
+# mark, each with its own paragraph, its own size check and its own
+# intent extra, and a third asset would have been a third of each.
+# A5.1 asks for exactly this change.
 #
 # /data/local/tmp, AND THAT WAS MEASURED FROM THE APP rather than
 # assumed. SELinux stops untrusted_app reading shell_data_file on many
 # images, and `run-as` CANNOT answer the question — it runs as
 # runas_app, a domain that may read what the app itself may not, so a
 # green run-as check would have been evidence about the wrong process.
-# The proof is the scene's own verdict on emulator-5554 (android-35
-# google_apis arm64), with the font pushed here and nowhere else:
+# The proof is the typeface scene's own verdict on emulator-5554
+# (android-35 google_apis arm64), with the font pushed here and nowhere
+# else:
 #
 #   kaya: KAYA_SELFTEST: OK (typeface, typeface Sora, clicked hi,
 #                            ax "heading/typeface")
 #
-# and the control, the same leg with KAYA_FONT_FILE pointing one path
-# over, which dies in the guest naming the variable:
+# and the control, the same leg pointed one path over, which dies in the
+# guest naming the root it could not read.
 #
-#   log_panics: thread 'kaya-app' panicked at 'kaya: the typeface scene
-#   needs the vendored font at /data/local/tmp/kaya-no-such-font.ttf
-#   (set KAYA_FONT_FILE or run from the repo root): No such file or
-#   directory (os error 2)'
+# BY HASH AND NOT BY SIZE, which is the second change. A short push is
+# what a size check catches, and it is not the only way a push goes
+# wrong: a same-length corruption passes a size comparison and then
+# fails three removes away — the typeface leg reports a resolved family
+# that is not Sora (KayaCompose falls back to the family name and logs,
+# so corrupt bytes are not fatal on this backend) and the identity leg
+# reports declared bytes BitmapFactory refused. Both read as lowering
+# bugs to anyone who did not push the file. The hash is compared here,
+# where the cause is.
 #
-# That panic is why this push needs no verified-delivery dance the way
-# the helper above does: a font that did not arrive stops the guest
-# before it mounts, naming the path and the variable. What it cannot
-# catch is a SHORT file — corrupt bytes are not fatal on this backend
-# (KayaCompose falls back to the family name and logs), and the leg would
-# then fail with a family that is not Sora, three removes from a
-# half-finished push. So the size is compared here, where the cause is.
-FONT_SRC="$ROOT/guests/assets/fonts/sora-wght.ttf"
-FONT_ON_DEVICE=/data/local/tmp/kaya-sora-wght.ttf
-font_prepare() { # serial
-    local serial="$1" want got
-    want="$(wc -c <"$FONT_SRC" | tr -d ' ')"
-    if ! adb -s "$serial" push "$FONT_SRC" "$FONT_ON_DEVICE" >/dev/null; then
-        echo "run-emulator: could not push $FONT_SRC to $serial" >&2
-        return 1
-    fi
-    # World-readable on purpose: the file is pushed by the SHELL user and
-    # opened by the app's, which share nothing but the other bits.
-    adb -s "$serial" shell chmod 644 "$FONT_ON_DEVICE" >/dev/null || true
-    got="$(adb -s "$serial" shell stat -c %s "$FONT_ON_DEVICE" 2>/dev/null | tr -d '\r')"
-    if [ "$got" != "$want" ]; then
-        echo "run-emulator: the typeface font on $serial is ${got:-no} bytes, and the" >&2
-        echo "  repo's is $want — a short blob is not fatal on this backend (the" >&2
-        echo "  interpreter falls back to the family name), so the typeface legs" >&2
-        echo "  would report a resolved family that is not Sora instead of a push" >&2
-        echo "  that half landed" >&2
-        return 1
-    fi
+# The identity guests still name their own file in KAYA_ICON_FILE, read
+# out of the declaration and never retyped (docs/app-identity-plan.md
+# ruling 4, held by tools/check-app-identity.sh C6): they have not moved
+# to `asset(name)` yet, and until they do the path they are handed is a
+# path INSIDE the root this pushes.
+ASSET_SRC="$ROOT/guests/assets"
+ASSET_ON_DEVICE=/data/local/tmp/kaya-assets
+
+# What arrived against what was sent, name by name and hash by hash.
+# Reads the device's `find ... -exec sha256sum` on stdin.
+asset_hashes_agree() { # serial listing-file
+    python3 - "$ASSET_SRC" "$ASSET_ON_DEVICE" "$1" "$2" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+src, prefix, serial = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+there = {}
+for line in pathlib.Path(sys.argv[4]).read_text().splitlines():
+    line = line.strip()
+    if not line or " " not in line:
+        continue
+    digest, path = line.split(None, 1)
+    if len(digest) != 64:
+        continue
+    path = path.strip()
+    if not path.startswith(prefix + "/"):
+        continue
+    there[path[len(prefix) + 1:]] = digest.lower()
+here = {
+    f.relative_to(src).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest()
+    for f in sorted(src.rglob("*")) if f.is_file()
 }
-# THE IDENTITY SCENE'S MARK, THE FONT'S STORY ONE ASSET OVER. The guest
-# declares the VENDORED mark's BYTES (docs/app-identity-plan.md ruling 4)
-# and its default path is repo-relative, which no device has, so the file
-# is pushed here and the identity legs name the pushed copy in
-# KAYA_ICON_FILE.
-#
-# THE PATH COMES OUT OF THE DECLARATION, never retyped:
-# guests/assets/identity.toml is the one place the name and the picture
-# are written down, and a packaging step that retypes the path is the
-# second reader ruling 4 exists to prevent (tools/check-app-identity.sh
-# C6 holds this).
-#
-# A SHORT PUSH IS FATAL HERE TOO, and for a sharper reason than the
-# font's: corrupt bytes make BitmapFactory refuse the blob, and the
-# identity read then reports declared bytes it could not decode — three
-# removes from a half-finished push. The size is compared where the cause
-# is.
+bad = []
+for name, want in sorted(here.items()):
+    got = there.get(name)
+    if got is None:
+        bad.append(f"  {name}: never arrived")
+    elif got != want:
+        bad.append(f"  {name}: arrived as {got[:12]}, the tree has {want[:12]}")
+for name in sorted(set(there) - set(here)):
+    bad.append(f"  {name}: is on the device and not in the tree — a stale "
+               "asset a guest can still resolve by name")
+if not here:
+    bad.append("  the tree's asset root is empty, so this comparison would "
+               "agree with an empty device")
+if bad:
+    print(f"run-emulator: the asset root on {serial} does not match the tree:")
+    print("\n".join(bad))
+    print("  a leg would then fail three removes away — a resolved family "
+          "that is not Sora, or declared bytes the decoder refused")
+    sys.exit(1)
+print(f"assets: {len(here)} files on {serial}, every one hash-equal to the tree")
+PY
+}
 KAYA_IDENTITY_MANIFEST="$ROOT/guests/assets/identity.toml"
 ICON_REL="$(python3 - "$KAYA_IDENTITY_MANIFEST" <<'PY'
 import pathlib
@@ -414,32 +428,35 @@ if [ "$icon_rel_rc" -ne 0 ] || [ -z "$ICON_REL" ]; then
     echo "run-emulator: could not read the declared icon from $KAYA_IDENTITY_MANIFEST" >&2
     exit 1
 fi
+# The declared mark, in the two places that need it: on the HOST, where
+# apk_icon_verify hashes it against what gradle packaged, and INSIDE the
+# pushed root, where the identity guests open it. Both derived from the
+# one declaration, so there is still exactly one place the icon's
+# location is written down.
 ICON_SRC="$ROOT/$ICON_REL"
-ICON_ON_DEVICE=/data/local/tmp/kaya-mark.png
-icon_prepare() { # serial
-    local serial="$1" want got
-    want="$(wc -c <"$ICON_SRC" | tr -d ' ')"
-    if ! adb -s "$serial" push "$ICON_SRC" "$ICON_ON_DEVICE" >/dev/null; then
-        echo "run-emulator: could not push $ICON_SRC to $serial" >&2
+ICON_ON_DEVICE="$ASSET_ON_DEVICE/${ICON_REL#guests/assets/}"
+assets_prepare() { # serial
+    local serial="$1" listing verdict rc
+    adb -s "$serial" shell rm -rf "$ASSET_ON_DEVICE" >/dev/null 2>&1 || true
+    if ! adb -s "$serial" push "$ASSET_SRC" "$ASSET_ON_DEVICE" >/dev/null; then
+        echo "run-emulator: could not push $ASSET_SRC to $serial" >&2
         return 1
     fi
-    # World-readable for font_prepare's reason: pushed by the SHELL user,
-    # opened by the app's.
-    adb -s "$serial" shell chmod 644 "$ICON_ON_DEVICE" >/dev/null || true
-    got="$(adb -s "$serial" shell stat -c %s "$ICON_ON_DEVICE" 2>/dev/null | tr -d '\r')"
-    if [ "$got" != "$want" ]; then
-        echo "run-emulator: the app mark on $serial is ${got:-no} bytes, and the" >&2
-        echo "  declared one ($ICON_REL) is $want — the identity legs would report" >&2
-        echo "  bytes the platform's decoder refused instead of a push that half" >&2
-        echo "  landed" >&2
-        return 1
-    fi
+    # World-readable on purpose: the tree is pushed by the SHELL user and
+    # opened by the app's, which share nothing but the other bits.
+    adb -s "$serial" shell chmod -R 755 "$ASSET_ON_DEVICE" >/dev/null 2>&1 || true
+    listing="$(mktemp)"
+    adb -s "$serial" shell "find $ASSET_ON_DEVICE -type f -exec sha256sum {} +" 2>&1 | tr -d '\r' >"$listing"
+    verdict="$(asset_hashes_agree "$serial" "$listing")"
+    rc=$?
+    rm -f "$listing"
+    printf '%s\n' "$verdict"
+    return "$rc"
 }
 for serial in "${SERIALS[@]}"; do
     cliphelper_prepare "$serial" || exit 1
     CLIPHELPER_IME_ON+=("$serial")
-    font_prepare "$serial" || exit 1
-    icon_prepare "$serial" || exit 1
+    assets_prepare "$serial" || exit 1
 done
 timing cliphelper
 
@@ -1355,7 +1372,8 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     #
     # THE MARK RIDES KAYA_ICON_FILE for the typeface font's reason: the
     # guest's default path is repo-relative and a device has no repo;
-    # icon_prepare pushed the declared file to every pool device above.
+    # assets_prepare pushed the whole asset root to every pool device
+    # above, and the declared file is a path inside it.
     #
     # ONE STEP IS NOT RUN HERE, printed by scene_script_drop and named in
     # its comment: `expect_title window#1` reads the declared NAME off an
@@ -1431,14 +1449,15 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # Only `expect_typeface`, which reads the family the text system
     # ENDED UP WITH off the real views, tells them apart
     # (tools/scenes/typeface.steps opens with the argument). The font
-    # itself rides KAYA_FONT_FILE because the guest's default path is
-    # repo-relative and a device has no repo; font_prepare pushed it to
-    # every pool device above, and that path was measured from the app.
+    # itself is `asset("fonts/sora-wght.ttf")` — the guest names the
+    # asset and the core resolves it under KAYA_ASSET_DIR, which is the
+    # root assets_prepare pushed to every pool device above, at a path
+    # measured from the app.
     run_apk typeface-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity typeface \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
-        --es KAYA_FONT_FILE "$FONT_ON_DEVICE"
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     # The clipboard scene: one clip in several representations, the
     # privileged read, the paste split, and Paste as a standard command.
     # The foreign process on the other side of every assertion is
@@ -1756,7 +1775,7 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity typeface \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
-        --es KAYA_FONT_FILE "$FONT_ON_DEVICE"
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     drain
     timing legs-jvm
 fi
@@ -1874,7 +1893,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2go/.MainActivity styling \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
     # The typeface scene through the Go binding (see the compose leg).
-    # This is the one host where KAYA_FONT_FILE crosses the environment
+    # This is the one host where KAYA_ASSET_DIR crosses the environment
     # trap this suite exists to keep honest: the guest reads it with
     # kaya.Env and never os.Getenv, which under the JNI attach answers ""
     # forever — and "" here is not an error, it is the guest's
@@ -1885,7 +1904,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity typeface \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
-        --es KAYA_FONT_FILE "$FONT_ON_DEVICE"
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     run_apk entry-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity entry \

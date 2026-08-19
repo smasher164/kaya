@@ -10,9 +10,14 @@ WHY A BUNDLED FONT — the canonical note is guests/rust/typeface.rs's doc
 comment. `font=` is Python's spelling of the blob form; `platforms=` is
 the per-platform mapping a name-based app would reach for instead.
 
+THE FONT IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+This scene used to read `KAYA_FONT_FILE` with a repo-relative default
+and raise in its own words, as its seven siblings each did in their own
+language. `kaya.asset(name)` is the whole thing now: where the file
+lives is the core's knowledge, and the failure sentence has one author.
+
 The byte-frozen contract is tools/scenes/typeface.steps."""
 
-import os
 import sys
 
 import kaya
@@ -39,18 +44,11 @@ with app.window(title="typeface", width=480.0, height=360.0):
     # exit, so anywhere in this body is before it. The blob registers
     # with the platform's app-font machinery and the "Sora" request then
     # resolves to it.
-    font_path = os.environ.get(
-        "KAYA_FONT_FILE", "guests/assets/fonts/sora-wght.ttf")
-    try:
-        with open(font_path, "rb") as handle:
-            font = handle.read()
-    except OSError as exc:
-        raise RuntimeError(
-            f"kaya: the typeface scene needs the vendored font at "
-            f"{font_path} (set KAYA_FONT_FILE or run from the repo root): "
-            f"{exc}"
-        ) from exc
-    kaya.brand_typeface("Sora", font=font)
+    # The asset's bytes go from the core's read straight to the
+    # platform's font API: this scene never holds them, and the `with`
+    # releases the core's handle on the way out.
+    with kaya.asset("fonts/sora-wght.ttf") as font:
+        kaya.brand_typeface("Sora", font=font)
     heading = kaya.signal("typeface")
     status = kaya.signal("ready")
     with kaya.column():

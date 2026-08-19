@@ -18,6 +18,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 
 readonly struct Signal
@@ -2123,6 +2124,53 @@ sealed class Tx
         Records.Add(KayaWire.TxSetBrandAccent(seed, mask, light ?? 0, dark ?? 0));
     }
 
+    /// Open an asset — a file the app's own BUILD shipped beside it,
+    /// named by a relative path under the asset root:
+    ///
+    ///     using var font = tx.Asset("fonts/sora-wght.ttf");
+    ///
+    /// Returns an Asset (see Kaya.cs for the type and its two
+    /// redemptions). Queues no record: opening one is a read, and the
+    /// transaction is here only because every kaya call a guest makes is.
+    ///
+    /// A MISS THROWS, WITH THE CORE'S SENTENCE AND NOTHING ADDED. A
+    /// missing, unreadable, empty or malformed-name asset is a scene
+    /// error in every binding — the wall an app hits at startup, before
+    /// it can have drawn anything — and each raises in its own idiom: an
+    /// InvalidOperationException here, a panic in Rust and Go, a
+    /// RuntimeError in Python. Every one of them carries
+    /// kaya_asset_why_not's sentence VERBATIM. THIS BINDING WRITES NO
+    /// PROSE OF ITS OWN for that failure: one author for the diagnostic
+    /// means a C# guest and a Haskell guest are handed the same bytes,
+    /// and one scene can freeze them.
+    ///
+    /// That sentence names what the process measured — the name asked
+    /// for, the census of what the package does carry, the place it
+    /// resolved and the route that chose it — because a why-not may only
+    /// print what it went and got.
+    ///
+    /// EACH CALL READS. No cache, no watch, no reload.
+    public Asset Asset(string name)
+    {
+        // The transaction's liveness, asked through the same chokepoint
+        // every write uses: Rust gets this from the borrow checker,
+        // which makes a dead Tx unnameable.
+        _ = Records;
+        ulong handle = Kaya.AssetOpen(name);
+        if (handle != 0) return new Asset(handle, name);
+        string sentence = Kaya.AssetMissSentence(name);
+        if (sentence.Length == 0)
+            // Reachable only if the two calls disagree, which they can
+            // do because they are two calls: the open answered a miss
+            // and the why-not answered that it resolves. Both facts were
+            // measured; this binding has no third one and invents no
+            // cause for them.
+            sentence = $"kaya: asset(\"{name}\") did not open, and the core's own " +
+                "why-not answers that it resolves — those two facts were measured " +
+                "a moment apart, and this binding has nothing further to report";
+        throw new InvalidOperationException(sentence);
+    }
+
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b).
     /// One family name is the whole call — tx.BrandTypeface("Georgia") —
     /// and every platform that HAS that family installed uses it.
@@ -2192,6 +2240,47 @@ sealed class Tx
             font is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(font))));
     }
 
+    /// The FONT-FILE overload: the same request, with the font THE APP'S
+    /// OWN BUILD PUT BESIDE IT.
+    ///
+    ///     using var font = tx.Asset("fonts/sora-wght.ttf");
+    ///     tx.BrandTypeface("Sora", font);
+    ///
+    /// The bytes never enter .NET. The core read them, the redemption
+    /// clones one refcount into the blob table, and a hundred kilobytes
+    /// of font reaches the platform's font API without a byte[] ever
+    /// existing for it.
+    ///
+    /// AN OVERLOAD WHERE GO WRITES A NAMED SIBLING (kaya.FontAsset),
+    /// which is what invariant 1 asks for: every binding admits both
+    /// spellings, and the language decides how they are spelled.
+    ///
+    /// THE ASSET IS SECOND AND REQUIRED, rather than a third optional
+    /// parameter beside `font`. Two overloads whose tails were both
+    /// optional would make tx.BrandTypeface("Georgia") ambiguous — a
+    /// compile error at every existing call site — so the parameter that
+    /// selects this overload is the one that cannot be left out.
+    public void BrandTypeface(
+        string family,
+        Asset font,
+        (Platform Platform, string Family)[]? platforms = null)
+    {
+        if (font is null)
+            throw new ArgumentNullException(nameof(font),
+                "kaya: BrandTypeface got no asset — open one with " +
+                "tx.Asset(\"fonts/...\"), or pass a family name alone");
+        var pairs = new List<object>();
+        foreach (var (platform, perPlatform) in
+                 platforms ?? Array.Empty<(Platform, string)>())
+        {
+            pairs.Add((long)platform);
+            pairs.Add(perPlatform);
+        }
+        Records.Add(KayaWire.TxSetBrandTypeface(
+            1u, family, pairs.ToArray(),
+            new KayaWire.BlobHandle(font.Blob())));
+    }
+
     /// DECLARE the app's identity (docs/app-identity-plan.md): the name
     /// it goes by and the picture that stands for it, as the bytes of
     /// one image file — tx.AppIdentity("Aurora Notes", markPng).
@@ -2237,6 +2326,26 @@ sealed class Tx
             // image's do — the record carries the handle, never the
             // picture itself.
             icon is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(icon))));
+    }
+
+    /// The MARK-FILE overload: the same declaration, with the picture
+    /// THE APP'S OWN BUILD PUT BESIDE IT.
+    ///
+    ///     using var mark = tx.Asset("icons/kaya-mark.png");
+    ///     tx.AppIdentity("Aurora Notes", mark);
+    ///
+    /// The picture never enters .NET — the core read it and the
+    /// redemption clones one refcount into the blob table. The
+    /// name-only form stays the one-argument call above; this overload
+    /// requires the asset, so nothing here is ambiguous with it.
+    public void AppIdentity(string name, Asset icon)
+    {
+        if (icon is null)
+            throw new ArgumentNullException(nameof(icon),
+                "kaya: AppIdentity got no asset — open one with " +
+                "tx.Asset(\"icons/...\"), or declare the name alone");
+        Records.Add(KayaWire.TxSetAppIdentity(
+            1u, name, new KayaWire.BlobHandle(icon.Blob())));
     }
 
     /// Mount into the default window; per-window targets arrive with

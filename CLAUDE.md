@@ -344,6 +344,27 @@ in docs/deferred.md.
    written into an artifact are checked by the packaging step itself,
    which is the path nobody can avoid, and a gate that reads a build
    directory has a red that the last watched negative can manufacture),
+   `tools/check-assets.sh` (ONE ASSET ROOT, ONE RESOLVER, and every
+   lane carrying all of it. `asset(name)` moved the "where are the
+   bytes and what do I say when they are not there" rule out of eight
+   guests into crates/kaya/src/assets.rs, and that is only true while
+   nothing else resolves an asset for itself — so this refuses any file
+   outside the core that spells a `guests/assets/...` path or reads an
+   asset environment variable, with an EXEMPT table whose every entry
+   carries a reason and must name a file that still exists. Beside it:
+   every family under the root has a README saying what the files are,
+   where they came from, their licence and how to regenerate them (an
+   honest "nobody knows" counts, silence does not — the opaque MRT index
+   filed under tools/ is the file that failed this and the reason the
+   survey found anything); the root's listing is printed with its count
+   and REFUSES A VERDICT below a floor, because a census that reads two
+   files agrees with everything; each of the five lanes either stages the
+   root as a UNIT or says at the site why it needs nothing, and a lane
+   caught copying one FILE under the root is the shape this convention
+   replaced; and every staging lane verifies what arrived BY HASH, since
+   a size check passes the same-length corruption a half-written push
+   produces. Seven watched negatives, each doctoring a shadow of the real
+   tree with its substitution count printed),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,

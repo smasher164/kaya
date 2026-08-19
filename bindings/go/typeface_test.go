@@ -253,9 +253,9 @@ func TestBrandTypefaceRefusesTwoFonts(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("two FontBytes in one call were accepted — one font vanished silently")
+			t.Fatal("two font overrides in one call were accepted — one font vanished silently")
 		}
-		if !strings.Contains(fmt.Sprint(r), "two FontBytes") {
+		if !strings.Contains(fmt.Sprint(r), "two fonts (FontBytes/FontAsset)") {
 			t.Fatalf("panicked with %v, want the duplicate-font sentence", r)
 		}
 	}()

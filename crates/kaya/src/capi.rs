@@ -1044,11 +1044,194 @@ pub unsafe extern "C" fn kaya_blob_register(bytes: *const u8, len: usize) -> u64
     } else {
         unsafe { std::slice::from_raw_parts(bytes, len) }
     };
+    pending_register(std::sync::Arc::from(src))
+}
+
+/// The pending table's insert, factored out so the ONE place a
+/// guest-to-core handle is minted is one place. `kaya_asset_blob`
+/// registers bytes the core itself read, and the alternative — a second
+/// copy of `next += 1; pending.insert(...)` — is two mints of one id
+/// space, which is how a handle space grows a second author.
+fn pending_register(bytes: std::sync::Arc<[u8]>) -> u64 {
     let mut table = blobs().lock().unwrap();
     let handle = table.next;
     table.next += 1;
-    table.pending.insert(handle, std::sync::Arc::from(src));
+    table.pending.insert(handle, bytes);
     handle
+}
+
+/// THE ASSET TABLE, the fourth direction: a file the guest's BUILD put
+/// beside the program, read by the core, held by handle until the guest
+/// says it is done (docs/assets-plan.md, ratified 2026-08-18).
+///
+/// It is the OCCURRENCE table's shape and not the pending table's, and
+/// the reason is the same one stated at OccBlobs: no boundary retires
+/// one of these. A pending blob dies at the next submit; an asset
+/// handle is a thing the guest holds and reads through — possibly
+/// twice, possibly never redeemed into a record at all — so the core
+/// cannot see it finish and the release is explicit.
+///
+/// THE TWO REDEMPTIONS, and the whole point of there being two:
+/// - `kaya_asset_blob` hands the same `Arc` to the pending table, so an
+///   asset reaches `set_brand_typeface`/`set_app_identity` with the
+///   bytes never entering the guest's heap. That is the route a font or
+///   an icon takes, and it is free of a copy on every language's
+///   boundary.
+/// - `kaya_asset_bytes` borrows them, for a guest that is itself the
+///   consumer. Each binding wraps this in its own standard in-memory
+///   reader (BytesIO, bytes.NewReader, MemoryStream): file-LIKE reading
+///   is binding-side sugar over these bytes and there is no descriptor
+///   anywhere — kaya resolved the name and produced the bytes itself,
+///   so PickedFile's necessity does not exist here.
+struct Assets {
+    next: u64,
+    live: std::collections::HashMap<u64, std::sync::Arc<[u8]>>,
+}
+
+fn assets_table() -> &'static Mutex<Assets> {
+    static TABLE: OnceLock<Mutex<Assets>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(Assets { next: 1, live: std::collections::HashMap::new() }))
+}
+
+/// Open an asset by name and get the handle its bytes are held under.
+///
+/// `name` is a relative path under the asset root, spelled with `/`
+/// (`"fonts/sora-wght.ttf"`), and it is UTF-8 of `name_len` bytes — not
+/// NUL-terminated, so every binding hands its own string type's bytes
+/// without a copy through C.
+///
+/// ZERO IS THE MISS, and it is a value rather than a panic on purpose:
+/// a panic inside an `extern "C"` frame is an uncatchable process abort
+/// in every guest language (measured 2026-08-02 — a 240-byte occurrence
+/// aborted a guest with no traceback anywhere). So the core answers 0
+/// and the BINDING raises in its own language's idiom, carrying the
+/// sentence `kaya_asset_why_not` hands it. One sentence, one author,
+/// nine spellings of the raise.
+///
+/// READ-ONLY, STRUCTURALLY: there is no mode argument, so the
+/// check-file-modes bug class — five hand-written sites decoding one
+/// integer differently — cannot exist on this surface at all.
+///
+/// EACH CALL READS. No cache, no watch, no reload (wall 4).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_asset_open(name: *const u8, name_len: usize) -> u64 {
+    let Some(name) = (unsafe { borrowed_str(name, name_len) }) else { return 0 };
+    let Ok(bytes) = crate::assets::read(&name) else { return 0 };
+    let mut table = assets_table().lock().unwrap();
+    let handle = table.next;
+    table.next += 1;
+    table.live.insert(handle, std::sync::Arc::from(&bytes[..]));
+    handle
+}
+
+/// An open asset's bytes. Returns the pointer and writes the length;
+/// NULL for a handle already released or never minted. The pointer
+/// borrows core memory and stays valid until `kaya_asset_release` —
+/// copy, then release, exactly as the occurrence blob's contract says.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_asset_bytes(handle: u64, len: *mut usize) -> *const u8 {
+    let table = assets_table().lock().unwrap();
+    match table.live.get(&handle) {
+        Some(arc) => {
+            if !len.is_null() {
+                unsafe { *len = arc.len() };
+            }
+            arc.as_ptr()
+        }
+        None => {
+            if !len.is_null() {
+                unsafe { *len = 0 };
+            }
+            std::ptr::null()
+        }
+    }
+}
+
+/// An open asset's byte count, for a binding that sizes a buffer before
+/// it copies. 0 for a dead handle — and an asset is never legitimately
+/// 0 bytes (wall 2 refuses an empty file at the open), so 0 here means
+/// the handle, never the file.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_asset_len(handle: u64) -> usize {
+    assets_table().lock().unwrap().live.get(&handle).map_or(0, |arc| arc.len())
+}
+
+/// THE BLOB REDEMPTION: register this asset's bytes into the pending
+/// table and get the handle a record will carry. The `Arc` is cloned,
+/// not the bytes — an asset handed to `set_app_identity` costs one
+/// refcount bump and no copy anywhere, which is the property that makes
+/// this a different thing from `bytes()` plus `kaya_blob_register`.
+///
+/// The returned handle obeys the pending table's existing lifetime
+/// (wall 5): valid for exactly one submit, drained whether referenced
+/// or not. Redeeming twice for two transactions is two registrations,
+/// which is correct and is what the guest asked for.
+///
+/// 0 for a dead asset handle, so a redemption of something never opened
+/// cannot register empty bytes that would sail through a lowering.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_asset_blob(handle: u64) -> u64 {
+    let arc = assets_table().lock().unwrap().live.get(&handle).cloned();
+    match arc {
+        Some(arc) => pending_register(arc),
+        None => 0,
+    }
+}
+
+/// Drop an open asset. Idempotent: a handle already released, or never
+/// minted, is a no-op rather than an error, so a binding's finalizer
+/// needs no bookkeeping of its own.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_asset_release(handle: u64) {
+    assets_table().lock().unwrap().live.remove(&handle);
+}
+
+/// Why `kaya_asset_open(name)` would answer 0 — the whole sentence, in
+/// UTF-8, written into `out` and truncated to `cap`; the return value
+/// is the length the sentence actually has, so a caller that got a
+/// short buffer can size one and ask again.
+///
+/// An EMPTY sentence (return 0) means the asset resolves. That is what
+/// makes this total rather than a failure path: a binding calls it only
+/// after a 0 from the open, but a guest may call it whenever it likes
+/// and get an honest answer either way.
+///
+/// THE PROSE IS NOT WRITTEN HERE. crates/kaya/src/assets.rs's
+/// `asset_why_not` is the one author, so the sentence a Python guest
+/// raises and the sentence a Haskell guest raises are the same bytes,
+/// and a scene can freeze them once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_asset_why_not(
+    name: *const u8,
+    name_len: usize,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    let name = unsafe { borrowed_str(name, name_len) }.unwrap_or_default();
+    let sentence = crate::assets::asset_why_not(&name);
+    let bytes = sentence.as_bytes();
+    if !out.is_null() && cap > 0 {
+        let n = bytes.len().min(cap);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
+}
+
+/// A borrowed UTF-8 string from a pointer and a length, or None for a
+/// null pointer or bytes that are not UTF-8. Not NUL-terminated: every
+/// binding hands its own string type's bytes, and only C would have a
+/// terminator to offer.
+///
+/// INVALID UTF-8 IS A MISS RATHER THAN A LOSSY CONVERSION, because a
+/// lossily-converted name would go looking for a file with U+FFFD in it
+/// and report "no asset named <mojibake>", which sends the reader after
+/// the wrong thing.
+unsafe fn borrowed_str(ptr: *const u8, len: usize) -> Option<String> {
+    if ptr.is_null() {
+        return Some(String::new());
+    }
+    let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+    std::str::from_utf8(slice).ok().map(|s| s.to_owned())
 }
 
 /// Fetch a blob's bytes by the handle an apply record carried. Returns

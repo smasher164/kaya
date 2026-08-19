@@ -135,10 +135,12 @@ fn app(ctx: kaya::AppCtx) {
         Ok("ranges") => ranges::app(ctx),
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),
-        // The typeface scene reads the vendored font's BYTES and its
-        // default path is repo-relative, which no device has: the leg
-        // pushes the file and names it in KAYA_FONT_FILE
-        // (tools/android/run-emulator.sh).
+        // The typeface scene asks for the vendored font BY ASSET NAME
+        // and does not read a path or an environment variable at all
+        // (docs/assets-plan.md). On this platform the asset root is the
+        // APK's own packaged assets/, which is not a directory and has
+        // no path, so the core resolves it through the AssetManager —
+        // the one route no per-scene staging could have described.
         Ok("typeface") => typeface::app(ctx),
         // The identity scene reads the vendored MARK's bytes, the
         // typeface's story one asset over: its default path is

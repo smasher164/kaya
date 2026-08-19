@@ -1101,6 +1101,44 @@ check_styling_point app_identity \
     '^appIdentity ::' \
     '^let app_identity '
 
+# `asset(name)`, the ninth tier's newest verb (docs/assets-plan.md,
+# ratified 2026-08-18) and the same failure shape as the two rows above:
+# a transaction-tier call no other sweep can see — not a widget kind, not
+# a window prop, not a template prop — so a binding shipping the core
+# entry point without sugar strands apps in that language unable to read
+# the files their own build shipped, while every other gate passes.
+#
+# THIS ROW IS WHY THE SWEEP EXISTS, more literally than most. The rule it
+# spreads is a rule that USED to be hand-written eight times: every
+# typeface guest carried its own environment read, its own repo-relative
+# default and its own prose for a missing file, and one of the eight had
+# a language trap severe enough to have earned a gate of its own
+# (tools/check-go-env.sh). `asset(name)` replaced all eight with one Rust
+# module — and the only thing keeping that true in eight languages is
+# this line.
+#
+# EIGHT PATTERNS, FOUR SHAPES, and the differences are idiom rather than
+# semantics (invariant 1). Rust, Go and C# hang it off the transaction
+# (`tx.asset`, `tx.Asset`, `tx.Asset`); Python, OCaml and Haskell are
+# ambient and it is a plain function; Java is static on the app surface;
+# Swift spells it as a CLASS whose initializer opens the asset
+# (`KayaAsset("fonts/sora-wght.ttf")`), which is that language's idiom
+# for a handle with a lifetime and is why its pattern names a type.
+#
+# KEYED PAST THE BARE NAME, per this file's own scar tissue: `asset` is
+# a short common word, and a pattern matching it alone would be
+# satisfied by a doc comment. Every pattern below carries its receiver,
+# its keyword or its type signature.
+check_styling_point asset \
+    'pub fn asset\(&self' \
+    '^def asset\(' \
+    'func \(tx \*Tx\) Asset\(' \
+    'public Asset Asset\(' \
+    'public static Asset asset\(' \
+    'final class KayaAsset' \
+    '^asset :: String -> IO Asset' \
+    '^let asset = '
+
 # THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
 # bare name: Rust's `role(self, role: MenuRole)`, Python's
 # `def role(self, name)` on the item class and OCaml's `let item …

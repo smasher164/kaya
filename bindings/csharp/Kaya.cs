@@ -34,6 +34,142 @@ public readonly record struct PickedFile(ulong Handle, string Name, string Local
         => Kaya.OpenPicked(Handle, mode);
 }
 
+/// One open asset: the bytes of a file the app's own BUILD shipped,
+/// held by the core and named the same way on five platforms
+/// (docs/assets-plan.md, ratified 2026-08-18). Tx.Asset opens one.
+///
+///     using var font = tx.Asset("fonts/sora-wght.ttf");
+///     tx.BrandTypeface("Sora", font);
+///
+/// WHERE that name resolves is the core's knowledge and never the app's:
+/// a directory in a repo checkout, a .app bundle's Resources, an APK's
+/// packaged assets/, which is not a directory and has no path at all.
+/// Before this existed the rule was hand-written once per guest
+/// language — eight environment-variable reads, eight repo-relative
+/// defaults, eight sentences for one failure.
+///
+/// TWO REDEMPTIONS, and the first is the interesting one:
+///
+///  - HAND IT TO KAYA. The BrandTypeface and AppIdentity overloads that
+///    take an Asset, where the bytes never enter .NET: the core clones a
+///    refcount into the blob table the wire already has.
+///  - READ IT YOURSELF. Bytes() copies them out and Open() wraps that
+///    copy in a MemoryStream.
+///
+/// FILE-LIKE READING IS THIS BINDING'S SUGAR, with zero core surface:
+/// Open() is a MemoryStream the way Python's is a BytesIO and Go's a
+/// bytes.Reader. THERE IS NO FILE HANDLE anywhere on the asset surface —
+/// a handle was PickedFile's necessity, because a provider-opened file
+/// has no path behind it, and kaya resolved this name and produced these
+/// bytes itself. Read-only structurally, too: no call here takes a mode,
+/// so the FileAccess this file picks for a picked file has no sibling
+/// here to disagree with.
+///
+/// DISPOSING. Dispose releases the core's handle, `using` disposes on
+/// the way out, and the finalizer releases one a guest forgot — so a
+/// guest that never disposes leaks nothing, and one that disposes twice
+/// pays nothing (the core's release is idempotent).
+public sealed class Asset : IDisposable
+{
+    ulong handle;
+
+    internal Asset(ulong handle, string name)
+    {
+        this.handle = handle;
+        Name = name;
+    }
+
+    /// The name this asset was asked for — what Tx.Asset was given, not
+    /// a path. There is no path to hand back on Android at all, so none
+    /// of the nine bindings offers one.
+    public string Name { get; }
+
+    /// The asset's bytes, copied out of core memory.
+    ///
+    /// A METHOD RATHER THAN A PROPERTY, deliberately: a property is a
+    /// promise that reading it is cheap, and this one allocates and
+    /// copies the whole file every time it is called (a hundred
+    /// kilobytes, for the font this surface was written for). That is
+    /// what MemoryStream.ToArray and Encoding.GetBytes are methods for.
+    ///
+    /// ONE COPY, AND IT IS NOT AVOIDABLE HERE: the pointer borrows the
+    /// core's allocation, and a byte[] aliasing it would outlive the
+    /// release. The BLOB redemption pays nothing, and it is the route a
+    /// font or an icon takes.
+    public byte[] Bytes()
+    {
+        Alive("Bytes()");
+        return Kaya.AssetBytes(handle);
+    }
+
+    /// The asset as a Stream: a MemoryStream over a copy of the bytes,
+    /// seekable and non-writable. Entirely .NET's — the core knows
+    /// nothing about it, and it stays valid after this Asset is
+    /// disposed because it owns its own memory.
+    public MemoryStream Open() => new MemoryStream(Bytes(), writable: false);
+
+    /// The asset's byte count. Never 0 for a live asset: the core
+    /// refuses a zero-byte asset at the open, because an empty blob
+    /// sails through every lowering and is indistinguishable from a
+    /// default.
+    public int Length
+    {
+        get
+        {
+            Alive("Length");
+            return Kaya.AssetLength(handle);
+        }
+    }
+
+    /// THE BLOB REDEMPTION, used by the two consumers that take an
+    /// Asset: it registers the core's own bytes into the pending table
+    /// and answers the handle the next submit consumes. The bytes never
+    /// enter .NET.
+    ///
+    /// INTERNAL, because the redemption is the binding's business and
+    /// not the guest's: the BrandTypeface and AppIdentity overloads are
+    /// the whole offer, and they are the same offer in all nine
+    /// languages.
+    internal ulong Blob()
+    {
+        Alive("a blob redemption");
+        return Kaya.AssetBlob(handle);
+    }
+
+    /// Release the core's handle. Idempotent, and safe beside a `using`.
+    public void Dispose()
+    {
+        ulong live = handle;
+        handle = 0;
+        if (live != 0) Kaya.AssetRelease(live);
+        // The finalizer has nothing left to do, and an object on the
+        // finalization queue costs a second GC generation to collect.
+        GC.SuppressFinalize(this);
+    }
+
+    /// THE FORGETTING GUEST'S NET. A finalizer rather than a
+    /// SafeHandle: a SafeHandle wraps an OS handle that the runtime
+    /// knows how to close, and this is an index into a table inside the
+    /// core. Release is idempotent, so this needs no bookkeeping of its
+    /// own beyond not calling into the core with a zero.
+    ~Asset()
+    {
+        if (handle != 0) Kaya.AssetRelease(handle);
+    }
+
+    void Alive(string what)
+    {
+        if (handle == 0)
+            throw new ObjectDisposedException(nameof(Asset),
+                $"kaya: {what} on a disposed asset (\"{Name}\") — the handle was " +
+                "released, and the bytes it borrowed are the core's. Read inside " +
+                "the `using`, or keep the bytes rather than the asset.");
+    }
+
+    public override string ToString() =>
+        handle == 0 ? $"Asset(\"{Name}\", disposed)" : $"Asset(\"{Name}\", {Length} bytes)";
+}
+
 /// One representation, arriving — the sum a copy is the record of.
 /// C# has records and pattern matching, so this is an abstract record
 /// with one derived record per constructor and a `switch` expression is
@@ -325,6 +461,103 @@ static class Kaya
     /// caller's bytes are free to drop the moment this returns.
     public static ulong RegisterBlob(byte[] data) =>
         kaya_blob_register(data, (nuint)data.Length);
+
+    // THE ASSET TABLE: a file the guest's own BUILD put beside the
+    // program, resolved and read by the CORE (docs/assets-plan.md). No
+    // mode argument anywhere on this floor — assets are read-only
+    // structurally — and no OS handle: kaya produced the bytes itself,
+    // so PickedFile's necessity above does not arise here.
+    [DllImport("kaya")]
+    static extern ulong kaya_asset_open(byte[] name, nuint nameLen);
+
+    [DllImport("kaya")]
+    static extern IntPtr kaya_asset_bytes(ulong handle, out nuint len);
+
+    [DllImport("kaya")]
+    static extern nuint kaya_asset_len(ulong handle);
+
+    [DllImport("kaya")]
+    static extern ulong kaya_asset_blob(ulong handle);
+
+    [DllImport("kaya")]
+    static extern void kaya_asset_release(ulong handle);
+
+    [DllImport("kaya")]
+    static extern nuint kaya_asset_why_not(
+        byte[] name, nuint nameLen, byte[] into, nuint cap);
+
+    /// Open an asset by name; 0 is the MISS, and AssetMissSentence says why.
+    ///
+    /// ZERO RATHER THAN A RAISE FROM THE CORE, because a panic inside an
+    /// extern "C" frame is an uncatchable process abort in every guest
+    /// language. The core answers a value and the BINDING throws — Tx's
+    /// Asset does it, carrying the core's sentence.
+    ///
+    /// The name travels as UTF-8 bytes with an explicit length rather
+    /// than a NUL-terminated string, so every binding hands its own
+    /// string type's bytes with no terminator to add.
+    internal static ulong AssetOpen(string name) =>
+        kaya_asset_open(Encoding.UTF8.GetBytes(name),
+                        (nuint)Encoding.UTF8.GetByteCount(name));
+
+    /// An open asset's bytes, copied out of core memory (the pointer
+    /// borrows an allocation the release frees).
+    internal static byte[] AssetBytes(ulong handle)
+    {
+        IntPtr data = kaya_asset_bytes(handle, out nuint len);
+        byte[] bytes = System.Array.Empty<byte>();
+        if (data != IntPtr.Zero && len > 0)
+        {
+            bytes = new byte[(int)len];
+            Marshal.Copy(data, bytes, 0, (int)len);
+        }
+        return bytes;
+    }
+
+    internal static int AssetLength(ulong handle) => (int)kaya_asset_len(handle);
+
+    /// THE BLOB REDEMPTION: the core's own bytes into the pending table,
+    /// no copy through .NET. The handle the next submit consumes.
+    internal static ulong AssetBlob(ulong handle) => kaya_asset_blob(handle);
+
+    /// Idempotent, so a Dispose and a finalizer that follows it cost
+    /// nothing between them.
+    internal static void AssetRelease(ulong handle) => kaya_asset_release(handle);
+
+    /// NAMED FOR THE CARRYING, not for the answering, and deliberately
+    /// not AssetWhyNot. tools/check-diagnostics.sh reads any *WhyNot by
+    /// that name alone and holds it to the rule that every branch must
+    /// print what it measured — which is right, and which the function
+    /// that EARNED the name already satisfies: asset_why_not in
+    /// crates/kaya/src/assets.rs stats the root, lists what is there and
+    /// reads the io error, and the gate audits it at answers=8,
+    /// measured=8. This copies that sentence's bytes into a string. It
+    /// observes nothing and could not print a second sentence if it
+    /// tried, so calling it a why-not would put a diagnostic's name on a
+    /// memcpy — and the other bindings in this slice name theirs the
+    /// same way (Python's asset_miss_sentence, Go's assetMissSentence).
+    ///
+    /// The core's sentence for why an open would fail — empty when it
+    /// would succeed.
+    ///
+    /// ASKED TWICE ON PURPOSE. The first call passes a null buffer to
+    /// learn the length; the second fills a buffer of exactly that size.
+    /// A fixed buffer would truncate the END of the sentence, which is
+    /// where the census of what the package actually carries lives — the
+    /// half that answers the reader's next question.
+    ///
+    /// THE PROSE IS THE CORE'S, whole and unedited: one author for the
+    /// sentence, nine spellings of the raise.
+    internal static string AssetMissSentence(string name)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(name);
+        int needed = (int)kaya_asset_why_not(raw, (nuint)raw.Length, null, 0);
+        if (needed == 0) return "";
+        byte[] into = new byte[needed];
+        int written = (int)kaya_asset_why_not(
+            raw, (nuint)raw.Length, into, (nuint)needed);
+        return Encoding.UTF8.GetString(into, 0, System.Math.Min(written, needed));
+    }
 
     /// One value at `at`, advancing past it (header plus payload,
     /// padded to eight). A blob is redeemed and RELEASED here, exactly

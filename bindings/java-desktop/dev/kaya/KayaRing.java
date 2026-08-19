@@ -88,5 +88,41 @@ public final class KayaRing {
      */
     public static native byte[] occurrenceBlob(long handle);
 
+    /**
+     * Open an asset by name — a relative path under the asset root,
+     * spelled with {@code /}, as UTF-8 bytes. 0 is the MISS, and the
+     * caller raises with the sentence {@link #assetMissSentence} hands it.
+     *
+     * <p>BYTES AND NOT A STRING, because JNI's string calls speak
+     * MODIFIED UTF-8: a name outside ASCII would reach the resolver as
+     * something other than what the guest typed.
+     *
+     * <p>The same entry both JVMs carry, because the JVM guest tier is
+     * one tier — a directory beside the program on the desktops, the
+     * APK's own {@code assets/} on Android, and neither class knows
+     * which route it got.
+     */
+    public static native long assetOpen(byte[] name);
+
+    /** An open asset's bytes: one copy out of core memory. */
+    public static native byte[] assetBytes(long handle);
+
+    /**
+     * Register an open asset's bytes into the pending blob table and
+     * return the handle a record carries. The bytes never enter the
+     * JVM's heap — this is the redemption a font or an icon takes.
+     */
+    public static native long assetBlob(long handle);
+
+    /** Drop an open asset; idempotent, so a double release is a no-op. */
+    public static native void assetRelease(long handle);
+
+    /**
+     * Why {@code assetOpen(name)} would answer 0, as UTF-8 bytes; empty
+     * means the name resolves. The sentence has ONE author (the core),
+     * so every language raises the same words.
+     */
+    public static native byte[] assetMissSentence(byte[] name);
+
     private KayaRing() {}
 }

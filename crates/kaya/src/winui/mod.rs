@@ -9279,7 +9279,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     //
                     // Two prerequisites, both VM-proven (2026-07-15):
                     // MRT init needs an exe-adjacent resources.pri (the
-                    // deploy ships tools/guest/minimal-resources.pri),
+                    // deploy ships guests/assets/win/minimal-resources.pri),
                     // and the built-in template's deferred theme XAML
                     // needs the composed Application's metadata provider
                     // (see KayaOuter below) — without it the XAML

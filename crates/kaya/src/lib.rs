@@ -4,6 +4,11 @@
 //! ring transport. See DESIGN.md at the repository root.
 
 mod app;
+// Assets: `asset(name)` resolves a file the guest's own BUILD put where
+// the running program can find it, and hands the bytes to the blob
+// channel (docs/assets-plan.md). UNGATED on purpose — capi compiles on
+// all five targets and every one of them can be handed a name.
+mod assets;
 mod brand;
 // The Rust-side harness serves the Rust-native backends (GTK, WinUI)
 // and the unit tests; the interpreter platforms run their own Kotlin/
@@ -65,7 +70,7 @@ pub mod capi;
 extern crate self as kaya;
 
 pub use app::{
-    Accepts, ActionRef, Align, AnyAnchor, AppCtx, BarAnchor, Collection, ContextAnchor, ContextCatalog,
+    Accepts, ActionRef, Align, AnyAnchor, AppCtx, Asset, BarAnchor, BlobSource, Collection, ContextAnchor, ContextCatalog,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, Symbol, ToggleRef, Tpl, TplSource, Tx, ValueKind,

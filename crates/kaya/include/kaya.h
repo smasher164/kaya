@@ -1574,6 +1574,88 @@ int32_t kaya_run(void);
 uint64_t kaya_blob_register(const uint8_t *bytes, uintptr_t len);
 
 /**
+ * Open an asset by name and get the handle its bytes are held under.
+ *
+ * `name` is a relative path under the asset root, spelled with `/`
+ * (`"fonts/sora-wght.ttf"`), and it is UTF-8 of `name_len` bytes — not
+ * NUL-terminated, so every binding hands its own string type's bytes
+ * without a copy through C.
+ *
+ * ZERO IS THE MISS, and it is a value rather than a panic on purpose:
+ * a panic inside an `extern "C"` frame is an uncatchable process abort
+ * in every guest language (measured 2026-08-02 — a 240-byte occurrence
+ * aborted a guest with no traceback anywhere). So the core answers 0
+ * and the BINDING raises in its own language's idiom, carrying the
+ * sentence `kaya_asset_why_not` hands it. One sentence, one author,
+ * nine spellings of the raise.
+ *
+ * READ-ONLY, STRUCTURALLY: there is no mode argument, so the
+ * check-file-modes bug class — five hand-written sites decoding one
+ * integer differently — cannot exist on this surface at all.
+ *
+ * EACH CALL READS. No cache, no watch, no reload (wall 4).
+ */
+uint64_t kaya_asset_open(const uint8_t *name, uintptr_t name_len);
+
+/**
+ * An open asset's bytes. Returns the pointer and writes the length;
+ * NULL for a handle already released or never minted. The pointer
+ * borrows core memory and stays valid until `kaya_asset_release` —
+ * copy, then release, exactly as the occurrence blob's contract says.
+ */
+const uint8_t *kaya_asset_bytes(uint64_t handle, uintptr_t *len);
+
+/**
+ * An open asset's byte count, for a binding that sizes a buffer before
+ * it copies. 0 for a dead handle — and an asset is never legitimately
+ * 0 bytes (wall 2 refuses an empty file at the open), so 0 here means
+ * the handle, never the file.
+ */
+uintptr_t kaya_asset_len(uint64_t handle);
+
+/**
+ * THE BLOB REDEMPTION: register this asset's bytes into the pending
+ * table and get the handle a record will carry. The `Arc` is cloned,
+ * not the bytes — an asset handed to `set_app_identity` costs one
+ * refcount bump and no copy anywhere, which is the property that makes
+ * this a different thing from `bytes()` plus `kaya_blob_register`.
+ *
+ * The returned handle obeys the pending table's existing lifetime
+ * (wall 5): valid for exactly one submit, drained whether referenced
+ * or not. Redeeming twice for two transactions is two registrations,
+ * which is correct and is what the guest asked for.
+ *
+ * 0 for a dead asset handle, so a redemption of something never opened
+ * cannot register empty bytes that would sail through a lowering.
+ */
+uint64_t kaya_asset_blob(uint64_t handle);
+
+/**
+ * Drop an open asset. Idempotent: a handle already released, or never
+ * minted, is a no-op rather than an error, so a binding's finalizer
+ * needs no bookkeeping of its own.
+ */
+void kaya_asset_release(uint64_t handle);
+
+/**
+ * Why `kaya_asset_open(name)` would answer 0 — the whole sentence, in
+ * UTF-8, written into `out` and truncated to `cap`; the return value
+ * is the length the sentence actually has, so a caller that got a
+ * short buffer can size one and ask again.
+ *
+ * An EMPTY sentence (return 0) means the asset resolves. That is what
+ * makes this total rather than a failure path: a binding calls it only
+ * after a 0 from the open, but a guest may call it whenever it likes
+ * and get an honest answer either way.
+ *
+ * THE PROSE IS NOT WRITTEN HERE. crates/kaya/src/assets.rs's
+ * `asset_why_not` is the one author, so the sentence a Python guest
+ * raises and the sentence a Haskell guest raises are the same bytes,
+ * and a scene can freeze them once.
+ */
+uintptr_t kaya_asset_why_not(const uint8_t *name, uintptr_t name_len, uint8_t *out, uintptr_t cap);
+
+/**
  * Fetch a blob's bytes by the handle an apply record carried. Returns
  * the byte pointer and writes the length; NULL for a dead handle (a
  * batch already superseded). The pointer borrows core memory and is

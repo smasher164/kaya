@@ -1001,6 +1001,163 @@ impl<R> From<Widget<'_, '_, R>> for WidgetId {
     }
 }
 
+// --- Assets: the files the app's own BUILD shipped beside it ------------
+
+/// An open asset: the bytes of one file the app's build put where the
+/// running program can find it, asked for by the same name on five
+/// platforms (docs/assets-plan.md, ratified 2026-08-18).
+///
+/// `tx.asset("fonts/sora-wght.ttf")` is the whole call. WHERE that name
+/// resolves is the core's knowledge and never the app's — a directory in
+/// a repo checkout, a `.app` bundle's Resources, an APK's packaged
+/// `assets/`, which is not a directory and has no path at all — and the
+/// rule plus its failure sentence live once, in
+/// [`crate::assets`](../assets/index.html). Before that module the same
+/// rule was hand-written eight times, once per guest language, each copy
+/// with its own environment variable and its own prose; one of the eight
+/// read `os.Getenv` from a c-shared library, where the environment is
+/// empty forever.
+///
+/// # Why Rust's asset is not a handle
+///
+/// The other seven bindings hold a `u64` from `kaya_asset_open` and have
+/// to release it, because their bytes live on the far side of a C ABI
+/// and nothing over there knows when a guest is done. Rust IS the core:
+/// this type holds the `Arc<[u8]>` itself, so the release is the `Arc`'s
+/// and a `Drop` impl would have nothing to do that dropping the field
+/// does not already do. The observable semantics are the ones every
+/// binding has — the bytes stay readable for exactly as long as the
+/// guest holds the asset — and per invariant 1 that, not the spelling,
+/// is what has to match.
+///
+/// # Two redemptions, and the first is the interesting one
+///
+/// - **Hand it to kaya.** [`Tx::brand_typeface_with`] and
+///   [`Tx::app_identity`] take a [`BlobSource`], and an `Asset`'s impl
+///   clones the `Arc`: a refcount bump, and not one copy of a hundred
+///   kilobytes of font between the file and the platform's font API.
+/// - **Read it yourself.** [`Asset::bytes`] and [`Asset::reader`], for
+///   an asset the app is itself the consumer of — a licence text, a seed
+///   document, anything kaya has no opinion about.
+///
+/// Reading is READ-ONLY structurally: there is no mode argument
+/// anywhere on this surface, so the bug class `tools/check-file-modes.sh`
+/// exists to police — five hand-written sites decoding one integer
+/// differently — cannot occur here at all.
+pub struct Asset {
+    bytes: Arc<[u8]>,
+}
+
+impl Asset {
+    /// The asset's bytes.
+    ///
+    /// A BORROW RATHER THAN A COPY, which is where Rust's spelling
+    /// parts company with the other seven: they copy out of core memory
+    /// because their bytes are behind a C pointer that a release
+    /// invalidates, and this one is the core's own allocation with the
+    /// borrow checker keeping it alive. Same bytes, no copy, and
+    /// [`Asset::reader`] is there for the caller who wants an owned one.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// The asset as something `std::io::Read` + `Seek`, for a parser
+    /// that wants a stream rather than a slice.
+    ///
+    /// FILE-LIKE READING IS BINDING-SIDE SUGAR, with zero core surface
+    /// (docs/assets-plan.md, "The ruling, plainly"): each language wraps
+    /// the bytes in its own standard in-memory reader — `BytesIO`,
+    /// `bytes.NewReader`, `MemoryStream`, and here `io::Cursor`. There
+    /// is no file descriptor anywhere in the asset surface. A descriptor
+    /// was `PickedFile`'s necessity, because a provider-opened file has
+    /// no path behind it; kaya resolved this name and produced these
+    /// bytes itself, so nothing here needs one.
+    pub fn reader(&self) -> std::io::Cursor<Vec<u8>> {
+        std::io::Cursor::new(self.bytes.to_vec())
+    }
+
+    /// How many bytes the asset has.
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Whether the asset has no bytes — which it never does. The core
+    /// refuses a zero-byte asset at the open (assets.rs's wall 2: an
+    /// empty blob sails through every lowering and is indistinguishable
+    /// from a default), so this answers `false` for every asset that
+    /// exists. It is here because it MEASURES that rather than asserting
+    /// it, and because a `len` without an `is_empty` is a lint.
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+impl std::ops::Deref for Asset {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+impl std::fmt::Debug for Asset {
+    /// The byte count, never the bytes: an asset is a font or a picture,
+    /// and a `{:?}` that dumped one would turn a one-line assertion
+    /// failure into a hundred-kilobyte diff. The `Blob` type upstream
+    /// makes the same choice for the same reason.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Asset({} bytes)", self.bytes.len())
+    }
+}
+
+/// What can become a blob on the wire: bytes the app computed, or an
+/// [`Asset`] the core read.
+///
+/// ONE ARGUMENT TYPE RATHER THAN TWO FUNCTIONS. Every binding has to
+/// admit both spellings — invariant 1 says the semantics are one and the
+/// spelling is the language's — and each language pays for it in its own
+/// coin: C# overloads `BrandTypeface`, Go names a sibling `FontAsset`
+/// beside `FontBytes`, and Rust, which has neither overloading nor a
+/// second name it would want, takes the trait object. `Some(&font)`
+/// reads identically whether `font` is a `Vec<u8>` or an `Asset`.
+///
+/// The impls differ in exactly one way, and that difference is the whole
+/// point of the asset route: the byte spellings COPY into a fresh `Arc`
+/// (they must — the caller owns those bytes and may edit them after this
+/// call returns), while `Asset` CLONES the `Arc` it is already holding.
+/// A font read by the core reaches the platform's font API without being
+/// copied a second time.
+pub trait BlobSource {
+    /// The bytes this source contributes to the transaction's blob
+    /// table. `Arc<[u8]>` rather than the protocol's own `Blob` because
+    /// that type is crate-private and this trait is not; the wire's
+    /// wrapper is one `From` away on the other side of the call.
+    fn blob_bytes(&self) -> Arc<[u8]>;
+}
+
+impl BlobSource for [u8] {
+    fn blob_bytes(&self) -> Arc<[u8]> {
+        Arc::from(self)
+    }
+}
+
+/// The owned byte spelling, alongside `[u8]`'s, because `&some_vec` does
+/// NOT reach `&dyn BlobSource` on its own: Rust will deref-coerce a
+/// `&Vec<u8>` to a `&[u8]` and it will unsize a `&[u8]` to a trait
+/// object, but it does not chain the two, and every guest that computes
+/// bytes is holding a `Vec`.
+impl BlobSource for Vec<u8> {
+    fn blob_bytes(&self) -> Arc<[u8]> {
+        Arc::from(&self[..])
+    }
+}
+
+impl BlobSource for Asset {
+    fn blob_bytes(&self) -> Arc<[u8]> {
+        Arc::clone(&self.bytes)
+    }
+}
+
 /// A transaction under construction. Everything queues locally; commit
 /// sends the batch and rings the doorbell once. Dropping a Tx without
 /// committing abandons its records — and rolls the model back with
@@ -1389,6 +1546,47 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::SetBrandAccent { seed, light, dark });
     }
 
+    /// Open an [`Asset`] — a file the app's own BUILD shipped beside it,
+    /// named by a relative path under the asset root
+    /// (`tx.asset("fonts/sora-wght.ttf")`).
+    ///
+    /// TAKES `&self` DELIBERATELY. Opening an asset queues no op and
+    /// touches no model, so it does not need the exclusive borrow, and
+    /// with a shared one `tx.brand_typeface_with("Sora", &[],
+    /// Some(&tx.asset(name)))` compiles. That the reservation borrow
+    /// makes it legal is a nicety; the honest reason is that a method
+    /// which mutates nothing should not say it does.
+    ///
+    /// # A miss panics, with the core's sentence and nothing added
+    ///
+    /// A missing, unreadable, empty or malformed-name asset is a scene
+    /// error in every binding — the wall an app hits at startup, before
+    /// it can have drawn anything — and each raises in its own idiom:
+    /// `RuntimeError` in Python, `InvalidOperationException` in C#, a
+    /// panic here. What every one of them carries is
+    /// [`crate::assets::asset_why_not`]'s sentence VERBATIM. THE
+    /// BINDING WRITES NO PROSE OF ITS OWN, and that is a rule rather
+    /// than a habit: there is one author for that diagnostic, so the
+    /// words a Haskell guest is handed and the words a Rust guest is
+    /// handed are the same bytes and one scene can freeze them.
+    ///
+    /// The sentence names what the process measured — the name asked
+    /// for, the census of what the package actually carries, the place
+    /// that census came from and the route that chose it — because a
+    /// why-not may only print what it went and got (invariant 3).
+    ///
+    /// This is the one call in the Rust surface that reads the
+    /// filesystem, and it reads on EVERY call: no cache, no watch, no
+    /// reload (assets.rs's wall 4).
+    pub fn asset(&self, name: &str) -> Asset {
+        match crate::assets::read(name) {
+            Ok(bytes) => Asset { bytes: Arc::from(bytes) },
+            // The whole sentence, unwrapped and unprefixed. Anything
+            // this line added would be a second author for it.
+            Err(sentence) => panic!("{sentence}"),
+        }
+    }
+
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
     /// one family name is the whole call, and every platform that has
     /// that family installed uses it. THE FAMILY, NEVER THE SCALE —
@@ -1408,7 +1606,7 @@ impl<'a> Tx<'a> {
         }));
     }
 
-    /// The per-platform form, plus the font-BYTES form: `family` is the
+    /// The per-platform form, plus the font-FILE form: `family` is the
     /// default and `platforms` overrides it for the platforms that name
     /// themselves — `&[(Platform::Linux, "DejaVu Serif")]` — while
     /// `font` ships a font file whose bytes the backend registers with
@@ -1418,11 +1616,23 @@ impl<'a> Tx<'a> {
     /// THE PAIRS TRAVEL UNRESOLVED, unlike the accent's per-platform
     /// values, and that asymmetry is the design: this binding cannot
     /// know its platform, but every lowering IS one.
+    ///
+    /// `font` is a [`BlobSource`], so both spellings fit and the second
+    /// is the one an app should reach for:
+    ///
+    /// ```ignore
+    /// let font = tx.asset("fonts/sora-wght.ttf");
+    /// tx.brand_typeface_with("Sora", &[], Some(&font));   // no copy
+    /// tx.brand_typeface_with("Sora", &[], Some(&my_vec)); // one copy
+    /// ```
+    ///
+    /// The asset route costs a refcount bump: the core read those bytes
+    /// and the same allocation reaches the platform's font API.
     pub fn brand_typeface_with(
         &mut self,
         family: &str,
         platforms: &[(Platform, &str)],
-        font: Option<&[u8]>,
+        font: Option<&dyn BlobSource>,
     ) {
         self.ops.push(TxOp::SetBrandTypeface(TypefaceRequest {
             family: family.to_string(),
@@ -1430,7 +1640,7 @@ impl<'a> Tx<'a> {
                 .iter()
                 .map(|(tag, f)| (*tag as u32, (*f).to_string()))
                 .collect(),
-            font: font.map(|bytes| crate::protocol::Blob(bytes.into())),
+            font: font.map(|source| crate::protocol::Blob(source.blob_bytes())),
         }));
     }
 
@@ -1452,10 +1662,15 @@ impl<'a> Tx<'a> {
     /// decoder. Bytes that are not an image leave every platform's
     /// default in place — which is why the identity scene reads what the
     /// DECODER produced rather than echoing what was sent.
-    pub fn app_identity(&mut self, name: &str, icon: &[u8]) {
+    ///
+    /// `icon` is a [`BlobSource`]: `&tx.asset("icons/kaya-mark.png")`
+    /// for the mark the app's build shipped (no copy — the core read
+    /// those bytes and the same allocation reaches the platform), or a
+    /// `&Vec<u8>`/`&[u8]` for an app that computed its own.
+    pub fn app_identity(&mut self, name: &str, icon: &dyn BlobSource) {
         self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
             name: name.to_string(),
-            icon: Some(crate::protocol::Blob(icon.into())),
+            icon: Some(crate::protocol::Blob(icon.blob_bytes())),
         }));
     }
 
@@ -5639,6 +5854,139 @@ mod tests {
         ));
         drop(tx); // abandoned: nothing may ship
         assert!(tx_rx.try_recv().is_err(), "an abandoned tx shipped its records");
+    }
+
+    /// A context for the asset tests: they send nothing and receive
+    /// nothing, they only need a Tx to hang the call off.
+    fn asset_ctx() -> AppCtx {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        AppCtx::new(occ_rx, tx_tx, no_wake())
+    }
+
+    /// `tx.asset(name)` answers the bytes of the file the build shipped,
+    /// and the three ways of reading them agree: the borrow, the
+    /// `Deref`, and the owned reader.
+    #[test]
+    fn an_asset_reads_the_file_the_build_shipped() {
+        use std::io::Read;
+
+        let ctx = asset_ctx();
+        let tx = ctx.begin();
+        let font = tx.asset("fonts/sora-wght.ttf");
+
+        // The vendored font's byte count, the same fact assets.rs pins,
+        // asserted again HERE because a truncated or short read would
+        // otherwise reach a scene as a font the platform silently
+        // declines to register.
+        assert_eq!(font.len(), 111400);
+        assert!(!font.is_empty());
+        assert_eq!(font.bytes().len(), font.len());
+        assert_eq!(&font[..8], &font.bytes()[..8], "Deref and bytes() disagree");
+
+        let mut owned = Vec::new();
+        font.reader().read_to_end(&mut owned).expect("an in-memory cursor cannot fail");
+        assert_eq!(owned, font.bytes(), "the reader is not the asset's bytes");
+
+        // Debug prints the count and never the font.
+        assert_eq!(format!("{font:?}"), "Asset(111400 bytes)");
+    }
+
+    /// THE PROPERTY THE ASSET ROUTE EXISTS FOR: an asset handed to a
+    /// blob consumer is not copied. The op carries the SAME allocation
+    /// the core read into, and a byte spelling in the same position
+    /// necessarily carries a different one — those bytes belong to the
+    /// caller, who may edit them the line after this call.
+    ///
+    /// Asserted on the POINTER rather than on the contents, because
+    /// equal contents is exactly what a copy would also produce.
+    #[test]
+    fn an_asset_reaches_a_blob_consumer_without_a_copy() {
+        use crate::protocol::TxOp;
+
+        let ctx = asset_ctx();
+        let mut tx = ctx.begin();
+        let font = tx.asset("fonts/sora-wght.ttf");
+        let read_into = font.bytes().as_ptr();
+
+        tx.brand_typeface_with("Sora", &[], Some(&font));
+        let TxOp::SetBrandTypeface(request) = tx.ops.last().expect("the op queued") else {
+            panic!("brand_typeface_with lowered to something that is not a typeface request");
+        };
+        let blob = request.font.as_ref().expect("the font rode along");
+        assert_eq!(blob.0.as_ptr(), read_into, "the asset's bytes were COPIED into the op");
+        assert_eq!(blob.0.len(), font.len());
+
+        let owned: Vec<u8> = font.bytes().to_vec();
+        let guest_owns = owned.as_ptr();
+        tx.brand_typeface_with("Sora", &[], Some(&owned));
+        let TxOp::SetBrandTypeface(request) = tx.ops.last().expect("the second op queued") else {
+            panic!("brand_typeface_with lowered to something that is not a typeface request");
+        };
+        let blob = request.font.as_ref().expect("the font rode along");
+        assert_ne!(blob.0.as_ptr(), guest_owns, "a guest's own bytes must be copied, not aliased");
+        assert_eq!(&blob.0[..], &owned[..], "the copy is not the bytes it was made from");
+
+        // The icon consumer takes the same trait, so both spellings fit
+        // there too — the one call that would not compile if
+        // app_identity had kept its `&[u8]`.
+        tx.app_identity("Aurora Notes", &font);
+        let TxOp::SetAppIdentity(identity) = tx.ops.last().expect("the identity op queued") else {
+            panic!("app_identity lowered to something that is not an identity");
+        };
+        assert_eq!(
+            identity.icon.as_ref().expect("the icon rode along").0.as_ptr(),
+            read_into
+        );
+    }
+
+    /// A MISS PANICS WITH THE CORE'S SENTENCE, byte for byte. The
+    /// binding writes no prose of its own: assets.rs is the one author,
+    /// so a Rust guest and a Haskell guest are handed the same words and
+    /// one scene can freeze them (docs/assets-plan.md, invariant 1).
+    #[test]
+    fn a_missing_asset_panics_with_the_cores_sentence_verbatim() {
+        let ctx = asset_ctx();
+        let tx = ctx.begin();
+
+        // The default hook would print the panic to stderr and read as
+        // a failure in a passing run; it goes back the way it was.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tx.asset("fonts/nope.ttf");
+        }));
+        std::panic::set_hook(previous);
+
+        let payload = caught.expect_err("a missing asset must not return an Asset");
+        let message = payload
+            .downcast_ref::<String>()
+            .expect("a formatted panic carries a String")
+            .clone();
+        assert_eq!(message, crate::assets::asset_why_not("fonts/nope.ttf"));
+        assert!(message.contains("no asset named \"fonts/nope.ttf\""), "{message}");
+        assert!(message.contains("fonts/sora-wght.ttf"), "the census is missing: {message}");
+    }
+
+    /// The walls are the CORE's, reached through this surface: a name
+    /// that climbs out of the root is refused before any filesystem is
+    /// touched, and the raise says which rule it broke.
+    #[test]
+    fn asset_refuses_a_name_that_escapes_the_root() {
+        let ctx = asset_ctx();
+        let tx = ctx.begin();
+
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tx.asset("../../Cargo.toml");
+        }));
+        std::panic::set_hook(previous);
+
+        let payload = caught.expect_err("an escaping name must not resolve");
+        let message = payload.downcast_ref::<String>().expect("a String payload").clone();
+        assert!(message.contains("climbs out of the asset root"), "{message}");
     }
 
     /// A patch is recorded writes: each setter emits exactly one

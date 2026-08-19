@@ -124,7 +124,12 @@ module KayaApp
     brandTypeface,
     TypefaceAttr (..),
     appIdentity,
+    appIdentityAsset,
     appIdentityNamed,
+    Asset,
+    asset,
+    assetBytes,
+    assetClose,
     Platform (..),
     AlertAttr (..),
     showAlert,
@@ -431,6 +436,75 @@ data PickedFile = PickedFile
 -- is an ordinary handle.
 openPicked :: PickedFile -> Word32 -> IO (Handle, Bool)
 openPicked f = R.openPicked (pickedHandle f)
+
+-- | AN ASSET — a file this app's own BUILD put where the running
+-- program can find it (docs\/assets-plan.md, ratified 2026-08-18): the
+-- vendored typeface, the app's mark, a licence text.
+type Asset = R.Asset
+
+-- | Open an asset. The name is a relative path under the asset root,
+-- spelled with @\/@ — @asset "fonts\/sora-wght.ttf"@ — and THE ROOT IS
+-- KAYA'S PROBLEM AND NOT AN APP'S: a directory beside the program on the
+-- desktops, the packaged assets on the phones, and one environment
+-- variable (@KAYA_ASSET_DIR@) overrides the whole root for a lane that
+-- staged it elsewhere. No guest reads an environment variable and no
+-- guest carries a repo-relative default; both used to be hand-written
+-- once per language, and one of those eight copies had a
+-- language-specific trap severe enough to have earned its own gate.
+--
+-- IO, AND CALLED OUTSIDE THE TRANSACTION. 'Build' is a pure state monad,
+-- so a scene opens its assets in the IO around 'buildTx' — exactly where
+-- the eight typeface guests already read their font, one call instead of
+-- ten lines.
+--
+-- A MISS RAISES with the core's sentence and nothing added. There is one
+-- author for that sentence (crates\/kaya\/src\/assets.rs) so a Haskell
+-- guest and a Java guest name the same fault in the same words, and a
+-- scene can freeze them once.
+--
+-- TWO REDEMPTIONS, and the whole point of there being two. 'TFontAsset'
+-- and 'appIdentityAsset' take the handle itself, and the bytes never
+-- enter the Haskell heap — the core hands its own buffer to the blob
+-- table. 'assetBytes' is for a guest that is ITSELF the consumer, and
+-- copies once.
+--
+-- FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and never a
+-- core surface. Six of the eight bindings wrap them in the language's
+-- own standard in-memory reader — std::io::Cursor, io.BytesIO,
+-- bytes.NewReader, MemoryStream, java.io.ByteArrayInputStream,
+-- Foundation's InputStream(data:) — and OCaml and Haskell wrap them in
+-- nothing, because neither language's dependency set carries one
+-- (OCaml's In_channel only wraps a real channel; base has no in-memory
+-- Handle) and kaya will not add a package to a guest's build to invent
+-- one. In those two the byte value IS the reader — Bytes.t and
+-- Data.ByteString.ByteString — and every reading idiom the language has
+-- applies to it directly. That is the whole of the carve-out (DESIGN.md,
+-- Binding conventions): the idiom decides the spelling, and here two
+-- idioms have no second spelling to decide on.
+--
+-- READ-ONLY, STRUCTURALLY: no mode argument anywhere on this surface,
+-- and no file descriptor either. A descriptor was 'PickedFile''s
+-- necessity — a provider-opened file with no path behind it — and it is
+-- not ours: kaya resolved the name and produced the bytes itself.
+--
+-- EACH CALL READS. No cache, no watch, no reload.
+--
+-- RELEASE IS EXPLICIT ('assetClose') AND AUTOMATIC: the runtime hangs a
+-- weak-reference finalizer on every handle, so a guest that forgets
+-- leaks nothing.
+asset :: String -> IO Asset
+asset = R.openAsset
+
+-- | THE BYTES REDEMPTION: this asset's bytes, copied out of core memory,
+-- for a guest that is itself the consumer. In Haskell this IS the
+-- reader — see the carve-out on 'asset'.
+assetBytes :: Asset -> IO BS.ByteString
+assetBytes = R.assetBytes
+
+-- | Let the core drop these bytes. Idempotent, and a guest that never
+-- calls it still leaks nothing.
+assetClose :: Asset -> IO ()
+assetClose = R.assetClose
 
 data Counters = Counters
   { cSignal :: !Word64,
@@ -1040,6 +1114,22 @@ data TypefaceAttr
     -- in the first build transaction — which is exactly when the brand
     -- applies, and why fonts need no asset pipeline.
     TFont BS.ByteString
+  | -- | The same font slot with the file NAMED rather than read:
+    -- @TFontAsset =<< asset "fonts\/sora-wght.ttf"@ opened in the IO
+    -- around 'buildTx'.
+    --
+    -- THE BYTES NEVER ENTER THE HASKELL HEAP. The core already holds
+    -- them, and this hands the same buffer to the blob table, so a font
+    -- file costs one reference here and no ByteString. That is the whole
+    -- reason an asset is a handle rather than a bytes factory — @TFont
+    -- \<$\> assetBytes a@ would work and would copy a megabyte through
+    -- Haskell for nothing.
+    --
+    -- A CONSTRUCTOR AND NOT AN ARGUMENT, because Haskell spells this
+    -- call's options as a list and there is nothing to add: 'TFont' and
+    -- 'TFontAsset' are two ways to fill ONE slot, so the last one
+    -- written wins exactly as two 'TFont's do.
+    TFontAsset Asset
 
 -- | REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
 -- one family name is the whole call — @brandTypeface "Georgia"@ — and
@@ -1099,16 +1189,32 @@ emitTypeface family attrs =
         ( \a -> case a of
             TFor p f -> [W.VI64 (platformWire p), W.VStr f]
             TFont _ -> []
+            TFontAsset _ -> []
         )
         attrs
-    font = foldl (\held a -> case a of TFont b -> Just b; _ -> held) Nothing attrs
+    -- ONE SLOT, TWO WAYS TO FILL IT, so they fold together and the last
+    -- one written wins — a TFont after a TFontAsset is not a second font
+    -- any more than a TFont after a TFont is.
+    font =
+      foldl
+        ( \held a -> case a of
+            TFont b -> Just (Left b)
+            TFontAsset s -> Just (Right s)
+            _ -> held
+        )
+        Nothing
+        attrs
     -- The wire's presence mask: bit 0 says a font blob rides the slot.
     mask = maybe 0 (const 1) font
     -- The slot is written either way — an empty Str stands in when there
     -- are no bytes, which is why this is the one brand write that needs
-    -- IO: real bytes register through the blob channel first (the menu
-    -- icon's mechanism) and travel as a handle.
-    slot = maybe (pure (W.VStr "")) (fmap W.VBlob . registerBlob) font
+    -- IO: bytes register through the blob channel first (the menu icon's
+    -- mechanism) and travel as a handle, and an ASSET registers there
+    -- without ever passing through this heap.
+    slot = case font of
+      Nothing -> pure (W.VStr "")
+      Just (Left b) -> W.VBlob <$> registerBlob b
+      Just (Right s) -> W.VBlob <$> R.assetBlob s
 
 -- | DECLARE this app's identity (docs/app-identity-plan.md): the name it
 -- goes by and the picture that stands for it, as the bytes of one image
@@ -1137,6 +1243,20 @@ appIdentity name icon =
   -- Real bytes register through the blob channel first (the menu icon's
   -- mechanism) and travel as a handle, which is why this needs IO.
   emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> registerBlob icon)
+
+-- | The ASSET form of the icon slot: the same declaration, with the mark
+-- NAMED rather than read — @appIdentityAsset "Aurora Notes" =\<\< asset
+-- "icons\/kaya-mark.png"@.
+--
+-- THE BYTES NEVER ENTER THE HASKELL HEAP: the core hands its own buffer
+-- to the blob table, so a picture costs one reference here and no
+-- ByteString. A SECOND FUNCTION rather than an attribute, for
+-- 'appIdentityNamed''s reason — this call has no attribute list, it has
+-- one optional thing, and Haskell names it by naming the function.
+-- Everything else is 'appIdentity''s, verbatim.
+appIdentityAsset :: String -> Asset -> Build ()
+appIdentityAsset name icon =
+  emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> R.assetBlob icon)
 
 -- | The NAME-ONLY form, for an app that has a name and no mark yet — a
 -- SECOND FUNCTION rather than an attribute list, because there is

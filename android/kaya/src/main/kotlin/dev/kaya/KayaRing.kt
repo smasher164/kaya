@@ -51,6 +51,51 @@ object KayaRing {
     @JvmStatic external fun occurrenceBlob(handle: Long): ByteArray
 
     /**
+     * Open an asset by name — a relative path under the asset root,
+     * spelled with `/`, as UTF-8 bytes. 0 is the MISS, and the caller
+     * raises with the sentence [assetMissSentence] hands it.
+     *
+     * BYTES AND NOT A STRING, because JNI's string calls speak MODIFIED
+     * UTF-8: a name outside ASCII would reach the resolver as something
+     * other than what the guest typed.
+     *
+     * The same entry the desktop JVM carries, because the JVM guest tier
+     * is one tier; on Android the root is the APK's own `assets/`, read
+     * through the platform's AssetManager, and this class cannot tell.
+     */
+    @JvmStatic external fun assetOpen(name: ByteArray): Long
+
+    /** An open asset's bytes: one copy out of core memory. */
+    @JvmStatic external fun assetBytes(handle: Long): ByteArray
+
+    /**
+     * Register an open asset's bytes into the pending blob table and
+     * return the handle a record carries. The bytes never enter the
+     * JVM's heap — this is the redemption a font or an icon takes.
+     */
+    @JvmStatic external fun assetBlob(handle: Long): Long
+
+    /** Drop an open asset; idempotent, so a double release is a no-op. */
+    @JvmStatic external fun assetRelease(handle: Long)
+
+    /**
+     * The core's sentence for why [assetOpen] answered 0, carried
+     * across as bytes; empty means the name resolves. The sentence has
+     * ONE author, so every language raises the same words.
+     *
+     * NAMED FOR THE CARRYING, not for the answering, and deliberately
+     * not `assetWhyNot`: tools/check-diagnostics.sh reads any *WhyNot
+     * by that name alone and holds every branch to printing what it
+     * measured. The function that EARNED the name is `asset_why_not`
+     * in crates/kaya/src/assets.rs, which stats the root, lists what
+     * is there and reads the io error; the gate audits it at
+     * answers=8, measured=8. This is the memcpy that carries its
+     * sentence, so it takes the carrier's name — OCaml's
+     * `asset_miss_sentence` one binding over.
+     */
+    @JvmStatic external fun assetMissSentence(name: ByteArray): ByteArray
+
+    /**
      * Redeem a picked file: a [java.io.FileDescriptor] the caller owns,
      * with `seekable[0]` set to 1 when it supports random access.
      *

@@ -4,8 +4,15 @@
 //
 // The scene names no size anywhere: sizes, weights and metrics stay the
 // platform's and the role tier carries emphasis. It requests the
-// VENDORED font's bytes so the resolved family is one string on every
-// lane — the canonical note is guests/rust/typeface.rs's doc comment.
+// VENDORED font so the resolved family is one string on every lane —
+// the canonical note is guests/rust/typeface.rs's doc comment.
+//
+// THE FONT IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+// This scene used to read KAYA_FONT_FILE with a repo-relative default
+// and throw in its own words, as its seven siblings each did in their
+// own language. tx.Asset(name) is the whole thing now: where the file
+// lives is the core's knowledge, and the failure sentence has one
+// author.
 //
 // The byte-frozen contract is tools/scenes/typeface.steps.
 
@@ -20,27 +27,14 @@ static class TypefaceScene
 
         app.Build(tx =>
         {
-            // BEFORE THE FIRST MOUNT, per the set-once wall. The blob
-            // registers with the platform's app-font machinery and the
-            // "Sora" request then resolves to it.
-            var fontPath =
-                System.Environment.GetEnvironmentVariable("KAYA_FONT_FILE")
-                ?? "guests/assets/fonts/sora-wght.ttf";
-            byte[] font;
-            try
-            {
-                font = System.IO.File.ReadAllBytes(fontPath);
-            }
-            catch (System.Exception e)
-                when (e is System.IO.IOException
-                      or System.UnauthorizedAccessException)
-            {
-                throw new System.InvalidOperationException(
-                    $"kaya: the typeface scene needs the vendored font at " +
-                    $"{fontPath} (set KAYA_FONT_FILE or run from the repo " +
-                    $"root): {e.Message}", e);
-            }
-            tx.BrandTypeface("Sora", font: font);
+            // BEFORE THE FIRST MOUNT, per the set-once wall. The
+            // asset's bytes go from the core's read straight to the
+            // platform's app-font machinery, and the "Sora" request then
+            // resolves to what that registration produced: this scene
+            // never holds them, and the `using` releases the core's
+            // handle on the way out.
+            using var font = tx.Asset("fonts/sora-wght.ttf");
+            tx.BrandTypeface("Sora", font);
             tx.Window(title: "typeface", width: 480, height: 360);
             var heading = tx.Signal("typeface");
             status = tx.Signal("ready");

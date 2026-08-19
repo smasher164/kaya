@@ -137,6 +137,27 @@ fi
 # equals the number it declared. tools/check-gates.sh (one of the gates)
 # holds this file, that list and CLAUDE.md's rung 2 to the same census,
 # and refuses this file the right to invoke a gate directly.
+# NOTHING TO STAGE FOR ASSETS, AND HERE IS WHY, CHECKED. The guests
+# call `asset(name)` and the core resolves it; with no KAYA_ASSET_DIR set
+# it falls through to the compile-time repo-relative default
+# (crates/kaya/src/assets.rs), and this lane runs from the repo root, so
+# guests/assets is exactly where that default points. Written down at the
+# site rather than left to be inferred: the next person to add an asset
+# reads this file looking for a staging line, and its absence has to be
+# an answer (docs/assets-plan.md A5.4).
+#
+# LOUD, AND BEFORE ANY LEG RUNS — the linux lane's identity block one
+# tier up. Without the root, every guest that names an asset dies inside
+# its build closure on eight legs at once, and the reader works back from
+# eight stack traces to one absent directory.
+if [ ! -f "$ROOT/guests/assets/fonts/sora-wght.ttf" ]; then
+    echo "validate-mac: the asset root guests/assets is not where the core's" >&2
+    echo "  repo-relative default points. This lane stages nothing because it" >&2
+    echo "  runs from the repo root; check that before doubting the guests." >&2
+    exit 1
+fi
+echo "assets: the root resolves by the repo-relative default ($(find "$ROOT/guests/assets" -type f | wc -l | tr -d ' ') files)"
+
 tools/gates.sh || exit 1
 timing core-build+gates
 

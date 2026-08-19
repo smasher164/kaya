@@ -1863,6 +1863,74 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           and _identity(empty_icon[1])[3] == kaya.wire.VALUE_BLOB)
     _rewind(before)
 
+    # ------------------------------------------------------------------
+    # ASSETS (docs/assets-plan.md, ratified 2026-08-18). This is the only
+    # tier that can assert the asset path's RECORD-level claim headlessly,
+    # which is why the rows are here and not only in a scene: the promise
+    # is that an asset reaches a blob consumer WITHOUT its bytes passing
+    # through the guest, and what that means on the wire is a VALUE_BLOB
+    # in the slot with the mask bit set — indistinguishable, from the
+    # record's side, from bytes the app read itself. Indistinguishable is
+    # the point: the wire learns nothing about assets (A3).
+    font = kaya.asset("fonts/sora-wght.ttf")
+    check("asset() opens the vendored font the build shipped",
+          len(font) == 111400)
+    check("and bytes() is the file, not a truncation",
+          font.bytes()[:4] == b"\x00\x01\x00\x00" and len(font.bytes()) == 111400)
+    # THE FILE-LIKE READER IS SUGAR OVER THOSE BYTES and nothing else —
+    # no descriptor anywhere, which is the ruling's own wording. A read
+    # of part of it proves the wrapper is a real reader rather than a
+    # value that happens to have the bytes.
+    reader = font.reader()
+    check("and reader() is a real in-memory reader over them",
+          reader.read(4) == b"\x00\x01\x00\x00" and reader.tell() == 4)
+
+    before = len(kaya._tx)
+    kaya.brand_typeface("Sora", font=font)
+    rows = _typeface_records(kaya._tx[before:])
+    check("brand_typeface(font=<asset>) sets bit 0 with a Blob in the slot",
+          len(rows) == 1
+          and _typeface(rows[0])[0] == 1
+          and _typeface(rows[0])[3] == kaya.wire.VALUE_BLOB)
+    check("and the family is still the app's word, never the file's",
+          len(rows) == 1 and _typeface(rows[0])[1] == "Sora")
+    _rewind(before)
+
+    before = len(kaya._tx)
+    kaya.app_identity("Aurora Notes", icon=kaya.asset("icons/kaya-mark.png"))
+    rows = _identity_records(kaya._tx[before:])
+    check("app_identity(icon=<asset>) sets bit 0 with a Blob in the slot",
+          len(rows) == 1
+          and _identity(rows[0])[0] == 1
+          and _identity(rows[0])[3] == kaya.wire.VALUE_BLOB)
+    _rewind(before)
+
+    # THE WALLS, REFUSED IN THE CORE AND NOT HERE. Every one of these
+    # raises with a sentence crates/kaya/src/assets.rs wrote; this
+    # binding contributes no prose of its own, so the check is that the
+    # sentence ARRIVED rather than that Python composed a good one.
+    for what, name, fragment in (
+        ("a name that escapes the root", "../Cargo.toml", "climbs out of the asset root"),
+        ("an absolute path", "/etc/passwd", "is an absolute path"),
+        ("the empty name", "", "names nothing"),
+        ("a missing asset", "fonts/nope.ttf", "no asset named"),
+    ):
+        try:
+            kaya.asset(name)
+            check(f"asset() refuses {what}", False)
+        except Exception as exc:  # noqa: BLE001 - the type is the binding's idiom
+            check(f"asset() refuses {what}", fragment in str(exc))
+    # AND THE MISS SENTENCE CARRIES THE CENSUS, which is the half that
+    # answers the reader's next question. A truncating buffer would drop
+    # exactly this and leave a sentence that still looked right.
+    try:
+        kaya.asset("fonts/nope.ttf")
+        census_ok = False
+    except Exception as exc:  # noqa: BLE001
+        census_ok = "the package carries" in str(exc) and \
+            "fonts/sora-wght.ttf" in str(exc)
+    check("and the miss names what the package DOES carry", census_ok)
+
     with kaya.column():
         before = len(kaya._tx)
         kaya.label(text="Sections").role(kaya.Role.HEADING)

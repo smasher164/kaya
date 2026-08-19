@@ -18,17 +18,18 @@ app.build { tx in
     // BEFORE THE FIRST MOUNT, per the set-once wall. The blob registers
     // with the platform's app-font machinery and the "Sora" request
     // resolves to it — register, then resolve.
-    let fontPath = ProcessInfo.processInfo.environment["KAYA_FONT_FILE"]
-        ?? "guests/assets/fonts/sora-wght.ttf"
-    let font: Data
-    do {
-        font = try Data(contentsOf: URL(fileURLWithPath: fontPath))
-    } catch {
-        fatalError(
-            "kaya: the typeface scene needs the vendored font at \(fontPath) "
-                + "(set KAYA_FONT_FILE or run from the repo root): \(error)")
-    }
+    //
+    // ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
+    // override and the sentence for a miss were all hand-written here
+    // (and in seven sibling scenes) until asset() arrived; they live in
+    // the core now (crates/kaya/src/assets.rs), which is also why the
+    // bytes never enter this guest's heap — the handle goes straight to
+    // the blob channel. The release is explicit and the redemption has
+    // already happened by then: brandTypeface registered the bytes into
+    // the pending blob table, which keeps its own reference.
+    let font = KayaAsset("fonts/sora-wght.ttf")
     tx.brandTypeface("Sora", font: font)
+    font.close()
     tx.window(title: "typeface", width: 480, height: 360)
 
     let heading = tx.signal(.str("typeface"))

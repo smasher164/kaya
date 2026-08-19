@@ -58,6 +58,7 @@ package kaya
 import "C"
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"runtime"
@@ -284,6 +285,214 @@ func WaitOccurrences() bool {
 // goroutine; the binding calls it from Post, and guests do not name it.
 func Wake() {
 	C.kaya_wake()
+}
+
+// Asset is one open asset: the bytes of a file the app's own BUILD
+// shipped, held by the core and named the same way on five platforms
+// (docs/assets-plan.md, ratified 2026-08-18). Tx.Asset opens one.
+//
+//	font := tx.Asset("fonts/sora-wght.ttf")
+//	defer font.Close()
+//	tx.BrandTypeface("Sora", kaya.FontAsset(font))
+//
+// WHERE that name resolves is the core's knowledge and never the app's:
+// a directory in a repo checkout, a .app bundle's Resources, an APK's
+// packaged assets/, which is not a directory and has no path at all.
+// Before this existed the rule was hand-written once per guest language,
+// and GO'S COPY IS THE ONE THAT HAD A GATE WRITTEN FOR IT — a guest
+// resolving a font through an environment variable had to remember
+// kaya.Env, because os.Getenv in a c-shared library reads an environment
+// that is empty forever (tools/check-go-env.sh). Moving the read into
+// the core does not gate that trap, it makes it unreachable: no guest
+// reads an environment variable at all.
+//
+// TWO REDEMPTIONS, and the first is the interesting one:
+//
+//   - HAND IT TO KAYA. kaya.FontAsset(a) and tx.AppIdentityAsset(name,
+//     a) take an Asset, and the bytes never enter Go: the core clones a
+//     refcount into the blob table the wire already has.
+//   - READ IT YOURSELF. Bytes copies them out, and Reader wraps that
+//     copy in a *bytes.Reader.
+//
+// FILE-LIKE READING IS THIS BINDING'S SUGAR, with zero core surface:
+// Reader is a bytes.Reader the way Python's is a BytesIO and C#'s a
+// MemoryStream. THERE IS NO FILE DESCRIPTOR anywhere on the asset
+// surface — a descriptor was PickedFile's necessity below, because a
+// provider-opened file has no path behind it, and kaya resolved this
+// name and produced these bytes itself. Read-only structurally, too: no
+// call here takes a mode.
+//
+// AN fs.FS FAÇADE IS ADMITTED, NOT REFUSED, and it is deliberately not
+// written yet (the plan's ruling): it is legal binding-side sugar the
+// same tier as bytes.NewReader, and the trigger is a real Go artifact
+// that wants to hand its assets to something FS-shaped
+// (http.FileServer, template.ParseFS). Until one does, Bytes plus
+// bytes.NewReader is the whole Go surface.
+//
+// CLOSING. Close releases the core's handle, and a cleanup releases one
+// a guest forgot — so a guest that never closes leaks nothing, and one
+// that closes twice pays nothing (the core's release is idempotent).
+type Asset struct {
+	handle uint64
+	name   string
+}
+
+// openAsset is Tx.Asset's floor: the handle, or 0 for a miss. The
+// sentence for a miss is assetMissSentence's, and the raise is app.go's.
+func openAsset(name string) *Asset {
+	raw := []byte(name)
+	var handle C.uint64_t
+	if len(raw) == 0 {
+		// &raw[0] does not exist for an empty slice, and an empty name
+		// is a real call the core has a sentence for ("names nothing"),
+		// so it must reach the core rather than being refused here.
+		var zero C.uint8_t
+		handle = C.kaya_asset_open(&zero, 0)
+	} else {
+		handle = C.kaya_asset_open((*C.uint8_t)(unsafe.Pointer(&raw[0])), C.size_t(len(raw)))
+	}
+	if handle == 0 {
+		return nil
+	}
+	asset := &Asset{handle: uint64(handle), name: name}
+	// THE FORGETTING GUEST'S NET. The cleanup captures the HANDLE by
+	// value and never the Asset — a cleanup that closed over the object
+	// would keep it reachable forever and never run, which is the
+	// classic way this net is written wrong. Release is idempotent, so
+	// a cleanup that fires after an explicit Close costs nothing and
+	// needs no bookkeeping to suppress.
+	runtime.AddCleanup(asset, func(handle uint64) {
+		C.kaya_asset_release(C.uint64_t(handle))
+	}, asset.handle)
+	return asset
+}
+
+// assetMissSentence CARRIES the core's sentence for why an open would
+// fail — empty
+// when it would succeed.
+//
+// ASKED TWICE ON PURPOSE. The first call passes a nil buffer to learn
+// the length; the second fills a buffer of exactly that size. A fixed
+// buffer would truncate the END of the sentence, which is where the
+// census of what the package actually carries lives — the half that
+// answers the reader's next question.
+//
+// THE PROSE IS THE CORE'S, whole and unedited: one author for the
+// sentence, nine spellings of the raise.
+// NAMED FOR THE CARRYING, not for the answering, and deliberately not
+// `assetWhyNot`. tools/check-diagnostics.sh reads any *WhyNot by that
+// name alone and holds it to the rule that every branch must print
+// what it measured — which is right, and which the function that
+// EARNED the name already satisfies: `asset_why_not` in
+// crates/kaya/src/assets.rs stats the root, lists what is there and
+// reads the io error, and the gate audits it at answers=8,
+// measured=8. This copies that sentence's bytes into a Go string. It
+// observes nothing and could not print a second sentence if it tried,
+// so calling it a why-not would put a diagnostic's name on a
+// memcpy — and three other bindings in this same slice named theirs
+// the same way (OCaml's asset_miss_sentence).
+func assetMissSentence(name string) string {
+	raw := []byte(name)
+	var (
+		namePtr *C.uint8_t
+		zero    C.uint8_t
+	)
+	if len(raw) == 0 {
+		namePtr = &zero
+	} else {
+		namePtr = (*C.uint8_t)(unsafe.Pointer(&raw[0]))
+	}
+	needed := int(C.kaya_asset_why_not(namePtr, C.size_t(len(raw)), nil, 0))
+	if needed == 0 {
+		return ""
+	}
+	out := make([]byte, needed)
+	written := int(C.kaya_asset_why_not(namePtr, C.size_t(len(raw)),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])), C.size_t(needed)))
+	return string(out[:min(written, needed)])
+}
+
+// Name is the name this asset was asked for — what Tx.Asset was given,
+// not a path. There is no path to hand back on Android at all, so none
+// of the nine bindings offers one.
+func (a *Asset) Name() string { return a.name }
+
+// Bytes copies the asset's bytes out of core memory.
+//
+// ONE COPY, AND IT IS NOT AVOIDABLE HERE: the C pointer borrows the
+// core's allocation, and a Go slice aliasing it would outlive the
+// release. The copy is the price of reading in Go; the BLOB redemption
+// pays nothing, and it is the route a font or an icon takes.
+func (a *Asset) Bytes() []byte {
+	a.alive("Bytes")
+	var length C.size_t
+	data := C.kaya_asset_bytes(C.uint64_t(a.handle), &length)
+	var out []byte
+	if data != nil && length > 0 {
+		out = C.GoBytes(unsafe.Pointer(data), C.int(length))
+	}
+	// The cleanup above releases the handle the moment this Asset is
+	// unreachable, and "unreachable" can happen while a method that no
+	// longer touches the receiver is still running: the release would
+	// then race the read above and this would answer nil. KeepAlive is
+	// what makes the object reachable until the C call has returned.
+	runtime.KeepAlive(a)
+	return out
+}
+
+// Reader is the asset as an io.Reader/io.Seeker: a *bytes.Reader over a
+// copy of the bytes. Entirely Go's — the core knows nothing about it.
+func (a *Asset) Reader() *bytes.Reader { return bytes.NewReader(a.Bytes()) }
+
+// Len is the asset's byte count. Never 0 for a live asset: the core
+// refuses a zero-byte asset at the open, because an empty blob sails
+// through every lowering and is indistinguishable from a default.
+func (a *Asset) Len() int {
+	a.alive("Len")
+	n := int(C.kaya_asset_len(C.uint64_t(a.handle)))
+	runtime.KeepAlive(a)
+	return n
+}
+
+// Close releases the core's handle. Idempotent, and safe to defer
+// beside the open.
+func (a *Asset) Close() {
+	handle := a.handle
+	a.handle = 0
+	if handle != 0 {
+		C.kaya_asset_release(C.uint64_t(handle))
+	}
+	runtime.KeepAlive(a)
+}
+
+// blobHandle is THE BLOB REDEMPTION, used by the two consumers that
+// take an Asset: it registers the core's own bytes into the pending
+// table and answers the handle the next submit consumes. The bytes
+// never enter Go.
+//
+// UNEXPORTED, because the redemption is the binding's business and not
+// the guest's: FontAsset and AppIdentityAsset are the whole offer, and
+// they are the same offer in all nine languages.
+func (a *Asset) blobHandle() uint64 {
+	a.alive("a blob redemption")
+	handle := uint64(C.kaya_asset_blob(C.uint64_t(a.handle)))
+	runtime.KeepAlive(a)
+	return handle
+}
+
+// alive is the asset's one panic, shared by every method that reads the
+// handle so the two cannot drift in what they say — Tx.alive's shape,
+// one table over.
+func (a *Asset) alive(what string) {
+	if a == nil || a.handle == 0 {
+		name := ""
+		if a != nil {
+			name = a.name
+		}
+		panic(fmt.Sprintf("kaya: %s on a closed asset (%q) — the handle was "+
+			"released, and the bytes it borrowed are the core's. Read before "+
+			"Close, or keep the bytes rather than the asset.", what, name))
+	}
 }
 
 // PickedFile is one file the picker answered with: a handle to redeem,

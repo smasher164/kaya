@@ -1590,6 +1590,52 @@ func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
 	tx.emit(TxSetBrandAccent(seed, mask, light, dark))
 }
 
+// Asset opens an asset — a file the app's own BUILD shipped beside it,
+// named by a relative path under the asset root:
+//
+//	font := tx.Asset("fonts/sora-wght.ttf")
+//	defer font.Close()
+//
+// Returns an *Asset (see runtime.go for the type and its two
+// redemptions). Queues no record: opening one is a read, and the
+// transaction is here only because every kaya call a guest makes is.
+//
+// A MISS PANICS, WITH THE CORE'S SENTENCE AND NOTHING ADDED. A missing,
+// unreadable, empty or malformed-name asset is a scene error in every
+// binding — the wall an app hits at startup, before it can have drawn
+// anything — and each raises in its own idiom: a panic here and in
+// Rust, a RuntimeError in Python, an InvalidOperationException in C#.
+// Every one of them carries kaya_asset_why_not's sentence VERBATIM.
+// THIS BINDING WRITES NO PROSE OF ITS OWN for that failure: one author
+// for the diagnostic means a Go guest and a Haskell guest are handed the
+// same bytes, and one scene can freeze them.
+//
+// That sentence names what the process measured — the name asked for,
+// the census of what the package does carry, the place it resolved and
+// the route that chose it — because a why-not may only print what it
+// went and got.
+//
+// EACH CALL READS. No cache, no watch, no reload.
+func (tx *Tx) Asset(name string) *Asset {
+	// The transaction's liveness, asked because Go can: Rust gets this
+	// from the borrow checker, which makes a dead Tx unnameable.
+	tx.alive()
+	if asset := openAsset(name); asset != nil {
+		return asset
+	}
+	sentence := assetMissSentence(name)
+	if sentence == "" {
+		// Reachable only if the two calls disagree, which they can do
+		// because they are two calls: the open answered a miss and the
+		// why-not answered that it resolves. Both facts were measured;
+		// this binding has no third one and invents no cause for them.
+		sentence = fmt.Sprintf("kaya: asset(%q) did not open, and the core's own "+
+			"why-not answers that it resolves — those two facts were measured a "+
+			"moment apart, and this binding has nothing further to report", name)
+	}
+	panic(sentence)
+}
+
 // TypefaceOverride is one optional part of a brand typeface request,
 // made by PlatformFamily or FontBytes and passed to Tx.BrandTypeface.
 // Most apps pass none: a family name is the whole call.
@@ -1610,6 +1656,11 @@ type TypefaceOverride struct {
 	family   string
 	font     []byte
 	isFont   bool
+	// asset is the font-FILE form: the same offer as font, redeemed
+	// without a copy. Nil means this override carries bytes (or is a
+	// platform row); the two are never both set, because the two
+	// constructors are the only things that build one.
+	asset *Asset
 }
 
 // PlatformFamily overrides the default family on ONE platform, named by
@@ -1644,6 +1695,32 @@ func PlatformFamily(platform int64, family string) TypefaceOverride {
 // contract, RegisterBlob); the caller's slice is free to drop.
 func FontBytes(font []byte) TypefaceOverride {
 	return TypefaceOverride{font: font, isFont: true}
+}
+
+// FontAsset ships the font FILE THE APP'S OWN BUILD PUT BESIDE IT,
+// opened by name through the core:
+//
+//	font := tx.Asset("fonts/sora-wght.ttf")
+//	defer font.Close()
+//	tx.BrandTypeface("Sora", kaya.FontAsset(font))
+//
+// Same request as FontBytes and a different route to it: the bytes
+// never enter Go. The core read them, the redemption clones one
+// refcount into the blob table, and a hundred kilobytes of font reaches
+// the platform's font API without a []byte ever existing for it.
+//
+// A NAMED SIBLING WHERE C# WRITES AN OVERLOAD, which is what invariant
+// 1 asks for: every binding admits both spellings, the language decides
+// how they are spelled, and Go names the second one because it cannot
+// overload the first.
+func FontAsset(asset *Asset) TypefaceOverride {
+	if asset == nil {
+		// The nil case is caught HERE rather than at the redemption
+		// inside BrandTypeface, because here is where the caller's
+		// mistake is: an override built from nothing.
+		panic("kaya: FontAsset got no asset — open one with tx.Asset(\"fonts/...\"), or pass a family name alone")
+	}
+	return TypefaceOverride{asset: asset, isFont: true}
 }
 
 // BrandTypeface REQUESTS the app's brand typeface (docs/styling-plan.md
@@ -1702,10 +1779,16 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 			// — the silent-write failure this whole pass is written
 			// against. The accent's duplicate-appearance refusal,
 			// exactly, and for the same reason.
-			panic("kaya: BrandTypeface got two FontBytes — one font blob rides per request, so the second would silently replace the first")
+			panic("kaya: BrandTypeface got two fonts (FontBytes/FontAsset) — one font blob rides per request, so the second would silently replace the first")
 		}
 		mask |= 1
-		font = BlobHandle(RegisterBlob(o.font))
+		if o.asset != nil {
+			// The asset route: the core's own bytes into the pending
+			// table, no copy through Go.
+			font = BlobHandle(o.asset.blobHandle())
+		} else {
+			font = BlobHandle(RegisterBlob(o.font))
+		}
 	}
 	tx.emit(TxSetBrandTypeface(mask, family, platforms, font))
 }
@@ -1744,6 +1827,25 @@ func (tx *Tx) AppIdentity(name string, icon []byte) {
 	// The bytes go to the core ONCE, by handle, exactly as an image's
 	// do — the record carries the handle, never the picture itself.
 	tx.emit(TxSetAppIdentity(1, name, BlobHandle(RegisterBlob(icon))))
+}
+
+// AppIdentityAsset is AppIdentity with the mark THE APP'S OWN BUILD
+// SHIPPED, opened by name through the core:
+//
+//	mark := tx.Asset("icons/kaya-mark.png")
+//	defer mark.Close()
+//	tx.AppIdentityAsset("Aurora Notes", mark)
+//
+// Same declaration as AppIdentity and a different route to it: the
+// picture never enters Go. A THIRD NAMED METHOD rather than an
+// overload, which is this file's own precedent — AppIdentityNamed
+// exists for the same reason — and it is what invariant 1 asks of a
+// language that names its variants instead of overloading them.
+func (tx *Tx) AppIdentityAsset(name string, icon *Asset) {
+	if icon == nil {
+		panic("kaya: AppIdentityAsset got no asset — open one with tx.Asset(\"icons/...\"), or declare the name alone with AppIdentityNamed")
+	}
+	tx.emit(TxSetAppIdentity(1, name, BlobHandle(icon.blobHandle())))
 }
 
 // AppIdentityNamed is the NAME-ONLY form, for an app that has a name and

@@ -70,6 +70,30 @@ let kaya_blob_register =
   foreign ~from:lib "kaya_blob_register"
     (string @-> size_t @-> returning uint64_t)
 
+(* THE ASSET SURFACE (docs/assets-plan.md, ratified 2026-08-18): a file
+   the guest's own BUILD put where the running program can find it, read
+   by the core and held by handle. [string] carries the name's bytes
+   exactly as [kaya_submit] carries a transaction's — ctypes hands over
+   the OCaml string's own bytes and the length rides beside it, so no
+   NUL terminator is involved and an OCaml string, being bytes already,
+   needs no encoding step at all. *)
+let kaya_asset_open =
+  foreign ~from:lib "kaya_asset_open" (string @-> size_t @-> returning uint64_t)
+
+let kaya_asset_bytes =
+  foreign ~from:lib "kaya_asset_bytes"
+    (uint64_t @-> ptr size_t @-> returning (ptr char))
+
+let kaya_asset_blob =
+  foreign ~from:lib "kaya_asset_blob" (uint64_t @-> returning uint64_t)
+
+let kaya_asset_release =
+  foreign ~from:lib "kaya_asset_release" (uint64_t @-> returning void)
+
+let kaya_asset_why_not =
+  foreign ~from:lib "kaya_asset_why_not"
+    (string @-> size_t @-> ptr char @-> size_t @-> returning size_t)
+
 let kaya_occurrence_blob =
   foreign ~from:lib "kaya_occurrence_blob"
     (uint64_t @-> ptr size_t @-> returning (ptr char))
@@ -176,6 +200,104 @@ let register_blob data =
   let s = Bytes.to_string data in
   Unsigned.UInt64.to_int64
     (kaya_blob_register s (Unsigned.Size_t.of_int (String.length s)))
+
+(* An open asset. A RECORD rather than a bare int64, for two reasons
+   that agree: [Gc.finalise] refuses an immediate (it needs a heap
+   block to attach to), and [live] is what makes the double release
+   after an explicit [asset_close] free rather than a second trip
+   through C. *)
+type asset = { handle : int64; mutable live : bool }
+
+let release_handle handle = kaya_asset_release (Unsigned.UInt64.of_int64 handle)
+
+(* The core's sentence for why a name would miss, fetched whole.
+
+   IT DOES NOT COMPOSE THE SENTENCE, it carries it: the one author is
+   [asset_why_not] in crates/kaya/src/assets.rs, which is where the
+   naming convention (and tools/check-diagnostics.sh's rule) belongs.
+   This is named for the carrying so it cannot be mistaken for the
+   writing.
+
+   SIZED, THEN READ. The C entry writes into the caller's buffer and
+   returns the sentence's TRUE length, so the first call asks how long
+   it is and the second fills it. A guessed buffer would cut the half
+   that names the root and the route — the half a reader is chasing. *)
+let asset_miss_sentence name =
+  let n = Unsigned.Size_t.of_int (String.length name) in
+  let len =
+    Unsigned.Size_t.to_int
+      (kaya_asset_why_not name n
+         (Ctypes.from_voidp Ctypes.char Ctypes.null)
+         (Unsigned.Size_t.of_int 0))
+  in
+  if len = 0 then ""
+  else begin
+    let buf = CArray.make char len in
+    ignore
+      (kaya_asset_why_not name n (CArray.start buf) (Unsigned.Size_t.of_int len));
+    String.init len (fun i -> CArray.get buf i)
+  end
+
+(* Open an asset by name; the sentence is the core's, verbatim.
+
+   [Failure] and not [Invalid_argument]: this module already raises
+   [Failure] for "the world is not as this process needs it" (the
+   library is missing, the spec hashes disagree), and a name the build
+   did not ship is that, not a malformed argument. *)
+let open_asset name =
+  let handle =
+    Unsigned.UInt64.to_int64
+      (kaya_asset_open name (Unsigned.Size_t.of_int (String.length name)))
+  in
+  if handle = 0L then failwith (asset_miss_sentence name)
+  else begin
+    let a = { handle; live = true } in
+    (* THE FINALISER TAKES ITS SUBJECT AS AN ARGUMENT and closes over
+       nothing: a finaliser that captured [a] from this scope would keep
+       [a] reachable forever and never run. The core's release is
+       idempotent and its handles are minted monotonically and never
+       reused, so an explicit close followed by a collection is a no-op
+       rather than a release landing on somebody else's asset. *)
+    Gc.finalise (fun a -> if a.live then release_handle a.handle) a;
+    a
+  end
+
+(* THE BYTES REDEMPTION: this asset's bytes, copied out of core memory.
+   The pointer borrows the core's buffer and stays valid until release,
+   so the copy happens here and the [Bytes.t] that comes out is the
+   caller's. *)
+let asset_bytes a =
+  if not a.live then
+    failwith
+      "kaya: this asset is closed — an asset's bytes live in the core until \
+       asset_close, and a use after that has nothing to read; open it again \
+       with asset";
+  let len = allocate size_t (Unsigned.Size_t.of_int 0) in
+  let data = kaya_asset_bytes (Unsigned.UInt64.of_int64 a.handle) len in
+  let n = Unsigned.Size_t.to_int !@len in
+  if is_null data || n = 0 then Bytes.empty
+  else Bytes.init n (fun i -> !@(data +@ i))
+
+(* THE BLOB REDEMPTION, for the consumers inside this binding: register
+   these bytes into the pending table and answer with the handle the
+   record carries. The bytes never enter the OCaml heap — the core
+   clones its own reference — which is the whole reason this is a
+   different call from [asset_bytes] followed by [register_blob]. *)
+let asset_blob a =
+  if not a.live then
+    failwith
+      "kaya: this asset is closed — an asset's bytes live in the core until \
+       asset_close, and a use after that has nothing to read; open it again \
+       with asset";
+  Unsigned.UInt64.to_int64 (kaya_asset_blob (Unsigned.UInt64.of_int64 a.handle))
+
+(* Let the core drop these bytes. Idempotent here as well as in the
+   core, so a close followed by the finaliser costs one C call. *)
+let asset_close a =
+  if a.live then begin
+    a.live <- false;
+    release_handle a.handle
+  end
 
 (* Block for the next occurrence; None when the core has shut down.
    Some (kind, id, keys, payload, clip, undo): keys are [] when the id

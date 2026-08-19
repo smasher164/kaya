@@ -874,6 +874,206 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * OPEN AN ASSET — a file this app's own BUILD put where the running
+     * program can find it (docs/assets-plan.md, ratified 2026-08-18):
+     * the vendored typeface, the app's mark, a licence text.
+     *
+     * <p>{@code name} is a relative path under the asset root, spelled
+     * with {@code /} — {@code KayaApp.asset("fonts/sora-wght.ttf")}. The
+     * ROOT is kaya's problem and not an app's: a directory beside the
+     * program on the desktops, the APK's own {@code assets/} on Android,
+     * and one environment variable ({@code KAYA_ASSET_DIR}) overrides
+     * the whole root for a lane that staged it elsewhere. No guest reads
+     * an environment variable and no guest carries a repo-relative
+     * default; both used to be hand-written once per language, and one
+     * of those eight copies had a language-specific trap severe enough
+     * to have earned its own gate.
+     *
+     * <p>A MISS THROWS, with the core's sentence and nothing added.
+     * There is one author for that sentence (crates/kaya/src/assets.rs)
+     * so a Java guest and a Haskell guest name the same fault in the
+     * same words, and a scene can freeze them once. It is an
+     * {@link IllegalStateException} because a name the build did not
+     * ship is a declaration bug — the same class of mistake as a wrong
+     * scene name — and the answer never changes on a retry.
+     *
+     * <p>TWO REDEMPTIONS, and the whole point of there being two.
+     * {@link Tx#brandTypeface(String, Map, Asset)} and
+     * {@link Tx#appIdentity(String, Asset)} take the handle itself, and
+     * the bytes never enter the JVM's heap — the core hands its own
+     * buffer to the blob table. {@link Asset#bytes()} is for a guest
+     * that is ITSELF the consumer, and copies once.
+     *
+     * <p>FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and
+     * never a core surface. Six of the eight bindings wrap them in the
+     * language's own standard in-memory reader — std::io::Cursor,
+     * io.BytesIO, bytes.NewReader, MemoryStream,
+     * java.io.ByteArrayInputStream, Foundation's InputStream(data:) —
+     * and OCaml and Haskell wrap them in nothing, because neither
+     * language's dependency set carries one (OCaml's In_channel only
+     * wraps a real channel; base has no in-memory Handle) and kaya will
+     * not add a package to a guest's build to invent one. In those two
+     * the byte value IS the reader — Bytes.t and
+     * Data.ByteString.ByteString — and every reading idiom the language
+     * has applies to it directly. That is the whole of the carve-out
+     * (DESIGN.md, Binding conventions): the idiom decides the spelling,
+     * and here two idioms have no second spelling to decide on.
+     *
+     * <p>READ-ONLY, STRUCTURALLY: there is no mode argument anywhere on
+     * this surface, and no file descriptor either. A descriptor was
+     * {@link PickedFile}'s necessity — a provider-opened file with no
+     * path behind it — and it is not ours: kaya resolved the name and
+     * produced the bytes itself.
+     *
+     * <p>EACH CALL READS. No cache, no watch, no reload.
+     */
+    public static Asset asset(String name) {
+        byte[] wire = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Asset.sweep();
+        long handle = KayaRing.assetOpen(wire);
+        if (handle == 0) {
+            throw new IllegalStateException(new String(
+                    KayaRing.assetMissSentence(wire),
+                    java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return new Asset(handle);
+    }
+
+    /**
+     * An open asset: the bytes kaya read, held by the core until this is
+     * released.
+     *
+     * <p>RELEASE IS EXPLICIT — {@link #close()}, and it is
+     * {@link AutoCloseable} so try-with-resources spells it — AND a
+     * guest that forgets still leaks nothing, because an unreachable
+     * Asset's handle is released the next time any asset is opened or
+     * closed.
+     *
+     * <p>WHY A PHANTOM REFERENCE AND NOT A FINALIZER. Java is the one
+     * binding here with no finalizer to use: {@code Object.finalize} is
+     * deprecated for removal (JEP 421), and its replacement
+     * {@code java.lang.ref.Cleaner} arrived on Android at API 33 while
+     * this file compiles at minSdk 26 (android/kaya/build.gradle.kts) —
+     * so a Cleaner would link on the desktops and die at first use on a
+     * phone, which is precisely the failure shape this repo keeps
+     * closing. A {@link java.lang.ref.PhantomReference} on a
+     * {@link java.lang.ref.ReferenceQueue} is what a Cleaner is built
+     * out of, it has existed since Java 1.2 and Android API 1, and it
+     * needs no thread of its own: the queue is drained on the calls a
+     * program that opens assets is already making. The reference holds
+     * the HANDLE NUMBER, never the Asset — a finalizer that closes over
+     * its own subject keeps it alive forever — and that is safe because
+     * the core mints handles monotonically and never reuses one, so a
+     * late release cannot land on a live asset.
+     */
+    public static final class Asset implements AutoCloseable {
+        private static final java.lang.ref.ReferenceQueue<Asset> DEAD =
+                new java.lang.ref.ReferenceQueue<>();
+
+        /** The live phantoms, kept reachable: a PhantomReference nobody
+         * holds is collected itself, and then it never enqueues. */
+        private static final java.util.Set<Tomb> TRACKED =
+                java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+        private static final class Tomb extends java.lang.ref.PhantomReference<Asset> {
+            private final long handle;
+
+            Tomb(Asset asset, long handle) {
+                super(asset, DEAD);
+                this.handle = handle;
+            }
+        }
+
+        /** Release every asset the collector has already reclaimed.
+         * Called at each open and each close, which is the only cadence
+         * that matters: a program that opens one asset and drops it
+         * holds one handle, and a program that opens them in a loop
+         * sweeps on every turn of that loop. */
+        static void sweep() {
+            java.lang.ref.Reference<? extends Asset> dead;
+            while ((dead = DEAD.poll()) != null) {
+                Tomb tomb = (Tomb) dead;
+                TRACKED.remove(tomb);
+                KayaRing.assetRelease(tomb.handle);
+            }
+        }
+
+        private final long handle;
+        private final Tomb tomb;
+        private boolean open = true;
+
+        Asset(long handle) {
+            this.handle = handle;
+            this.tomb = new Tomb(this, handle);
+            TRACKED.add(this.tomb);
+        }
+
+        /**
+         * THE BYTES REDEMPTION: this asset's bytes, copied out of core
+         * memory. For a guest that is itself the consumer — a licence
+         * text, a JSON table, a shader.
+         *
+         * <p>A fresh array each call, so the caller owns what it gets
+         * and the core's buffer is never aliased into the JVM's heap.
+         */
+        public byte[] bytes() {
+            alive();
+            return KayaRing.assetBytes(handle);
+        }
+
+        /**
+         * The same bytes as a stream, for the many java.io consumers
+         * that want one — {@code javax.imageio.ImageIO.read}, a parser,
+         * a copy loop.
+         *
+         * <p>IN-MEMORY AND NOT A FILE: this is
+         * {@link java.io.ByteArrayInputStream} over {@link #bytes()},
+         * binding-side sugar with no core surface behind it and no
+         * descriptor anywhere. Nothing here blocks and nothing here can
+         * fail.
+         */
+        public java.io.ByteArrayInputStream stream() {
+            return new java.io.ByteArrayInputStream(bytes());
+        }
+
+        /**
+         * THE BLOB REDEMPTION, for the consumers inside this binding:
+         * register these bytes into the pending table and answer with
+         * the handle the record carries. The bytes never enter the JVM's
+         * heap. Package-private on purpose — a guest names the asset at
+         * {@code brandTypeface}/{@code appIdentity} and never handles a
+         * blob id.
+         */
+        long blob() {
+            alive();
+            return KayaRing.assetBlob(handle);
+        }
+
+        /**
+         * Let the core drop these bytes. Idempotent, and the sweep that
+         * runs here retires anything the collector reclaimed since the
+         * last open.
+         */
+        @Override
+        public void close() {
+            if (open) {
+                open = false;
+                KayaRing.assetRelease(handle);
+            }
+            sweep();
+        }
+
+        private void alive() {
+            if (!open) {
+                throw new IllegalStateException(
+                        "kaya: this asset is closed — an asset's bytes live in "
+                        + "the core until close(), and a use after that has "
+                        + "nothing to read; open it again with KayaApp.asset");
+            }
+        }
+    }
+
     /** Accumulates the one atomic SHOW_FILE_DIALOG record; nothing is
      * sent until show (a request has a send moment). */
     public static final class FileDialogRef {
@@ -3890,7 +4090,11 @@ public final class KayaApp {
          * theme-switching surface the vocabulary does not have.
          */
         public void brandTypeface(String family) {
-            brandTypeface(family, null, null);
+            // The cast picks the bytes overload rather than the Asset
+            // one: two reference types in the same slot make a bare
+            // `null` ambiguous, and javac says so at this line rather
+            // than in a guest.
+            brandTypeface(family, null, (byte[]) null);
         }
 
         /**
@@ -3950,6 +4154,44 @@ public final class KayaApp {
         }
 
         /**
+         * The ASSET form of the font slot: the same call, with the font
+         * named rather than read — {@code tx.brandTypeface("Sora", null,
+         * KayaApp.asset("fonts/sora-wght.ttf"))}.
+         *
+         * <p>THE BYTES NEVER ENTER THE JVM'S HEAP. The core already
+         * holds them; this hands the same buffer to the blob table, so a
+         * font file costs one refcount here and no array. That is the
+         * whole reason an asset is a handle rather than a {@code byte[]}
+         * factory — {@code brandTypeface(family, platforms,
+         * asset.bytes())} would work and would copy a megabyte through
+         * Java for nothing.
+         *
+         * <p>Everything else — the family, the per-platform rows, the
+         * set-once wall, register-then-resolve — is
+         * {@link #brandTypeface(String, Map, byte[])}'s, verbatim.
+         */
+        public void brandTypeface(String family, Map<Platform, String> platforms, Asset font) {
+            java.util.List<Object> pairs = new java.util.ArrayList<>();
+            if (platforms != null) {
+                for (Platform platform : Platform.values()) {
+                    if (!platforms.containsKey(platform)) {
+                        continue;
+                    }
+                    String row = platforms.get(platform);
+                    pairs.add(platform.wire);
+                    pairs.add(row == null ? "" : row);
+                }
+            }
+            emit(KayaWire.txSetBrandTypeface(
+                    font != null ? TYPEFACE_MASK_FONT : 0,
+                    family == null ? "" : family,
+                    pairs.toArray(),
+                    font != null
+                            ? new KayaWire.BlobHandle(font.blob())
+                            : ""));
+        }
+
+        /**
          * DECLARE the app's identity (docs/app-identity-plan.md): the
          * name it goes by and the picture that stands for it, as the
          * bytes of one image file.
@@ -3982,6 +4224,23 @@ public final class KayaApp {
             emit(KayaWire.txSetAppIdentity(
                     IDENTITY_MASK_ICON, name,
                     new KayaWire.BlobHandle(KayaRing.blobRegister(icon))));
+        }
+
+        /**
+         * The ASSET form of the icon slot: the same declaration, with
+         * the mark named rather than read — {@code
+         * tx.appIdentity("Aurora Notes",
+         * KayaApp.asset("icons/kaya-mark.png"))}.
+         *
+         * <p>THE BYTES NEVER ENTER THE JVM'S HEAP: the core hands its
+         * own buffer to the blob table, so a picture costs one refcount
+         * here and no array. Everything else is
+         * {@link #appIdentity(String, byte[])}'s, verbatim.
+         */
+        public void appIdentity(String name, Asset icon) {
+            emit(KayaWire.txSetAppIdentity(
+                    IDENTITY_MASK_ICON, name,
+                    new KayaWire.BlobHandle(icon.blob())));
         }
 
         /**

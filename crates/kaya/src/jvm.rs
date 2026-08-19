@@ -80,6 +80,39 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "(J)[B".into(),
                 fn_ptr: ring_occurrence_blob as *mut _,
             },
+            // THE ASSET SURFACE, shared and not desktop-only for
+            // openPicked's reason: the JVM guest tier is ONE tier, and
+            // an asset is a file the guest's own build shipped on
+            // either JVM — a directory beside the program on the
+            // desktops, the APK's own assets/ on Android. The
+            // per-platform route is the core's problem
+            // (crates/kaya/src/assets.rs), and neither KayaRing knows
+            // which one it got.
+            NativeMethod {
+                name: "assetOpen".into(),
+                sig: "([B)J".into(),
+                fn_ptr: ring_asset_open as *mut _,
+            },
+            NativeMethod {
+                name: "assetBytes".into(),
+                sig: "(J)[B".into(),
+                fn_ptr: ring_asset_bytes as *mut _,
+            },
+            NativeMethod {
+                name: "assetBlob".into(),
+                sig: "(J)J".into(),
+                fn_ptr: ring_asset_blob as *mut _,
+            },
+            NativeMethod {
+                name: "assetRelease".into(),
+                sig: "(J)V".into(),
+                fn_ptr: ring_asset_release as *mut _,
+            },
+            NativeMethod {
+                name: "assetMissSentence".into(),
+                sig: "([B)[B".into(),
+                fn_ptr: ring_asset_miss_sentence as *mut _,
+            },
             NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
@@ -191,6 +224,94 @@ extern "system" fn ring_occurrence_blob<'a>(
         .expect("kaya: handing over the occurrence blob failed");
     crate::capi::kaya_occurrence_blob_release(handle as u64);
     out
+}
+
+/// KayaRing.assetOpen: kaya_asset_open's JNI spelling. 0 is the MISS,
+/// carried across as-is — the binding raises, in Java's idiom, with the
+/// sentence assetMissSentence hands it, so no prose is written here.
+///
+/// THE NAME TRAVELS AS UTF-8 BYTES rather than as a jstring, and that
+/// is not fussiness: JNI's string calls speak MODIFIED UTF-8 (a NUL is
+/// two bytes, an astral character is a surrogate pair encoded twice),
+/// so a name outside ASCII would reach the resolver as something other
+/// than what the guest typed. `String.getBytes(UTF_8)` on the Java side
+/// and `str::from_utf8` in the core agree on every name there is.
+extern "system" fn ring_asset_open(env: JNIEnv, _class: JClass, name: JByteArray) -> jlong {
+    let bytes = env
+        .convert_byte_array(&name)
+        .expect("kaya: reading the asset name failed");
+    (unsafe { crate::capi::kaya_asset_open(bytes.as_ptr(), bytes.len()) }) as jlong
+}
+
+/// KayaRing.assetBytes: THE BYTES REDEMPTION — one copy out of core
+/// memory into a fresh byte[]. The pointer borrows the core's Arc and
+/// stays valid until release, so the copy happens here and nothing the
+/// JVM holds outlives the handle. An empty array for a dead handle,
+/// which the Java side never asks for (it checks liveness first).
+extern "system" fn ring_asset_bytes<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    handle: jlong,
+) -> JByteArray<'a> {
+    let mut len = 0usize;
+    let data = unsafe { crate::capi::kaya_asset_bytes(handle as u64, &mut len) };
+    let bytes: &[u8] = if data.is_null() || len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(data, len) }
+    };
+    env.byte_array_from_slice(bytes)
+        .expect("kaya: handing over the asset bytes failed")
+}
+
+/// KayaRing.assetBlob: THE BLOB REDEMPTION — register this asset's
+/// bytes into the pending table and answer with the handle a record
+/// will carry. The bytes never enter the JVM's heap: the core clones an
+/// Arc, which is the whole reason this is a different call from
+/// assetBytes plus blobRegister.
+extern "system" fn ring_asset_blob(_env: JNIEnv, _class: JClass, handle: jlong) -> jlong {
+    crate::capi::kaya_asset_blob(handle as u64) as jlong
+}
+
+/// KayaRing.assetRelease: drop an open asset. Idempotent in the core, so
+/// the Java side's close and its phantom-reference sweep may both fire
+/// for one asset and the second is a no-op.
+extern "system" fn ring_asset_release(_env: JNIEnv, _class: JClass, handle: jlong) {
+    crate::capi::kaya_asset_release(handle as u64)
+}
+
+/// KayaRing.assetMissSentence: the core's sentence for why a name would
+/// miss, CARRIED and not composed — named for the carrying, the way
+/// every other binding in this slice named its own (bindings/go's
+/// assetMissSentence, OCaml's asset_miss_sentence). The function that
+/// earned the why-not name is crates/kaya/src/assets.rs's, and
+/// tools/check-diagnostics.sh audits that one.
+///
+/// as UTF-8 bytes; empty means the name resolves.
+///
+/// SIZED, THEN READ. The C entry writes into the caller's buffer and
+/// returns the sentence's TRUE length, so a first call with a null
+/// buffer asks how long it is and the second one fills it. Truncating
+/// to a guessed buffer would cut the half of the sentence that names
+/// the root and the route — the half a reader is actually chasing.
+extern "system" fn ring_asset_miss_sentence<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    name: JByteArray<'a>,
+) -> JByteArray<'a> {
+    let name = env
+        .convert_byte_array(&name)
+        .expect("kaya: reading the asset name failed");
+    let len =
+        unsafe { crate::capi::kaya_asset_why_not(name.as_ptr(), name.len(), std::ptr::null_mut(), 0) };
+    let mut buf = vec![0u8; len];
+    if len > 0 {
+        unsafe {
+            crate::capi::kaya_asset_why_not(name.as_ptr(), name.len(), buf.as_mut_ptr(), len)
+        };
+    }
+    env.byte_array_from_slice(&buf)
+        .expect("kaya: handing over the asset diagnostic failed")
 }
 
 /// The desktop bootstrap: dev.kaya.KayaRing.attach()'s name-resolved

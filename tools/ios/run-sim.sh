@@ -134,6 +134,33 @@ if [ ! -f "$ICON_SRC" ]; then
     exit 1
 fi
 
+# THE ASSET ROOT, INTO EVERY BUNDLE. This is the one lane where staging
+# and PACKAGING are the same act: an iOS app resolves its resources out
+# of its own bundle, so copying the root into the `.app` is both how a
+# shipped kaya app would carry its assets and how this lane delivers
+# them (docs/assets-plan.md A4's iOS row and A5.3).
+#
+# NO KAYA_ASSET_DIR HERE, AND THAT IS THE POINT. Every other lane that
+# cannot see the repo names a path in an environment variable; this one
+# does not have to, because the core asks `Bundle.main` for its resource
+# directory before it falls back to anything (crates/kaya/src/assets.rs,
+# route 2). So iOS is the first lane whose asset delivery is the real
+# mechanism rather than a test convenience — which is exactly what the
+# plan's A4 says the fix should be. If the bundle copy stops happening,
+# the guest does not silently read a stale file: it gets the core's miss
+# sentence naming the bundle it looked in.
+#
+# THE WHOLE ROOT, not the files a scene happens to want. A lane stages
+# the root as a unit (A5.1); the bundle is 116 KB of assets and the
+# simulator does not care.
+ASSET_SRC="$ROOT/guests/assets"
+if [ ! -d "$ASSET_SRC" ]; then
+    echo "run-sim: the asset root $ASSET_SRC is missing — every bundle this" >&2
+    echo "  lane assembles carries it, and a guest calling asset() would get" >&2
+    echo "  the core's miss sentence on every leg" >&2
+    exit 1
+fi
+
 make_bundle() {
     # A fourth argument, ANY non-empty value, puts the declared identity
     # into this bundle: the mark copied in verbatim and the plist's icon
@@ -181,6 +208,40 @@ sys.stdout.write(tpl.replace("@EXECUTABLE@", os.environ["KAYA_NAME"])
                     .replace("@BUNDLE_ID@", os.environ["KAYA_BUNDLE_ID"])
                     .replace("@NAME@", os.environ["KAYA_NAME"])
                     .replace("@IDENTITY@", block))' > "$app/Info.plist"
+    # The asset root, verbatim and entire, where Bundle.main will find
+    # it. `cp -R <dir>/. <dst>/` rather than `cp -R <dir> <dst>` so the
+    # ROOT'S CONTENTS land at assets/ regardless of whether the
+    # destination already exists — the two spellings differ only on a
+    # second run, which is the run that would have nested
+    # assets/assets/.
+    mkdir -p "$app/assets"
+    cp -R "$ASSET_SRC/." "$app/assets/" || return 1
+    # What arrived is what was sent, by hash. The bundle assembly is a
+    # local copy and cannot half-land the way a push over adb can — but
+    # it CAN copy a stale tree if the destination was not cleared, and
+    # this is the only place that would notice.
+    python3 - "$ASSET_SRC" "$app/assets" "$name" <<'PY' || return 1
+import hashlib
+import pathlib
+import sys
+
+src, dst, leg = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
+digest = lambda f: hashlib.sha256(f.read_bytes()).hexdigest()
+here = {f.relative_to(src).as_posix(): digest(f) for f in sorted(src.rglob("*")) if f.is_file()}
+there = {f.relative_to(dst).as_posix(): digest(f) for f in sorted(dst.rglob("*")) if f.is_file()}
+if not here:
+    sys.exit(f"run-sim: the tree's asset root is empty, so the {leg} bundle's "
+             "copy would agree with anything")
+bad = [f"  {n}: " + ("never arrived" if n not in there
+                     else f"is {there[n][:12]}, the tree has {h[:12]}")
+       for n, h in sorted(here.items()) if there.get(n) != h]
+bad += [f"  {n}: is in the bundle and not in the tree" for n in sorted(set(there) - set(here))]
+if bad:
+    print(f"run-sim: the {leg} bundle's asset root does not match the tree:",
+          file=sys.stderr)
+    print("\n".join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
     cp "$executable_path" "$app/$name"
     echo "$app"
 }

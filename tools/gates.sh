@@ -200,6 +200,17 @@ GATES = [
      "one of its clauses walks every path in the tree looking for app-icon "
      "resources, so any add, delete or rename is a real input — check-case's "
      "shape, and a key that cheap to invalidate is a cache that never hits"),
+    # THE ASSET ROOT'S DRIFT GATE, the identity gate's sibling one tier
+    # down (docs/assets-plan.md A6). `asset(name)` is only "one rule in
+    # one place" while nothing else resolves an asset for itself and
+    # every lane that has to carry the root carries all of it; neither is
+    # a thing the core can check, because both are statements about files
+    # the core never reads.
+    ("check-assets", ["tools/check-assets.sh"], False,
+     "one of its clauses walks every source root looking for a second "
+     "resolver and another walks the asset root itself, so any add, delete "
+     "or rename anywhere is a real input — check-app-identity's shape, and a "
+     "key that cheap to invalidate is a cache that never hits"),
     ("check-jni", ["tools/check-jni.sh"], True, ""),
     ("check-stubs", ["tools/check-stubs.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),

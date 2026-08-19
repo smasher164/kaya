@@ -538,47 +538,110 @@ scp -q "$ROOT"/tools/scenes/*.steps "$HOST:C:/kaya/scenes/"
 # every leg runs through schtasks, which inherits the user environment.
 run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul'
 
-# THE VENDORED FONT, for the same reason and by the same rule: the
-# typeface scene's guests hand the backend the font's BYTES (the
-# register-then-resolve path a brand's licensed font takes), so a guest
-# that cannot open the file cannot run the scene at all — it panics
-# naming KAYA_FONT_FILE. Shipped EVERY run, outside the deploy stamp,
-# exactly like the .steps above: an asset edit that a stamp skip
-# swallows is the same defect as a scene edit that never arrives.
+# THE ASSET ROOT, AS A UNIT. The typeface scene hands the backend the
+# vendored font's BYTES and the identity scene the mark's, so a guest
+# that cannot open them cannot run those scenes at all; and `asset(name)`
+# resolves both through ONE root, which the core finds by
+# KAYA_ASSET_DIR (docs/assets-plan.md A2, A5.2).
+#
+# THE ROOT AND NOT THE FILES, which is the single change from what this
+# block used to do. It shipped `fonts/*.ttf` by glob and one
+# manifest-named icon — two staging paragraphs for two assets, and a
+# third asset would have been a third. `scp -r` of the root is one
+# paragraph for every asset there will ever be, and a file that fails to
+# arrive fails the hash below rather than one scene on one lane.
+#
+# SHIPPED EVERY RUN, OUTSIDE THE DEPLOY STAMP, exactly like the .steps
+# above: an asset edit that a stamp skip swallows is the same defect as
+# a scene edit that never arrives.
 #
 # INTO THE REPO-MIRROR PATH. C:\kaya is already the repo root as far as
 # the guests are concerned — go.mod ships to C:\kaya and guests/go to
-# C:\kaya\guests\go below — so guests/assets/fonts lands at
-# C:\kaya\guests\assets\fonts and the guests' DEFAULT relative path
-# resolves for anything run from C:\kaya (probe.cmd included). The five
-# launchers still name it absolutely: the C# leg's cwd is C:\kaya\cs,
-# where the default would miss, and one spelling in all five beats four
-# legs that work by cwd and one that does not.
-run_ssh 'cmd /c if not exist C:\kaya\guests\assets\fonts mkdir C:\kaya\guests\assets\fonts'
-scp -q "$ROOT"/guests/assets/fonts/*.ttf "$HOST:C:/kaya/guests/assets/fonts/"
+# C:\kaya\guests\go below — so the root lands at C:\kaya\guests\assets
+# and anything run from C:\kaya would resolve it by the relative default
+# anyway. KAYA_ASSET_DIR is set absolutely all the same, machine-wide
+# beside KAYA_SCENES_DIR above, because the C# leg's cwd is C:\kaya\cs
+# where a relative default would miss, and one spelling for every leg
+# beats four that work by cwd and one that does not.
+run_ssh 'cmd /c "if exist C:\kaya\guests\assets rmdir /s /q C:\kaya\guests\assets"'
+run_ssh 'cmd /c if not exist C:\kaya\guests mkdir C:\kaya\guests'
+scp -q -r "$ROOT/guests/assets" "$HOST:C:/kaya/guests/"
+run_ssh 'setx KAYA_ASSET_DIR C:\kaya\guests\assets >nul'
 
-# THE VENDORED MARK, the font's rule verbatim one asset over: the
-# identity scene's guests declare this file's BYTES, so a guest that
-# cannot open it cannot run the scene at all — it panics naming
-# KAYA_ICON_FILE. Shipped every run, outside the deploy stamp, into the
-# same repo-mirror path, for the same two reasons the font is.
-#
-# READ OUT OF THE DECLARATION, not globbed out of the directory beside
-# it (docs/app-identity-plan.md ruling 4, held by
-# tools/check-app-identity.sh). A glob ships whatever happens to be
-# there; the manifest names the ONE file the build and the running app
-# are both supposed to read, and that is the whole point of there being
-# a manifest.
-icon_rel="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["icon"])' "$ROOT/guests/assets/identity.toml")"
-icon_rc=$?
-if [ "$icon_rc" -ne 0 ] || [ ! -f "$ROOT/$icon_rel" ]; then
-    echo "deploy-win: guests/assets/identity.toml does not name a readable icon" >&2
-    echo "  (got \"$icon_rel\", rc=$icon_rc) — the identity legs would run against" >&2
-    echo "  whatever the guest already had on disk" >&2
+# AND THE INDEX GOES BESIDE THE EXE, from the copy that just arrived
+# rather than from a second scp of its own. Every kaya host on Windows
+# needs an MRT resources.pri in the PROCESS executable's directory or
+# the XAML parser fail-fasts at 0xC000027B (docs/traps.md); the index is
+# an asset like any other and now travels with the root, so this is a
+# rename on the VM and not a staging decision.
+run_ssh 'cmd /c copy /y C:\kaya\guests\assets\win\minimal-resources.pri C:\kaya\resources.pri >nul' || {
+    echo "deploy-win: could not place C:\\kaya\\resources.pri — every WinUI host" >&2
+    echo "  needs an MRT index beside its exe or the XAML parser fail-fasts at" >&2
+    echo "  0xC000027B (docs/traps.md)" >&2
+    exit 1
+}
+
+# WHAT ARRIVED IS WHAT WAS SENT, BY HASH AND NOT BY SIZE. A size check
+# passes a same-length corruption, and a half-written scp over a
+# previous run's file is exactly that (docs/assets-plan.md A5.1 asks for
+# the change in these words). One round trip: PowerShell hashes the
+# whole staged tree, python holds it against this one.
+staged="$(run_ssh 'powershell -NoProfile -Command "Get-ChildItem -Recurse -File C:\kaya\guests\assets | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash + \" \" + $_.FullName }"' 2>&1 | tr -d '\r')"
+staged_rc=$?
+if [ "$staged_rc" -ne 0 ]; then
+    echo "deploy-win: could not hash the staged asset root on the VM: $staged" >&2
     exit 1
 fi
-run_ssh 'cmd /c if not exist C:\kaya\guests\assets\icons mkdir C:\kaya\guests\assets\icons'
-scp -q "$ROOT/$icon_rel" "$HOST:C:/kaya/$icon_rel"
+staged_list="$(mktemp)"
+printf '%s\n' "$staged" >"$staged_list"
+python3 - "$ROOT/guests/assets" "$staged_list" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+there = {}
+PREFIX = "c:\\kaya\\guests\\assets\\"
+for line in pathlib.Path(sys.argv[2]).read_text().splitlines():
+    line = line.strip()
+    if " " not in line:
+        continue
+    digest, full = line.split(" ", 1)
+    if len(digest) != 64:
+        continue
+    # The VM answers in its own spelling; the tree speaks `/`. One
+    # normalisation, here, so neither side has to know about the other.
+    low = full.strip().lower()
+    if not low.startswith(PREFIX):
+        continue
+    there[full.strip()[len(PREFIX):].replace("\\", "/")] = digest.lower()
+here = {}
+for f in sorted(root.rglob("*")):
+    if f.is_file():
+        here[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+bad = []
+for name, digest in sorted(here.items()):
+    got = there.get(name)
+    if got is None:
+        bad.append(f"  {name}: never arrived on the VM")
+    elif got != digest:
+        bad.append(f"  {name}: arrived as {got[:12]}, the tree has {digest[:12]}")
+for name in sorted(set(there) - set(here)):
+    bad.append(f"  {name}: is on the VM and not in the tree — a stale asset a "
+               "guest can still resolve by name")
+if bad:
+    print("deploy-win: the staged asset root does not match the tree:",
+          file=sys.stderr)
+    print("\n".join(bad), file=sys.stderr)
+    sys.exit(1)
+print(f"assets: {len(here)} files staged to C:\\kaya\\guests\\assets, "
+       "every one hash-equal to the tree")
+PY
+assets_rc=$?
+rm -f "$staged_list"
+if [ "$assets_rc" -ne 0 ]; then
+    exit 1
+fi
 
 
 # EXTENSIONS MUST BE VISIBLE, and this is not cosmetic. Explorer ships
@@ -802,7 +865,6 @@ deploy_stamp() {
             "$ROOT/crates/kaya/include/kaya.h" \
             "$ROOT"/tools/guest/*.cmd \
             "$ROOT"/tools/guest/*.vbs \
-            "$ROOT/tools/guest/minimal-resources.pri" \
             "$ROOT/tools/guest/shot.ps1" \
             "$ROOT/tools/guest/desk-warm.ps1" \
             "$ROOT"/bindings/go/*.go \
@@ -830,7 +892,6 @@ else
         "$ROOT/crates/kaya/include/kaya.h" \
         "$ROOT"/tools/guest/*.cmd \
         "$ROOT"/tools/guest/*.vbs \
-        "$ROOT/tools/guest/minimal-resources.pri" \
         "$ROOT/tools/guest/shot.ps1" \
         "$ROOT/tools/guest/desk-warm.ps1" \
         "$HOST:C:/kaya/" || {

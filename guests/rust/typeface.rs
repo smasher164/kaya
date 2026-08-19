@@ -6,23 +6,27 @@
 //! platform's, and the role tier carries emphasis. The font is the
 //! VENDORED one (guests/assets/fonts/sora-wght.ttf, OFL) because no
 //! platform preinstalls "Sora", so no fallback can equal the
-//! expectation; KAYA_FONT_FILE is how a runner that cannot see the repo
-//! points at a pushed copy.
+//! expectation.
+//!
+//! THE FONT IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+//! This scene used to read `KAYA_FONT_FILE` with a repo-relative default
+//! and panic in its own words, and its seven siblings each did the same
+//! thing in their own language — eight copies of one resolution rule and
+//! eight sentences for one failure. `tx.asset(name)` is the whole thing
+//! now: WHERE the file lives is the core's knowledge (a repo checkout, a
+//! bundle's Resources, an APK's packaged assets/ with no path at all)
+//! and the failure sentence has one author, so a runner that cannot see
+//! the repo stages the asset ROOT and names it once rather than
+//! per-asset.
 
 use kaya::Occurrence;
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let (status, field, go) = ctx.apply(|tx| {
-        // BEFORE THE FIRST MOUNT, per the set-once wall.
-        let font_path = std::env::var("KAYA_FONT_FILE")
-            .unwrap_or_else(|_| "guests/assets/fonts/sora-wght.ttf".into());
-        let font = std::fs::read(&font_path).unwrap_or_else(|e| {
-            panic!(
-                "kaya: the typeface scene needs the vendored font at \
-                 {font_path} (set KAYA_FONT_FILE or run from the repo \
-                 root): {e}"
-            )
-        });
+        // BEFORE THE FIRST MOUNT, per the set-once wall. The asset's
+        // bytes go from the core's read straight to the platform's font
+        // API: nothing here copies them, and this scene never sees them.
+        let font = tx.asset("fonts/sora-wght.ttf");
         tx.brand_typeface_with("Sora", &[], Some(&font));
         tx.window(kaya::DEFAULT_WINDOW).title("typeface").size(480.0, 360.0);
         let heading = tx.signal("typeface");

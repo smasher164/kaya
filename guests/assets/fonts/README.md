@@ -21,3 +21,19 @@ machinery, the register-then-resolve path is exercised on all five
 platforms, and no platform preinstalls the family, so a failed
 registration can never render as a false pass
 (docs/styling-plan.md, Slice 2b).
+
+## How to regenerate it
+
+You do not, and that is the point. `sora-wght.ttf` is a VENDORED
+upstream release, not something this tree produces: it is the variable
+`Sora[wght].ttf` from the Sora repository, renamed only because square
+brackets are glob characters. To take a newer one, download that
+release, rename it, and check the name table still reports the family
+`Sora` — the family string is the typeface scene's frozen observable, so
+a release that renamed the family would turn `expect_typeface` red on
+five lanes at once, which is exactly the signal you want.
+
+Subsetting, instancing and any other transformation are REFUSED, not
+merely unimplemented: the OFL's Reserved Font Name term makes a modified
+file something that may not be called Sora, and the name is the thing
+the scene reads.

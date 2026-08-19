@@ -77,6 +77,65 @@ type instance = {
    desktops and neither phone (DESIGN.md, File dialogs). *)
 type picked_file = { handle : int64; name : string; local_path : string }
 
+(* AN ASSET — a file this app's own BUILD put where the running program
+   can find it (docs/assets-plan.md, ratified 2026-08-18): the vendored
+   typeface, the app's mark, a licence text.
+
+   [asset "fonts/sora-wght.ttf"] opens one. The name is a relative path
+   under the asset root, spelled with [/], and THE ROOT IS KAYA'S
+   PROBLEM AND NOT AN APP'S: a directory beside the program on the
+   desktops, the packaged assets on the phones, and one environment
+   variable ([KAYA_ASSET_DIR]) overrides the whole root for a lane that
+   staged it elsewhere. No guest reads an environment variable and no
+   guest carries a repo-relative default; both used to be hand-written
+   once per language, and one of those eight copies had a
+   language-specific trap severe enough to have earned its own gate.
+
+   A MISS RAISES [Failure] carrying the core's sentence and nothing
+   added. There is one author for that sentence
+   (crates/kaya/src/assets.rs) so an OCaml guest and a Java guest name
+   the same fault in the same words, and a scene can freeze them once.
+   [Failure] rather than [Invalid_argument] for the runtime's reason:
+   this module raises [Failure] when the world is not as the process
+   needs it (no library, disagreeing spec hashes), and a name the build
+   did not ship is that.
+
+   TWO REDEMPTIONS, and the whole point of there being two.
+   [brand_typeface ~font_asset] and [app_identity ~icon_asset] take the
+   handle itself and the bytes never enter the OCaml heap — the core
+   hands its own buffer to the blob table. [asset_bytes] is for a guest
+   that is ITSELF the consumer, and copies once.
+
+   FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and never a
+   core surface. Six of the eight bindings wrap them in the language's
+   own standard in-memory reader — std::io::Cursor, io.BytesIO,
+   bytes.NewReader, MemoryStream, java.io.ByteArrayInputStream,
+   Foundation's InputStream(data:) — and OCaml and Haskell wrap them in
+   nothing, because neither language's dependency set carries one
+   (OCaml's In_channel only wraps a real channel; base has no in-memory
+   Handle) and kaya will not add a package to a guest's build to invent
+   one. In those two the byte value IS the reader — Bytes.t and
+   Data.ByteString.ByteString — and every reading idiom the language has
+   applies to it directly. That is the whole of the carve-out (DESIGN.md,
+   Binding conventions): the idiom decides the spelling, and here two
+   idioms have no second spelling to decide on.
+
+   READ-ONLY, STRUCTURALLY: no mode argument anywhere on this surface,
+   and no file descriptor either. A descriptor was [picked_file]'s
+   necessity — a provider-opened file with no path behind it — and it is
+   not ours: kaya resolved the name and produced the bytes itself.
+
+   EACH CALL READS. No cache, no watch, no reload.
+
+   RELEASE IS EXPLICIT ([asset_close]) AND AUTOMATIC: the runtime
+   attaches a [Gc.finalise] to every handle, so a guest that forgets
+   leaks nothing. *)
+type asset = Kaya_runtime.asset
+
+let asset = Kaya_runtime.open_asset
+let asset_bytes = Kaya_runtime.asset_bytes
+let asset_close = Kaya_runtime.asset_close
+
 (* One representation, arriving — the sum a copy is the record of.
    OCaml has a real sum, so this is a variant and a match is the
    elimination.
@@ -1589,8 +1648,18 @@ let brand_accent ?light ?dark seed =
    SET ONCE, BEFORE THE FIRST MOUNT: [brand_accent]'s wall verbatim, and
    for its reason — a typeface that could flip at runtime would promise
    the theme-switching surface the vocabulary deliberately does not
-   have. The root refuses a second write and a late one. *)
-let brand_typeface ?(platforms = []) ?font family =
+   have. The root refuses a second write and a late one.
+
+   [~font_asset] is the same slot with the font NAMED rather than read —
+   [brand_typeface ~font_asset:(asset "fonts/sora-wght.ttf") "Sora"] —
+   and THE BYTES NEVER ENTER THE OCAML HEAP: the core already holds
+   them, and this hands the same buffer to the blob table. That is the
+   whole reason an asset is a handle rather than a bytes factory;
+   [~font:(asset_bytes a)] would work and would copy a megabyte through
+   OCaml for nothing. The two are exclusive — naming both is a
+   declaration that means two different fonts in one slot, and it is
+   refused rather than resolved by an order nobody wrote down. *)
+let brand_typeface ?(platforms = []) ?font ?font_asset family =
   let pairs =
     (* The filters' encoding one tier over: a FLAT list read in twos,
        an I64 platform tag then that platform's family. *)
@@ -1598,17 +1667,25 @@ let brand_typeface ?(platforms = []) ?font family =
       (fun (p, f) -> [ Kaya_wire.I64 (platform_wire p); Kaya_wire.Str f ])
       platforms
   in
+  let slot =
+    match (font, font_asset) with
+    | Some _, Some _ ->
+      invalid_arg
+        "kaya: brand_typeface takes ~font or ~font_asset, never both — there \
+         is one font slot on the wire"
+    | Some bytes, None -> Some (Kaya_wire.Blob (Kaya_runtime.register_blob bytes))
+    | None, Some a -> Some (Kaya_wire.Blob (Kaya_runtime.asset_blob a))
+    | None, None -> None
+  in
   emit (the_tx ())
     (Kaya_wire.tx_set_brand_typeface
-       (match font with Some _ -> 1 | None -> 0)
+       (match slot with Some _ -> 1 | None -> 0)
        (Kaya_wire.Str family) pairs
        (* THE FONT SLOT IS ALWAYS WRITTEN and the mask above is what
           says whether it means anything: an absent font rides as an
           empty Str, so the record's field count never varies with the
           payload (the accent mask's discipline, verbatim). *)
-       (match font with
-       | Some bytes -> Kaya_wire.Blob (Kaya_runtime.register_blob bytes)
-       | None -> Kaya_wire.Str ""))
+       (Option.value slot ~default:(Kaya_wire.Str "")))
 
 (* DECLARE this app's identity (docs/app-identity-plan.md): the name it
    goes by and the picture that stands for it, as the bytes of one image
@@ -1639,19 +1716,34 @@ let brand_typeface ?(platforms = []) ?font family =
    decoder. Whether a blob is an image is a question only that decoder
    can answer, so bytes that are not one leave every platform's default
    in place, which is why the conformance scene reads what the DECODER
-   produced rather than echoing this request back. *)
-let app_identity ?icon name =
+   produced rather than echoing this request back.
+
+   [~icon_asset] is the same slot with the mark NAMED rather than read —
+   [app_identity ~icon_asset:(asset "icons/kaya-mark.png") "Aurora
+   Notes"] — and THE BYTES NEVER ENTER THE OCAML HEAP: the core hands
+   its own buffer to the blob table, so a picture costs one reference
+   here and no [Bytes.t]. The two are exclusive, for [~font]'s reason:
+   one icon slot on the wire. *)
+let app_identity ?icon ?icon_asset name =
+  let slot =
+    match (icon, icon_asset) with
+    | Some _, Some _ ->
+      invalid_arg
+        "kaya: app_identity takes ~icon or ~icon_asset, never both — there is \
+         one icon slot on the wire"
+    | Some bytes, None -> Some (Kaya_wire.Blob (Kaya_runtime.register_blob bytes))
+    | None, Some a -> Some (Kaya_wire.Blob (Kaya_runtime.asset_blob a))
+    | None, None -> None
+  in
   emit (the_tx ())
     (Kaya_wire.tx_set_app_identity
-       (match icon with Some _ -> 1 | None -> 0)
+       (match slot with Some _ -> 1 | None -> 0)
        (Kaya_wire.Str name)
        (* THE ICON SLOT IS ALWAYS WRITTEN and the mask above is what
           says whether it means anything: an absent icon rides as an
           empty Str, so the record's field count never varies with the
           payload (the brand mask's discipline, verbatim). *)
-       (match icon with
-       | Some bytes -> Kaya_wire.Blob (Kaya_runtime.register_blob bytes)
-       | None -> Kaya_wire.Str ""))
+       (Option.value slot ~default:(Kaya_wire.Str "")))
 
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)

@@ -42,3 +42,34 @@ holding. So the mark is built to make that read impossible to fake:
 guest cannot see the repo, exactly as `KAYA_FONT_FILE` does for the
 typeface — the Windows lane copies this file to the mirrored path on the
 VM (tools/deploy-win.sh) and points the variable at it.
+
+## How to regenerate it
+
+`kaya-mark.png` is written by this repo, so unlike the vendored typeface
+beside it there is something to run. Four flat quadrants, 64x64, 8-bit
+truecolour, no alpha, no ancillary chunks:
+
+    python3 - <<'PY'
+    import struct, zlib
+    W = H = 64
+    Q = [(0xE0,0x1B,0x24), (0x33,0xD1,0x7A), (0x1C,0x71,0xD8), (0xF6,0xD3,0x2D)]
+    rows = []
+    for y in range(H):
+        row = bytearray([0])
+        for x in range(W):
+            row += bytes(Q[(y >= H // 2) * 2 + (x >= W // 2)])
+        rows.append(bytes(row))
+    def chunk(t, p):
+        return struct.pack(">I", len(p)) + t + p + struct.pack(">I", zlib.crc32(t + p))
+    open("kaya-mark.png", "wb").write(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+        + chunk(b"IEND", b""))
+    PY
+
+Regenerating changes the file's BYTES if zlib's output differs, and the
+byte-equality rule (tools/check-app-identity.sh) holds every packaged
+copy identical to this one — so a regeneration is a tree-wide change and
+the gate will say so. The four colours themselves are frozen: they are
+`expect_app_icon`'s expectation in tools/scenes/identity.steps.
