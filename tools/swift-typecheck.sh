@@ -37,11 +37,39 @@ kaya_resolve_swiftc || exit 1
 # each example program typechecks in its own pass.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# WHAT EACH PASS COMPILED, said out loud at the end. This gate is named
+# after layers it did not always compile, twice (the interpreter until
+# 2026-07-25, the Swift guests on iOS until 2026-08-18), and both times
+# the green line said "swift-typecheck: OK" without saying over what —
+# docs/traps.md's entry is about exactly that. So every pass appends the
+# file set it actually walked here, and the passes that COUNT files
+# refuse a verdict rather than report a pass over nothing.
+PASSES=()
+refuse() {
+    echo "swift-typecheck: REFUSING A VERDICT — $1" >&2
+    exit 1
+}
+
 # Globbed, not listed: the hand-maintained list this loop once
 # carried had silently skipped align.swift (the forgotten-list class;
 # same fix as java-typecheck). Companions ride via $companions below.
+GUESTS=()
 for example in guests/swift/*.swift; do
     case "$example" in *+*) continue ;; esac
+    # A glob that matches nothing comes back as the PATTERN, and counting
+    # that as a file is how a census over an empty directory reports one.
+    [ -f "$example" ] || continue
+    GUESTS+=("$example")
+done
+# A glob that matches nothing leaves an empty loop, and an empty loop
+# agrees with everything. Ten is a plausibility floor, not a count: the
+# tree has had dozens of Swift guests since milestone 2, so a handful
+# means the sources moved out from under the gate.
+[ "${#GUESTS[@]}" -ge 10 ] ||
+    refuse "guests/swift/*.swift matched ${#GUESTS[@]} files; a pass over that is not a check"
+mac_guests=0
+for example in "${GUESTS[@]}"; do
     cp "$example" "$TMP/main.swift"
     # A guest with generated sum surfaces (kaya-swift-gen) has a
     # checked-in <name>+Kaya.swift companion; compile it alongside.
@@ -50,10 +78,14 @@ for example in guests/swift/*.swift; do
     if ! kaya_swiftc -typecheck \
         -import-objc-header crates/kaya/include/kaya.h \
         bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift $companions "$TMP/main.swift"; then
-        echo "swift-typecheck: FAIL ($example)"
+        echo "swift-typecheck: FAIL ($example, the macOS guest pass)"
         exit 1
     fi
+    mac_guests=$((mac_guests + 1))
 done
+[ "$mac_guests" = "${#GUESTS[@]}" ] ||
+    refuse "the macOS guest pass compiled $mac_guests of ${#GUESTS[@]} guests"
+PASSES+=("guests/swift: $mac_guests files, macOS SDK")
 # THE INTERPRETER ITSELF — the layer this gate did not cover until
 # 2026-07-25. swift/KayaSwiftUI.swift is 14,182 lines (measured
 # 2026-08-17; it was ~4300 when this paragraph was written) and is the
@@ -78,6 +110,7 @@ if ! kaya_swiftc -typecheck -warnings-as-errors \
     echo "swift-typecheck: FAIL (the SwiftUI interpreter, macOS)"
     exit 1
 fi
+PASSES+=("swift/KayaSwiftUI.swift + swift/KayaSwiftUIEntry.swift: macOS SDK, -warnings-as-errors")
 
 # AND THE HOST-SIDE iOS DRIVER, which is Swift no other mac-side gate
 # compiles. tools/ios/simdrive is the only thing that can read or drive
@@ -91,6 +124,7 @@ if ! kaya_swiftc -typecheck tools/ios/simdrive/main.swift; then
     echo "swift-typecheck: FAIL (tools/ios/simdrive, the iOS lane's driver)"
     exit 1
 fi
+PASSES+=("tools/ios/simdrive/main.swift: macOS SDK (it runs on the host)")
 
 # AND FOR iOS. One file serves both Apple platforms, so half of it lives
 # behind `#if os(macOS)` / `#else` and a host-target typecheck compiles
@@ -121,6 +155,7 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
         echo "swift-typecheck: FAIL (the SwiftUI interpreter, iOS)"
         exit 1
     fi
+    PASSES+=("swift/KayaSwiftUI.swift + swift/KayaSwiftUIEntry.swift: iphonesimulator SDK, arm64-apple-ios17.0-simulator (no -warnings-as-errors, unlike the macOS pass)")
     # The lane's foreign clipboard reader, for the same reason simdrive
     # earned its pass: nothing else compiles it until run-sim.sh does,
     # and the emulator must never be the first compiler to see it.
@@ -130,8 +165,123 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
         echo "swift-typecheck: FAIL (tools/ios/clipctl, the iOS lane's foreign clipboard process)"
         exit 1
     fi
+    PASSES+=("tools/ios/clipctl/main.swift: iphonesimulator SDK, arm64-apple-ios17.0-simulator")
+
+    # AND THE GUESTS FOR iOS — the pass this gate lacked until 2026-08-18,
+    # while its name and CLAUDE.md's one-line description both said "the
+    # guests". The macOS guest loop at the top compiles ONE side of every
+    # `#if os(...)` a guest carries, so an iOS-breaking guest edit passed
+    # every fast gate and died in the simulator minutes into a run. That
+    # stopped being theoretical the day guests/swift/identity.swift grew
+    # a `#if !os(iOS)` around its auxiliary window: Swift guests reach
+    # phones, tools/ios/run-sim.sh builds bundles straight out of
+    # guests/swift, and nothing compiled them for that platform first.
+    #
+    # THE FILE SET AND THE FLAGS ARE THE LANE'S, read out of
+    # tools/ios/run-sim.sh rather than restated here:
+    #   - IOS_SWIFT_SCENES is which guests the lane ships to a phone.
+    #     Entries are `scene` or `scene:guest`; the SOURCE is after the
+    #     colon (listdetail:split). The guests NOT in it — window,
+    #     panels and friends — are desktop-only by design, and making
+    #     them answer for an SDK they never meet would be this gate
+    #     inventing a rule the lane does not have.
+    #   - IOS_MIN is the deployment target the lane compiles guests at
+    #     (16.0), which is NOT the 17.0 the interpreter passes above use.
+    #     The older target is the stricter one for availability
+    #     diagnostics, so hardcoding 17.0 here would make the gate LOOSER
+    #     than the lane it stands in for — green here, red in the
+    #     simulator, which is the whole failure this pass exists to end.
+    # No -warnings-as-errors, for the same reason: the lane's guest
+    # builds do not use it (the interpreter's do), and a gate stricter
+    # than the lane fails builds that would have shipped.
+    #
+    # A parse can quietly come back empty, and an empty loop agrees with
+    # everything — so the reader refuses rather than returns nothing, and
+    # the pass below refuses if it compiled fewer files than it was
+    # handed.
+    if ! ios_lane_spec="$(python3 - tools/ios/run-sim.sh <<'PY'
+import pathlib
+import re
+import sys
+
+src = pathlib.Path(sys.argv[1]).read_text()
+target = re.search(r'^IOS_MIN="([0-9][0-9.]*)"', src, re.M)
+scenes = re.search(r'^\s*IOS_SWIFT_SCENES="([^"]*)"', src, re.M)
+if not target or not scenes:
+    sys.exit("cannot read IOS_MIN/IOS_SWIFT_SCENES out of tools/ios/run-sim.sh; "
+             "the iOS lane's guest build moved and this gate no longer knows "
+             "which guests reach a phone")
+sources = []
+for entry in scenes.group(1).split():
+    name = entry.split(":")[-1]
+    if name not in sources:
+        sources.append(name)
+if not sources:
+    sys.exit("IOS_SWIFT_SCENES named no guests")
+print(target.group(1))
+print(" ".join(sources))
+PY
+    )"; then
+        # The reader printed WHICH half it could not read, on stderr.
+        refuse "the iOS lane's guest set is unreadable (see the line above)"
+    fi
+    { read -r ios_min; read -r ios_scene_sources; } <<<"$ios_lane_spec"
+    read -r -a ios_names <<<"$ios_scene_sources"
+    ios_srcs=()
+    for name in "${ios_names[@]}"; do
+        [ -f "guests/swift/$name.swift" ] ||
+            refuse "tools/ios/run-sim.sh ships guest '$name' to iOS and guests/swift/$name.swift does not exist"
+        ios_srcs+=("guests/swift/$name.swift")
+    done
+    [ "${#ios_srcs[@]}" -ge 10 ] ||
+        refuse "the iOS guest pass was handed ${#ios_srcs[@]} guests by tools/ios/run-sim.sh; a pass over that is not a check"
+    # Pooled, like the lane's own guest builds (run-sim.sh) and for the
+    # same reason: each compile re-reads the four binding files, so
+    # serially this pass costs ~35s of a ~35s gate and parallel it costs
+    # ~3s (measured 2026-08-18).
+    ios_pids=()
+    for src in "${ios_srcs[@]}"; do
+        (
+            stage="$TMP/ios-$(basename "$src" .swift)"
+            mkdir -p "$stage"
+            cp "$src" "$stage/main.swift"
+            companions=$(ls "${src%.swift}"+*.swift 2>/dev/null || true)
+            # shellcheck disable=SC2086
+            ios_xcrun -sdk iphonesimulator swiftc -typecheck \
+                -target "arm64-apple-ios$ios_min-simulator" \
+                -import-objc-header crates/kaya/include/kaya.h \
+                bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
+                bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
+                $companions "$stage/main.swift" >"$stage/log" 2>&1
+        ) &
+        ios_pids+=($!)
+    done
+    ios_status=0
+    ios_guests=0
+    i=0
+    for pid in "${ios_pids[@]}"; do
+        wait "$pid"
+        pid_status=$?
+        if [ "$pid_status" != 0 ]; then
+            echo "swift-typecheck: FAIL (${ios_srcs[$i]}, the iOS guest pass — arm64-apple-ios$ios_min-simulator)"
+            cat "$TMP/ios-$(basename "${ios_srcs[$i]}" .swift)/log"
+            ios_status=1
+        fi
+        ios_guests=$((ios_guests + 1))
+        i=$((i + 1))
+    done
+    [ "$ios_status" = 0 ] || exit 1
+    [ "$ios_guests" = "${#ios_srcs[@]}" ] ||
+        refuse "the iOS guest pass compiled $ios_guests of ${#ios_srcs[@]} guests"
+    PASSES+=("guests/swift: $ios_guests of ${#GUESTS[@]} files (tools/ios/run-sim.sh's IOS_SWIFT_SCENES; the rest are desktop-only), iphonesimulator SDK, arm64-apple-ios$ios_min-simulator")
 else
     echo "swift-typecheck: note — no iphonesimulator SDK; the iOS half went unchecked" >&2
+    PASSES+=("SKIPPED: everything iOS — the interpreter, tools/ios/clipctl and the lane's guests (no iphonesimulator SDK)")
 fi
 
-echo "swift-typecheck: OK"
+# The verdict names its passes. "OK" over an unstated file set is how
+# this gate twice claimed a layer it had never compiled.
+for pass in "${PASSES[@]}"; do
+    echo "swift-typecheck:   $pass"
+done
+echo "swift-typecheck: OK (${#PASSES[@]} passes)"
