@@ -349,13 +349,22 @@ cliphelper_prepare() { # serial
 # bugs to anyone who did not push the file. The hash is compared here,
 # where the cause is.
 #
-# The identity guests still name their own file in KAYA_ICON_FILE, read
-# out of the declaration and never retyped (docs/app-identity-plan.md
-# ruling 4, held by tools/check-app-identity.sh C6): they have not moved
-# to `asset(name)` yet, and until they do the path they are handed is a
-# path INSIDE the root this pushes.
+# THE IDENTITY GUESTS NAME NO FILE ANY MORE: they moved to
+# `asset("icons/kaya-mark.png")` with the typeface guests, so nothing on
+# a leg points at the mark. The declaration is still read here — the
+# HOST side of it, for apk_icon_verify, which holds the bytes gradle
+# packaged against the bytes guests/assets/identity.toml declares
+# (docs/app-identity-plan.md ruling 4, held by
+# tools/check-app-identity.sh C6).
 ASSET_SRC="$ROOT/guests/assets"
 ASSET_ON_DEVICE=/data/local/tmp/kaya-assets
+# The subdirectory of the APK's own `assets/` that IS kaya's asset root.
+# One string, three files: this, KayaAssets.kt's `ROOT`, and
+# android/build.gradle.kts's `kayaAssetPrefix`. tools/check-assets.sh's
+# C7 refuses if the three disagree — the build would copy into one and
+# the reader would read the other, and the miss sentence would name a
+# census the app cannot produce.
+APK_ASSET_PREFIX=kaya
 
 # What arrived against what was sent, name by name and hash by hash.
 # Reads the device's `find ... -exec sha256sum` on stdin.
@@ -428,13 +437,12 @@ if [ "$icon_rel_rc" -ne 0 ] || [ -z "$ICON_REL" ]; then
     echo "run-emulator: could not read the declared icon from $KAYA_IDENTITY_MANIFEST" >&2
     exit 1
 fi
-# The declared mark, in the two places that need it: on the HOST, where
-# apk_icon_verify hashes it against what gradle packaged, and INSIDE the
-# pushed root, where the identity guests open it. Both derived from the
-# one declaration, so there is still exactly one place the icon's
-# location is written down.
+# The declared mark on the HOST, where apk_icon_verify hashes it against
+# what gradle packaged. THE DEVICE-SIDE PATH IS GONE with the identity
+# guests' migration — nothing on a leg points at the mark any more, the
+# guest names it and the core resolves it — so this is the one derived
+# value left, and it is still derived rather than retyped.
 ICON_SRC="$ROOT/$ICON_REL"
-ICON_ON_DEVICE="$ASSET_ON_DEVICE/${ICON_REL#guests/assets/}"
 assets_prepare() { # serial
     local serial="$1" listing verdict rc
     adb -s "$serial" shell rm -rf "$ASSET_ON_DEVICE" >/dev/null 2>&1 || true
@@ -1081,6 +1089,82 @@ apk_icon_verify() { # apk
     fi
 }
 
+# THE SAME BYTE EQUALITY, FOR THE WHOLE ASSET ROOT, and this one is the
+# packaging gate docs/assets-plan.md's A6 Gate 2 asks for.
+#
+# Android is the ONE platform whose packaged assets are not files: an
+# entry inside an APK has no path and is read through AssetManager
+# (dev.kaya.KayaAssets). One leg below deliberately arrives with no
+# KAYA_ASSET_DIR and resolves its assets out of the package itself, so
+# the package's contents are load-bearing rather than decorative — and
+# the miss sentence that leg freezes is a CENSUS of what the package
+# carries, which can only be right if every declared file is in there
+# and nothing else is.
+#
+# HERE AND NOT IN A GATE, exactly as apk_icon_verify is: the wall goes
+# where someone walks into it by building, so no leg ever installs an
+# apk whose assets are not the tree's.
+#
+# BOTH DIRECTIONS. A missing entry is the obvious failure; an EXTRA one
+# is the failure the census actually catches, because a stray file in
+# `assets/` would put a name in the sentence that no other platform
+# prints and reden the scene on this lane alone.
+apk_assets_verify() { # apk
+    local apk="$1" listing
+    listing="$(mktemp)"
+    if ! unzip -Z1 "$apk" "assets/$APK_ASSET_PREFIX/*" >"$listing" 2>/dev/null; then
+        : # an apk with no matching entries exits non-zero; the compare says so
+    fi
+    python3 - "$ASSET_SRC" "$apk" "$APK_ASSET_PREFIX" "$listing" <<'PY'
+import hashlib
+import pathlib
+import subprocess
+import sys
+
+src, apk, prefix, listing = (
+    pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], pathlib.Path(sys.argv[4])
+)
+root = f"assets/{prefix}/"
+packaged = [
+    ln.strip() for ln in listing.read_text().splitlines()
+    if ln.strip().startswith(root) and not ln.strip().endswith("/")
+]
+here = {
+    f.relative_to(src).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest()
+    for f in sorted(src.rglob("*")) if f.is_file()
+}
+there = {e[len(root):]: e for e in packaged}
+bad = []
+if not here:
+    bad.append("  the tree's asset root is empty, so this comparison would agree "
+               "with an empty package")
+for name, want in sorted(here.items()):
+    entry = there.get(name)
+    if entry is None:
+        bad.append(f"  {name}: is not in the apk under {root}")
+        continue
+    got = hashlib.sha256(subprocess.run(
+        ["unzip", "-p", apk, entry], capture_output=True, check=True).stdout).hexdigest()
+    if got != want:
+        bad.append(f"  {name}: packaged as {got[:12]}, the tree has {want[:12]}")
+for name in sorted(set(there) - set(here)):
+    bad.append(f"  {name}: is in the apk and not in the tree — the app's own "
+               "census would name an asset no other platform carries")
+if bad:
+    print(f"run-emulator: the assets inside {apk} are not the tree's:")
+    print("\n".join(bad))
+    print(f"  android/build.gradle.kts copies {src} into {root} at configuration")
+    print("  time; the leg that runs with no KAYA_ASSET_DIR reads exactly these")
+    print("  entries, and tools/scenes/assets.steps freezes their names")
+    sys.exit(1)
+print(f"assets: {len(here)} files inside {apk.rsplit('/', 1)[-1]} under {root}, "
+      "every one byte-equal to the tree")
+PY
+    local rc=$?
+    rm -f "$listing"
+    return "$rc"
+}
+
 # THE GO GUEST'S ARTIFACT: a `-buildmode=c-shared` .so the shell Activity
 # loads beside libkaya.so, which is the JVM guest's packaging shape and
 # not the Rust one (the Rust guest carries a statically-linked kaya
@@ -1198,6 +1282,8 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     "$ROOT/tools/build-id.sh" --verify --component compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
     apk_icon_verify \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
+    apk_assets_verify \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
@@ -1370,10 +1456,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # four colours. That is the byte-equality invariant re-proved on the
     # device, one tier below apk_icon_verify's proof on the artifact.
     #
-    # THE MARK RIDES KAYA_ICON_FILE for the typeface font's reason: the
-    # guest's default path is repo-relative and a device has no repo;
-    # assets_prepare pushed the whole asset root to every pool device
-    # above, and the declared file is a path inside it.
+    # THE MARK IS AN ASSET AND THIS LEG NAMES NO FILE: the guest says
+    # `asset("icons/kaya-mark.png")` and the core resolves it out of the
+    # root KAYA_ASSET_DIR names — the root assets_prepare pushed to every
+    # pool device above. A per-asset variable used to ride here, and it
+    # is gone with the migration.
     #
     # ONE STEP IS NOT RUN HERE, printed by scene_script_drop and named in
     # its comment: `expect_title window#1` reads the declared NAME off an
@@ -1383,7 +1470,7 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity identity \
         --es KAYA_SELFTEST_SCRIPT "'${IDENTITY_SCRIPT}'" \
-        --es KAYA_ICON_FILE "$ICON_ON_DEVICE"
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     # The listdetail scene: list-detail's bare invariant, which is the
     # only form of it this host can run — the `split` scene drives
     # resize_window, and Android does not command its own window size
@@ -1458,6 +1545,27 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2/.MainActivity typeface \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
         --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
+
+    # THE ASSETS CONFORMANCE SCENE, AND THIS LEG CARRIES NO
+    # KAYA_ASSET_DIR. That omission is the assertion: with the variable
+    # unset the core takes its ANDROID route and resolves every asset out
+    # of the APK's own `assets/` through AssetManager
+    # (crates/kaya/src/assets.rs `Place::Apk`, dev.kaya.KayaAssets), which
+    # is the packaging reader and the only route a shipped app has —
+    # a phone cannot see the repo and there is no runner beside it to push
+    # a directory. The staged root two hundred lines up is still on this
+    # device and this leg does not read it; `run_apk_on` force-stops the
+    # package before every start, so the process's environment is the
+    # Zygote's plus exactly the extras named here.
+    #
+    # The scene freezes the miss sentence's CENSUS of what the package
+    # carries, so this leg can only pass if the apk carries the whole
+    # root — which apk_assets_verify checked, on the artifact, before
+    # anything was installed.
+    run_apk assets-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity assets \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script assets)'"
     # The clipboard scene: one clip in several representations, the
     # privileged read, the paste split, and Paste as a standard command.
     # The foreign process on the other side of every assertion is
@@ -1607,6 +1715,8 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" || exit 1
     apk_icon_verify \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" || exit 1
+    apk_assets_verify \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" || exit 1
     timing build-jvm
     run_apk jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
@@ -1728,7 +1838,7 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity identity \
         --es KAYA_SELFTEST_SCRIPT "'${IDENTITY_SCRIPT}'" \
-        --es KAYA_ICON_FILE "$ICON_ON_DEVICE"
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     # The commands scene through the JVM binding (see the compose leg).
     # The listdetail scene through the JVM binding: the same
     # guests/java/Split.java the desktop lanes run, on the tier that
@@ -1775,6 +1885,19 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity typeface \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
+
+    # The assets scene on the JVM tier, and this one DOES name
+    # KAYA_ASSET_DIR: it takes the staged-directory route while the
+    # compose leg above takes the APK one. THE SAME BYTE-FROZEN CENSUS
+    # PASSES BOTH WAYS ON THE SAME DEVICE, which is the strongest
+    # statement available that the packaging reader and the staging
+    # reader agree — and it keeps the directory route exercised, which
+    # C4's per-lane token in tools/check-assets.sh reads.
+    run_apk assets-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity assets \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script assets)'" \
         --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     drain
     timing legs-jvm
@@ -1874,6 +1997,8 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
     apk_icon_verify \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
+    apk_assets_verify \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
     timing build-go
     run_apk go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
@@ -1905,6 +2030,16 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2go/.MainActivity typeface \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
         --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
+
+    # The assets scene on the Go tier, taking the APK route like the
+    # compose leg: no KAYA_ASSET_DIR anywhere on this leg. It is also the
+    # host where that omission is most worth making, because this is the
+    # tier whose environment reads are a known trap — a guest here reads
+    # nothing at all, and the core asks the platform.
+    run_apk assets-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity assets \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script assets)'"
     run_apk entry-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity entry \
@@ -1998,19 +2133,15 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2go/.MainActivity toolbar \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
     # The identity scene through the Go binding (see the compose leg).
-    # Two things are this leg's alone. KAYA_ICON_FILE crosses the
-    # environment trap this suite exists to keep honest — the guest reads
-    # it with kaya.Env and never os.Getenv, which under the JNI attach
-    # answers "" forever, and "" here is not an error but the guest's
-    # repo-relative default (tools/check-go-env.sh is the static half).
-    # And the untitled window is split by BUILD TAG rather than by a
+    # One thing is this leg's alone now: the untitled window is split by
+    # BUILD TAG rather than by a
     # runtime probe (guests/go/identity/untitled_{desktop,phone}.go),
     # because a Go guest is cross-built per platform.
     run_apk identity-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity identity \
         --es KAYA_SELFTEST_SCRIPT "'${IDENTITY_SCRIPT}'" \
-        --es KAYA_ICON_FILE "$ICON_ON_DEVICE"
+        --es KAYA_ASSET_DIR "$ASSET_ON_DEVICE"
     # The listdetail scene through the Go binding: guests/go/split
     # under the `listdetail` key, the same one app behind both scripts
     # the other two hosts use. `split` itself is desktop-only.

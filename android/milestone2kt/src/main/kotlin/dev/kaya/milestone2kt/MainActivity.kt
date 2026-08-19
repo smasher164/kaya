@@ -95,11 +95,11 @@ class MainActivity : ComponentActivity() {
             // requests the VENDORED font's bytes — "Sora", a family no
             // platform preinstalls — so nothing holds the legs off and
             // tools/android/run-emulator.sh runs them. The one thing
-            // this host supplies from outside is the FILE: the guest's
-            // default path is repo-relative and a device has no repo, so
-            // the leg pushes the font and names it in KAYA_FONT_FILE,
-            // which arrives as an extra and reaches the guest through
-            // the Os.setenv loop above.
+            // this host supplies from outside is WHERE the asset root
+            // is: the guest names `fonts/sora-wght.ttf` and nothing
+            // else, and the leg pushes the whole root and names it in
+            // KAYA_ASSET_DIR, which arrives as an extra and reaches the
+            // core through the Os.setenv loop above.
             "typeface" -> Typeface::app
             // The toolbar scene (docs/chrome-plan.md C2): the `primary`
             // bit as real window chrome. Nothing new is spelled here —
@@ -116,17 +116,23 @@ class MainActivity : ComponentActivity() {
             // PACKAGE's, compiled from guests/assets/identity.toml by
             // android/build.gradle.kts, and `expect_app_icon` reads that
             // package's icon back through the system PackageManager. The
-            // guest's own file supplies the FILE the same way the
-            // typeface guest does — a repo-relative default no device
-            // has, so the leg pushes the mark and names it in
-            // KAYA_ICON_FILE, which reaches the guest through the
-            // Os.setenv loop above.
+            // guest names the mark the same way the typeface guest names
+            // the font — one asset name, no path and no environment
+            // read — and the leg supplies the ROOT it lives in.
             //
             // Its untitled window is desktop-only and Identity.java says
             // so in its own words: a phone rejects createWindow at the
             // root, so the guest skips it and the runner drops the one
             // step that reads it (scene_script_drop).
             "identity" -> Identity::app
+            // The assets conformance scene (docs/assets-plan.md). This
+            // tier's leg is the one that keeps the STAGED-DIRECTORY
+            // route exercised on this platform: it arrives with a
+            // KAYA_ASSET_DIR, while the compose and go legs arrive with
+            // none and resolve out of the APK's own assets/ through the
+            // AssetManager. The same byte-frozen census has to come out
+            // of both routes, on the same device.
+            "assets" -> Assets::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

@@ -3,17 +3,23 @@ it is called and what it looks like, and the platform shows both.
 Canonical semantics in guests/rust/identity.rs; the byte-frozen contract
 in tools/scenes/identity.steps.
 
-THE MARK IS THE VENDORED ONE (guests/assets/icons/kaya-mark.png, four
-flat quadrants) because no platform's own default icon can land on four
-declared colours, so a lowering that never applied can never read as a
-pass. KAYA_ICON_FILE is how a runner that cannot see the repo points at
-a pushed copy.
+THE MARK IS THE VENDORED ONE (four flat quadrants) because no platform's
+own default icon can land on four declared colours, so a lowering that
+never applied can never read as a pass.
+
+THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+This scene used to read `KAYA_ICON_FILE` with a repo-relative default
+and raise in its own words, as its seven siblings each did in their own
+language. `kaya.asset(name)` is the whole thing now: WHERE the file
+lives is the core's knowledge — a repo checkout, a bundle's Resources,
+an APK's packaged assets/ with no path at all — and the failure sentence
+has one author. The four quadrants stay the four quadrants wherever the
+core found them.
 
 THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 blank an app's NAME fills on every platform.
 """
 
-import os
 import sys
 
 import kaya
@@ -37,18 +43,11 @@ def on_go():
 with app.window(title="identity", width=480.0, height=360.0):
     # BEFORE THE FIRST MOUNT, per the declared-once wall. The scope
     # mounts on exit, so anywhere in this body is before it.
-    icon_path = os.environ.get(
-        "KAYA_ICON_FILE", "guests/assets/icons/kaya-mark.png")
-    try:
-        with open(icon_path, "rb") as handle:
-            icon = handle.read()
-    except OSError as exc:
-        raise RuntimeError(
-            f"kaya: the identity scene needs the vendored mark at "
-            f"{icon_path} (set KAYA_ICON_FILE or run from the repo root): "
-            f"{exc}"
-        ) from exc
-    kaya.app_identity("Aurora Notes", icon=icon)
+    # The asset's bytes go from the core's read straight to the
+    # platform's icon sink: this scene never holds them, and the `with`
+    # releases the core's handle on the way out.
+    with kaya.asset("icons/kaya-mark.png") as icon:
+        kaya.app_identity("Aurora Notes", icon=icon)
 
     # ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows mints
     # its custom caption from the first promotion and from nothing else,

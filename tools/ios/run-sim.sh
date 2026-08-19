@@ -1327,32 +1327,25 @@ $extra"
         simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
         watcher_pid=$!
     fi
-    # THE DECLARED MARK, DELIVERED WHERE THE GUEST CAN OPEN IT. The guest's
-    # default path is repo-relative and an app inside the simulator has no
-    # repo — its working directory is `/`, so `guests/assets/...` resolves
-    # nowhere. So the mark is STAGED INTO THIS APP'S OWN DATA CONTAINER
-    # and KAYA_ICON_FILE names it, the typeface's KAYA_FONT_FILE one asset
-    # over. The container is a real host path that both sides can see; it
-    # is the same meeting point the picker and clipboard verbs already use
-    # (docs/traps.md), so nothing new is being trusted here.
+    # NO MARK IS STAGED FOR THE GUEST ANY MORE, and the deletion is the
+    # migration (docs/assets-plan.md): the identity guest names
+    # `asset("icons/kaya-mark.png")` and the core resolves it out of
+    # THIS BUNDLE'S OWN Resources, which `make_bundle` filled with the
+    # whole asset root. There used to be a second copy in the app's data
+    # container with an environment variable pointing at it, because the
+    # guest's default path was repo-relative and an app inside the
+    # simulator has no repo.
     #
-    # A SECOND, INDEPENDENT COPY, and that is the point rather than an
-    # accident: the bundle got its copy from make_bundle and the guest
-    # reads THIS one, so the interpreter holding the two equal is ruling
-    # 4's byte-equality check — the declared bytes against the packaged
-    # bytes — running where the lane can watch it. Pointing the guest at
-    # the bundle's own copy would make that comparison a file compared
-    # with itself.
-    local icon_env=()
-    if [ "$scene" = identity ]; then
-        local icon_container
-        icon_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
-        mkdir -p "$icon_container/Documents"
-        cp "$ICON_SRC" "$icon_container/Documents/$ICON_IN_BUNDLE" || return 1
-        icon_env=(SIMCTL_CHILD_KAYA_ICON_FILE="$icon_container/Documents/$ICON_IN_BUNDLE")
-    fi
+    # THE TWO INDEPENDENT COPIES SURVIVE THAT, which is what made the
+    # deletion safe rather than merely tidy. The bytes the guest declares
+    # now come from `Resources/assets/icons/kaya-mark.png` (the asset-root
+    # copy) and `expect_app_icon` decodes `Resources/$ICON_IN_BUNDLE` (the
+    # icon-keys copy make_bundle writes from the manifest). Two files,
+    # written by two steps, held equal by the interpreter — which is
+    # ruling 4's byte-equality check, still running where the lane can
+    # watch it.
     local out
-    out=$(env "${icon_env[@]}" SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
+    out=$(env SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
         SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$script" \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
@@ -1583,7 +1576,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity assets"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -1719,7 +1712,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
     # compile, and -isysroot has to reach both halves.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity assets"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST, which each leg below already passes as its
@@ -2060,6 +2053,25 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     queue_leg run_swiftui_on identity-swiftui "$APP" dev.kaya.identityswiftui \
         identity-swiftui identity identity "" "" expect_app_icon \
         expect_title "window#1"
+
+    # The assets conformance scene (docs/assets-plan.md). THIS LANE'S
+    # ASSET DELIVERY IS THE SHIPPED MECHANISM, which is what makes the
+    # leg worth more here than anywhere else: make_bundle copies the
+    # asset root into the app's Resources exactly as a real iOS app
+    # packages one, no KAYA_ASSET_DIR is set anywhere on this lane, and
+    # the core asks `Bundle.main` for its resource directory
+    # (crates/kaya/src/assets.rs, route 2). So the scene's frozen census
+    # is an assertion about the BUNDLE, and it fails if the copy staged
+    # one file instead of the root.
+    #
+    # It is also the only asset observation this lane can make at all:
+    # `expect_typeface` is depth-stubbed here, which is precisely why the
+    # conformance scene reads an IMAGE instead — the platform's own
+    # decoder answers, and every backend has one.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example assets
+    APP=$(make_bundle assetsrs-swiftui dev.kaya.assetsswiftui "$TARGET_DIR/examples/assets")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on assets-swiftui "$APP" dev.kaya.assetsswiftui assets-swiftui assets assets
 
     # The listdetail scene, the DEPTH slice: list-detail's bare
     # invariant, which is the only form of it this host can run — the

@@ -5790,6 +5790,38 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     }
 }
 
+/// Cut one script LINE into statements at `;` — the newline stand-in for
+/// transports that cannot carry a newline.
+///
+/// QUOTE-AWARE, AND THAT IS NOT A NICETY: an expected string is whatever
+/// the app puts on screen, and kaya's own asset miss sentence carries a
+/// semicolon (`no asset named "x"; the package carries ...`). This is
+/// the same rule as `split_statements` in crates/kaya/src/harness.rs and
+/// `kayaSplitStatements` in KayaCompose.kt, and the three are held equal
+/// by tools/scenes/assets.steps, which freezes such a sentence and runs
+/// on every lane through all three.
+///
+/// A `"` toggles, so a statement must have balanced quotes;
+/// tools/check-steps.sh refuses one that does not.
+private func kayaSplitStatements(_ line: String) -> [String] {
+    var out: [String] = []
+    var current = ""
+    var quoted = false
+    for c in line {
+        if c == "\"" {
+            quoted.toggle()
+            current.append(c)
+        } else if c == ";" && !quoted {
+            out.append(current)
+            current = ""
+        } else {
+            current.append(c)
+        }
+    }
+    out.append(current)
+    return out.filter { !$0.isEmpty }
+}
+
 private func kayaRunScript(_ script: String) {
     var observed: [String] = []
     var failures: [String] = []
@@ -5820,7 +5852,7 @@ private func kayaRunScript(_ script: String) {
     scriptLines: for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
         let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
         if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") { continue }
-        for raw in trimmedLine.split(separator: ";", omittingEmptySubsequences: true) {
+        for raw in kayaSplitStatements(trimmedLine) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty || line.hasPrefix("#") { continue }
             let parts = line.split(separator: " ", omittingEmptySubsequences: true)

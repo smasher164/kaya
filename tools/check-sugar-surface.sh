@@ -1139,6 +1139,39 @@ check_styling_point asset \
     '^asset :: String -> IO Asset' \
     '^let asset = '
 
+# The row above's other half: the sentence a miss WOULD raise, answered
+# TOTALLY, without unwinding.
+#
+# IT IS NOT A CONVENIENCE. `asset(name)` raises on a miss in every
+# binding, and seven of the eight raise something a guest could catch —
+# but Swift's is `fatalError`, which traps rather than unwinding, so a
+# Swift guest cannot recover from one at all (docs/deferred.md carries
+# that as a maintainer question about invariant 1). A scene has to
+# OBSERVE that sentence on five platforms in nine languages, and "catch
+# it" is not one semantics in nine languages. A query is.
+#
+# So this is the row that keeps the conformance scene writable: without
+# it in some language, tools/scenes/assets.steps simply has no guest in
+# that language, and the census nothing else observes goes unchecked
+# there. The bindings write no prose — every one of these returns
+# crates/kaya/src/assets.rs's bytes unchanged — so what the scene freezes
+# is what an app's author would have been shown.
+#
+# NAMED FOR CARRYING, NOT FOR DIAGNOSING, in all eight: a `…WhyNot` here
+# would opt into tools/check-diagnostics.sh by its name alone, and that
+# gate reads a function so named as the AUTHOR of a sentence these only
+# carry. Swift hangs it off the handle type as a static, which is that
+# language's idiom for a namespaced free function.
+check_styling_point asset_miss_sentence \
+    'pub fn asset_miss_sentence\(&self' \
+    '^def asset_miss_sentence\(' \
+    'func \(tx \*Tx\) AssetMissSentence\(' \
+    'public string AssetMissSentence\(' \
+    'public static String assetMissSentence\(' \
+    'static func missSentence\(' \
+    '^assetMissSentence :: String -> IO String' \
+    '^let asset_miss_sentence = '
+
 # THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
 # bare name: Rust's `role(self, role: MenuRole)`, Python's
 # `def role(self, name)` on the item class and OCaml's `let item …

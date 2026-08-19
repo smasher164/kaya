@@ -20,6 +20,7 @@ module KayaRuntime
     registerBlob,
     Asset,
     openAsset,
+    assetMissSentence,
     assetBytes,
     assetBlob,
     assetClose,
@@ -221,7 +222,9 @@ openAsset name = do
       _ <- mkWeakIORef cell (c_kaya_asset_release handle)
       return (Asset cell)
 
--- The core's sentence for why a name would miss, fetched whole.
+-- | The core's sentence for why a name would miss, fetched whole. @""@
+-- means it resolves. Exported, because 'KayaApp.assetMissSentence' is the
+-- guest-facing total query over it.
 --
 -- IT DOES NOT COMPOSE THE SENTENCE, it carries it: the one author is
 -- @asset_why_not@ in crates/kaya/src/assets.rs, which is where the

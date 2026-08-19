@@ -32,7 +32,7 @@ fi
 # self-test scaffolding below (shadow/doctor/applied/refuses) verbatim,
 # which is the part that would actually have drifted.
 #
-# FIVE CLAUSES.
+# SEVEN CLAUSES.
 #
 #   C1 PROVENANCE   Every family under the root carries a README that
 #                   says what the files are, where they came from, their
@@ -72,6 +72,25 @@ fi
 #                   half-written push or a re-encoding packaging step
 #                   produces (docs/assets-plan.md A5.1 asks for this
 #                   change in those words).
+#
+#   C6 THE FROZEN    tools/scenes/assets.steps expects the miss
+#      CENSUS        sentence's first line, which names every asset the
+#                    package carries — the one run-time observation that
+#                    a lane staged the WHOLE root. The consequence is
+#                    that adding an asset reddens five lanes, so this
+#                    clause turns that into ONE gate failure naming the
+#                    .steps file, before any lane runs.
+#
+#   C7 THE APK'S     Android is the one platform whose packaged assets
+#      PREFIX        are not files, so it is the one with a packaging
+#                    layout of its own: the tree is copied into
+#                    `assets/<prefix>/` and read back through
+#                    AssetManager. Three files spell that prefix and
+#                    this holds them equal. THE BYTES are checked where
+#                    they are packaged — `apk_assets_verify` in
+#                    tools/android/run-emulator.sh, right after the
+#                    assemble that wrote them — because that is where
+#                    invariant 3 puts a guard.
 #
 # NO FIXTURE ANYWHERE. Every negative below doctors a shadow of the REAL
 # tree, so what is proven is that the rule still bites on the sources as
@@ -198,15 +217,6 @@ EXEMPT = {
         "the harness-only include_bytes! of the vendored font, so the "
         "DirectWrite name-table tests measure a real font on whatever "
         "machine runs them; a test fixture, never a runtime read",
-    "guests/rust/identity.rs": "identity has not migrated yet — see the ledger",
-    "guests/python/identity.py": "identity has not migrated yet — see the ledger",
-    "guests/go/identity/identity.go": "identity has not migrated yet — see the ledger",
-    "guests/swift/identity.swift": "identity has not migrated yet — see the ledger",
-    "guests/csharp/IdentityScene.cs": "identity has not migrated yet — see the ledger",
-    "guests/ocaml/identity.ml": "identity has not migrated yet — see the ledger",
-    "guests/haskell/identity.hs": "identity has not migrated yet — see the ledger",
-    "guests/java/dev/kaya/milestone2kt/Identity.java":
-        "identity has not migrated yet — see the ledger",
     "android/build.gradle.kts":
         "the APK's BUILD reads guests/assets/identity.toml, which is the "
         "declaration's second reader by ruling 4 and not a runtime asset "
@@ -418,6 +428,105 @@ for rel in sorted(STAGES):
                    "replaced (docs/assets-plan.md A5.1) and it agrees with any "
                    "corruption that preserved the length")
 
+# ------------------------------------------------------------------ C6
+# The conformance scene's FROZEN CENSUS equals the root's listing.
+#
+# tools/scenes/assets.steps expects the miss sentence's first line, which
+# names every asset the package carries, and that expectation is what
+# forces a lane to stage the WHOLE root rather than the one file it
+# happens to need (docs/assets-plan.md A5.1). The consequence is that
+# ADDING AN ASSET REDDENS FIVE LANES, and this clause is what turns that
+# into one gate failure naming the .steps file before any lane runs.
+SCENE = "tools/scenes/assets.steps"
+scene_path = root / SCENE
+if not scene_path.is_file():
+    bad.append(f"{SCENE} is not there — it is the only run-time observation of the "
+               "asset census, and without it nothing checks that a lane staged the "
+               "whole root rather than one file (docs/assets-plan.md A5.1)")
+else:
+    scene = scene_path.read_text(encoding="utf-8", errors="replace")
+    statements = [ln.strip() for ln in scene.split("\n") if not ln.strip().startswith("#")]
+    frozen = [ln for ln in statements if "the package carries" in ln]
+    if not frozen:
+        bad.append(f"{SCENE} freezes no census — its `expect label#1` is the whole "
+                   "reason the scene exists, and a scene that stopped asserting it "
+                   "would keep passing on a lane that staged one file")
+    for line in frozen:
+        m = re.search(r"the package carries (.+)\"\s*$", line)
+        if not m:
+            bad.append(f"{SCENE}: this gate could not read the census out of "
+                       f"{line!r} — the expectation moved and this clause is now "
+                       "reading nothing, which agrees with anything")
+            continue
+        named = [p.strip() for p in m.group(1).split(",")]
+        if named != assets:
+            bad.append(f"{SCENE} freezes a census of {len(named)} assets and the root "
+                       f"carries {len(assets)}. Frozen: {', '.join(named)}. Root: "
+                       f"{', '.join(assets)}. The scene's string is the miss "
+                       "sentence's first line verbatim, so it moves with the root — "
+                       "and it is deliberately expensive to change, because every "
+                       "lane has to stage what it names")
+        missing = re.search(r"no asset named \"([^\"]+)\"", line)
+        if missing and missing.group(1) in assets:
+            bad.append(f"{SCENE} names {missing.group(1)!r} as the asset that is NOT "
+                       "there, and the root now carries it — the scene would then be "
+                       "asserting a sentence the core will never print")
+
+# ------------------------------------------------------------------ C7
+# The APK carries the root, under ONE prefix that three files spell.
+#
+# Android is the one platform whose packaged assets are not files, so it
+# is the one platform where the packaging step has a layout of its own:
+# the tree is copied into `assets/<prefix>/` and read back through
+# AssetManager. The prefix exists because an app's AssetManager root
+# listing is not exclusively the app's (framework asset directories are
+# visible there, and every AAR merges its own `assets/` in), which would
+# make C6's frozen census a fact about the toolchain.
+#
+# THE BYTES ARE CHECKED WHERE THEY ARE PACKAGED, not here:
+# tools/android/run-emulator.sh's `apk_assets_verify` opens the APK
+# gradle just wrote and compares every entry against the tree, which is
+# where invariant 3 puts a guard. This clause holds the one thing a
+# built artifact cannot show — that the three hand-written spellings of
+# the prefix are one string.
+APK_PREFIX_SITES = {
+    "android/kaya/src/main/kotlin/dev/kaya/KayaAssets.kt":
+        re.compile(r"""const\s+val\s+ROOT\s*=\s*"([^"]+)\""""),
+    "android/build.gradle.kts":
+        re.compile(r"""val\s+kayaAssetPrefix\s*=\s*"([^"]+)\""""),
+    "tools/android/run-emulator.sh":
+        re.compile(r"""^APK_ASSET_PREFIX=([A-Za-z0-9._-]+)""", re.MULTILINE),
+}
+prefixes = {}
+for rel, pattern in sorted(APK_PREFIX_SITES.items()):
+    path = root / rel
+    if not path.is_file():
+        bad.append(f"{rel} is not there and it is one of the three files that spell "
+                   "the APK's asset prefix — deleting one of the three is how the "
+                   "packaged layout and the reader stop agreeing")
+        continue
+    m = pattern.search(path.read_text(encoding="utf-8", errors="replace"))
+    if not m:
+        bad.append(f"{rel} no longer spells the APK asset prefix in the form this "
+                   "gate reads. It is one of three hand-written copies of one "
+                   "string, and a copy this cannot see is a copy nothing holds")
+        continue
+    prefixes[rel] = m.group(1)
+if len(set(prefixes.values())) > 1:
+    bad.append("the APK's asset prefix is spelled differently in "
+               + "; ".join(f"{k} = {v!r}" for k, v in sorted(prefixes.items()))
+               + " — the build copies into one, the reader reads the other, and the "
+                 "miss sentence would name a census the app cannot produce")
+GRADLE = "android/build.gradle.kts"
+gradle_path = root / GRADLE
+if gradle_path.is_file():
+    gradle = gradle_path.read_text(encoding="utf-8", errors="replace")
+    if "assets.srcDir" not in gradle:
+        bad.append(f"{GRADLE} never adds an assets source directory — an APK that "
+                   "carries no assets/ resolves nothing through AssetManager, and "
+                   "the leg that runs without a staged root would fall through to a "
+                   "path the device does not have (docs/assets-plan.md A4)")
+
 for b in bad:
     print("check-assets: " + b, file=sys.stderr)
 sys.exit(1 if bad else 0)
@@ -574,7 +683,40 @@ hits="$(doctor "$s" tools/android/run-emulator.sh '(?i)sha256sum|shasum|sha256' 
 applied "$hits" "N7's hash removal"
 refuses "$s" "never hashes what arrived" "N7 (a size check standing in for a hash)"
 
-echo "check-assets: self-test: 7 watched negatives, each with its" \
+# N8 — C6: the root gains an asset and the scene's frozen census does
+# not. THIS IS THE ONE THE CLAUSE EXISTS FOR: without it the first
+# notice is five red lanes, each blaming a scene rather than the file
+# that was added.
+s="$(fresh n8)"
+printf 'a second font nobody told the scene about\n' >"$s/guests/assets/fonts/extra.bin"
+refuses "$s" "freezes a census of" "N8 (an asset the scene does not name)"
+
+# N9 — C6: the scene stops freezing a census at all, which is how the
+# expensive expectation gets quietly dropped rather than updated.
+s="$(fresh n9)"
+hits="$(doctor "$s" tools/scenes/assets.steps 'the package carries' 'the package holds')"
+applied "$hits" "N9's census removal"
+refuses "$s" "freezes no census" "N9 (a scene that stopped asserting the census)"
+
+# N10 — C7: the APK's prefix is spelled differently in two of the three
+# files. The build then copies into one directory and the reader reads
+# another, and the failure lands as a census the app cannot produce.
+s="$(fresh n10)"
+hits="$(doctor "$s" android/kaya/src/main/kotlin/dev/kaya/KayaAssets.kt \
+    'const val ROOT = "kaya"' 'const val ROOT = "kaya-assets"')"
+applied "$hits" "N10's prefix rename"
+refuses "$s" "asset prefix is spelled differently" "N10 (three files, two prefixes)"
+
+# N11 — C7: the APK stops carrying assets at all. The leg that runs
+# without a staged root would then fall through to a path no device has,
+# and the failure would name a directory rather than the packaging step
+# that stopped packaging.
+s="$(fresh n11)"
+hits="$(doctor "$s" android/build.gradle.kts 'assets\.srcDir' 'assets.ignored')"
+applied "$hits" "N11's removed assets source directory"
+refuses "$s" "never adds an assets source directory" "N11 (an APK carrying no assets)"
+
+echo "check-assets: self-test: 11 watched negatives, each with its" \
     "perturbation proven applied"
 
 # ---------------------------------------------------------------------

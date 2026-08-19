@@ -1636,6 +1636,40 @@ func (tx *Tx) Asset(name string) *Asset {
 	panic(sentence)
 }
 
+// AssetMissSentence is why Tx.Asset(name) would panic — the sentence it
+// would carry, handed over without panicking. "" means the name resolves.
+//
+// WHY THIS EXISTS WHEN THE PANIC ALREADY CARRIES IT. Unwinding is not one
+// semantics in nine languages, and a conformance scene has to observe this
+// sentence on five platforms. Go recovers; Swift's miss is a fatalError,
+// which traps rather than unwinding, so a Swift guest cannot catch a miss
+// at all. A total query has no such split — every binding answers the same
+// string the same way, and the scene can freeze it.
+//
+// THE SAME SENTENCE, NOT A SECOND ONE: this and Tx.Asset's panic both hand
+// back the core's bytes, so what a scene freezes is what an app's user
+// would have been shown.
+//
+// NAMED FOR THE CARRYING and not for the diagnosing — the long form of
+// that reasoning is on assetMissSentence in runtime.go. There is one
+// author for the sentence and this only ferries it across the FFI.
+//
+// TWO LINES. Line 1 — the name, the rule it broke, and the census of what
+// the package carries — is the same on every platform and is the line a
+// scene freezes. Line 2 names the resolved place and the route that chose
+// it, which a bundle, a device directory and a repo checkout spell three
+// different ways.
+//
+// It measures rather than predicts: each call reads, so "" is a fact about
+// the moment it was asked.
+func (tx *Tx) AssetMissSentence(name string) string {
+	// The transaction's liveness, for the same reason Tx.Asset asks it:
+	// Rust's asset_miss_sentence takes &self, so a dead Tx cannot name it
+	// there, and Go reproduces that by asking rather than by diverging.
+	tx.alive()
+	return assetMissSentence(name)
+}
+
 // TypefaceOverride is one optional part of a brand typeface request,
 // made by PlatformFamily or FontBytes and passed to Tx.BrandTypeface.
 // Most apps pass none: a family name is the whole call.

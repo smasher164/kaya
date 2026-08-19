@@ -94,6 +94,9 @@ mod typeface;
 #[path = "identity.rs"]
 mod identity;
 
+#[path = "assets.rs"]
+mod assets;
+
 /// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
 /// hold that.
@@ -137,18 +140,34 @@ fn app(ctx: kaya::AppCtx) {
         Ok("toolbar") => toolbar::app(ctx),
         // The typeface scene asks for the vendored font BY ASSET NAME
         // and does not read a path or an environment variable at all
-        // (docs/assets-plan.md). On this platform the asset root is the
-        // APK's own packaged assets/, which is not a directory and has
-        // no path, so the core resolves it through the AssetManager —
-        // the one route no per-scene staging could have described.
+        // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE
+        // RUNNER'S CHOICE, not this file's: the emulator lane hands this
+        // leg a KAYA_ASSET_DIR naming the root it pushed, so it resolves
+        // through a directory. The APK's own packaged assets/ — which is
+        // not a directory and has no path, so the core reads it through
+        // the AssetManager — is what the `assets` legs below take, by
+        // arriving with no such variable.
         Ok("typeface") => typeface::app(ctx),
-        // The identity scene reads the vendored MARK's bytes, the
-        // typeface's story one asset over: its default path is
-        // guests/assets/icons/kaya-mark.png, which is repo-relative and
-        // so no device has it, and the leg pushes that declared file and
-        // names the pushed copy in KAYA_ICON_FILE
-        // (tools/android/run-emulator.sh).
+        // The identity scene asks for the vendored MARK BY ASSET NAME,
+        // the typeface's story one asset over, and takes whichever route
+        // the runner's KAYA_ASSET_DIR leaves it on. Its default path used
+        // to be guests/assets/icons/kaya-mark.png, which no device has.
+        // THE SCENE'S OTHER HALF DOES NOT COME THROUGH THE ASSET ROOT AT
+        // ALL: the launcher icon and android:label are baked by the
+        // BUILD, which reads guests/assets/identity.toml before any
+        // program runs. One declaration, two consumers, and on this
+        // platform they are the two most different ones there are
+        // (docs/app-identity-plan.md ruling 4).
         Ok("identity") => identity::app(ctx),
+        // THE ONE LEG ON THIS PLATFORM THAT RESOLVES OUT OF ITS OWN
+        // PACKAGE. `assets-compose` arrives with no KAYA_ASSET_DIR, so
+        // the core takes its Android route and reads every asset through
+        // the AssetManager — the only route a shipped app has, because a
+        // phone cannot see the repo and there is no runner beside it to
+        // push a directory. The scene freezes the census of what the
+        // package carries, which is what makes that route's correctness
+        // observable rather than assumed.
+        Ok("assets") => assets::app(ctx),
         // "1" is the selftest flag's original spelling, from before the
         // value doubled as a scene selector.
         Ok("1") | Err(_) => milestone2::app(ctx),

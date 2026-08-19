@@ -78,29 +78,46 @@ pub(crate) enum Place {
     /// A directory on a filesystem: the desktops, and any lane that
     /// staged the root by path.
     Dir(PathBuf),
+    /// The APK's own `assets/`, read through the platform's
+    /// AssetManager.
+    ///
+    /// ANDROID IS THE ONE PLATFORM WHOSE PACKAGED ASSETS ARE NOT FILES.
+    /// An entry inside an APK has no path — it is a range inside a zip
+    /// the framework maps — so `std::fs::read` cannot reach it and the
+    /// resolver has to ask the platform. This is the packaging reader
+    /// docs/assets-plan.md's A4 table calls "APK resources or `assets/`,
+    /// read through `AssetManager`", and the arm is reached on every
+    /// android run: one leg of the emulator lane deliberately arrives
+    /// with no `KAYA_ASSET_DIR`, so it resolves from inside its own
+    /// package with nothing staged beside it. A branch no run reaches is
+    /// a guess about a state nobody has been in, which is why this one
+    /// waited for a leg that takes it.
+    ///
+    /// THE ENTRIES SIT UNDER `kaya/` INSIDE THE APK, not at `assets/`'s
+    /// root, and the name is stripped of that prefix here so a guest
+    /// spells one name on five platforms. Two measured reasons: an app's
+    /// AssetManager root listing is NOT exclusively the app's (the
+    /// framework's own asset directories are visible there on several
+    /// API levels), and every AAR on the classpath merges its `assets/`
+    /// into the same namespace — so a census taken at the root would
+    /// name entries this app never shipped, and the frozen census in
+    /// tools/scenes/assets.steps would be a fact about the toolchain
+    /// rather than about kaya.
+    #[cfg(target_os = "android")]
+    Apk,
 }
 
-/// THE APK'S OWN `assets/` IS NOT A VARIANT HERE, and its absence is a
-/// decision rather than an oversight.
-///
-/// Android is the one platform whose packaged assets are not files: an
-/// entry inside an APK has no path and is read through the platform's
-/// AssetManager. A `Place::Apk` arm reading it through JNI is the
-/// PACKAGING reader, and the plan schedules it there
-/// (docs/assets-plan.md A4: "APK resources or `assets/`, read through
-/// `AssetManager`" is the "in a packaged app" column, and the "staged
-/// to the lane today" column is an `adb push`). What the lane does
-/// today is push the root and name it, which A5.1 asks for in exactly
-/// those words — so the directory route above serves Android as it
-/// serves every other lane, and there is nothing here that no run
-/// reaches. A branch nobody has taken is a guess about a state nobody
-/// has been in, and this module is not going to ship one to be tidy.
-/// docs/deferred.md carries the APK reader as the packaging milestone's
-/// work, with this paragraph as its reason.
 impl Place {
     fn shown(&self) -> String {
         match self {
             Place::Dir(p) => p.display().to_string(),
+            // Asked of the platform ON THE FAILURE PATH ONLY, and it is
+            // the app's own installed package path — a value this call
+            // went and got. When the platform will not answer, the
+            // sentence says that instead of naming a path it does not
+            // have.
+            #[cfg(target_os = "android")]
+            Place::Apk => crate::android::apk_assets_shown(),
         }
     }
 }
@@ -121,11 +138,15 @@ impl Place {
 /// 4. The repo-relative compile-time default, so a repo run needs no
 ///    environment. This is why macOS and Linux lanes stage nothing.
 ///
-/// ANDROID AND WINDOWS TAKE STEP 1, because neither lane's guest can
-/// see the repo: the emulator runner pushes the root and names it in
-/// the intent, and the deploy copies it into the VM's repo mirror. That
-/// is A5.1 and A5.2 respectively, and it is why there is no Android
-/// branch here at all — see the note above `Place`.
+/// WINDOWS TAKES STEP 1, because that lane's guest cannot see the repo:
+/// the deploy copies the root into the VM's repo mirror and names it
+/// machine-wide (A5.2). ANDROID TAKES STEP 1 OR STEP 2 DEPENDING ON THE
+/// LEG, deliberately: the emulator runner pushes the root and names it
+/// in the intent for the legs that prove the staged route (A5.1), and
+/// omits it for the leg that proves the PACKAGED one, which then
+/// resolves from inside its own APK with nothing staged beside it. The
+/// same byte-frozen census passes both ways on the same device, which
+/// is the strongest statement available that the two routes agree.
 ///
 /// STEP 3 IS DELIBERATELY BELOW STEP 2 AND ABOVE STEP 4, and it is the
 /// weakest of the four: for a DLL-HOSTED guest — python, go, csharp,
@@ -147,6 +168,16 @@ pub(crate) fn root() -> Root {
         if dir.is_dir() {
             return Root { place: Place::Dir(dir), route: "the main bundle's Resources" };
         }
+    }
+    // Android's own step 2, in the same position and for the same
+    // reason as Apple's: the packaging every app on the platform
+    // actually ships is where its assets are, and asking the platform
+    // is the only way to reach entries that are not files. Gated on the
+    // JNI glue having been attached, because a host-side unit test
+    // compiled for android has no JVM to ask.
+    #[cfg(target_os = "android")]
+    if crate::android::apk_assets_reachable() {
+        return Root { place: Place::Apk, route: "the APK's own assets/" };
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent().map(|d| d.join("assets")) {
@@ -185,6 +216,16 @@ pub(crate) fn census() -> Vec<String> {
         Place::Dir(dir) => {
             let mut out = Vec::new();
             walk(&dir, &dir, &mut out);
+            out.sort();
+            out
+        }
+        // The same walk, done by the platform: AssetManager's `list`
+        // answers one directory at a time and says nothing about which
+        // entries are files, so the recursion lives on the Kotlin side
+        // and this receives the leaves already flattened.
+        #[cfg(target_os = "android")]
+        Place::Apk => {
+            let mut out = crate::android::apk_asset_list();
             out.sort();
             out
         }
@@ -344,6 +385,16 @@ pub(crate) enum Miss {
 
 fn read_raw(place: &Place, name: &str) -> Result<Vec<u8>, Miss> {
     match place {
+        // An entry inside an APK has no path, so there is no
+        // `ErrorKind::NotFound` to read: the platform answers with a
+        // stream or with an IOException, and the Kotlin side turns the
+        // two into "here are the bytes" and "no". Absent and unreadable
+        // are therefore ONE answer on this route, and the sentence says
+        // "no asset named" rather than inventing a cause it did not
+        // measure — the census beside it is what tells the reader
+        // whether the name is wrong or the packaging is.
+        #[cfg(target_os = "android")]
+        Place::Apk => crate::android::apk_asset_read(name).ok_or(Miss::Absent),
         Place::Dir(dir) => {
             let path = dir.join(name);
             match std::fs::read(&path) {

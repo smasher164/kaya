@@ -941,6 +941,44 @@ public final class KayaApp {
     }
 
     /**
+     * Why {@link #asset(String)} would throw — the sentence it would
+     * carry, handed over without throwing. {@code ""} means the name
+     * resolves.
+     *
+     * <p>WHY THIS EXISTS WHEN THE THROW ALREADY CARRIES IT. Unwinding is
+     * not one semantics in nine languages, and a conformance scene has to
+     * observe this sentence on five platforms. Java catches happily;
+     * Swift's miss is a {@code fatalError}, which traps rather than
+     * unwinding, so a Swift guest cannot catch a miss at all. A total
+     * query has no such split — every binding answers the same string the
+     * same way, and the scene can freeze it.
+     *
+     * <p>THE SAME SENTENCE, NOT A SECOND ONE: this and
+     * {@link #asset(String)}'s throw both hand back the core's bytes, so
+     * what a scene freezes is what an app's user would have been shown.
+     *
+     * <p>NAMED FOR THE CARRYING and not for the diagnosing: the sentence
+     * has one author ({@code asset_why_not} in crates/kaya/src/assets.rs),
+     * and a {@code whyNot} here would put a diagnostic's name on a call
+     * that only decodes bytes JNI handed it.
+     *
+     * <p>TWO LINES. Line 1 — the name, the rule it broke, and the census
+     * of what the package carries — is the same on every platform and is
+     * the line a scene freezes. Line 2 names the resolved place and the
+     * route that chose it, which a bundle, a device directory and a repo
+     * checkout spell three different ways.
+     *
+     * <p>It measures rather than predicts: each call reads, so {@code ""}
+     * is a fact about the moment it was asked.
+     */
+    public static String assetMissSentence(String name) {
+        byte[] wire = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return new String(
+                KayaRing.assetMissSentence(wire),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
      * An open asset: the bytes kaya read, held by the core until this is
      * released.
      *

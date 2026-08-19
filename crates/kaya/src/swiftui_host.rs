@@ -234,9 +234,33 @@ pub struct KayaHostApi {
 unsafe extern "C" {
     fn dlopen(path: *const c_char, flag: c_int) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    fn dlerror() -> *const c_char;
 }
 
 const RTLD_NOW: c_int = 2;
+
+/// What the loader said, or the fact that it said nothing.
+///
+/// A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED (invariant 3). The
+/// assertion below used to answer a `dlopen` failure with one sentence —
+/// "build it with tools/swiftui/build-dylib.sh and set KAYA_SWIFTUI_LIB"
+/// — which is a CAUSE, and it was printed for every cause it did not
+/// name. Measured 2026-08-18: fifty legs of a five-lane matrix died with
+/// that sentence while the dylib was on disk, current, and named by
+/// KAYA_SWIFTUI_LIB exactly as it asked for; the reader spent the next
+/// twenty minutes looking for a build that had never gone wrong. This
+/// asks the loader instead, and the loader's answer is the only thing
+/// that can tell an absent file from a bad architecture from a missing
+/// dependency from a process that has run out of file descriptors.
+fn loader_said() -> String {
+    // dlerror() is one-shot and thread-local: it clears on read, so it
+    // is read EXACTLY ONCE, right after the failing call.
+    let raw = unsafe { dlerror() };
+    if raw.is_null() {
+        return "the loader gave no reason (dlerror was empty)".to_owned();
+    }
+    unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned()
+}
 
 /// Load the SwiftUI backend and enter its run loop on the calling
 /// (main) thread. Returns the exit code if the loop ever returns.
@@ -245,15 +269,30 @@ pub(crate) fn run() -> i32 {
         .unwrap_or_else(|_| "libkaya_swiftui.dylib".to_string());
     let cpath = CString::new(path.clone()).unwrap();
     let handle = unsafe { dlopen(cpath.as_ptr(), RTLD_NOW) };
-    assert!(
-        !handle.is_null(),
-        "could not load the SwiftUI backend from {path:?}; build it with \
-         tools/swiftui/build-dylib.sh and set KAYA_SWIFTUI_LIB"
-    );
+    if handle.is_null() {
+        // The loader's own sentence FIRST, then two facts about the path
+        // this process actually looked at — whether it is there and how
+        // big it is. Between them they separate "never built" from
+        // "half-written by a concurrent build" from "wrong architecture"
+        // from "the process is out of descriptors", which the single
+        // sentence this replaced could not.
+        let said = loader_said();
+        let seen = match std::fs::metadata(&path) {
+            Ok(m) => format!("it is on disk, {} bytes", m.len()),
+            Err(e) => format!("it is not readable from here ({e})"),
+        };
+        panic!(
+            "could not load the SwiftUI backend from {path:?}: {said} — {seen}. \
+             If the file is absent, build it with tools/swiftui/build-dylib.sh \
+             and set KAYA_SWIFTUI_LIB; if it is there, the sentence above is \
+             the loader's and names the real reason."
+        );
+    }
     let symbol = unsafe { dlsym(handle, c"kaya_swiftui_run".as_ptr()) };
     assert!(
         !symbol.is_null(),
-        "kaya_swiftui_run not exported by {path:?}"
+        "kaya_swiftui_run not exported by {path:?}: {}",
+        loader_said()
     );
     // THE ONE CALL THAT RUNS THE OTHER WAY, and it is resolved the same
     // way `run` is rather than through the vtable: the vtable carries

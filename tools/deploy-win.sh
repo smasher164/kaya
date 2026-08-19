@@ -132,6 +132,7 @@ for arg in "$@"; do
         typeface_rust|typeface_python|typeface_go|typeface_csharp|typeface_java) SUITE="$arg" ;;
         toolbar_rust|toolbar_python|toolbar_go|toolbar_csharp|toolbar_java) SUITE="$arg" ;;
         identity_rust|identity_python|identity_go|identity_csharp|identity_java) SUITE="$arg" ;;
+        assets_rust|assets_python|assets_go|assets_csharp|assets_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         # PHASES, not legs: they run inside `all` and are named here so
         # each can be re-run on its own while fixing what it found.
@@ -337,7 +338,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -1960,6 +1961,22 @@ case "$SUITE" in
         run_suite toolbar_go
         run_suite toolbar_csharp
         run_suite toolbar_java
+        # The assets conformance scene (docs/assets-plan.md). THIS LANE
+        # IS THE ONE WHERE THE STAGED ROOT IS THE ONLY ROUTE: the VM has
+        # no repo of its own, so the deploy copies guests/assets into the
+        # repo mirror every run and names it machine-wide in
+        # KAYA_ASSET_DIR, and the scene's frozen census is what proves it
+        # copied the WHOLE root rather than the file a leg happened to
+        # need. Deliberately outside the deploy stamp, so an asset edit
+        # cannot be swallowed by a stamp skip.
+        #
+        # Pooled with the family above for the same three reasons: no
+        # typed input, no window close, nothing foreground-sensitive.
+        run_suite assets_rust
+        run_suite assets_python
+        run_suite assets_go
+        run_suite assets_csharp
+        run_suite assets_java
         drain_suites
         # The ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one
         # (docs/ranges-plan.md D1), plus the two rules that make those

@@ -55,6 +55,24 @@ static JVM: std::sync::OnceLock<jni::JavaVM> = std::sync::OnceLock::new();
 static PRESENT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
+/// dev.kaya.KayaAssets and the Activity, remembered at attach for the
+/// same reason and with the same urgency as PRESENT_CLASS above: an
+/// asset is read from the APP THREAD, which was attached with
+/// AttachCurrentThread and resolves classes through the system class
+/// loader. `FindClass("dev/kaya/KayaAssets")` there fails, and a
+/// Context is not something a thread can go and find at all.
+///
+/// THE CONTEXT IS THE ACTIVITY, held as a global ref for the process's
+/// life. That is a strong reference to an Activity, which on Android is
+/// normally a leak — it is deliberate here and it is not one in
+/// practice: kaya's Activity IS the process (one Activity, one surface,
+/// finished by the harness's own exit), and the alternative,
+/// `getApplicationContext`, would need a JNI round trip on every asset
+/// read to fetch a context that outlives nothing more.
+static ASSETS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+static ACTIVITY: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
+
 
 fn init_logging() {
     android_logger::init_once(
@@ -82,7 +100,7 @@ pub fn attach(
     app_main: impl FnOnce(AppCtx) + Send + 'static,
 ) -> i32 {
     init_logging();
-    let _ = &activity;
+    remember_context(&mut env, &activity);
 
     let (occ_tx, occ_rx) = mpsc::channel();
     let ctx = AppCtx::new(occ_rx, crate::capi::presentation_tx_sender(), occ_tx.clone());
@@ -108,13 +126,190 @@ pub fn attach(
 extern "system" fn Java_dev_kaya_KayaRing_attach(
     mut env: JNIEnv,
     _class: JClass,
-    _activity: JObject,
+    activity: JObject,
 ) {
     init_logging();
+    // BOTH attach paths remember it, and that is the whole reason this
+    // parameter stopped being `_activity`: the JVM and Go tiers come
+    // through here and never through `attach` above, so an asset read
+    // on those tiers would have had no Context at all.
+    remember_context(&mut env, &activity);
     crate::jvm::register_ring_natives(&mut env)
         .expect("kaya: registering KayaRing natives failed");
     register_present_natives(&mut env)
         .expect("kaya: registering KayaPresent natives failed");
+}
+
+/// Remember what an asset read will need and cannot go and find: the
+/// Activity (the Context whose AssetManager holds this APK's assets)
+/// and dev.kaya.KayaAssets, both as global refs, both resolved HERE on
+/// the Activity's own thread.
+///
+/// FAILURE IS SILENT AND THAT IS DELIBERATE. Nothing about mounting a
+/// window needs an asset, so a process whose class resolution failed
+/// must still start; what must not happen is a wrong sentence later.
+/// `apk_assets_reachable` answers false when either ref is missing, the
+/// resolver then falls through to its remaining routes, and the miss
+/// sentence names the place it DID resolve — which is a fact, where
+/// "the APK does not carry it" would have been a guess.
+fn remember_context(env: &mut JNIEnv, activity: &JObject) {
+    if let Ok(vm) = env.get_java_vm() {
+        let _ = JVM.set(vm);
+    }
+    if let Ok(global) = env.new_global_ref(activity) {
+        let _ = ACTIVITY.set(global);
+    }
+    match env.find_class("dev/kaya/KayaAssets") {
+        Ok(class) => {
+            if let Ok(global) = env.new_global_ref(&class) {
+                let _ = ASSETS_CLASS.set(global);
+            }
+        }
+        Err(e) => {
+            // The exception FindClass left pending would detonate at the
+            // next unrelated JNI call, so it is read and cleared here
+            // exactly as `open_through_resolver` does.
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            log::warn!("kaya: dev.kaya.KayaAssets did not resolve ({e}); this process cannot read its own APK's assets");
+        }
+    }
+}
+
+/// Whether an asset read can reach this APK at all — the guard on
+/// `Place::Apk` (crates/kaya/src/assets.rs). All three refs or none:
+/// a route that half-works would produce a sentence about a place this
+/// process never looked in.
+pub(crate) fn apk_assets_reachable() -> bool {
+    JVM.get().is_some() && ACTIVITY.get().is_some() && ASSETS_CLASS.get().is_some()
+}
+
+/// The three refs plus an attached env, or `None`. Every call below
+/// wants the same four things and none of them may panic: an asset read
+/// happens on the app thread inside a guest's build closure, and a
+/// panic there is an abort with no diagnostic at all.
+fn assets_env() -> Option<(
+    jni::AttachGuard<'static>,
+    &'static jni::objects::GlobalRef,
+    &'static jni::objects::GlobalRef,
+)> {
+    let vm = JVM.get()?;
+    let class = ASSETS_CLASS.get()?;
+    let activity = ACTIVITY.get()?;
+    let env = vm.attach_current_thread().ok()?;
+    Some((env, class, activity))
+}
+
+/// Read one asset out of this APK. `None` is "the platform would not
+/// open it", which on this route covers both absent and unreadable —
+/// an entry inside an APK has no `ENOENT` to distinguish them, and
+/// assets.rs's sentence says only what it measured.
+pub(crate) fn apk_asset_read(name: &str) -> Option<Vec<u8>> {
+    let (mut env, class, activity) = assets_env()?;
+    let name_arg = env.new_string(name).ok()?;
+    let called = env.call_static_method(
+        class,
+        "read",
+        "(Landroid/content/Context;Ljava/lang/String;)[B",
+        &[(activity.as_obj()).into(), (&name_arg).into()],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        return None;
+    }
+    let obj = called.and_then(|v| v.l()).ok()?;
+    if obj.is_null() {
+        return None;
+    }
+    let array = jni::objects::JByteArray::from(obj);
+    env.convert_byte_array(&array).ok()
+}
+
+/// Every asset this APK carries, as asset names. THE DIRECTORY LISTING
+/// IS THE MANIFEST (docs/assets-plan.md A2) and here the platform does
+/// the walking, because `AssetManager.list` answers one directory at a
+/// time and says nothing about which entries are files.
+///
+/// An empty list is what a process that could not ask answers with, and
+/// the sentence upstream prints "nothing this process could list"
+/// rather than "carries nothing" — the difference between a measurement
+/// and a claim.
+pub(crate) fn apk_asset_list() -> Vec<String> {
+    let Some((mut env, class, activity)) = assets_env() else {
+        return Vec::new();
+    };
+    let called = env.call_static_method(
+        class,
+        "list",
+        "(Landroid/content/Context;)[Ljava/lang/String;",
+        &[(activity.as_obj()).into()],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        return Vec::new();
+    }
+    let Ok(obj) = called.and_then(|v| v.l()) else {
+        return Vec::new();
+    };
+    if obj.is_null() {
+        return Vec::new();
+    }
+    let array = jni::objects::JObjectArray::from(obj);
+    let Ok(len) = env.get_array_length(&array) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        let Ok(item) = env.get_object_array_element(&array, i) else {
+            continue;
+        };
+        let name: jni::objects::JString = item.into();
+        if let Ok(text) = env.get_string(&name) {
+            out.push(text.into());
+        }
+    }
+    out
+}
+
+/// What to print for `Place::Apk` in the miss sentence's second line:
+/// the installed package this process is running out of, asked of the
+/// platform. A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED — when the
+/// platform will not answer, this says so rather than naming a path it
+/// does not have.
+pub(crate) fn apk_assets_shown() -> String {
+    let Some((mut env, class, activity)) = assets_env() else {
+        return "this APK's assets/ (the platform was not reachable to name the package)"
+            .to_owned();
+    };
+    let called = env.call_static_method(
+        class,
+        "sourceDir",
+        "(Landroid/content/Context;)Ljava/lang/String;",
+        &[(activity.as_obj()).into()],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        return "this APK's assets/ (the platform refused to name the package)".to_owned();
+    }
+    match called.and_then(|v| v.l()) {
+        Ok(obj) if !obj.is_null() => {
+            let path: jni::objects::JString = obj.into();
+            match env.get_string(&path) {
+                Ok(text) => {
+                    let text: String = text.into();
+                    format!("assets/ inside the APK at {text}")
+                }
+                Err(e) => format!("this APK's assets/ (its path would not cross: {e})"),
+            }
+        }
+        Ok(_) => "this APK's assets/ (the platform answered no package path)".to_owned(),
+        Err(e) => format!("this APK's assets/ (the platform would not name the package: {e})"),
+    }
 }
 
 // The presentation-side C API over JNI, for guest-language backends

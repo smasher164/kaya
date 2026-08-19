@@ -1545,6 +1545,8 @@ extern void *dlopen(const char *path, int flag);
 
 extern void *dlsym(void *handle, const char *symbol);
 
+extern const char *dlerror(void);
+
 /**
  * The protocol fingerprint this core was built from. Bindings carry
  * the same value baked in at generation (KAYA_SPEC_HASH and friends)

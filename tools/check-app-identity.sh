@@ -61,13 +61,30 @@ fi
 #       conversion, and a mark that stopped having them would make every
 #       identity leg unfalsifiable.
 #
-#   C3  THE PATH IS WRITTEN DOWN ONCE. Eight guests and the Windows
-#       launchers spell the icon's repo-relative default, because the
-#       runtime reader is eight languages and a .cmd file, none of which
-#       parses TOML. They may spell it, but they may not DISAGREE with
-#       it: every file naming KAYA_ICON_FILE must name the manifest's
-#       path (backslashes and a drive-letter mirror allowed, since
-#       tools/deploy-win.sh stages the tree to C:\kaya).
+#   C3  THE DECLARATION IS WRITTEN DOWN ONCE. The runtime readers are
+#       eight languages and a batch file, none of which parses TOML, so
+#       a site may name the declaration in THREE ways and no fourth:
+#
+#         READ THE MANIFEST — what a script that can parse TOML does;
+#         SPELL THE DECLARED PATH — what the .cmd launchers and the lane
+#           scripts' repo-relative KAYA_ICON_FILE default do (backslashes
+#           and a drive-letter mirror allowed, since tools/deploy-win.sh
+#           stages the tree to C:\kaya);
+#         OPEN IT AS AN ASSET — `asset("icons/kaya-mark.png")`, which is
+#           the manifest's path with the asset root's prefix removed, and
+#           is what the eight identity guests say since they stopped
+#           resolving their own icon path (docs/assets-plan.md). This
+#           gate DERIVES that name from the manifest; typing it here
+#           would be the very second source of truth the clause exists
+#           to prevent.
+#
+#       They may spell it, but they may not DISAGREE with it. Two ways to
+#       disagree, and both are checked: naming KAYA_ICON_FILE while
+#       naming none of the three is a third source of truth wearing the
+#       override's name, and opening some OTHER file out of the mark's
+#       own asset family is a second mark — which is silent at runtime,
+#       because an asset name nothing answers to leaves each platform's
+#       own icon in place.
 #
 #   C4  THE NAME IS WRITTEN DOWN ONCE, same rule one field over: every
 #       identity guest declares it, and the scene's own
@@ -315,6 +332,40 @@ else:
 
 # ---------------------------------------------------------------- C3/C6
 icon_posix = icon_rel.replace("\\", "/")
+
+# THE THIRD WAY TO NAME THE DECLARATION, DERIVED AND NEVER RETYPED. A
+# guest that opens the mark as an ASSET names it the way the core
+# resolves it — by its path UNDER THE ASSET ROOT, with no repo checkout,
+# bundle or APK in front of it — so the accepted string is the manifest's
+# own `icon` minus that prefix and nothing else. Deriving it is the whole
+# point of the clause: a literal "icons/kaya-mark.png" written down here
+# would be exactly the second source of truth C3 exists to refuse.
+ASSET_ROOT = "guests/assets/"
+icon_under_root = (icon_posix[len(ASSET_ROOT):]
+                   if icon_posix.startswith(ASSET_ROOT) else None)
+if icon_under_root is None:
+    bad.append(f"{MANIFEST}: declares icon \"{icon_rel}\", which is not under "
+               f"the asset root {ASSET_ROOT} — the identity guests open the "
+               "mark by asset name, and a file outside the root has no asset "
+               "name for them to open")
+# The family the mark lives in (`icons`), for the wrong-name half below.
+icon_family = icon_under_root.split("/")[0] if icon_under_root else None
+
+# Every language's spelling of one call, and they differ only in what
+# sits in front of the word and whether a paren follows:
+#
+#   tx.asset("...")      kaya.asset("...")     tx.Asset("...")
+#   KayaApp.asset("...") KayaAsset("...")      asset "..."
+#
+# No leading word boundary, because Swift's constructor is `KayaAsset(`
+# and OCaml's is a bare `asset `. The looseness costs nothing: the only
+# two questions asked of a captured name are whether the DECLARED one is
+# among them and whether any of them is in the mark's family but is not
+# the declared one, and a stray capture (`AppIdentityAsset("Aurora
+# Notes"` matches, and its argument is the app's NAME) answers no to
+# both.
+ASSET_CALL = re.compile(r'(?i)asset\s*\(?\s*"([^"\n]+)"')
+
 manifest_readers, icon_namers = [], []
 SOURCE_ROOTS = ("guests", "tools", "android", "swift", "crates", "bindings")
 for r in SOURCE_ROOTS:
@@ -332,29 +383,56 @@ for r in SOURCE_ROOTS:
         names_var = "KAYA_ICON_FILE" in text
         norm = text.replace("\\", "/")
         names_path = icon_posix in norm
+        asset_names = {m.group(1) for m in ASSET_CALL.finditer(text)}
+        names_asset = icon_under_root is not None and icon_under_root in asset_names
         if MANIFEST in text:
             manifest_readers.append(rel)
-        if not (names_var or names_path):
-            continue
         # PROSE AND SCENE SCRIPTS ARE NOT READERS. A .md file explains
         # the mechanism and a tools/scenes/*.steps file records why the
         # guest opens a file at all; neither copies a byte anywhere, and
         # demanding they parse the manifest would be a rule about
         # documentation rather than about drift.
-        if rel.endswith(".md") or rel.startswith("tools/scenes/"):
+        prose = rel.endswith(".md") or rel.startswith("tools/scenes/")
+        # C3, THE ASSET FORM'S OWN HALF, and it is asked BEFORE the
+        # is-this-a-namer question below rather than after. A file that
+        # opens the WRONG file out of the mark's family names none of the
+        # three accepted forms, so it would fall out of this loop
+        # unlooked-at — and it is precisely the failure the asset form
+        # introduced: an asset call carrying a mistyped name compiles in
+        # all eight languages and, at runtime, leaves whatever icon the
+        # platform already had. (No comment here may quote such a name;
+        # the arm would read it and refuse this file. See `declared`
+        # below, which is where the self-test's own counterexample comes
+        # from.)
+        if not prose and icon_family:
+            for other in sorted(n for n in asset_names
+                                if n.startswith(icon_family + "/")
+                                and n != icon_under_root):
+                bad.append(
+                    f"{rel}: opens the asset \"{other}\", which is in the "
+                    f"declared mark's own family but is not it — {MANIFEST} "
+                    f"declares \"{icon_rel}\", and under the asset root that "
+                    f"is \"{icon_under_root}\". One picture is the picture on "
+                    "all five platforms (ruling 1), and a name nothing "
+                    "answers to fails SILENTLY: the platform's own icon "
+                    "stays, and every expectation that reads it goes red "
+                    "somewhere else")
+        if not (names_var or names_path or names_asset):
+            continue
+        if prose:
             continue
         icon_namers.append(rel)
         # C3 — a site that names the variable must get its DEFAULT from
-        # the declaration: either by reading the manifest (what a script
-        # that can parse TOML does) or by spelling the declared path
-        # (what eight guests and a batch file do). Naming neither is a
-        # third source of truth wearing the override's name.
-        if names_var and not names_path and MANIFEST not in text:
+        # the declaration: by reading the manifest, by spelling the
+        # declared path, or by opening the declared asset. Naming none of
+        # them is a third source of truth wearing the override's name.
+        if names_var and not names_path and not names_asset and MANIFEST not in text:
             bad.append(
-                f"{rel}: names KAYA_ICON_FILE but does not name the declared "
-                f"icon path \"{icon_rel}\" — the override needs a default to "
-                "override, and the default is the manifest's or it is a "
-                "second source of truth")
+                f"{rel}: names KAYA_ICON_FILE but names the declaration in "
+                f"none of C3's three ways — not the path \"{icon_rel}\", not "
+                f"the asset name \"{icon_under_root}\", not {MANIFEST} — and "
+                "the override needs a default to override, so the default is "
+                "the manifest's or it is a second source of truth")
         # C6 — a tools/ consumer derives the path; it does not retype it.
         if (rel.startswith("tools/") and not rel.startswith(CMD_LAUNCHERS)
                 and MANIFEST not in text):
@@ -366,9 +444,9 @@ for r in SOURCE_ROOTS:
                 "and C3 holds their literal to the manifest instead)")
 
 if not icon_namers:
-    bad.append("no file in the tree names the declared icon or "
-               "KAYA_ICON_FILE — this gate read nothing and would agree "
-               "with any manifest")
+    bad.append("no file in the tree names the declared icon — not its path, "
+               "not its asset name, not KAYA_ICON_FILE — so C3 read nothing "
+               "and would agree with any manifest")
 
 # ---------------------------------------------------------------- C4
 guests = sorted((root / "guests").glob("*/identity.*"))
@@ -571,6 +649,44 @@ fresh() { # <name> -> path to a new shadow root
     echo "$dir"
 }
 
+# <name|pattern|other> -> the declared icon's ASSET name (the manifest's
+# `icon` with the asset root's prefix removed), a regex matching it, or a
+# NEIGHBOUR of it: same family, not the declared file.
+#
+# THE SELF-TEST DERIVES ITS DATA FOR THE SAME REASON THE CLAUSE DOES, and
+# for one more. C3 derives so it holds one source of truth; this derives
+# so it does not become a second one — and because THIS SCRIPT IS IN THE
+# TREE THE CHECKER READS. An asset call spelled out here, naming any file
+# in the mark's family other than the declared one, is a file in the tree
+# opening an asset the manifest does not declare, and the arm above
+# refuses it in the real run with the gate pointing at itself. Measured:
+# it did, twice, the first time this was written — once for the
+# perturbation's own data and once for a COMMENT that quoted a
+# counterexample. The rule reaches prose because prose is text, so no
+# comment in this file may spell one either.
+declared() {
+    python3 -c '
+import pathlib
+import re
+import sys
+import tomllib
+
+root, which = sys.argv[1], sys.argv[2]
+man = pathlib.Path(root) / "guests/assets/identity.toml"
+icon = tomllib.loads(man.read_text(encoding="utf-8"))["icon"].replace("\\", "/")
+PREFIX = "guests/assets/"
+if not icon.startswith(PREFIX):
+    sys.exit("check-app-identity: SELF-TEST FAIL (the declared icon is not "
+             "under the asset root, so no guest can open it by name and "
+             "neither of C3'"'"'s asset perturbations means anything)")
+name = icon[len(PREFIX):]
+family, _, base = name.rpartition("/")
+print({"name": name,
+       "pattern": re.escape(name),
+       "other": f"{family}/not-{base}"}[which])
+' "$ROOT" "$1"
+}
+
 # N0 — the shadow root itself must pass, or every refusal below could be
 # an artifact of the copy rather than of the perturbation.
 base="$(fresh base)"
@@ -632,6 +748,43 @@ s="$(fresh noobservation)"
 hits="$(doctor "$s" tools/scenes/identity.steps 'expect_app_icon' 'expect_app_haiku')"
 applied "$hits" "the no-observation perturbation"
 refuses "$s" "would agree with anything" "a tree where no scene reads the icon"
+
+# N8 — C3'S OWN NEGATIVE, which the clause went without until the identity
+# guests stopped resolving their own path. Put the environment read back
+# into a guest and take the asset call away: the file then names
+# KAYA_ICON_FILE, the declared path nowhere, the manifest nowhere and no
+# asset at all, which is the third source of truth the clause is about.
+#
+# It is also the reason C3's positive side cannot rot unnoticed. All
+# eight migrated guests still SAY "KAYA_ICON_FILE" — in the paragraph
+# explaining what they stopped doing — so the asset form is the only
+# thing keeping them on the right side of this clause. If the asset arm
+# below ever stopped matching, N0 would go red eight times over before
+# anyone reached this test.
+mark_re="$(declared pattern)" || exit 1
+s="$(fresh envreader)"
+hits="$(doctor "$s" guests/rust/identity.rs \
+    "tx\\.asset\\(\"$mark_re\"\\)" \
+    'std::env::var("KAYA_ICON_FILE").unwrap()')"
+applied "$hits" "the environment-reader perturbation"
+refuses "$s" "names the declaration in none of C3's three ways" \
+    "a guest that names the override with no declaration behind it"
+
+# N9 — THE ASSET ARM'S OWN NEGATIVE: a guest that opens a DIFFERENT file
+# out of the mark's family. A name is not a path and nothing checks it at
+# compile time, so the guest still builds in all eight languages; at
+# runtime the name answers to nothing and each platform keeps whatever
+# icon it already had. The Swift guest is the one doctored on purpose —
+# its spelling is the constructor `KayaAsset(`, with no word boundary in
+# front of the word, so a pattern written for `tx.asset(` alone would
+# read this file and find nothing in it.
+other_mark="$(declared other)" || exit 1
+s="$(fresh othermark)"
+hits="$(doctor "$s" guests/swift/identity.swift \
+    "KayaAsset\\(\"$mark_re\"\\)" "KayaAsset(\"$other_mark\")")"
+applied "$hits" "the other-mark perturbation"
+refuses "$s" "in the declared mark's own family but is not it" \
+    "a guest opening an asset the manifest does not declare"
 
 if ! offenders="$(check "$ROOT")"; then
     echo "$offenders"

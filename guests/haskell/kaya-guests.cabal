@@ -205,6 +205,11 @@ executable identity
   main-is: identity.hs
   build-depends: kaya-guests
 
+executable assets
+  import: shared
+  main-is: assets.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

@@ -2653,6 +2653,45 @@ def asset(name):
     ))
 
 
+def asset_miss_sentence(name):
+    """Why `asset(name)` would fail — the sentence it would raise, handed
+    over without raising. `""` means the name resolves.
+
+    WHY THIS EXISTS WHEN THE RAISE ALREADY CARRIES IT. Unwinding is not
+    one semantics in nine languages, and a conformance scene has to
+    observe this sentence on five platforms. Python catches a
+    `RuntimeError` happily; Swift's miss is a `fatalError`, which traps
+    rather than unwinding, so a Swift guest cannot catch a miss at all. A
+    total query has no such split — every binding answers the same string
+    the same way, and the scene can freeze it.
+
+    THE SAME SENTENCE, NOT A SECOND ONE. This and `asset`'s raise both
+    hand back the core's bytes, so what a scene freezes is what an app's
+    user would have been shown.
+
+    NAMED FOR THE CARRYING, not for the diagnosing: the sentence has one
+    author (`asset_why_not` in crates/kaya/src/assets.rs), and a `why_not`
+    here would put a diagnostic's name on a call that only copies bytes.
+
+    TWO LINES. Line 1 — the name, the rule it broke, and the census of
+    what the package carries — is the same on every platform and is the
+    line a scene freezes. Line 2 names the resolved place and the route
+    that chose it, which a bundle, a device directory and a repo checkout
+    spell three different ways.
+
+    It measures rather than predicts: each call reads (no cache, no watch,
+    no reload), so `""` is a fact about the moment it was asked.
+    """
+    if not isinstance(name, str):
+        raise TypeError(
+            f"kaya: asset_miss_sentence() takes a name as str "
+            f"('fonts/sora-wght.ttf'), not {type(name).__name__} — a "
+            "relative path under the asset root, spelled with `/` on "
+            "every platform"
+        )
+    return runtime.asset_miss_sentence(name)
+
+
 def _blob_of(source):
     """The one place a blob-taking consumer turns its argument into a
     handle: an `Asset` redeems (no copy, nothing through Python), and

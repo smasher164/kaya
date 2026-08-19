@@ -3,12 +3,22 @@
 //! platform shows both. The byte-frozen contract is
 //! tools/scenes/identity.steps.
 //!
-//! THE MARK IS THE VENDORED ONE (guests/assets/icons/kaya-mark.png,
-//! four flat quadrants) because no platform's own default icon can land
-//! on four declared colours, so a lowering that never applied can never
-//! read as a pass. KAYA_ICON_FILE is how a runner that cannot see the
-//! repo points at a pushed copy — the typeface scene's KAYA_FONT_FILE,
-//! one asset over.
+//! THE MARK IS THE VENDORED ONE (four flat quadrants) because no
+//! platform's own default icon can land on four declared colours, so a
+//! lowering that never applied can never read as a pass.
+//!
+//! THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+//! This scene used to read `KAYA_ICON_FILE` with a repo-relative default
+//! and panic in its own words, and its seven siblings each did the same
+//! thing in their own language — eight copies of one resolution rule and
+//! eight sentences for one failure. `tx.asset(name)` is the whole thing
+//! now: WHERE the file lives is the core's knowledge (a repo checkout, a
+//! bundle's Resources, an APK's packaged assets/ with no path at all)
+//! and the failure sentence has one author, so a runner that cannot see
+//! the repo stages the asset ROOT and names it once rather than
+//! per-asset. The four quadrants the scene reads back are the same four
+//! wherever the core found the file; what the name buys is that no leg
+//! has to know which of those places it was.
 //!
 //! THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 //! blank an app's NAME fills on every platform, and the only place the
@@ -34,16 +44,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     const UNTITLED: WindowId = WindowId(1);
 
     let (status, field, go) = ctx.apply(|tx| {
-        // BEFORE THE FIRST MOUNT, per the declared-once wall.
-        let icon_path = std::env::var("KAYA_ICON_FILE")
-            .unwrap_or_else(|_| "guests/assets/icons/kaya-mark.png".into());
-        let icon = std::fs::read(&icon_path).unwrap_or_else(|e| {
-            panic!(
-                "kaya: the identity scene needs the vendored mark at \
-                 {icon_path} (set KAYA_ICON_FILE or run from the repo \
-                 root): {e}"
-            )
-        });
+        // BEFORE THE FIRST MOUNT, per the declared-once wall. The
+        // asset's bytes go from the core's read straight to the
+        // platform's icon sink: nothing here copies them, and this scene
+        // never sees them.
+        let icon = tx.asset("icons/kaya-mark.png");
         tx.app_identity("Aurora Notes", &icon);
         tx.window(kaya::DEFAULT_WINDOW).title("identity").size(480.0, 360.0);
         // ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows

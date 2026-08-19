@@ -133,6 +133,34 @@ type picked_file = { handle : int64; name : string; local_path : string }
 type asset = Kaya_runtime.asset
 
 let asset = Kaya_runtime.open_asset
+
+(* Why [asset name] would raise — the sentence it would carry, handed over
+   without raising. [""] means the name resolves.
+
+   WHY THIS EXISTS WHEN THE RAISE ALREADY CARRIES IT. Unwinding is not one
+   semantics in nine languages, and a conformance scene has to observe this
+   sentence on five platforms. OCaml catches [Failure] happily; Swift's
+   miss is a [fatalError], which traps rather than unwinding, so a Swift
+   guest cannot catch a miss at all. A total query has no such split —
+   every binding answers the same string the same way.
+
+   THE SAME SENTENCE, NOT A SECOND ONE: [asset]'s [failwith] carries
+   exactly this string, so what a scene freezes is what an app's user would
+   have been shown.
+
+   NAMED FOR THE CARRYING and not for the diagnosing — the long form is on
+   [Kaya_runtime.asset_miss_sentence]. One author writes the sentence; this
+   only ferries it.
+
+   TWO LINES. Line 1 — the name, the rule it broke, and the census of what
+   the package carries — is the same on every platform and is the line a
+   scene freezes. Line 2 names the resolved place and the route that chose
+   it, which a bundle, a device directory and a repo checkout spell three
+   different ways.
+
+   It measures rather than predicts: each call reads, so [""] is a fact
+   about the moment it was asked. *)
+let asset_miss_sentence = Kaya_runtime.asset_miss_sentence
 let asset_bytes = Kaya_runtime.asset_bytes
 let asset_close = Kaya_runtime.asset_close
 

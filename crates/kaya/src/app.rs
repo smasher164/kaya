@@ -1587,6 +1587,39 @@ impl<'a> Tx<'a> {
         }
     }
 
+    /// Why [`Tx::asset`] would fail for this name — the sentence it
+    /// would raise, handed over without raising. `""` means it resolves.
+    ///
+    /// # Why this exists at all, when the raise already carries it
+    ///
+    /// Because UNWINDING IS NOT ONE SEMANTICS IN NINE LANGUAGES and a
+    /// scene has to observe the sentence on five platforms. Seven
+    /// bindings raise something a guest can catch; Swift's is
+    /// `fatalError`, which traps rather than unwinding, so a Swift guest
+    /// cannot recover from a miss (docs/deferred.md carries that as a
+    /// maintainer question about invariant 1). A total query has no such
+    /// split: every binding answers the same string in the same way, and
+    /// `tools/scenes/assets.steps` freezes it.
+    ///
+    /// It is the SAME sentence, not a second one — this call and the
+    /// raise both return
+    /// [`crate::assets::asset_why_not`]'s bytes, so what a scene freezes
+    /// is what an app's user would have been shown.
+    ///
+    /// TWO LINES: the first is the name, the rule it broke and the
+    /// census of what the package carries, and it is the same on every
+    /// platform. The second names the resolved place and the route that
+    /// chose it, which a bundle, a device directory and a repo checkout
+    /// spell three different ways — a cross-platform expectation freezes
+    /// the first line and prints the second when it fails.
+    ///
+    /// This measures; it does not predict. `asset` reads on every call
+    /// (assets.rs's wall 4), so an answer of `""` here is a fact about
+    /// the moment it was asked.
+    pub fn asset_miss_sentence(&self, name: &str) -> String {
+        crate::assets::asset_why_not(name)
+    }
+
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
     /// one family name is the whole call, and every platform that has
     /// that family installed uses it. THE FAMILY, NEVER THE SCALE —

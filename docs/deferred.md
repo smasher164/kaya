@@ -2675,36 +2675,44 @@ An INSTALLED app is unaffected on either protocol: that identity comes
 from a `.desktop` file plus the hicolor install, which is ruling 5's
 first surface and carries no GTK version condition at all.
 
-## The primary window keeps its launcher binary's `app_id`/`WM_CLASS` (measured 2026-08-18)
+## ~~The primary window keeps its launcher binary's `app_id`/`WM_CLASS`~~ — CLOSED 2026-08-18
 KEY: identity, app_id, WM_CLASS, g_set_prgname, gdk4-x11, gdk4-wayland, desktop file
 
-`g_set_prgname` is a lever and not a cosmetic string: it is what GTK's
-Wayland backend sends as `app_id` and what its X11 backend writes into
-`WM_CLASS`, and that string is what a desktop matches a window to a
-`.desktop` file by. MEASURED on the lane image: the identity leg's
-PRIMARY window — built and presented in `run_core`'s activate handler
-BEFORE the app thread's first transaction is drained — reported
-`WM_CLASS(STRING) = "identity", "identity"`, the example BINARY's name;
-its SECOND window, created after `set_app_identity` had called
-`g_set_prgname("Aurora Notes")`, reported
-`WM_CLASS(STRING) = "Aurora Notes", "Aurora Notes"`. So the name really
-is settable at runtime and reaches every surface created after it is
-set. What it cannot do is move a class that has already been sent.
+**Done.** The primary window's class now follows the declaration on BOTH
+protocols, so a `.desktop` entry can match a kaya app's main window —
+the precondition the Linux half of the packaging story was waiting on.
+`crates/kaya/src/gtk.rs`'s `reclass_toplevels` runs at the identity apply,
+after `g_set_prgname`, and moves the class of the windows that ALREADY
+EXIST; the program name keeps covering every window created afterwards,
+and the two halves are disjoint rather than redundant. `gdk4-x11`,
+`gdk4-wayland` and `x11-dl` are in crates/kaya/Cargo.toml with the
+reasoning beside them.
 
-Moving the primary window's would need
-`gdk_wayland_toplevel_set_application_id` and its X11 sibling, which live
-in the `gdk4-wayland` / `gdk4-x11` crates this tree does not depend on —
-a crates/kaya/Cargo.toml plus Cargo.lock change, which is why the GTK arm
-did not make it. It is a PRECONDITION for a Linux `.desktop` packaging
-reader rather than a cosmetic nit: without it, no `.desktop` file could
-ever match a kaya window.
+MEASURED, both protocols permitting it and neither needing a fallback:
+X11 takes `XSetClassHint` on the realized surface's xid — GDK4 exposes no
+wrapper, and `set_utf8_property` is NOT the route, since `WM_CLASS` is
+ICCCM `STRING` and a `UTF8_STRING` copy is the right name with the wrong
+type — and Wayland takes `gdk_wayland_toplevel_set_application_id`, which
+xdg-shell explicitly permits after map ("Like other properties, a
+set_app_id request can be sent after the xdg_toplevel has been mapped to
+update the property"); sway honours it in its own tree.
 
-Found in passing and already corrected: tools/linux/run-suites.sh's
-comment claimed kaya's GTK windows carry
-`application_id("dev.kaya.Milestone2")` and that the sway rule matched
-because of it. They do not — `app_id` follows `g_get_prgname()`, which
-defaults to the launcher binary's name, so the lane's legs advertise
-`python3`, `dotnet`, `java`, `milestone2`, `kaya-go`.
+Held by the LEGS on both rings: `tools/linux/identity-class-leg.py` wraps
+every identity leg, reads the class off the real server — `xprop WM_CLASS`
+on X11, sway's own tree on wayland — and requires every mapped toplevel of
+the app to carry the declared name, plus kaya's own record of having moved
+one, so a launcher that happened to share the name cannot pass it.
+
+**A correction to the correction, MEASURED 2026-08-18.** The entry above
+used to say a kaya window's class follows `g_get_prgname()`. True on X11
+and true on Wayland WITHOUT a session bus; with one, a GtkApplication
+window's `app_id` comes from the GApplication ID instead, so the same
+binary on the same protocol reported `identity` in one run and
+`dev.kaya.Milestone2` in the next, the only difference being the bus that
+`tools/linux/a11y-leg.sh` launches. That made the gap worse than recorded,
+not better: every kaya app on a real Wayland desktop advertised kaya's own
+milestone-2 id. tools/linux/run-suites.sh's comment carries the
+measurement.
 
 ## `kaya_capabilities()` has no binding surface in any of the eight languages (found 2026-08-18)
 KEY: kaya_capabilities, KAYA_CAP_AUX_WINDOWS, capability query, create_window, aux window, eight-language sugar
@@ -3575,7 +3583,7 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   `BRAND_MASK_DARK` pair in the spec moves the agreement from measured
   to structural. Spec-hash move + regeneration + seven callsite edits.
 
-## The APK's own assets/ is not read (asset packaging, Android)
+## ~~The APK's own assets/ is not read (asset packaging, Android)~~
 KEY: assets, Android, AssetManager, APK, packaging, KAYA_ASSET_DIR
 
 `asset(name)` resolves through a DIRECTORY on every platform
@@ -3595,15 +3603,39 @@ state nobody has been in. The trigger is the packaging milestone: the
 moment a kaya APK ships without a runner beside it to push a directory,
 the arm is written and the emulator lane stops pushing.
 
-The shape, so the next person does not re-derive it: cache a GlobalRef
-to the Activity at attach (crates/kaya/src/android.rs already caches the
-JVM and KayaPresent for exactly this class of later, off-thread call),
-add a small `dev.kaya.KayaAssets` Kotlin object with `read(Context,
-String): ByteArray?` and a recursive `list(Context)`, and call it from
-the new arm. The Kotlin side does the stream reading because
-`InputStream.readAllBytes` is API 33 and this tree's minSdk is 26.
+COMPLETE 2026-08-18, and it was written the way the paragraph above
+demanded: WITH A LEG THAT TAKES IT. `Place::Apk` is in
+crates/kaya/src/assets.rs, the Context and dev.kaya.KayaAssets are
+global refs remembered at BOTH attach paths (the KayaRing one had been
+throwing its Activity away, so the JVM and Go tiers would have had no
+Context at all), and `assets-compose` and `assets-go` arrive with NO
+KAYA_ASSET_DIR — so they resolve out of their own package with nothing
+staged beside them, which is the only route a shipped app has.
+`assets-jvm` keeps the staged-directory route on the same device, and
+THE SAME BYTE-FROZEN CENSUS COMES OUT OF BOTH.
 
-## The identity guests still resolve their own icon path
+Three things the build had to decide, recorded because they are not
+obvious:
+
+  The entries sit under `assets/kaya/` and not at the top of `assets/`.
+  An app's AssetManager root listing is not exclusively the app's — the
+  framework's own asset directories are visible there on several API
+  levels — and every AAR on the classpath merges its `assets/` into the
+  same namespace. Either would put a name in the census the app never
+  shipped, and the census is frozen in a scene. The prefix is written in
+  three files and tools/check-assets.sh's C7 holds them equal.
+
+  Absent and unreadable are ONE answer on this route. An APK entry has
+  no `ENOENT`; the platform answers with a stream or an IOException. The
+  sentence says "no asset named X" plus the census, and lets the reader
+  see which it is, rather than naming a cause it did not measure.
+
+  tools/check-jni.sh does NOT cover this class. Its subject is `external
+  fun` declarations, and KayaAssets has none — it is called FROM native
+  code by `call_static_method`, which no list holds. What holds the name
+  is the leg, every run.
+
+## ~~The identity guests still resolve their own icon path~~
 KEY: assets, identity, KAYA_ICON_FILE, one resolver, check-assets EXEMPT
 
 The eight typeface guests collapsed to `asset("fonts/sora-wght.ttf")`;
@@ -3628,7 +3660,20 @@ icon's path under the root>")` as naming the declaration, the eight
 guests lose their environment read, and the eight EXEMPT entries come
 out of check-assets.sh together.
 
-## The C floor has no asset guest
+COMPLETE 2026-08-18, and that is exactly what happened — the three
+moves in one commit, because the stale-exemption clause makes them
+inseparable: an EXEMPT entry for a guest that has stopped resolving
+anything is itself a finding, so the table could not be left behind.
+C3's new arm derives the asset-relative form from the manifest rather
+than spelling it, so there is still one source of truth. C3 also gained
+the watched negative it had never had.
+
+The lane side went with it: the five `tools/guest/run_identity_*.cmd`
+launchers lost their `KAYA_ICON_FILE` lines the way the typeface ones
+did, the emulator legs stopped carrying the extra, and the iOS lane
+stopped staging a second copy of the mark into the data container.
+
+## ~~The C floor has no asset guest~~
 KEY: assets, C floor, guests/c, longhand, invariant 5
 
 The C guests are the explicit floor and document every primitive
@@ -3645,7 +3690,15 @@ shares, which a font swap changes. It belongs with the assets
 conformance scene below, which is where a C guest can exercise it
 against assertions written for it.
 
-## The assets conformance scene
+COMPLETE 2026-08-18: guests/c/assets.c, which is where it belonged.
+Five of the six entry points are written longhand — open, blob, bytes,
+release and the sized-then-read `kaya_asset_why_not` — and the sixth,
+`kaya_asset_len`, is named in the header as the sizing-only sibling of
+`kaya_asset_bytes` (this guest already holds the pointer, so it reads
+the length that came with it). It runs on the two lanes that carry the
+floor, mac and linux.
+
+## ~~The assets conformance scene~~
 KEY: assets, scene, assets.steps, miss diagnostic, census, expect image
 
 Not built. What the slice DOES prove today: `asset()`'s happy path
@@ -3687,6 +3740,70 @@ a guest per language, and legs on all five runners (check-steps'
 be dishonest here because every backend CAN decode a PNG). That is a
 breadth commit, and it did not fit beside a migration that had to leave
 every lane green.
+
+COMPLETE 2026-08-18, built to that design, with three changes the
+building found:
+
+  IT READS THE MISS THROUGH A PUBLIC QUERY, and that query had to be
+  added in all eight bindings — `asset_miss_sentence`, the carrier that
+  every binding already held internally, made public and given a
+  check-sugar-surface row of its own. The design said "a query rather
+  than a catch"; what it did not say is that nothing was queryable yet.
+
+  IT READS THE IMAGE THROUGH `bytes()`, not through the blob handle.
+  The blob redemption is already proven cross-platform by the typeface
+  scene on four lanes; NOTHING proved the `bytes()` redemption through a
+  real surface on any lane. The scene closes that half instead of
+  re-proving the other. (The C floor guest is the exception and says so:
+  `kaya_tx_set_source` takes exactly the handle `kaya_asset_blob` mints,
+  so reading the bytes back out to re-register them would copy a buffer
+  the core is already holding.)
+
+  THE SCENE GRAMMAR HAD TO LEARN ABOUT QUOTES. The frozen sentence
+  contains a `;`, which is the newline stand-in a transport without
+  newlines uses, and all three interpreters split statements on it
+  unconditionally — so no expected string could contain a semicolon at
+  all, a restriction written down nowhere. `split_statements` in
+  crates/kaya/src/harness.rs and `kayaSplitStatements` in
+  KayaSwiftUI.swift and KayaCompose.kt are now quote-aware, and THIS
+  SCENE IS THE WALL that holds the three equal: it runs the same quoted
+  `;` through all three, on five lanes.
+
+The clause the design asked check-assets for is C6, and it earned its
+keep before the scene ran: the frozen census must equal the root's
+listing, so adding an asset is one gate red naming the .steps file
+rather than five red lanes.
+
+## An image widget whose bytes half-decode CRASHES the SwiftUI backend
+KEY: swiftui, KayaCell, Layout, subviews, image, decode failure, gallery
+
+FOUND 2026-08-18 by a watched negative for the assets scene, not by a
+lane: perturbing guests/rust/assets.rs to hand the image widget the
+VENDORED FONT's 111400 bytes instead of the mark's killed the process
+with SIGTRAP before any expectation could be read.
+
+    KayaCell.sizeThatFits(proposal:subviews:cache:)
+      <- LayoutSubviews.subscript.getter   (EXC_BREAKPOINT)
+
+swift/KayaSwiftUI.swift's `KayaCell` indexes `subviews[0]`
+unconditionally in BOTH `sizeThatFits` and `placeSubviews`. A cell whose
+child produced no subview — which is what a SwiftUI `if let img =
+NSImage(data:)` with no `else` yields — traps on the subscript.
+
+THIS CONTRADICTS A CONTRACT THE TREE ALREADY STATES.
+tools/scenes/gallery.steps: "deliberately invalid bytes read 0x0 — decode
+failure is the placeholder class, never a crash", and that scene passes
+on this backend every run with 12 bytes of `not an image`. So SOME
+undecodable input reaches the placeholder and some does not, and which is
+which has never been characterised. That is the part worth doing first:
+the fix is probably three lines (`subviews.first` with a zero fallback),
+but a fix without knowing why the 12-byte case survives is a guess.
+
+NOT THIS SLICE'S BUG and not on any lane's path: no scene hands an image
+widget bytes that half-decode. It is reachable by an APP, which is what
+makes it worth a line here rather than a shrug — and the same audit is
+owed to the other three backends, because nothing holds their
+empty-child layout level with this one.
 
 ## A Swift guest cannot catch an asset miss
 KEY: assets, Swift, fatalError, uniform semantics, invariant 1

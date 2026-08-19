@@ -3,20 +3,27 @@
 // canonical semantics is guests/rust/identity.rs; the byte-frozen
 // contract is tools/scenes/identity.steps.
 //
-// THE MARK IS THE VENDORED ONE (guests/assets/icons/kaya-mark.png, four
-// flat quadrants) because no platform's own default icon can land on
-// four declared colours, so a lowering that never applied can never read
-// as a pass. KAYA_ICON_FILE is how a runner that cannot see the repo
-// points at a pushed copy.
+// THE MARK IS THE VENDORED ONE (four flat quadrants) because no
+// platform's own default icon can land on four declared colours, so a
+// lowering that never applied can never read as a pass.
+//
+// THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+// This scene used to resolve the file itself — kaya.Env("KAYA_ICON_FILE")
+// with a repo-relative default, os.ReadFile, and a panic in its own
+// words — as its seven siblings each did in their own language.
+// tx.Asset(name) is the whole thing now: WHERE the file lives is the
+// core's knowledge (a repo checkout, a bundle's Resources, an APK's
+// packaged assets/ with no path at all), and the four quadrants the
+// scene reads back are the same four wherever it was found. The
+// kaya.Env-not-os.Getenv rule this file used to carry is not merely
+// obeyed here any more, it is unreachable: the scene reads no
+// environment at all.
 //
 // THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 // blank an app's NAME fills on every platform.
 package identity
 
 import (
-	"fmt"
-	"os"
-
 	kaya "dev.kaya/bindings/go"
 )
 
@@ -27,20 +34,12 @@ func App() *kaya.App {
 	draft := ""
 
 	app.Build(func(tx *kaya.Tx) {
-		// BEFORE THE FIRST MOUNT, per the declared-once wall. kaya.Env
-		// and never os.Getenv — tools/check-go-env.sh.
-		iconPath := kaya.Env("KAYA_ICON_FILE")
-		if iconPath == "" {
-			iconPath = "guests/assets/icons/kaya-mark.png"
-		}
-		icon, err := os.ReadFile(iconPath)
-		if err != nil {
-			panic(fmt.Sprintf(
-				"kaya: the identity scene needs the vendored mark at %s "+
-					"(set KAYA_ICON_FILE or run from the repo root): %v",
-				iconPath, err))
-		}
-		tx.AppIdentity("Aurora Notes", icon)
+		// BEFORE THE FIRST MOUNT, per the declared-once wall. The
+		// asset's bytes go from the core's read straight to the
+		// platform's icon sink: this scene never holds them.
+		icon := tx.Asset("icons/kaya-mark.png")
+		defer icon.Close()
+		tx.AppIdentityAsset("Aurora Notes", icon)
 		tx.Window(0).Title("identity").Size(480, 360)
 		// ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows
 		// mints its custom caption from the first promotion and from

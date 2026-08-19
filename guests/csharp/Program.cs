@@ -51,6 +51,7 @@ static class Program
             case "toolbar": ToolbarScene.Run(); break;
             case "typeface": TypefaceScene.Run(); break;
             case "identity": IdentityScene.Run(); break;
+            case "assets": AssetsScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;
         }

@@ -2171,6 +2171,42 @@ sealed class Tx
         throw new InvalidOperationException(sentence);
     }
 
+    /// Why Asset(name) would throw — the sentence it would carry, handed
+    /// over without throwing. "" means the name resolves.
+    ///
+    /// WHY THIS EXISTS WHEN THE THROW ALREADY CARRIES IT. Unwinding is not
+    /// one semantics in nine languages, and a conformance scene has to
+    /// observe this sentence on five platforms. C# catches happily;
+    /// Swift's miss is a fatalError, which traps rather than unwinding, so
+    /// a Swift guest cannot catch a miss at all. A total query has no such
+    /// split — every binding answers the same string the same way, and the
+    /// scene can freeze it.
+    ///
+    /// THE SAME SENTENCE, NOT A SECOND ONE: this and Asset's throw both
+    /// hand back the core's bytes, so what a scene freezes is what an
+    /// app's user would have been shown.
+    ///
+    /// NAMED FOR THE CARRYING and not for the diagnosing — the long form
+    /// of that reasoning is on Kaya.AssetMissSentence. There is one author
+    /// for the sentence and this only ferries it across the FFI.
+    ///
+    /// TWO LINES. Line 1 — the name, the rule it broke, and the census of
+    /// what the package carries — is the same on every platform and is the
+    /// line a scene freezes. Line 2 names the resolved place and the route
+    /// that chose it, which a bundle, a device directory and a repo
+    /// checkout spell three different ways.
+    ///
+    /// It measures rather than predicts: each call reads, so "" is a fact
+    /// about the moment it was asked.
+    public string AssetMissSentence(string name)
+    {
+        // The transaction's liveness, for the same reason Asset asks it:
+        // Rust's asset_miss_sentence takes &self, so a dead Tx cannot name
+        // it there, and C# reproduces that by asking rather than diverging.
+        _ = Records;
+        return Kaya.AssetMissSentence(name);
+    }
+
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b).
     /// One family name is the whole call — tx.BrandTypeface("Georgia") —
     /// and every platform that HAS that family installed uses it.

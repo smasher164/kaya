@@ -3,11 +3,19 @@
 // it is called and what it looks like, and the platform shows both. The
 // byte-frozen contract is tools/scenes/identity.steps.
 //
-// THE MARK IS THE VENDORED ONE (guests/assets/icons/kaya-mark.png, four
-// flat quadrants) because no platform's own default icon can land on
-// four declared colours, so a lowering that never applied can never read
-// as a pass. KAYA_ICON_FILE is how a runner that cannot see the repo
-// points at a pushed copy.
+// THE MARK IS THE VENDORED ONE (four flat quadrants) because no
+// platform's own default icon can land on four declared colours, so a
+// lowering that never applied can never read as a pass.
+//
+// THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+// This scene used to read KAYA_ICON_FILE with a repo-relative default and
+// fatalError in its own words, as its seven siblings each did in their
+// own language. KayaAsset(name) is the whole thing now: WHERE the file
+// lives is the core's knowledge — a repo checkout, a bundle's Resources,
+// an APK's packaged assets/ with no path at all — and the four quadrants
+// the scene reads back are the same four wherever it was found. This
+// source serves mac AND iOS, and the bundle's Resources is exactly the
+// place the old repo-relative default could not name.
 //
 // THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 // blank an app's NAME fills on every platform.
@@ -23,17 +31,18 @@ var draft = ""
 
 app.build { tx in
     // BEFORE THE FIRST MOUNT, per the declared-once wall.
-    let iconPath = ProcessInfo.processInfo.environment["KAYA_ICON_FILE"]
-        ?? "guests/assets/icons/kaya-mark.png"
-    let icon: Data
-    do {
-        icon = try Data(contentsOf: URL(fileURLWithPath: iconPath))
-    } catch {
-        fatalError(
-            "kaya: the identity scene needs the vendored mark at \(iconPath) "
-                + "(set KAYA_ICON_FILE or run from the repo root): \(error)")
-    }
+    //
+    // ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
+    // override and the sentence for a miss were all hand-written here
+    // (and in seven sibling scenes) until asset() arrived; they live in
+    // the core now (crates/kaya/src/assets.rs), which is also why the
+    // bytes never enter this guest's heap — the handle goes straight to
+    // the blob channel. The release is explicit and the redemption has
+    // already happened by then: appIdentity registered the bytes into
+    // the pending blob table, which keeps its own reference.
+    let icon = KayaAsset("icons/kaya-mark.png")
     tx.appIdentity("Aurora Notes", icon: icon)
+    icon.close()
 
     // ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows mints
     // its custom caption from the first promotion and from nothing else,

@@ -137,6 +137,9 @@ public final class Main {
             case "identity":
                 app = Identity::app;
                 break;
+            case "assets":
+                app = Assets::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

@@ -5144,6 +5144,38 @@ object KayaCompose {
         return out.toString()
     }
 
+    /**
+     * Cut one script LINE into statements at `;` — the newline stand-in
+     * for transports that cannot carry a newline, which on this platform
+     * is the intent extra every leg arrives in.
+     *
+     * QUOTE-AWARE, AND THAT IS NOT A NICETY: an expected string is
+     * whatever the app puts on screen, and kaya's own asset miss
+     * sentence carries a semicolon (`no asset named "x"; the package
+     * carries ...`). Same rule as `split_statements` in
+     * crates/kaya/src/harness.rs and `kayaSplitStatements` in
+     * swift/KayaSwiftUI.swift; the three are held equal by
+     * tools/scenes/assets.steps, which freezes such a sentence and runs
+     * on every lane through all three.
+     *
+     * A `"` toggles, so a statement must have balanced quotes;
+     * tools/check-steps.sh refuses one that does not.
+     */
+    private fun kayaSplitStatements(line: String): List<String> {
+        val out = ArrayList<String>()
+        val current = StringBuilder()
+        var quoted = false
+        for (c in line) {
+            when {
+                c == '"' -> { quoted = !quoted; current.append(c) }
+                c == ';' && !quoted -> { out.add(current.toString()); current.setLength(0) }
+                else -> current.append(c)
+            }
+        }
+        out.add(current.toString())
+        return out
+    }
+
     private fun runScript(activity: ComponentActivity, script: String) {
         val observed = ArrayList<String>()
         val failures = ArrayList<String>()
@@ -5152,7 +5184,7 @@ object KayaCompose {
         for (rawLine in script.split('\n')) {
             val trimmedLine = rawLine.trim()
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) continue
-            for (raw in trimmedLine.split(';')) {
+            for (raw in kayaSplitStatements(trimmedLine)) {
                 val line = raw.trim()
                 if (line.isEmpty() || line.startsWith("#")) continue
                 val parts = line.split(' ').filter { it.isNotEmpty() }

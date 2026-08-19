@@ -3,11 +3,17 @@
 // Canonical semantics in guests/rust/identity.rs; the byte-frozen
 // contract in tools/scenes/identity.steps.
 //
-// THE MARK IS THE VENDORED ONE (guests/assets/icons/kaya-mark.png, four
-// flat quadrants) because no platform's own default icon can land on
-// four declared colours, so a lowering that never applied can never read
-// as a pass. KAYA_ICON_FILE is how a runner that cannot see the repo
-// points at a pushed copy.
+// THE MARK IS THE VENDORED ONE (four flat quadrants) because no
+// platform's own default icon can land on four declared colours, so a
+// lowering that never applied can never read as a pass.
+//
+// THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
+// This scene used to read KAYA_ICON_FILE with a repo-relative default
+// and throw in its own words, as its seven siblings each did in their
+// own language. tx.Asset(name) is the whole thing now: WHERE the file
+// lives is the core's knowledge — a repo checkout, a bundle's Resources,
+// an APK's packaged assets/ with no path at all — and the four quadrants
+// the scene reads back are the same four wherever it was found.
 //
 // THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 // blank an app's NAME fills on every platform.
@@ -25,25 +31,12 @@ static class IdentityScene
 
         app.Build(tx =>
         {
-            // BEFORE THE FIRST MOUNT, per the declared-once wall.
-            var iconPath =
-                Environment.GetEnvironmentVariable("KAYA_ICON_FILE")
-                ?? "guests/assets/icons/kaya-mark.png";
-            byte[] icon;
-            try
-            {
-                icon = System.IO.File.ReadAllBytes(iconPath);
-            }
-            catch (Exception e)
-                when (e is System.IO.IOException
-                      or UnauthorizedAccessException)
-            {
-                throw new InvalidOperationException(
-                    $"kaya: the identity scene needs the vendored mark at " +
-                    $"{iconPath} (set KAYA_ICON_FILE or run from the repo " +
-                    $"root): {e.Message}", e);
-            }
-            tx.AppIdentity("Aurora Notes", icon: icon);
+            // BEFORE THE FIRST MOUNT, per the declared-once wall. The
+            // asset's bytes go from the core's read straight to the
+            // platform's icon sink: this scene never holds them, and the
+            // `using` releases the core's handle on the way out.
+            using var icon = tx.Asset("icons/kaya-mark.png");
+            tx.AppIdentity("Aurora Notes", icon);
 
             // ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows
             // mints its custom caption from the first promotion and from

@@ -363,8 +363,20 @@ in docs/deferred.md.
    caught copying one FILE under the root is the shape this convention
    replaced; and every staging lane verifies what arrived BY HASH, since
    a size check passes the same-length corruption a half-written push
-   produces. Seven watched negatives, each doctoring a shadow of the real
-   tree with its substitution count printed),
+   produces. AND TWO CLAUSES ABOUT THE ARTIFACTS: the census
+   tools/scenes/assets.steps freezes must equal the root's own listing —
+   that scene is the only run-time observation that a lane staged the
+   WHOLE root, and it means adding an asset reddens five lanes, so the
+   gate turns that into ONE red naming the .steps file before any lane
+   runs — and the APK's asset prefix is one string in the three files
+   that spell it (the Kotlin reader, the gradle copy, the emulator
+   runner), because Android is the one platform whose packaged assets are
+   not files and therefore the one with a packaging layout of its own.
+   THE PACKAGED BYTES THEMSELVES ARE CHECKED WHERE THEY ARE PACKAGED,
+   by `apk_assets_verify` right after the assemble that wrote them, in
+   both directions: a missing entry, and an EXTRA one, which is the half
+   the census actually catches. Watched negatives doctor a shadow of the
+   real tree with the substitution count printed),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,

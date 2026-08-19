@@ -1366,6 +1366,46 @@ pub trait Stage: Send + 'static {
     fn finish(&self, code: i32, verdict: &str);
 }
 
+/// Cut one script LINE into statements at `;` — the newline stand-in for
+/// transports that cannot carry a newline, which is why it exists at all
+/// (an Android intent extra is the case that forced it).
+///
+/// QUOTE-AWARE, AND THAT IS NOT A NICETY. An expected string is whatever
+/// the app puts on screen, and kaya's own asset miss sentence contains a
+/// semicolon: `no asset named "x"; the package carries ...`. Before this
+/// function no expected string could contain one at all — the statement
+/// split ate it, the tail parsed as an unknown verb, and the grammar's
+/// restriction was written down nowhere.
+///
+/// A `"` TOGGLES, so a statement must have balanced quotes. Every
+/// statement in the corpus does, and `tools/check-steps.sh` refuses one
+/// that does not, because an odd quote would silently move every
+/// following `;` from one side of the rule to the other.
+///
+/// ALL THREE INTERPRETERS SPLIT IDENTICALLY (this, KayaSwiftUI.swift's
+/// `kayaSplitStatements`, KayaCompose.kt's). The wall on that is
+/// `tools/scenes/assets.steps`, which freezes a sentence with a quoted
+/// `;` and runs on every lane through all three: a parser that regresses
+/// reddens a scene that already exists, rather than waiting for one
+/// nobody has written.
+fn split_statements(line: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut quoted = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            ';' if !quoted => {
+                out.push(&line[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&line[start..]);
+    out
+}
+
 pub fn parse(script: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     // Comments are whole newline-delimited lines; only the statements
@@ -1376,7 +1416,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
         if raw_line.is_empty() || raw_line.starts_with('#') {
             continue;
         }
-        for raw in raw_line.split(';') {
+        for raw in split_statements(raw_line) {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -3771,6 +3811,34 @@ mod tests {
     fn comments_swallow_their_semicolons() {
         let steps = parse("# wait; settle 999; chaos\nexpect label#0 \"x\"").unwrap();
         assert_eq!(steps.len(), 1);
+    }
+
+    /// A `;` INSIDE A QUOTED STRING IS PROSE TOO, and this is the half
+    /// the line above did not cover. kaya's own asset miss sentence
+    /// carries one — `no asset named "x"; the package carries ...` — so
+    /// until the split learned about quotes, the one diagnostic the
+    /// conformance scene has to freeze was the one string the grammar
+    /// could not hold. tools/scenes/assets.steps is the cross-platform
+    /// half of this test: it runs the same line through the Swift and
+    /// Kotlin interpreters, which split for themselves.
+    #[test]
+    fn a_quoted_semicolon_is_not_a_statement_break() {
+        let sentence = "kaya: no asset named \"icons/nope.png\"; the package carries a, b";
+        let script = format!("expect label#0 \"{sentence}\"");
+        let steps = parse(&script).unwrap();
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert_eq!(
+            steps[0],
+            Step::Expect(Target { kind: TargetKind::Label, index: 0 }, sentence.to_owned())
+        );
+        // And the separator still separates when it is not inside a
+        // string, which is the property the transports depend on.
+        let joined = parse("click button#0; expect label#0 \"a; b\"; click button#1").unwrap();
+        assert_eq!(joined.len(), 3, "{joined:?}");
+        assert_eq!(
+            joined[1],
+            Step::Expect(Target { kind: TargetKind::Label, index: 0 }, "a; b".to_owned())
+        );
     }
 
     /// expect routes by target kind (entry reads the field, labels

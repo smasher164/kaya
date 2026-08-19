@@ -1,10 +1,10 @@
 @echo off
 cd /d C:\kaya
 set PATH=C:\kaya;%PATH%
-rem The vendored mark's bytes are what the guest declares; named
-rem absolutely so no leg depends on its cwd (deploy-win.sh ships it to
-rem the repo-mirror path, the vendored font's rule one asset over).
-set KAYA_ICON_FILE=C:\kaya\guests\assets\icons\kaya-mark.png
+rem NO ASSET LINE HERE ANY MORE: the guest names the mark
+rem `asset("icons/kaya-mark.png")` and the core resolves it out
+rem of the root the deploy stages and names machine-wide in
+rem KAYA_ASSET_DIR — the typeface scene's rule, one asset over.
 set KAYA_SELFTEST=identity
 rem ms-appx resolves against the PROCESS exe's directory: place
 rem kaya's minimal resources.pri beside java.exe (idempotent).

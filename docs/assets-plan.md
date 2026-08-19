@@ -13,7 +13,29 @@ every lane that stages one; guests/assets/win/minimal-resources.pri moved under
 the root with a provenance README; and tools/check-assets.sh holds all of
 it. STREAMING and Go's `fs.FS` façade stayed refused behind their named
 triggers, as ruled. The two carve-outs the build itself forced are stated
-in A3's walls and in A8. This brief answers the maintainer's
+in A3's walls and in A8.
+
+**COMPLETED 2026-08-18** by a second pass that closed the four things the
+first one deferred, each for a reason the pass had to discharge rather
+than repeat: the CONFORMANCE SCENE (tools/scenes/assets.steps, nine
+guests including the C floor, legs on all five lanes) freezes the miss
+sentence's census, which is the only run-time observation that a lane
+staged the whole root; the APK's own `assets/` is read through
+AssetManager and the arm IS REACHED — two android legs arrive with no
+`KAYA_ASSET_DIR` and resolve out of their own package with nothing staged
+beside them, and the same byte-frozen census comes out of both routes on
+the same device; the eight IDENTITY guests joined the typeface guests on
+`asset(name)`, with check-app-identity's C3 taught a third accepted form
+and given the watched negative it had never had; and the C floor gained
+guests/c/assets.c. Three things the building forced and the design had
+not: a PUBLIC `asset_miss_sentence` in all eight bindings (the scene
+reads the sentence through a total query, because unwinding is not one
+semantics in nine languages), an `assets/kaya/` prefix inside the APK
+(an app's AssetManager root listing is not exclusively the app's), and a
+QUOTE-AWARE statement split in all three interpreters (the frozen
+sentence contains a `;`, which is the grammar's newline stand-in — no
+expected string could contain one before, a restriction written down
+nowhere). This brief answers the maintainer's
 question of 2026-08-18: "we have some examples right now where we declare
 binary data in a source file that can probably be replaced with an asset
 that's packaged/bundled." It surveyed every such place first and designs

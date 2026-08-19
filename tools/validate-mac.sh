@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. Empty today: styling graduated
@@ -69,6 +69,15 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # backend that had the feature. It carries no C floor guest, exactly as
 # `toolbar` does not (guests/c/Makefile's SCENES is the other side of
 # that, read by check-steps' sweep_c_floor).
+# The assets conformance scene (docs/assets-plan.md) is NOT a depth
+# entry: `asset()` shipped in all eight bindings on 2026-08-18, so all
+# eight guests exist and a depth entry would have held seven legs off a
+# backend that has the feature — the identity scene's reasoning, one
+# slice later. It carries a C FLOOR guest, which neither typeface nor
+# identity does: the floor is where `kaya_asset_open` + `kaya_asset_blob`
+# are documented longhand, and this is the first scene whose assertions
+# were written for it (guests/c/Makefile's SCENES is the other side,
+# read by check-steps' sweep_c_floor).
 DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
@@ -699,7 +708,7 @@ build_c() {
     # very assignment to say so — every name here must have a leg below.
     # SCENES is a command-line override, so the Makefile keeps one list
     # and the linux suite keeps building all of them.
-    make -C guests/c SCENES="undo dirty ranges save a11yrows styling" TARGET_DIR="$ROOT/target/debug" \
+    make -C guests/c SCENES="undo dirty ranges save a11yrows styling assets" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
 
@@ -1242,6 +1251,37 @@ run identity-ocaml-swiftui env KAYA_SELFTEST=identity KAYA_LIB="$ROOT/target/deb
 run identity-haskell-swiftui env KAYA_SELFTEST=identity "$(hs_bin identity)"
 run identity-java-swiftui env KAYA_SELFTEST=identity KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+drain
+
+# The assets conformance scene (docs/assets-plan.md): `asset(name)`'s two
+# redemptions, observed through real surfaces.
+#
+# THIS LANE STAGES NOTHING, and that is the assertion. No KAYA_ASSET_DIR
+# is exported anywhere below, so the core resolves the root by its
+# compile-time repo-relative default — and the frozen census in
+# tools/scenes/assets.steps is what proves it found the whole root rather
+# than one file. The pre-flight above says the same thing before any leg
+# runs, so a missing root is named there rather than as nine identical
+# failures here.
+#
+# ALL NINE TIERS, including the C FLOOR — the only scene that has one
+# beside the eight hosted guests, because the floor is where
+# `kaya_asset_open` and `kaya_asset_blob` are documented longhand and
+# this is the first scene whose assertions were written for it.
+KAYA_SELFTEST_SCRIPT="$(scene_script assets)"
+export KAYA_SELFTEST_SCRIPT
+run assets-rust-swiftui env KAYA_SELFTEST=assets "$RUST_GUESTS"/assets
+run assets-python-swiftui env KAYA_SELFTEST=assets python3 guests/python/assets.py
+run assets-go-swiftui env KAYA_SELFTEST=assets target/go-guests/kaya-go
+run assets-swift-swiftui env KAYA_SELFTEST=assets target/swift-guests/assets
+run assets-csharp-swiftui env KAYA_SELFTEST=assets KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run assets-ocaml-swiftui env KAYA_SELFTEST=assets KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/assets.exe
+run assets-haskell-swiftui env KAYA_SELFTEST=assets "$(hs_bin assets)"
+run assets-java-swiftui env KAYA_SELFTEST=assets KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+run assets-c-swiftui env KAYA_SELFTEST=assets target/c-guests/assets
 drain
 
 # The clipboard scene: one clip in several representations, and the

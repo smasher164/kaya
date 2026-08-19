@@ -38,10 +38,16 @@ holding. So the mark is built to make that read impossible to fake:
   one asset over: the expectation must be unreachable by fallback, by
   construction.
 
-`KAYA_ICON_FILE` overrides the repo-relative default for a runner whose
-guest cannot see the repo, exactly as `KAYA_FONT_FILE` does for the
-typeface — the Windows lane copies this file to the mirrored path on the
-VM (tools/deploy-win.sh) and points the variable at it.
+NOTHING NAMES THIS FILE'S PATH ANY MORE. The guests ask for
+`asset("icons/kaya-mark.png")` and the core resolves it
+(crates/kaya/src/assets.rs); a runner whose guest cannot see the repo
+stages the whole asset ROOT and names it once in `KAYA_ASSET_DIR` — the
+Windows lane copies the root into the VM's repo mirror, the emulator
+lane pushes it, and the iOS lane copies it into the app bundle, where
+the core finds it with no variable at all. Android has a fourth route
+and it is the packaging one: the APK carries the root under
+`assets/kaya/` and the AssetManager serves it, which is what the legs
+that arrive with no `KAYA_ASSET_DIR` exercise.
 
 ## How to regenerate it
 

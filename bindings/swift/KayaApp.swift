@@ -868,32 +868,61 @@ final class KayaAsset {
             kaya_asset_open(raw.baseAddress, UInt(raw.count))
         }
         guard opened != 0 else {
-            // NO SWIFT FUNCTION IS NAMED FOR THIS, deliberately. The
-            // sentence has exactly one author — `asset_why_not` in
-            // crates/kaya/src/assets.rs, which is where
-            // tools/check-diagnostics.sh's rule belongs — and a Swift
-            // helper called `…WhyNot` would claim to compose a diagnosis
-            // it only carries. This is the carrying, inline, so the
-            // naming convention keeps pointing at the one place a
-            // sentence is written.
-            //
-            // SIZED, THEN READ: the C entry writes into the caller's
-            // buffer and returns the sentence's TRUE length, so the
-            // first call asks how long it is and the second fills it.
-            // A guessed buffer would cut the half that names the root
-            // and the route, which is the half a reader is chasing.
-            let len = utf8.withUnsafeBufferPointer { raw in
-                kaya_asset_why_not(raw.baseAddress, UInt(raw.count), nil, 0)
-            }
-            var sentence = [UInt8](repeating: 0, count: Int(len))
-            sentence.withUnsafeMutableBufferPointer { out in
-                _ = utf8.withUnsafeBufferPointer { raw in
-                    kaya_asset_why_not(raw.baseAddress, UInt(raw.count), out.baseAddress, len)
-                }
-            }
-            fatalError(String(decoding: sentence, as: UTF8.self))
+            // ONE COPY OF THE FFI DANCE, and it is `missSentence` below:
+            // the trap and the query hand back the same bytes because
+            // they are the same call.
+            fatalError(KayaAsset.missSentence(name))
         }
         handle = opened
+    }
+
+    /// Why `KayaAsset(name)` would trap — the sentence it would carry,
+    /// handed over without trapping. `""` means the name resolves.
+    ///
+    /// THIS BINDING IS WHY THE QUERY EXISTS AT ALL. Unwinding is not one
+    /// semantics in nine languages, and a conformance scene has to observe
+    /// this sentence on five platforms: seven bindings raise something a
+    /// guest can catch, and Swift's is `fatalError`, which TRAPS rather
+    /// than unwinding — so a Swift guest cannot catch a miss. A total
+    /// query has no such split, and the scene can freeze it here too.
+    ///
+    /// THE SAME SENTENCE, NOT A SECOND ONE: `init` traps with exactly this
+    /// string, so what a scene freezes is what an app's user would have
+    /// been shown.
+    ///
+    /// NAMED FOR THE CARRYING and not for the diagnosing. The sentence has
+    /// exactly one author — `asset_why_not` in crates/kaya/src/assets.rs,
+    /// which is where tools/check-diagnostics.sh's rule belongs — and a
+    /// Swift helper called `…WhyNot` would claim to compose a diagnosis it
+    /// only carries.
+    ///
+    /// SIZED, THEN READ: the C entry writes into the caller's buffer and
+    /// returns the sentence's TRUE length, so the first call asks how long
+    /// it is and the second fills it. A guessed buffer would cut the half
+    /// that names the root and the route, which is the half a reader is
+    /// chasing.
+    ///
+    /// TWO LINES. Line 1 — the name, the rule it broke, and the census of
+    /// what the package carries — is the same on every platform and is the
+    /// line a scene freezes. Line 2 names the resolved place and the route
+    /// that chose it, which a bundle, a device directory and a repo
+    /// checkout spell three different ways.
+    ///
+    /// It measures rather than predicts: each call reads, so `""` is a
+    /// fact about the moment it was asked.
+    static func missSentence(_ name: String) -> String {
+        let utf8 = Array(name.utf8)
+        let len = utf8.withUnsafeBufferPointer { raw in
+            kaya_asset_why_not(raw.baseAddress, UInt(raw.count), nil, 0)
+        }
+        if len == 0 { return "" }
+        var sentence = [UInt8](repeating: 0, count: Int(len))
+        sentence.withUnsafeMutableBufferPointer { out in
+            _ = utf8.withUnsafeBufferPointer { raw in
+                kaya_asset_why_not(raw.baseAddress, UInt(raw.count), out.baseAddress, len)
+            }
+        }
+        return String(decoding: sentence, as: UTF8.self)
     }
 
     /// THE BYTES REDEMPTION: this asset's bytes, copied out of core
