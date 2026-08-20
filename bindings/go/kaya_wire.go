@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x9be02e4dbe710c5b
+	SpecHash uint64 = 0x2dd89e177006e976
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -62,7 +62,7 @@ const (
 	WpropHeight = 3
 	WpropVetoClose = 4
 	WpropSectionsPresentation = 5
-	WpropListDetail = 6
+	WpropPanes = 6
 	WpropDirty = 7
 	WpropInset = 8
 	EpropTitle = 1
@@ -1348,21 +1348,21 @@ func TxBindWindowSectionsPresentation(window uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
-// TxSetWindowListDetail: set_window_prop with a constant list_detail value (window 0, the primary surface).
-func TxSetWindowListDetail(window uint64, listDetail bool) []byte {
+// TxSetWindowPanes: set_window_prop with a constant panes value (window 0, the primary surface).
+func TxSetWindowPanes(window uint64, panes int64) []byte {
 	b := beginRecord(txSetWindowProp)
 	b = binary.LittleEndian.AppendUint64(b, window)
-	b = binary.LittleEndian.AppendUint32(b, WpropListDetail)
+	b = binary.LittleEndian.AppendUint32(b, WpropPanes)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
-	b = encodeValue(b, listDetail)
+	b = encodeValue(b, panes)
 	return endRecord(b)
 }
 
-// TxBindWindowListDetail: set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
-func TxBindWindowListDetail(window uint64, signalID uint64) []byte {
+// TxBindWindowPanes: set_window_prop with a signal-bound panes value (window 0, the primary surface).
+func TxBindWindowPanes(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
 	b = binary.LittleEndian.AppendUint64(b, window)
-	b = binary.LittleEndian.AppendUint32(b, WpropListDetail)
+	b = binary.LittleEndian.AppendUint32(b, WpropPanes)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

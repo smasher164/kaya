@@ -2758,7 +2758,7 @@ final class KayaAppTx {
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
-        listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
+        panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
         inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -2769,7 +2769,7 @@ final class KayaAppTx {
         tx.createWindow(id)
         window(
             id, title: title, width: width, height: height,
-            vetoClose: vetoClose, dirty: dirty, listDetail: listDetail,
+            vetoClose: vetoClose, dirty: dirty, panes: panes,
             sectionsPresentation: sectionsPresentation, inset: inset,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             onUndone: onUndone, onRedone: onRedone,
@@ -2790,10 +2790,19 @@ final class KayaAppTx {
     /// not appearance (docs/styling-plan.md D3). 16 unless you say
     /// otherwise; 0 is full bleed. A platform's SAFE AREA is a separate
     /// fact and is not removed by it.
+    ///
+    /// `panes:` is the CEILING on how many of this window's stack entries
+    /// present side by side — 1 is the serial stack, 2 and 3 are columns on
+    /// a window wide enough, the shallowest shed first as it narrows
+    /// (docs/multicolumn-plan.md carries the ruling and the measured
+    /// mechanics). There is deliberately no argument for WHICH entries show
+    /// — the stack's order is the priority order — and the live count is
+    /// the platform's own judgment where it has one. The root refuses 0 and
+    /// anything above 3.
     func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
-        listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
+        panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
         inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -2806,7 +2815,7 @@ final class KayaAppTx {
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
         if let dirty { tx.setWindowDirty(id, dirty) }
-        if let listDetail { tx.setWindowListDetail(id, listDetail) }
+        if let panes { tx.setWindowPanes(id, Int64(panes)) }
         if let sectionsPresentation {
             tx.setWindowSectionsPresentation(id, sectionsPresentation)
         }

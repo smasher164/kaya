@@ -1130,7 +1130,7 @@ pub enum WindowProp {
     /// top of stack trailing; a COMPACT window is unchanged, the compact
     /// case being the default. There is deliberately no prop for WHICH
     /// way it presents: that is the size class's answer.
-    ListDetail,
+    Panes,
     /// Whether this surface holds UNSAVED WORK (Bool-valued; default
     /// false; docs/dirty-plan.md D1). State, never chrome: each backend
     /// spells its platform's own affordance (D2) and the app's title

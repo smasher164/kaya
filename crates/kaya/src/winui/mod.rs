@@ -9408,8 +9408,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
-                (WindowProp::ListDetail, Value::Bool(on)) => {
-                    core.list_detail.insert(window.0, *on);
+                // BRIDGE (docs/multicolumn-plan.md): a ceiling of 2 or 3
+                // lowers as the two-pane split, 1 as the serial stack,
+                // until this backend's three-pane slice lands.
+                (WindowProp::Panes, Value::I64(n)) => {
+                    core.list_detail.insert(window.0, *n >= 2);
                     refresh_nav(core, window.0)?;
                 }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {

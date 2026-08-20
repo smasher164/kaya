@@ -1,10 +1,10 @@
-(* The split conformance scene, OCaml port — adaptive list-detail:
-   [~list_detail] rides the window, [push_entry ~title ~on_popped] plus
-   [mount_in] presents the detail.
+(* The split conformance scene, OCaml port — adaptive panes: [~panes]
+   rides the window, [push_entry ~title ~on_popped] plus [mount_in]
+   presents the detail.
 
    THE GUEST ASKS FOR THE PRESENTATION ONCE and then does nothing adaptive
    again: the platform re-decides as the size class changes, and there is
-   no prop for WHICH way it presents.
+   no prop for WHICH entries present.
 
    TWO scripts drive this ONE app: [split] resizes and names the
    presentation on each side, [listdetail] asserts the bare invariant at
@@ -20,7 +20,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     window ~title:"split" ~list_detail:true ();
+     window ~title:"split" ~panes:2 ();
      let s = signal (Str "list pane") in
      let on_detail () =
        push_entry ~title:"detail"

@@ -378,7 +378,7 @@
 
 #define WPROP_SECTIONS_PRESENTATION 5
 
-#define WPROP_LIST_DETAIL 6
+#define WPROP_PANES 6
 
 #define WPROP_DIRTY 7
 
@@ -441,6 +441,18 @@
 #define SECTIONS_PRESENTATION_BAR 1
 
 #define SECTIONS_PRESENTATION_SIDEBAR 2
+
+/**
+ * The panes enum's wire values (spec enum "panes"): the declared
+ * ceiling on side-by-side stack entries. VALUES ARE THE COUNTS
+ * THEMSELVES (alert_choice's index precedent) — 0 is deliberately
+ * unassigned so an unset default cannot alias a legal ceiling.
+ */
+#define PANES_ONE 1
+
+#define PANES_TWO 2
+
+#define PANES_THREE 3
 
 /**
  * Navigation-entry property ids (spec::ENTRY_PROPS) — their own
@@ -1106,7 +1118,16 @@
  * The window prop asking for the adaptive list-detail presentation of
  * this window's entry stack (DESIGN.md, Adaptive list-detail).
  */
-#define KAYA_WPROP_LIST_DETAIL 6
+#define KAYA_WPROP_PANES 6
+
+/**
+ * The panes enum's values (spec enum "panes"): the counts themselves.
+ */
+#define KAYA_PANES_ONE 1
+
+#define KAYA_PANES_TWO 2
+
+#define KAYA_PANES_THREE 3
 
 /**
  * The window prop saying this surface holds UNSAVED WORK

@@ -1062,9 +1062,15 @@ data WindowAttr
   = WTitle String
   | WSize Double Double
   | WVetoClose Bool
-  | -- | Present this window's entry stack as list-detail where the
-    -- size class allows; the platform decides which way.
-    WListDetail Bool
+  | -- | The CEILING on how many of this window's stack entries present
+    -- side by side: 1 is the serial stack, 2 and 3 are columns on a
+    -- window wide enough, the shallowest shed first as it narrows
+    -- (docs/multicolumn-plan.md carries the ruling and the measured
+    -- mechanics). There is deliberately no argument for WHICH entries
+    -- show — the stack's order is the priority order — and the live
+    -- count is the platform's own judgment where it has one. The root
+    -- refuses 0 and anything above 3.
+    WPanes Word32
   | WSectionsPresentation Int64
   | -- | Whether this surface holds unsaved work (docs/dirty-plan.md
     -- D1). STATE, not chrome: each backend spells its own platform's
@@ -1106,7 +1112,7 @@ window n = mapM_ apply
       emitB (W.txSetWindowWidth n w)
       emitB (W.txSetWindowHeight n h)
     apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
-    apply (WListDetail v) = emitB (W.txSetWindowListDetail n v)
+    apply (WPanes ceiling') = emitB (W.txSetWindowPanes n (fromIntegral ceiling'))
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
     apply (WDirty v) = emitB (W.txSetWindowDirty n v)
     apply (WInset units) = emitB (W.txSetWindowInset n units)

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x9be02e4dbe710c5b;
+    public const ulong SpecHash = 0x2dd89e177006e976;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -60,7 +60,7 @@ static class KayaWire
     public const uint WpropHeight = 3;
     public const uint WpropVetoClose = 4;
     public const uint WpropSectionsPresentation = 5;
-    public const uint WpropListDetail = 6;
+    public const uint WpropPanes = 6;
     public const uint WpropDirty = 7;
     public const uint WpropInset = 8;
     public const uint EpropTitle = 1;
@@ -1248,20 +1248,20 @@ static class KayaWire
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
-    /// set_window_prop with a constant list_detail value (window 0, the primary surface).
-    public static byte[] TxSetWindowListDetail(ulong window, bool listDetail)
+    /// set_window_prop with a constant panes value (window 0, the primary surface).
+    public static byte[] TxSetWindowPanes(ulong window, long panes)
     {
         var w = Begin(out var stream);
-        w.Write(window); w.Write(WpropListDetail); w.Write(SourceConst);
-        EncodeValue(w, listDetail);
+        w.Write(window); w.Write(WpropPanes); w.Write(SourceConst);
+        EncodeValue(w, panes);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
-    /// set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
-    public static byte[] TxBindWindowListDetail(ulong window, ulong signalId)
+    /// set_window_prop with a signal-bound panes value (window 0, the primary surface).
+    public static byte[] TxBindWindowPanes(ulong window, ulong signalId)
     {
         var w = Begin(out var stream);
-        w.Write(window); w.Write(WpropListDetail); w.Write(SourceSignal); w.Write(signalId);
+        w.Write(window); w.Write(WpropPanes); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 

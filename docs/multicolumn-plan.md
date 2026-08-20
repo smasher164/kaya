@@ -1,5 +1,58 @@
 # Multi-column adaptive layout — the design pass
 
+
+Status: **RATIFIED 2026-08-19 (maintainer), all five questions ruled.**
+Q1: PANES is the milestone; container re-flow stays its own ledger
+entry. Q2: the third pane is ADMITTED (Windows composes, stated as the
+weak leg). Q3: OPTION A — kaya's compact/collapse behavior is UNIFORM,
+macOS included; the maintainer finds the platform's native crush
+undesirable ("compacting/collapsing panes is better"). The carve-out
+therefore runs the other way from the draft's proposal: platforms with
+native adaptive judgment (iPadOS size classes, Android's window size
+classes) decide capacity K natively, and macOS — which has no compact
+mode to defer to — takes KAYA-SUPPLIED thresholds. The threshold must
+be PRINCIPLED, not another invented 600: collapse when the window
+cannot fit the visible columns' MINIMUM WIDTHS (research pass on the
+mechanics in flight; its findings amend this section). Q4: the
+material3-adaptive bump is taken as a deliberate, watched change to the
+tablet leg. Q5: `panes` REPLACES list_detail's Bool at window-prop
+slot 6 — one spec-hash move, full regeneration, both scenes and four
+backends rewritten, DESIGN.md's ratified section reopened with this
+ruling as its authority.
+
+MECHANICS AMENDMENTS (measured 2026-08-19, scratch probes on macOS
+26.5.2; the raw logs and probe sources are recoverable from the session
+transcripts — the findings below are the durable record):
+1. MINIMUMS ARE KAYA'S MODEL'S ALONE, DECLARED TO NOBODY. Declaring
+   navigationSplitViewColumnWidth(min:) sets the WINDOW's minimum to
+   the columns' sum — the window then refuses every smaller size, the
+   collapse rule can never fire (flips=0 measured), and resize_window
+   (setContentSize) becomes a SILENT NO-OP with every later assertion
+   made against a window that never shrank. SwiftUI receives ideal
+   widths only; the collapse arithmetic (window width vs the sum of
+   kaya's own minimums for the visible columns) runs in kaya's model.
+2. THE NAVIGATIONSTACK SWAP IS DELETED. Measured cost of a container
+   swap: total view-identity loss on every crossing (every @State,
+   focus, in-flight edits), a toolbar rebuild, and the window title
+   changing source. The one-container ladder replaces it: the entry
+   stack lives INSIDE the detail column (which also yields a real
+   back item that survives collapse), .doubleColumn sheds the sidebar
+   — shallowest first, kaya's own order, a smooth ~250ms ramp — and
+   the 1-pane rung comes from zeroing the CONTENT column's width,
+   never from .detailOnly, which the three-column form refuses in two
+   silent shapes (a no-op leaving the binding lying, or SwiftUI
+   writing .all back).
+3. THE PANE READER COUNTS BY WIDTH AND HIDDENNESS BOTH: the zero-width
+   column stays isHidden == false, so "non-hidden" alone would count a
+   pane no eye can see — zero width IS invisible, the stronger rule.
+   Two [INFER] checks the depth slice owes: the zero-width column's
+   content renders conditionally (an empty view at zero) so focus
+   order and AX gain no phantom stop, and the sidebar-toggle button
+   writes into the same visibility binding, so kaya's rule is
+   EDGE-triggered on width crossings, never level-triggered — a
+   level rule undoes the user's toggle, and a refused state must
+   never be commanded (it re-issues forever, measured).
+
 Status: DRAFT, 2026-08-19. NOTHING RATIFIED. Five research briefs feed
 this (`mac-ios.md`, `windows.md`, `gtk.md`, `android.md`,
 `prior-art.md`, all in this directory) plus the read-only scout

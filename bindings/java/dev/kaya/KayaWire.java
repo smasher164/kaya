@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x9be02e4dbe710c5bL;
+    public static final long SPEC_HASH = 0x2dd89e177006e976L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -61,7 +61,7 @@ public final class KayaWire {
     public static final int WPROP_HEIGHT = 3;
     public static final int WPROP_VETO_CLOSE = 4;
     public static final int WPROP_SECTIONS_PRESENTATION = 5;
-    public static final int WPROP_LIST_DETAIL = 6;
+    public static final int WPROP_PANES = 6;
     public static final int WPROP_DIRTY = 7;
     public static final int WPROP_INSET = 8;
     public static final int EPROP_TITLE = 1;
@@ -1143,18 +1143,18 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** set_window_prop with a constant list_detail value (window 0, the primary surface). */
-    public static byte[] txSetWindowListDetail(long window, boolean listDetail) {
+    /** set_window_prop with a constant panes value (window 0, the primary surface). */
+    public static byte[] txSetWindowPanes(long window, long panes) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(window).putInt(WPROP_LIST_DETAIL).putInt(SOURCE_CONST);
-        encodeValue(b, listDetail);
+        b.putLong(window).putInt(WPROP_PANES).putInt(SOURCE_CONST);
+        encodeValue(b, panes);
         return finish(b);
     }
 
-    /** set_window_prop with a signal-bound list_detail value (window 0, the primary surface). */
-    public static byte[] txBindWindowListDetail(long window, long signalId) {
+    /** set_window_prop with a signal-bound panes value (window 0, the primary surface). */
+    public static byte[] txBindWindowPanes(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(window).putInt(WPROP_LIST_DETAIL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        b.putLong(window).putInt(WPROP_PANES).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

@@ -597,7 +597,11 @@ pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 
 /// The window prop asking for the adaptive list-detail presentation of
 /// this window's entry stack (DESIGN.md, Adaptive list-detail).
-pub const KAYA_WPROP_LIST_DETAIL: u32 = 6;
+pub const KAYA_WPROP_PANES: u32 = 6;
+/// The panes enum's values (spec enum "panes"): the counts themselves.
+pub const KAYA_PANES_ONE: u32 = 1;
+pub const KAYA_PANES_TWO: u32 = 2;
+pub const KAYA_PANES_THREE: u32 = 3;
 
 /// The window prop saying this surface holds UNSAVED WORK
 /// (docs/dirty-plan.md D1). State, not chrome: each backend spells its
@@ -759,7 +763,10 @@ const _: () = assert!(
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
         && KAYA_WPROP_VETO_CLOSE == wire::WPROP_VETO_CLOSE
-        && KAYA_WPROP_LIST_DETAIL == wire::WPROP_LIST_DETAIL
+        && KAYA_WPROP_PANES == wire::WPROP_PANES
+        && KAYA_PANES_ONE == wire::PANES_ONE
+        && KAYA_PANES_TWO == wire::PANES_TWO
+        && KAYA_PANES_THREE == wire::PANES_THREE
         && KAYA_WPROP_DIRTY == wire::WPROP_DIRTY
         && KAYA_WPROP_INSET == wire::WPROP_INSET
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE

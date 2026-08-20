@@ -1,6 +1,6 @@
-//! The split conformance scene: adaptive list-detail as assertions
-//! (DESIGN.md, Adaptive list-detail). Nothing here is split-specific
-//! except `list_detail(true)`, asked for ONCE — the stack is the
+//! The split conformance scene: adaptive panes as assertions
+//! (DESIGN.md; docs/multicolumn-plan.md). Nothing here is
+//! split-specific except `panes(2)`, asked for ONCE — the stack is the
 //! ordinary navigation stack, and every re-decision after that is the
 //! platform's.
 
@@ -25,7 +25,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let status = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("split")
-            .list_detail(true);
+            .panes(2);
         let status = tx.signal("list pane");
         let root = tx
             .column(|tx| {

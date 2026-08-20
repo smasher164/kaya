@@ -715,7 +715,13 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
     match (prop, value) {
         (WindowProp::Title, Value::Str(_)) => {}
         (WindowProp::VetoClose, Value::Bool(_)) => {}
-        (WindowProp::ListDetail, Value::Bool(_)) => {}
+        (WindowProp::Panes, Value::I64(n)) => {
+            assert!(
+                (1..=3).contains(n),
+                "kaya: panes is a ceiling of 1, 2 or 3 side-by-side stack \
+                 entries — {n} is not one (docs/multicolumn-plan.md)"
+            );
+        }
         (WindowProp::Dirty, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
@@ -5797,26 +5803,51 @@ mod tests {
     }
 
     #[test]
-    fn list_detail_takes_a_bool() {
+    fn panes_takes_the_three_legal_ceilings() {
+        let mut scene = Scene::new();
+        for n in 1..=3 {
+            scene.apply(vec![TxOp::SetWindowProp {
+                window: DEFAULT_WINDOW,
+                prop: WindowProp::Panes,
+                value: PropValue::Const(Value::I64(n)),
+            }]);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "is not one")]
+    fn panes_rejects_zero() {
+        // 0 is deliberately unassigned in the enum so an unset default
+        // cannot alias a legal ceiling (wire.rs's PANES_* block).
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::SetWindowProp {
             window: DEFAULT_WINDOW,
-            prop: WindowProp::ListDetail,
-            value: PropValue::Const(Value::Bool(true)),
+            prop: WindowProp::Panes,
+            value: PropValue::Const(Value::I64(0)),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not one")]
+    fn panes_rejects_a_ceiling_above_three() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::Panes,
+            value: PropValue::Const(Value::I64(4)),
         }]);
     }
 
     #[test]
     #[should_panic(expected = "rejects value")]
-    fn list_detail_rejects_a_non_bool() {
-        // The prop asks a yes/no question — "present this stack as
-        // list-detail" — and WHICH way it presents is the size class's
-        // answer, never a value the app supplies. An enum here would be
-        // an app overriding the platform's own breakpoint.
+    fn panes_rejects_a_non_integer() {
+        // WHICH way the stack presents is never a value the app
+        // supplies — only the ceiling is. A string here is the old
+        // enum-shaped mistake the Bool refused too.
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::SetWindowProp {
             window: DEFAULT_WINDOW,
-            prop: WindowProp::ListDetail,
+            prop: WindowProp::Panes,
             value: PropValue::Const(Value::from("regular")),
         }]);
     }

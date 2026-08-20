@@ -3811,14 +3811,17 @@ impl WindowRef<'_, '_> {
         self
     }
 
-    /// Ask this window to present its ENTRY STACK as list-detail
-    /// (DESIGN.md, Adaptive list-detail): on a REGULAR window the base root
-    /// takes the leading pane and the top of the stack the trailing one; on
-    /// a COMPACT one nothing changes. There is deliberately no argument for
-    /// WHICH way it presents — that is the size class's answer.
-    pub fn list_detail(self, on: bool) -> Self {
+    /// The CEILING on how many of this window's stack entries present
+    /// side by side: 1 is the serial stack, 2 and 3 are columns on a
+    /// window wide enough, the shallowest shed first as it narrows
+    /// (docs/multicolumn-plan.md carries the ruling and the measured
+    /// mechanics). There is deliberately no argument for WHICH entries
+    /// show — the stack's order is the priority order — and the live
+    /// count is the platform's own judgment where it has one. The root
+    /// refuses 0 and anything above 3.
+    pub fn panes(self, ceiling: u32) -> Self {
         self.tx
-            .set_window_prop(self.window, WindowProp::ListDetail, on);
+            .set_window_prop(self.window, WindowProp::Panes, i64::from(ceiling));
         self
     }
 

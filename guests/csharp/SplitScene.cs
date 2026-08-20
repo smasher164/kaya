@@ -1,6 +1,6 @@
-// The split conformance scene, C# port — adaptive list-detail via named
+// The split conformance scene, C# port — adaptive panes via named
 // arguments. The guest asks for the presentation ONCE and does nothing
-// adaptive after that; there is no prop for WHICH way it presents.
+// adaptive after that; there is no prop for WHICH entries present.
 //
 // TWO scripts drive this ONE app: split resizes and names the
 // presentation on each side, listdetail asserts the bare invariant at
@@ -18,7 +18,7 @@ static class SplitScene
         Signal status = default;
         app.Build(tx =>
         {
-            tx.Window(title: "split", listDetail: true);
+            tx.Window(title: "split", panes: 2);
             status = tx.Signal("list pane");
 
             tx.Mount(tx.Column(() =>

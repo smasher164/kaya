@@ -1312,11 +1312,19 @@ public final class KayaApp {
         }
 
         /**
-         * Ask this window to present its ENTRY STACK as list-detail: on a REGULAR window the base root takes the leading pane and the top of the stack the trailing one; on a COMPACT one nothing changes.
-         * There is no argument for WHICH way it presents - that is the size class's answer, not the app's.
+         * The CEILING on how many of this window's stack entries present
+         * side by side: 1 is the serial stack, 2 and 3 are columns on a
+         * window wide enough, the shallowest shed first as it narrows
+         * (docs/multicolumn-plan.md carries the ruling and the measured
+         * mechanics).
+         *
+         * <p>There is deliberately no argument for WHICH entries show —
+         * the stack's order is the priority order — and the live count is
+         * the platform's own judgment where it has one. The root refuses
+         * 0 and anything above 3.
          */
-        public WindowRef listDetail(boolean on) {
-            tx.emit(KayaWire.txSetWindowListDetail(id, on));
+        public WindowRef panes(int ceiling) {
+            tx.emit(KayaWire.txSetWindowPanes(id, ceiling));
             return this;
         }
 

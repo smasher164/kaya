@@ -819,6 +819,17 @@ try:
         "the live window construct names its surface",
         _win_shipped[2:3] == [[kaya.wire.tx_set_window_dirty(7, True)]],
     )
+    # `panes` IS AN INTEGER PROP AND PYTHON HAS NO TYPE TO CATCH IT: the
+    # keyword takes whatever it is handed, and a bool would ride the same
+    # `int()` as a count. Decoded from the bytes rather than asked about,
+    # so the ceiling that reaches the wire is the one the guest said
+    # (docs/multicolumn-plan.md).
+    with app_win.build():
+        app_win.window(panes=2)
+    check(
+        "the window construct ships the panes ceiling as an I64",
+        _win_shipped[3:4] == [[kaya.wire.tx_set_window_panes(0, 2)]],
+    )
     # And the `with` form inside an open transaction is refused IN ITS
     # OWN WORDS: "transactions do not nest" is true here and unhelpful.
     with app_win.build():
@@ -1839,7 +1850,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     # THE CLASS IS HAND-WRITTEN AND THE CONSTANTS ARE GENERATED, so the
     # first clause is the census holding them together: without it Python
     # is silently the one binding that cannot say a new word, which is
-    # how `list_detail` shipped unsayable here (invariant 2).
+    # how the window prop then spelled `list_detail` (now `panes`)
+    # shipped unsayable here (invariant 2).
     generated = {
         name[len("SYMBOL_"):].lower(): value
         for name, value in vars(kaya.wire).items()

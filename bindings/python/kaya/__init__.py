@@ -3062,7 +3062,7 @@ def when(sig):
 
 
 def _window_props(window, title, width, height, veto_close, dirty,
-                  list_detail, sections_presentation, inset):
+                  panes, sections_presentation, inset):
     """The window construct's props, emitted into the ambient
     transaction — ONE place, so the scene scope and the live call cannot
     drift apart."""
@@ -3076,8 +3076,8 @@ def _window_props(window, title, width, height, veto_close, dirty,
     # means and what it deliberately does not do.
     if dirty is not None:
         records.append(wire.tx_set_window_dirty(window, bool(dirty)))
-    if list_detail is not None:
-        records.append(wire.tx_set_window_list_detail(window, bool(list_detail)))
+    if panes is not None:
+        records.append(wire.tx_set_window_panes(window, int(panes)))
     if sections_presentation is not None:
         records.append(wire.tx_set_window_sections_presentation(
             window, int(sections_presentation)))
@@ -3119,7 +3119,7 @@ class _LiveWindow:
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
                  window=0, create=False, veto_close=None, dirty=None,
-                 list_detail=None,
+                 panes=None,
                  sections_presentation=None, inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None, host_window=0,
@@ -3139,7 +3139,7 @@ class _TxScope:
         self._create = create
         self._veto_close = veto_close
         self._dirty = dirty
-        self._list_detail = list_detail
+        self._panes = panes
         self._sections_presentation = sections_presentation
         self._inset = inset
         self._push = push
@@ -3240,7 +3240,7 @@ class _TxScope:
             _records().append(wire.tx_create_window(self._window))
         _window_props(
             self._window, self._title, self._width, self._height,
-            self._veto_close, self._dirty, self._list_detail,
+            self._veto_close, self._dirty, self._panes,
             self._sections_presentation, self._inset)
         return self
 
@@ -3376,7 +3376,7 @@ class App:
             self._redone[int(window_id)] = on_redone
 
     def create_window(self, window_id, title=None, width=None, height=None,
-                      veto_close=None, dirty=None, list_detail=None,
+                      veto_close=None, dirty=None, panes=None,
                       sections_presentation=None, inset=None,
                       on_close_requested=None, on_closed=None,
                       on_undone=None, on_redone=None):
@@ -3401,11 +3401,11 @@ class App:
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
-            dirty=dirty, list_detail=list_detail,
+            dirty=dirty, panes=panes,
             sections_presentation=sections_presentation, inset=inset)
 
     def window(self, title=None, width=None, height=None, veto_close=None,
-               dirty=None, list_detail=None, sections_presentation=None,
+               dirty=None, panes=None, sections_presentation=None,
                inset=None, on_close_requested=None, on_closed=None,
                on_undone=None, on_redone=None, window_id=0):
         """The scene scope: an ambient transaction whose single top-level
@@ -3413,11 +3413,19 @@ class App:
         set is EXACTLY create_window's — the primary differs only in
         having no creation moment. `title` names the surface;
         `width`/`height` request content size in DIP (advisory);
-        `veto_close` arms the close-veto class; `list_detail` asks for
-        list-detail presentation, and WHICH way is the platform's answer;
+        `veto_close` arms the close-veto class;
         `sections_presentation` is the ADVISORY sections hint;
         `window_id` names the surface the attributes are about, 0 unless
         you say otherwise.
+
+        `panes` is the CEILING on how many of this window's stack entries
+        present side by side: 1 is the serial stack, 2 and 3 are columns
+        on a window wide enough, the shallowest shed first as it narrows
+        (docs/multicolumn-plan.md carries the ruling and the measured
+        mechanics). There is deliberately no argument for WHICH entries
+        show — the stack's order is the priority order — and the live
+        count is the platform's own judgment where it has one. The root
+        refuses 0 and anything above 3.
 
         `inset` is the window's CONTENT INSET in layout units — LAYOUT,
         not appearance (docs/styling-plan.md D3). 16 unless you say
@@ -3464,12 +3472,12 @@ class App:
             # `_tx` is a module global (see _require_app_thread).
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
-                          dirty, list_detail, sections_presentation, inset)
+                          dirty, panes, sections_presentation, inset)
             return _LiveWindow()
         return _TxScope(
             self, mount_on_exit=True, window=window_id,
             title=title, width=width, height=height,
-            veto_close=veto_close, dirty=dirty, list_detail=list_detail,
+            veto_close=veto_close, dirty=dirty, panes=panes,
             sections_presentation=sections_presentation, inset=inset)
 
     def build(self):

@@ -1,7 +1,7 @@
-// The split conformance scene, Swift port — adaptive list-detail. The
-// guest asks for the presentation ONCE and does nothing adaptive after:
-// the platform re-decides as the size class changes, and there is no
-// prop for WHICH way it presents.
+// The split conformance scene, Swift port — adaptive panes. The guest
+// asks for the presentation ONCE and does nothing adaptive after: the
+// platform re-decides as the size class changes, and there is no prop
+// for WHICH entries present.
 //
 // TWO scripts drive this ONE app. See guests/rust/split.rs,
 // tools/scenes/split.steps and tools/scenes/listdetail.steps.
@@ -15,7 +15,7 @@ let app = KayaApp()
 var status: KayaSignal!
 
 app.build { tx in
-    tx.window(title: "split", listDetail: true)
+    tx.window(title: "split", panes: 2)
     status = tx.signal(.str("list pane"))
     let root = tx.column {
         // Authored ids so the REAL-TREE read can address these: an index

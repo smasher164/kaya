@@ -1,11 +1,11 @@
-"""The split conformance scene, Python port — adaptive list-detail as
-assertions (DESIGN.md, Adaptive list-detail).
+"""The split conformance scene, Python port — adaptive panes as
+assertions (DESIGN.md; docs/multicolumn-plan.md).
 
-The guest asks for the presentation ONCE — `list_detail=True` on the
-window — and does nothing adaptive after that; the platform re-decides
-as the size class changes, and there is no prop for WHICH way it
-presents. The stack is the ordinary navigation stack: nothing here is
-split-specific except that one prop.
+The guest asks for the presentation ONCE — `panes=2` on the window —
+and does nothing adaptive after that; the platform re-decides as the
+size class changes, and there is no prop for WHICH entries present. The
+stack is the ordinary navigation stack: nothing here is split-specific
+except that one prop.
 
 TWO scripts drive this ONE app: `split` resizes and names the
 presentation on each side, `listdetail` asserts the bare invariant at
@@ -35,7 +35,7 @@ def open_detail():
             kaya.label(bind=caption).a11y_id("detail")
 
 
-with app.window(title="split", list_detail=True):
+with app.window(title="split", panes=2):
     status = kaya.signal("list pane")
     with kaya.column():
         # Authored ids so the REAL-TREE read can address these:

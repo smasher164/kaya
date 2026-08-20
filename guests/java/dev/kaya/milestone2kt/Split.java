@@ -3,8 +3,8 @@ package dev.kaya.milestone2kt;
 import dev.kaya.KayaApp;
 
 /**
- * The split conformance scene from the JVM — adaptive list-detail via
- * the chain spelling. The guest asks for the presentation ONCE and does
+ * The split conformance scene from the JVM — adaptive panes via the
+ * chain spelling. The guest asks for the presentation ONCE and does
  * nothing adaptive after that; the platform re-decides as the size
  * class changes.
  *
@@ -20,7 +20,7 @@ final class Split {
         KayaApp app = new KayaApp();
 
         KayaApp.Signal<String> status = app.build(tx -> {
-            tx.window(0).title("split").listDetail(true);
+            tx.window(0).title("split").panes(2);
             KayaApp.Signal<String> s = tx.signal("list pane");
             tx.mount(tx.column(() -> {
                 // Authored ids so the read goes through the REAL tree:

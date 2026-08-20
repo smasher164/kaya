@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x9be02e4dbe710c5b
+let kayaSpecHash: UInt64 = 0x2dd89e177006e976
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -64,7 +64,7 @@ private let wpropWidth: UInt32 = 2
 private let wpropHeight: UInt32 = 3
 private let wpropVetoClose: UInt32 = 4
 private let wpropSectionsPresentation: UInt32 = 5
-private let wpropListDetail: UInt32 = 6
+private let wpropPanes: UInt32 = 6
 private let wpropDirty: UInt32 = 7
 private let wpropInset: UInt32 = 8
 private let spropTitle: UInt32 = 1
@@ -386,7 +386,7 @@ final class KayaWindowModel: Identifiable {
     /// Whether this window presents its entry stack as list-detail (wprop 6;
     /// DESIGN.md, Adaptive list-detail). The SIZE CLASS decides which one
     /// materializes.
-    var listDetail = false
+    var panes: Int64 = 1
     /// Whether this surface holds UNSAVED WORK (wprop 7; docs/dirty-plan.md).
     /// macOS lowers it to NSWindow.isDocumentEdited and nothing else; iOS
     /// lowers it to nothing. The declared title is never rewritten.
@@ -397,7 +397,7 @@ final class KayaWindowModel: Identifiable {
     var inset: Double = 16
     /// The presentation the view layer ACTUALLY rendered — "split" or
     /// "stacked" — stamped by the arm that ran, never derived from
-    /// `listDetail` or `formFactor` (check-verbs' stamped-observation rule).
+    /// `panes` or `formFactor` (check-verbs' stamped-observation rule).
     var splitPresentation = "stacked"
     /// THE ARM THE SECTIONS RENDER ACTUALLY TOOK — "bar" or "sidebar",
     /// stamped by the body that rendered (the stamped-observation rule).
@@ -3100,8 +3100,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaApplyWindowSize(wid)
                 case (wpropVetoClose, valueBool):
                     model?.vetoClose = raw[body + 24] != 0
-                case (wpropListDetail, valueBool):
-                    model?.listDetail = raw[body + 24] != 0
+                case (wpropPanes, valueI64):
+                    model?.panes =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (wpropDirty, valueBool):
                     model?.dirty = raw[body + 24] != 0
                     kayaApplyWindowDirty(wid)
@@ -11705,7 +11706,9 @@ struct KayaAuxRoot: View {
 /// platform's answer, never the app's — that is what makes this adaptive.
 func kayaSplitArm(_ windowId: UInt64) -> Bool {
     guard let w = kayaScene.windows[windowId] else { return false }
-    return w.listDetail && w.formFactor == .regular
+    // BRIDGE (docs/multicolumn-plan.md): a ceiling of 2 or 3 takes
+    // the two-pane split until the three-pane slice lands.
+    return w.panes >= 2 && w.formFactor == .regular
 }
 
 /// The list-detail presentation of a window's entry stack. Two panes, never
@@ -11750,7 +11753,7 @@ struct KayaSplitRoot: View {
         .font(kayaBrandFont())
     }
 
-    /// Stamp the arm THIS BODY TOOK. Never derived from listDetail or
+    /// Stamp the arm THIS BODY TOOK. Never derived from panes or
     /// formFactor: a derived answer agrees with the lowering by construction and
     /// could never catch the defect.
     private func record() {

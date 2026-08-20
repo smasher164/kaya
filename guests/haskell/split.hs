@@ -1,6 +1,6 @@
--- The split conformance scene, Haskell port — adaptive list-detail. The
--- guest asks for the presentation ONCE and does nothing adaptive ever
--- again; there is no prop for WHICH way it presents.
+-- The split conformance scene, Haskell port — adaptive panes. The guest
+-- asks for the presentation ONCE and does nothing adaptive ever again;
+-- there is no prop for WHICH entries present.
 --
 -- TWO scripts drive this ONE app: split resizes and names the
 -- presentation on each side, listdetail asserts the bare invariant at
@@ -17,7 +17,7 @@ detailId = 7
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    window 0 [WTitle "split", WListDetail True]
+    window 0 [WTitle "split", WPanes 2]
     s <- signal (VStr "list pane")
     root <-
       column

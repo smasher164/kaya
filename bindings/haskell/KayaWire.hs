@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x9be02e4dbe710c5b
+specHash = 0x2dd89e177006e976
 
 valueBool :: Word32
 valueBool = 1
@@ -118,8 +118,8 @@ wpropVetoClose :: Word32
 wpropVetoClose = 4
 wpropSectionsPresentation :: Word32
 wpropSectionsPresentation = 5
-wpropListDetail :: Word32
-wpropListDetail = 6
+wpropPanes :: Word32
+wpropPanes = 6
 wpropDirty :: Word32
 wpropDirty = 7
 wpropInset :: Word32
@@ -1051,16 +1051,16 @@ txBindWindowSectionsPresentation window signalId = wireRecord txKindSetWindowPro
   (word64LE window <> word32LE wpropSectionsPresentation <> word32LE sourceSignal
     <> word64LE signalId)
 
--- set_window_prop with a constant list_detail value (window 0, the primary surface).
-txSetWindowListDetail :: Word64 -> Bool -> Builder
-txSetWindowListDetail window listDetail = wireRecord txKindSetWindowProp
-  (word64LE window <> word32LE wpropListDetail <> word32LE sourceConst
-    <> encodeValue (VBool listDetail))
+-- set_window_prop with a constant panes value (window 0, the primary surface).
+txSetWindowPanes :: Word64 -> Int64 -> Builder
+txSetWindowPanes window panes = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropPanes <> word32LE sourceConst
+    <> encodeValue (VI64 panes))
 
--- set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
-txBindWindowListDetail :: Word64 -> Word64 -> Builder
-txBindWindowListDetail window signalId = wireRecord txKindSetWindowProp
-  (word64LE window <> word32LE wpropListDetail <> word32LE sourceSignal
+-- set_window_prop with a signal-bound panes value (window 0, the primary surface).
+txBindWindowPanes :: Word64 -> Word64 -> Builder
+txBindWindowPanes window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropPanes <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_window_prop with a constant dirty value (window 0, the primary surface).

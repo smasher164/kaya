@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x9be02e4dbe710c5b
+let kayaSpecHash: UInt64 = 0x2dd89e177006e976
 
 struct KayaTx {
     var bytes = Data()
@@ -1125,21 +1125,21 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// set_window_prop with a constant list_detail value (window 0, the primary surface).
-    mutating func setWindowListDetail(_ window: UInt64, _ listDetail: Bool) {
+    /// set_window_prop with a constant panes value (window 0, the primary surface).
+    mutating func setWindowPanes(_ window: UInt64, _ panes: Int64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
-        self.u32(UInt32(KAYA_WPROP_LIST_DETAIL))
+        self.u32(UInt32(KAYA_WPROP_PANES))
         self.u32(UInt32(KAYA_SOURCE_CONST))
-        self.value(.bool(listDetail))
+        self.value(.i64(panes))
         self.end(kayaAt)
     }
 
-    /// set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
-    mutating func bindWindowListDetail(_ window: UInt64, _ signalId: UInt64) {
+    /// set_window_prop with a signal-bound panes value (window 0, the primary surface).
+    mutating func bindWindowPanes(_ window: UInt64, _ signalId: UInt64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
-        self.u32(UInt32(KAYA_WPROP_LIST_DETAIL))
+        self.u32(UInt32(KAYA_WPROP_PANES))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(kayaAt)

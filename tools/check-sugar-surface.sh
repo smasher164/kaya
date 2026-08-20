@@ -992,9 +992,126 @@ check_menus ocaml bindings/ocaml/kaya_app.ml \
 # WINDOW_PROPS entry lands here the moment the generators run. C is
 # exempt for the reason it is above: the floor spells every window prop
 # with one generic kaya_tx_set_window_prop call, on purpose.
+#
+# AND THE SPELLING HAS TO BE IN CODE. Measured 2026-08-19 while `panes`
+# was fanning out: with Go's constructor renamed to `PanesXX` this loop
+# still passed, because the doc comment above it opens "Panes is the
+# CEILING …" and /\bPanes\b/ cannot tell prose from a declaration. Every
+# prop in every binding carries such a comment, so the loop could only
+# ever agree — the exact vacuity the \b tightening was meant to end, one
+# layer further in. The patterns below are unchanged; they run against
+# copies with comments and docstrings stripped.
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/code"
+
+python3 - "$T/code" \
+    "python:bindings/python/kaya/__init__.py" \
+    "go:bindings/go/app.go" \
+    "csharp:bindings/csharp/KayaApp.cs" \
+    "java:bindings/java/dev/kaya/KayaApp.java" \
+    "swift:bindings/swift/KayaApp.swift" \
+    "ocaml:bindings/ocaml/kaya_app.ml" \
+    "haskell:bindings/haskell/KayaApp.hs" <<'PY' || exit 1
+import re
+import sys
+
+out = sys.argv[1]
+
+
+def c_like(s):
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+    return "\n".join(re.sub(r"//.*", "", ln) for ln in s.split("\n"))
+
+
+def python_like(s):
+    s = re.sub(r'"""(?:.|\n)*?"""', "", s)
+    s = re.sub(r"'''(?:.|\n)*?'''", "", s)
+    return "\n".join(re.sub(r"#.*", "", ln) for ln in s.split("\n"))
+
+
+def ocaml_like(s):
+    """(* … *) nests, so this counts rather than matching."""
+    keep, depth, i = [], 0, 0
+    while i < len(s):
+        if s.startswith("(*", i):
+            depth += 1
+            i += 2
+        elif s.startswith("*)", i) and depth:
+            depth -= 1
+            i += 2
+        else:
+            if not depth:
+                keep.append(s[i])
+            i += 1
+    return "".join(keep)
+
+
+def haskell_like(s):
+    s = re.sub(r"\{-(?:.|\n)*?-\}", "", s)
+    return "\n".join(re.sub(r"--.*", "", ln) for ln in s.split("\n"))
+
+
+STRIP = {
+    "python": python_like, "go": c_like, "csharp": c_like, "java": c_like,
+    "swift": c_like, "ocaml": ocaml_like, "haskell": haskell_like,
+}
+
+# A NONCE IN A COMMENT, PER LANGUAGE, and the whole point of the pass:
+# the raw file must satisfy the token and the stripped one must not. It
+# is planted rather than borrowed from a real prop so it cannot rot into
+# a name some binding later spells in code, and it runs for all seven so
+# a stripper that quietly strips nothing is caught where it lives.
+NONCE = "KayaCommentOnlyNonce"
+PLANT = {
+    "python": f"# {NONCE} rides in a comment\n" + f'"""{NONCE} rides in a docstring"""\n',
+    "go": f"// {NONCE} rides in a comment\n",
+    "csharp": f"/// {NONCE} rides in a comment\n",
+    "java": f"/** {NONCE} rides in a comment */\n",
+    "swift": f"/* {NONCE} rides in a comment */\n",
+    "ocaml": f"(* {NONCE} rides in a (* nested *) comment *)\n",
+    "haskell": f"-- {NONCE} rides in a comment\n",
+}
+
+applied = []
+for arg in sys.argv[2:]:
+    lang, path = arg.split(":", 1)
+    text = open(path, encoding="utf-8").read()
+    stripped = STRIP[lang](text)
+    # A stripper that ate the whole file would redden everything; one
+    # that ate nothing would restore the miss this replaces. Neither is
+    # allowed to reach the loop below as a verdict.
+    ratio = len(stripped) / len(text)
+    if not 0.25 < ratio < 0.95:
+        sys.exit(f"check-sugar-surface: stripping comments from {path} left "
+                 f"{len(stripped)}/{len(text)} bytes ({ratio:.2f}) — the "
+                 f"{lang} comment stripper is wrong")
+    planted = STRIP[lang](PLANT[lang] + text)
+    if NONCE not in PLANT[lang] + text:
+        sys.exit(f"check-sugar-surface: SELF-TEST FAIL ({lang}'s nonce was "
+                 "not planted at all)")
+    if NONCE in planted:
+        sys.exit(f"check-sugar-surface: SELF-TEST FAIL (a {lang} COMMENT "
+                 f"still satisfies the window-prop sweep — {path})")
+    applied.append(f" {lang}={PLANT[lang].count(NONCE)}")
+    open(f"{out}/{lang}", "w", encoding="utf-8").write(stripped)
+
+print("check-sugar-surface: window-prop comment-only nonces refused:"
+      + "".join(applied), file=sys.stderr)
+PY
+
 wprops=$(grep -oE "^WPROP_[A-Z_]+" bindings/python/kaya/wire.py \
     | cut -c7- | tr "[:upper:]" "[:lower:]")
 [ -n "$wprops" ] || { echo "check-sugar-surface: no window props in the generated wire file"; exit 1; }
+
+# check_wprop <language> <source file, for the message> <prop> <regex>
+check_wprop() {
+    if ! grep -qE "$4" "$T/code/$1"; then
+        echo "check-sugar-surface: $1 has no window-prop sugar for '$3'" \
+            "(wanted /$4/ in $2, comments stripped)"
+        status=1
+    fi
+}
 
 for wprop in $wprops; do
     # snake_case for python/ocaml, camelCase for the rest, and
@@ -1013,7 +1130,7 @@ print(''.join(p.capitalize() for p in sys.argv[1].split('_')))" "$wprop")
     # had to be redone as an outright deletion. `\b` holds both edges
     # (`_` is a word character, so a generated `tx_set_window_inset`
     # cannot stand in for the sugar's own `inset`).
-    check python bindings/python/kaya/__init__.py "$wprop" "\b$wprop\b"
+    check_wprop python bindings/python/kaya/__init__.py "$wprop" "\b$wprop\b"
     # Go folds width and height into ONE Size(w, h) chain method, the
     # same flavor as Haskell's WSize below — surfaced by the \b
     # tightening, which is the proof the old substring match was passing
@@ -1023,18 +1140,18 @@ print(''.join(p.capitalize() for p in sys.argv[1].split('_')))" "$wprop")
         width | height) go_pat="\bSize\b" ;;
         *) go_pat="\b$pascal\b" ;;
     esac
-    check go bindings/go/app.go "$wprop" "$go_pat"
-    check csharp bindings/csharp/KayaApp.cs "$wprop" "\b$camel\b"
-    check java bindings/java/dev/kaya/KayaApp.java "$wprop" "\b$camel\b"
-    check swift bindings/swift/KayaApp.swift "$wprop" "\b$camel\b"
-    check ocaml bindings/ocaml/kaya_app.ml "$wprop" "\b$wprop\b"
+    check_wprop go bindings/go/app.go "$wprop" "$go_pat"
+    check_wprop csharp bindings/csharp/KayaApp.cs "$wprop" "\b$camel\b"
+    check_wprop java bindings/java/dev/kaya/KayaApp.java "$wprop" "\b$camel\b"
+    check_wprop swift bindings/swift/KayaApp.swift "$wprop" "\b$camel\b"
+    check_wprop ocaml bindings/ocaml/kaya_app.ml "$wprop" "\b$wprop\b"
     # Haskell carries width and height as ONE WSize constructor — a
     # language flavor, not a gap, exactly like the kind spellings above.
     case "$wprop" in
         width | height) hs="WSize" ;;
         *) hs="W$pascal" ;;
     esac
-    check haskell bindings/haskell/KayaApp.hs "$wprop" "\b$hs\b"
+    check_wprop haskell bindings/haskell/KayaApp.hs "$wprop" "\b$hs\b"
 done
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1237,8 +1354,8 @@ check_styling_point 'container inset' \
 # ADDING A NEW WINDOW HANDLER means spelling it in Haskell's WindowAttr
 # or OCaml's window, at which point this sweep demands the other seven
 # and refuses the loose one. Nobody edits a list here.
-T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+#
+# $T is the window-prop sweep's temp dir, made above.
 
 WH_PY=bindings/python/kaya/__init__.py
 WH_GO=bindings/go/app.go

@@ -162,13 +162,21 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // presentations. `auto` (the default) resolves to each platform's
     // dominant idiom.
     ("sections_presentation", 5, PropKind::Enum("sections_presentation")),
-    // How this window presents its ENTRY STACK (DESIGN.md, Adaptive
-    // list-detail). False (the default): the stack is serial. True: on
-    // a REGULAR window the base root takes the leading pane and the top
-    // of the stack the trailing one; a COMPACT one is unchanged,
-    // because the compact case IS the default. Adaptive by
-    // construction — there is no prop for WHICH way it presents.
-    ("list_detail", 6, PropKind::Bool),
+    // How this window presents its ENTRY STACK (DESIGN.md; the ruling,
+    // the mechanics and their measurements are docs/multicolumn-plan.md's
+    // Status block). `panes` is the DECLARED CEILING on how many stack
+    // entries present side by side: 1 (the default) is the serial
+    // stack; 2 and 3 present up to that many columns when the window
+    // is wide enough, shedding the SHALLOWEST column first as it
+    // narrows — the stack order is the priority order, so no second
+    // vocabulary exists. WHO decides the live count: the platform's
+    // own adaptive judgment where it has one (iPadOS size classes,
+    // Android window size classes), kaya's minimum-width arithmetic
+    // where it does not (macOS — and those minimums are kaya's model's
+    // alone, declared to no platform API: a declared minimum becomes
+    // the WINDOW's floor and the collapse can never fire). The root
+    // wall refuses 0 and anything above 3.
+    ("panes", 6, PropKind::Enum("panes")),
     // WHETHER THIS SURFACE HOLDS UNSAVED WORK (docs/dirty-plan.md D1).
     // The app declares STATE; the backend spells the chrome, and the
     // spellings genuinely differ — macOS puts the whole signal in the
@@ -2129,7 +2137,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("height", 3),
                 ("veto_close", 4),
                 ("sections_presentation", 5),
-                ("list_detail", 6),
+                ("panes", 6),
                 ("dirty", 7),
                 ("inset", 8),
             ],
@@ -2739,7 +2747,7 @@ mod tests {
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
-                    ("wprop", "list_detail") => wire::WPROP_LIST_DETAIL,
+                    ("wprop", "panes") => wire::WPROP_PANES,
                     ("wprop", "dirty") => wire::WPROP_DIRTY,
                     ("wprop", "inset") => wire::WPROP_INSET,
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,

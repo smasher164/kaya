@@ -1369,7 +1369,7 @@ let app_identity ?icon ?icon_asset name =
    the process owns it): [window ~title:"sections"
    ~sections_presentation:(Int64.of_int
    Kaya_wire.sections_presentation_bar) ()]. *)
-let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
+let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
@@ -1390,7 +1390,17 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
      marker composed into the app's own title is Qt's [*] template, the
      named rejection (D1). *)
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_dirty id v)) dirty;
-  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_list_detail id v)) list_detail;
+  (* [~panes] is the CEILING on how many of this window's stack entries
+     present side by side: 1 is the serial stack, 2 and 3 are columns on a
+     window wide enough, the shallowest shed first as it narrows
+     (docs/multicolumn-plan.md carries the ruling and the measured
+     mechanics). There is deliberately no argument for WHICH entries show —
+     the stack's order is the priority order — and the live count is the
+     platform's own judgment where it has one. The root refuses 0 and
+     anything above 3. *)
+  Option.iter
+    (fun v -> emit tx (Kaya_wire.tx_set_window_panes id (Int64.of_int v)))
+    panes;
   Option.iter
     (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
     sections_presentation;
@@ -1428,7 +1438,7 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
 
 (* Create an auxiliary window (capability-gated: phone hosts reject at the
    root); materializes hidden, [mount_in] presents. *)
-let create_window ?title ?width ?height ?inset ?veto_close ?dirty
+let create_window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
@@ -1436,7 +1446,8 @@ let create_window ?title ?width ?height ?inset ?veto_close ?dirty
   (* [~dirty] rides the creation like every other window attribute: an
      auxiliary editor can be born with unsaved work, and the mark has to
      survive the surface not existing yet. *)
-  window ?title ?width ?height ?inset ?veto_close ?dirty ?sections_presentation
+  window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
+    ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's

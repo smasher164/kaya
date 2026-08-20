@@ -1,5 +1,5 @@
-# The split scene: adaptive list-detail as assertions (DESIGN.md,
-# Adaptive list-detail). The window asks for list_detail once; WHICH
+# The split scene: adaptive panes as assertions (DESIGN.md;
+# docs/multicolumn-plan.md). The window asks for panes once; WHICH
 # presentation materializes is the size class's answer, and this scene
 # drives the size class with real resizes and re-asserts on the far
 # side. That round trip is the whole point — a transition no code

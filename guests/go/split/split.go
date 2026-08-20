@@ -1,8 +1,8 @@
-// The split conformance scene, Go port — adaptive list-detail via the
-// chain spelling. The guest asks for the presentation ONCE and does
-// nothing adaptive again: everything after that is the platform
-// re-deciding as the size class changes, and there is no prop for
-// WHICH way it presents.
+// The split conformance scene, Go port — adaptive panes via the chain
+// spelling. The guest asks for the presentation ONCE and does nothing
+// adaptive again: everything after that is the platform re-deciding as
+// the size class changes, and there is no prop for WHICH entries
+// present.
 //
 // TWO scripts drive this ONE app: split resizes and names the
 // presentation on each side, listdetail asserts the bare invariant at
@@ -21,7 +21,7 @@ func App() *kaya.App {
 
 	var status kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.Window(0).Title("split").ListDetail(true)
+		tx.Window(0).Title("split").Panes(2)
 		status = tx.Signal("list pane")
 
 		tx.Mount(tx.Column(func() {

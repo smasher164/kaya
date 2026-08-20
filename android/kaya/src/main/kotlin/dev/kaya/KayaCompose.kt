@@ -595,9 +595,9 @@ object KayaSceneModel {
     var menuPresentation = "none" // none | bar | overflow
     /// Does this window ASK for list-detail (wprop 6). Whether it GETS
     /// it is the size class's answer, resolved in the render arm.
-    var listDetail by mutableStateOf(false)
+    var panes by mutableStateOf(1L)
     /// The list-detail presentation the render arm ACTUALLY took —
-    /// stamped by the arm that ran, never derived from `listDetail` or
+    /// stamped by the arm that ran, never derived from `panes` or
     /// the width, so expect_split cannot agree with the lowering by
     /// construction (docs/traps.md).
     var splitPresentation = "stacked" // split | stacked
@@ -803,7 +803,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x9be02e4dbe710c5buL
+    private const val SPEC_HASH: ULong = 0x2dd89e177006e976uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -889,7 +889,7 @@ object KayaCompose {
     private const val WPROP_HEIGHT = 3
     private const val WPROP_VETO_CLOSE = 4
     private const val WPROP_SECTIONS_PRESENTATION = 5
-    private const val WPROP_LIST_DETAIL = 6
+    private const val WPROP_PANES = 6
     private const val WPROP_DIRTY = 7
     private const val WPROP_INSET = 8
     private const val SPROP_TITLE = 1
@@ -1437,7 +1437,7 @@ object KayaCompose {
                         WPROP_VETO_CLOSE -> readBool(b)
                         WPROP_SECTIONS_PRESENTATION ->
                             KayaSceneModel.sectionsPresentation = readI64(b)
-                        WPROP_LIST_DETAIL -> KayaSceneModel.listDetail = readBool(b)
+                        WPROP_PANES -> KayaSceneModel.panes = readI64(b)
                         // The unsaved-work mark (docs/dirty-plan.md D4).
                         // It APPLIES and lowers to NO CHROME, which is
                         // not being ignored: expect_dirty reads the
@@ -8548,7 +8548,7 @@ fun KayaRoot() {
  * may be: MATERIAL'S answer, from the real window.
  *
  * kaya does not draw the one-pane/two-pane line and no prop moves it —
- * the app declares list_detail and the platform decides presentation.
+ * the app declares a panes ceiling and the platform decides presentation.
  * The standard directive grants a second horizontal partition at
  * 840dp, so 840dp is Android's threshold, chosen by Android. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
@@ -8609,7 +8609,9 @@ internal fun kayaBothPanesExpanded(value: ThreePaneScaffoldValue): Boolean =
  * and disabling the BackHandler is how that rule is spelled here. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 internal fun kayaSplitArm(value: ThreePaneScaffoldValue): Boolean =
-    KayaSceneModel.listDetail && kayaBothPanesExpanded(value)
+    // BRIDGE (docs/multicolumn-plan.md): ceiling >= 2 takes the
+    // two-pane split until the three-pane slice lands.
+    KayaSceneModel.panes >= 2 && kayaBothPanesExpanded(value)
 
 /** The same question asked where only the window is in hand. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
@@ -8670,7 +8672,7 @@ private fun KayaSurface() {
         // same rule GTK and mac follow. Requiring an entry here reported
         // `stacked` where they report `split` for one scene, which is a
         // semantics divergence rather than a backend's call.
-        if (KayaSceneModel.listDetail) {
+        if (KayaSceneModel.panes >= 2) {
             val directive = kayaPaneDirective()
             val scaffoldValue = kayaScaffoldValue(directive)
             // THE SCAFFOLD'S OWN ARRANGEMENT, not a value the arm

@@ -196,7 +196,7 @@ pub const WPROP_WIDTH: u32 = 2;
 pub const WPROP_HEIGHT: u32 = 3;
 pub const WPROP_VETO_CLOSE: u32 = 4;
 pub const WPROP_SECTIONS_PRESENTATION: u32 = 5;
-pub const WPROP_LIST_DETAIL: u32 = 6;
+pub const WPROP_PANES: u32 = 6;
 pub const WPROP_DIRTY: u32 = 7;
 pub const WPROP_INSET: u32 = 8;
 
@@ -232,6 +232,14 @@ pub const MPROP_SYMBOL: u32 = 9;
 pub const SECTIONS_PRESENTATION_AUTO: u32 = 0;
 pub const SECTIONS_PRESENTATION_BAR: u32 = 1;
 pub const SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
+
+/// The panes enum's wire values (spec enum "panes"): the declared
+/// ceiling on side-by-side stack entries. VALUES ARE THE COUNTS
+/// THEMSELVES (alert_choice's index precedent) — 0 is deliberately
+/// unassigned so an unset default cannot alias a legal ceiling.
+pub const PANES_ONE: u32 = 1;
+pub const PANES_TWO: u32 = 2;
+pub const PANES_THREE: u32 = 3;
 
 /// Navigation-entry property ids (spec::ENTRY_PROPS) — their own
 /// typed table, not WINDOW_PROPS with applicability checks (see
@@ -586,7 +594,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_HEIGHT => WindowProp::Height,
         WPROP_VETO_CLOSE => WindowProp::VetoClose,
         WPROP_SECTIONS_PRESENTATION => WindowProp::SectionsPresentation,
-        WPROP_LIST_DETAIL => WindowProp::ListDetail,
+        WPROP_PANES => WindowProp::Panes,
         WPROP_DIRTY => WindowProp::Dirty,
         WPROP_INSET => WindowProp::Inset,
         other => panic!("kaya: unknown window property {other}"),
@@ -600,7 +608,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Height => WPROP_HEIGHT,
         WindowProp::VetoClose => WPROP_VETO_CLOSE,
         WindowProp::SectionsPresentation => WPROP_SECTIONS_PRESENTATION,
-        WindowProp::ListDetail => WPROP_LIST_DETAIL,
+        WindowProp::Panes => WPROP_PANES,
         WindowProp::Dirty => WPROP_DIRTY,
         WindowProp::Inset => WPROP_INSET,
     }
