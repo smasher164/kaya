@@ -30,13 +30,24 @@ IMPLICIT = ("tools/", "flake.nix", "flake.lock")
 PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9_]+")
 
 
-def gates() -> dict[str, list[str]]:
-    """The GATES table, read from build-id.sh rather than duplicated."""
+def _table(name: str) -> dict[str, list[str]]:
     text = (ROOT / "tools" / "build-id.sh").read_text()
-    body = text[text.index("GATES = {") : text.index("\n}", text.index("GATES = {"))]
+    marker = name + " = {"
+    body = text[text.index(marker) : text.index("\n}", text.index(marker))]
     ns: dict = {}
-    exec("GATES = {" + body[len("GATES = {") :] + "\n}", ns)  # noqa: S102
-    return ns["GATES"]
+    exec(name + " = {" + body[len(marker) :] + "\n}", ns)  # noqa: S102
+    return ns[name]
+
+
+def gates() -> dict[str, list[str]]:
+    """The GATES table with each gate's ARTIFACT_GATES paths folded in
+    as declared inputs — an artifact in the key is a declared read,
+    read from build-id.sh rather than duplicated."""
+    table = _table("GATES")
+    for gate, artifacts in _table("ARTIFACT_GATES").items():
+        if gate in table:
+            table[gate] = table[gate] + artifacts
+    return table
 
 
 def code_only(source: pathlib.Path) -> str:

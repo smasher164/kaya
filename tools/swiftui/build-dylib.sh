@@ -33,6 +33,23 @@ tools/gen-header.sh --check
 # against a plain let, an @_cdecl and a byte array — all four survive,
 # this is the least machinery).
 mkdir -p target/swiftui
+# ONE BUILDER AT A TIME: the matrix's gate sweep and the mac lane's
+# skip path (tools/validate-all.sh, 2026-08-20) can both reach here in
+# the same second, and two concurrent swiftc runs write one dylib —
+# cargo has its own lock, this artifact needs one of its own. mkdir is
+# the atomic primitive; a crashed holder's lock dies with the deadline.
+LOCK=target/swiftui/.build-lock
+waited=0
+until mkdir "$LOCK" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 300 ]; then
+        echo "build-dylib: the build lock $LOCK is stuck after 300s — a dead" >&2
+        echo "  builder left it; remove the directory and rerun." >&2
+        exit 1
+    fi
+    sleep 1
+done
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 KAYA_SWIFTUI_ID="$(tools/build-id.sh swiftui)"
 MARKER_SWIFT=target/swiftui/KayaBuildId.swift
 cat >"$MARKER_SWIFT" <<EOF
@@ -42,15 +59,30 @@ EOF
 
 OUT=target/swiftui/libkaya_swiftui.dylib
 
+# ALREADY FRESH MEANS DONE: when the dylib in place carries this tree's
+# own id, a rebuild would produce the same thing — and the matrix's
+# concurrent shape (tools/validate-all.sh, 2026-08-20) has the gate
+# sweep and the mac lane both arriving here while legs are dlopening
+# the artifact, so a needless rebuild is not merely slow.
+if [ -f "$OUT" ] \
+    && tools/build-id.sh --verify --component swiftui "$OUT" >/dev/null 2>&1; then
+    echo "built $OUT (already carries this tree's id)"
+    exit 0
+fi
+
 # A FAILED BUILD MUST NOT LEAVE A USABLE ARTIFACT: compile to a scratch
-# path, delete the old dylib first, move into place only on success
-# (docs/traps.md, "A failed build must not leave a usable artifact").
+# path; on success the move REPLACES the old dylib atomically (readers
+# that mapped it keep their copy, and there is never a moment with no
+# dylib on disk — legs dlopen this path while a concurrent sweep
+# rebuilds, measured 2026-08-20 when a delete-first shape left a ~30s
+# hole and eight legs died in it); on FAILURE the old dylib is deleted,
+# which is the guarantee's whole point (docs/traps.md, "A failed build
+# must not leave a usable artifact").
 #
 # -warnings-as-errors is a GUARD, not tidiness: a dropped return value
 # is only a warning, and that is how a clipboard seed discarded
 # osascript's exit status for the life of the scene (docs/traps.md §
 # the swift-typecheck sibling of this flag).
-rm -f "$OUT"
 if ! kaya_swiftc \
     -warnings-as-errors \
     -emit-library \
@@ -59,7 +91,7 @@ if ! kaya_swiftc \
     -Xlinker -undefined -Xlinker dynamic_lookup \
     -framework AppKit -framework Foundation \
     -o "$OUT.tmp"; then
-    rm -f "$OUT.tmp"
+    rm -f "$OUT.tmp" "$OUT"
     echo "build-dylib: FAILED — no dylib left in place (a stale one would be tested silently)" >&2
     exit 1
 fi

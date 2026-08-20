@@ -74,7 +74,23 @@ ssh "$HOST" "schtasks /create /tn kaya_tcp_p /tr \"wscript.exe $R\\hidden.vbs $R
 ssh "$HOST" "cmd /c del /q $R\\out.txt $R\\prove.txt $R\\psout.txt >nul 2>&1 & schtasks /run /tn kaya_tcp_g" >/dev/null
 sleep 7
 ssh "$HOST" "schtasks /run /tn kaya_tcp_p" >/dev/null
-sleep 50
+# POLLED, NOT SLEPT: the ps1 ends with "PROVE: done", so waiting is a
+# read of that line rather than a 50s guess (measured 2026-08-20: the
+# sweep itself finishes in well under half that, and the guess was most
+# of this phase's minute). The deadline is the old guess.
+tries=0
+until ssh "$HOST" "cmd /c type $R\\prove.txt" 2>/dev/null | grep -q "^PROVE: done"; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 25 ]; then
+        break
+    fi
+    sleep 2
+done
+# The guest's scratch scene holds a 45s settle so the probe has a still
+# window to measure; the poll returns long before it ends, and a
+# lingering toolbar window would fight the next phase's legs for the
+# foreground — so the guest is put down here, not left to its timer.
+ssh "$HOST" "taskkill /im toolbar.exe /f >nul 2>&1" >/dev/null 2>&1
 
 echo "== the measurement =="
 ssh "$HOST" "cmd /c type $R\\prove.txt" > "$WORK/prove.txt" 2>&1

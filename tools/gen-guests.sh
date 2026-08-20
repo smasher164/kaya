@@ -52,6 +52,13 @@ if [ "$CHECK" = 1 ]; then
         if [ -e "$f" ]; then
             mkdir -p "$TMP/saved/$(dirname "$f")"
             cp "$f" "$TMP/saved/$f" || exit 1
+            # The pre-check mtime, kept so an in-place rewrite of
+            # IDENTICAL bytes can be undone below: a fresh mtime on
+            # unchanged sources makes cargo relink libkaya on every
+            # sweep, and every relink mints a new LC_UUID (measured
+            # 2026-08-20 — the artifact gate keys never hit).
+            python3 -c "import os,sys;print(os.stat(sys.argv[1]).st_mtime_ns)" "$f" \
+                >"$TMP/saved/$f.mtime" || exit 1
             echo "$f" >>"$TMP/before.list"
         else
             # Tracked as a generated surface, absent from the tree — its
@@ -134,6 +141,17 @@ if [ "$CHECK" = 1 ]; then
         echo "gen-guests: REFUSING A VERDICT — --check modified the tree it was checking" >&2
         exit 2
     fi
+    # Bytes are proven identical (the sha above); give every file its
+    # pre-check mtime back so the regeneration is invisible to cargo —
+    # see the snapshot comment for the relink churn this stops.
+    while IFS= read -r f; do
+        if [ -f "$TMP/saved/$f.mtime" ]; then
+            python3 -c "
+import os, sys
+os.utime(sys.argv[1], ns=(int(sys.argv[2]), int(sys.argv[2])))
+" "$f" "$(cat "$TMP/saved/$f.mtime")" || exit 1
+        fi
+    done <"$TMP/before.list"
     # Drift's sibling, omission: a generated file the tree carries but
     # git does not.
     untracked="$(git ls-files --others --exclude-standard -- "${GENERATED[@]}")"

@@ -487,8 +487,12 @@ in docs/deferred.md.
    on the windows guest's unit phase),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
-   is never cached, KAYA_FAST unset consults nothing, and the three
-   gates that read a built artifact are never keyed),
+   is never cached, KAYA_FAST unset consults nothing but RECORDS its
+   passes, the gates that read a built artifact carry the artifact's
+   REAL BYTES in their key (build-id.sh's ARTIFACT_GATES; ratified
+   2026-08-20 — sources alone cannot vouch for target/), and
+   check-build-id alone is never keyed, because caching the staleness
+   gate's answer is the defect it exists to find),
    `tools/swift-typecheck.sh` (the guests, the Swift bindings AND the
    SwiftUI interpreter — a gate named after a layer it does not
    compile has burned someone here; docs/traps.md),

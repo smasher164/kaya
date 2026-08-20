@@ -212,7 +212,7 @@ else:
 
 # N3 — a gate invoked DIRECTLY by validate-mac must be reported. The
 # perturbation plants one into validate-mac.sh's real text.
-planted, n = re.subn(r"(?m)^tools/gates\.sh\b",
+planted, n = re.subn(r"(?m)^\s*tools/gates\.sh\b",
                      "tools/check-mirror.sh || exit 1\ntools/gates.sh", mac_text)
 print(f"check-gates: self-test N3 planted a direct gate call in "
       f"validate-mac.sh, {n} substitution(s)")
@@ -261,7 +261,10 @@ if direct:
          + " ".join(sorted(direct))
          + " — the lane must DELEGATE to tools/gates.sh, or the sweep has two "
            "lists again and the count in one of them means nothing")
-if not re.search(r"(?m)^tools/gates\.sh\b", mac_text):
+# Leading whitespace allowed: the matrix-handshake branch (ratified
+# 2026-08-20) keeps the delegation inside a conditional, and the
+# clause's real quarry is DIRECT gate invocations, held above.
+if not re.search(r"(?m)^\s*tools/gates\.sh\b", mac_text):
     fail("tools/validate-mac.sh does not call tools/gates.sh — the lane runs "
          "no gate sweep at all")
 

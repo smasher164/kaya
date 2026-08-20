@@ -103,22 +103,18 @@ GATES = [
     # the declarative backends "render nothing" makes the node LEAVE THE
     # TREE and every positional reader above it reads the wrong child
     # (docs/deferred.md).
-    ("check-empty-child", ["tools/check-empty-child.sh"], False,
-     "its macOS clause compiles the interpreter's own source against the BUILT "
-     "libkaya and RUNS it, so an unchanged source tree is not an unchanged "
-     "answer — check-abort's shape, one toolkit over"),
+    # The four ARTIFACT gates are keyed since 2026-08-20: their keys mix
+    # the built libkaya's REAL BYTES (build-id.sh's ARTIFACT_GATES), so
+    # "unchanged sources" alone can no longer hand back a stale PASS —
+    # unchanged sources AND unchanged artifact bytes can, and that is an
+    # unchanged answer.
+    ("check-empty-child", ["tools/check-empty-child.sh"], True, ""),
     # The macOS pane ladder: no column minimum ever declared to SwiftUI,
     # and the middle rung — which no shared scene may sample — walked
     # for real in an NSWindow (docs/multicolumn-plan.md).
-    ("check-pane-ladder", ["tools/check-pane-ladder.sh"], False,
-     "its macOS clause compiles the interpreter's own source against the BUILT "
-     "libkaya and RUNS it — check-empty-child's shape, one milestone over"),
-    ("check-wheel", ["tools/check-wheel.sh"], False,
-     "it builds and imports a wheel out of target/, so an unchanged source "
-     "tree is not an unchanged answer"),
-    ("check-abort", ["tools/check-abort.sh"], False,
-     "it links guest probes against the BUILT libkaya, so an unchanged "
-     "source tree is not an unchanged answer"),
+    ("check-pane-ladder", ["tools/check-pane-ladder.sh"], True, ""),
+    ("check-wheel", ["tools/check-wheel.sh"], True, ""),
+    ("check-abort", ["tools/check-abort.sh"], True, ""),
     ("check-tx-liveness", ["tools/check-tx-liveness.sh"], False,
      "no input set is declared for it in build-id.sh's GATES, so keyed.sh "
      "would refuse at run time; it is a pure source scan and can be keyed "
@@ -364,9 +360,30 @@ if args == ["--list"]:
 if args == ["--selftest"]:
     sys.exit(0 if selftest() else 1)
 
+if args == ["--fingerprint"]:
+    # One hash over every keyed gate's key, in name order: the token
+    # validate-all hands the mac lane after running this sweep itself.
+    # The keyed keys' input sets jointly cover every source root a gate
+    # reads (tools/ and the flake ride each one), so any edit between
+    # the sweep and the mac lane's start changes this value and the
+    # lane re-runs the gates instead of skipping them.
+    import hashlib
+    h = hashlib.sha256()
+    for n, _c, k, _w in sorted(GATES):
+        if not k:
+            continue
+        key = subprocess.run(
+            ["tools/build-id.sh", "--gate", n],
+            stdout=subprocess.PIPE, text=True, check=False)
+        if key.returncode != 0:
+            sys.exit(f"gates.sh: --fingerprint could not key {n}")
+        h.update(f"{n}={key.stdout.strip()}\n".encode())
+    print(h.hexdigest()[:16])
+    sys.exit(0)
+
 if args:
     sys.exit(f"gates.sh: unknown argument {args[0]!r} — "
-             f"usage: gates.sh [--list | --selftest]")
+             f"usage: gates.sh [--list | --selftest | --fingerprint]")
 
 print(f"gates: {len(GATES)} declared — building what they read first", flush=True)
 if not build():

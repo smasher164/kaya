@@ -19,14 +19,26 @@ shift
 [ "${1:-}" = "--" ] || { echo "keyed.sh: expected -- before the command" >&2; exit 2; }
 shift
 
-if [ "${KAYA_FAST:-0}" != 1 ]; then
-    exec "$@"
-fi
-
 key="$("$ROOT/tools/build-id.sh" --gate "$name")" || exit 1
 store="$ROOT/target/.kaya-gates"
 mkdir -p "$store"
 stamp="$store/$name"
+
+if [ "${KAYA_FAST:-0}" != 1 ]; then
+    # CONSULTS NOTHING — the matrix's run answers from the gate alone —
+    # but a PASS is still recorded, so the first KAYA_FAST run after a
+    # full sweep is warm instead of re-running everything the sweep
+    # just proved (measured 2026-08-20: a cold fast sweep cost 148s
+    # against 46s warm, and a day of full runs had warmed nothing).
+    "$@"
+    status=$?
+    if [ "$status" = 0 ]; then
+        printf '%s' "$key" >"$stamp"
+    else
+        rm -f "$stamp"
+    fi
+    exit "$status"
+fi
 
 if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$key" ]; then
     # Every skip says so, with its key: "why didn't that re-run" must be

@@ -70,11 +70,37 @@ run_lane() {
 
 status=0
 T0=$SECONDS
-run_lane mac tools/validate-mac.sh
-run_lane linux tools/validate-linux.sh
-run_lane windows tools/deploy-win.sh "$HOST" all
-run_lane ios tools/ios/run-sim.sh
-run_lane android tools/android/run-emulator.sh
+if [ "$MODE" = parallel ]; then
+    # THE GATE SWEEP RUNS AS ITS OWN CONCURRENT UNIT, ONCE (ratified
+    # 2026-08-20): inside the mac lane it sat serially in front of the
+    # matrix's slowest path, under five-lane contention — measured, a
+    # 250s sweep ahead of 280s of legs, and moving it BEFORE the lanes
+    # just relocated the same serialization. The sweep does not need to
+    # PRECEDE anything: the matrix's verdict includes its rc exactly as
+    # it includes each lane's, and a failed sweep fails the matrix. The
+    # token is a fingerprint of every keyed gate's input set computed at
+    # t0 — it attests SAME-TREE, not swept-and-passed — and the mac
+    # lane skips its own sweep only while the fingerprint still matches
+    # (a within-run handshake, not a cache — nothing survives this
+    # invocation; a hand-run of validate-mac sees no token and sweeps).
+    # The sweep's two probe windows never take key focus and the other
+    # lanes' windows live in a container, emulators, a simulator and a
+    # VM, so nothing here fights the mac legs for the desktop.
+    KAYA_MATRIX_GATES_TOKEN="$(tools/gates.sh --fingerprint)" || exit 1
+    export KAYA_MATRIX_GATES_TOKEN
+    run_lane gates tools/gates.sh
+    run_lane mac tools/validate-mac.sh
+    run_lane linux tools/validate-linux.sh
+    run_lane windows tools/deploy-win.sh "$HOST" all
+    run_lane ios tools/ios/run-sim.sh
+    run_lane android tools/android/run-emulator.sh
+else
+    run_lane mac tools/validate-mac.sh
+    run_lane linux tools/validate-linux.sh
+    run_lane windows tools/deploy-win.sh "$HOST" all
+    run_lane ios tools/ios/run-sim.sh
+    run_lane android tools/android/run-emulator.sh
+fi
 
 if [ "$MODE" = parallel ]; then
     if [ ${#lane_pids[@]} -gt 0 ]; then
@@ -178,6 +204,10 @@ if [ "$MODE" = parallel ]; then
             # environmental anomaly is how a guard stops guarding.
             ios) budget=540 ;;
             android) budget=250 ;;
+            # The sweep as its own concurrent unit (2026-08-20):
+            # measured 250s under five-lane contention the day it moved
+            # out of the mac lane; ~1.25x headroom like the others.
+            gates) budget=310 ;;
             *) budget=0 ;;
         esac
         if [ "$budget" -gt 0 ] && [ "$secs" != '?' ] && [ "$secs" -gt "$budget" ]; then

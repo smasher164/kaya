@@ -110,7 +110,26 @@ if [ ! -f "$ROOT/guests/assets/fonts/sora-wght.ttf" ]; then
 fi
 echo "assets: the root resolves by the repo-relative default ($(find "$ROOT/guests/assets" -type f | wc -l | tr -d ' ') files)"
 
-tools/gates.sh || exit 1
+# THE MATRIX HANDSHAKE (ratified 2026-08-20): when validate-all just
+# ran this same sweep in this same invocation, the token below carries
+# a fingerprint of every keyed gate's input set, and a MATCHING
+# fingerprint means re-running the sweep here would repeat work the
+# matrix did seconds ago under contention. NOT a cache — the token
+# never outlives one validate-all run, a hand-run of this script sees
+# no token and runs everything, and a MISMATCH (something changed the
+# tree mid-matrix) falls through to the full sweep. The interpreter
+# still gets built and verified on the skip path: the legs run it, and
+# gates.sh was the builder this lane relied on.
+if [ -n "${KAYA_MATRIX_GATES_TOKEN:-}" ] \
+    && [ "$(tools/gates.sh --fingerprint)" = "$KAYA_MATRIX_GATES_TOKEN" ]; then
+    echo "gates: skipped — validate-all ran the sweep in this matrix run" \
+        "and the tree's gate fingerprint still matches ($KAYA_MATRIX_GATES_TOKEN)"
+    tools/swiftui/build-dylib.sh || exit 1
+    tools/build-id.sh --verify --component swiftui \
+        target/swiftui/libkaya_swiftui.dylib || exit 1
+else
+    tools/gates.sh || exit 1
+fi
 timing core-build+gates
 
 status=0

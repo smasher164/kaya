@@ -229,8 +229,16 @@ paragraph said "sixteen" for long enough to be wrong by three, which is
 the same drift tools/check-gates.sh now refuses between the sweep and
 CLAUDE.md.) Under KAYA_FAST=1 a gate whose inputs are unchanged since it
 last PASSED prints `CACHED (<key>)` and is skipped. Measured on a warm
-tree: the gate phase goes 55s to 17s, and what remains is the cargo
-build plus the gates that are deliberately never keyed.
+tree, 2026-08-20 at 41 gates: 148s cold, 23s warm with 28 gates keyed —
+the artifact gates joined the keyed set the same day, on sources plus
+the artifact's EMBEDDED build-id (build-id.sh's ARTIFACT_GATES), and
+gen-guests' restore now hands byte-identical files their old mtimes
+back so a sweep no longer relinks libkaya for nothing.
+
+A FULL sweep RECORDS its passes too (never consults — the matrix's
+answer still comes from the gates alone), so the first KAYA_FAST run
+after any full sweep is already warm. Before 2026-08-20 only fast runs
+recorded, and a day of full sweeps warmed nothing.
 
 What the keys actually buy is not the all-cached case — it is that
 different work re-runs different gates. Measured 2026-07-28, when 16

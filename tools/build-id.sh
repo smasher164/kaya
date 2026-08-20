@@ -27,6 +27,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 exec python3 - "$ROOT" "$@" <<'PY'
 import hashlib
+import os
 import pathlib
 import zipfile
 import subprocess
@@ -60,10 +61,15 @@ COMPONENTS = {
 # much costs a re-run nobody notices; naming too little hands back a
 # PASS about code that changed since.
 #
-# Gates whose verdict depends on a BUILT ARTIFACT are absent on purpose
-# and must stay absent: check-abort, check-wheel and check-build-id all
-# load or inspect target/, so an unchanged source tree does not mean an
-# unchanged answer.
+# Gates whose verdict depends on a BUILT ARTIFACT carry that artifact
+# in ARTIFACT_GATES below, and their key mixes in the artifact's ACTUAL
+# BYTES (ratified 2026-08-20): an unchanged source tree does not mean
+# an unchanged answer, but unchanged sources AND unchanged artifact
+# bytes do — the loophole the old never-key rule guarded is closed by
+# hashing the real file instead of trusting the sources it claims to
+# come from. check-build-id alone stays absent forever: its whole job
+# is catching a stale artifact, and any cache of that answer is the
+# defect it exists to find.
 GATES = {
     "gen-header": ["crates", "Cargo.toml", "Cargo.lock"],
     "gen-bindings": ["crates", "bindings"],
@@ -114,11 +120,47 @@ GATES = {
                         "guests/swift", "swift"],
     "java-typecheck": ["bindings/java", "bindings/java-desktop",
                        "guests/java", "guests/java-desktop"],
+    # The four ARTIFACT gates (see ARTIFACT_GATES): sources here, the
+    # built bytes below, both in the key.
+    "check-abort": ["crates", "bindings", "guests"],
+    "check-wheel": ["crates", "bindings/python"],
+    "check-empty-child": ["crates", "swift", "android"],
+    "check-pane-ladder": ["crates", "swift"],
     # The fixture tools/check-keyed.sh exercises. A REAL entry on
     # purpose: a self-test stamping under a live gate's name would make
     # the next KAYA_FAST run skip that gate.
     "keyed-selftest": [],
 }
+
+# The BUILT files each artifact gate reads. The key mixes each one's
+# EMBEDDED build-id marker — the fingerprint of the sources it was
+# really built from — never the raw bytes: every relink mints a fresh
+# LC_UUID, and gen-guests' every-sweep snapshot-restore touches source
+# mtimes and triggers exactly such a relink, so a raw-byte key was
+# measured never hitting at all (2026-08-20, keys fc2c5a7f ->
+# 46f098b5 across one restore-and-noop-rebuild). A file with no marker
+# or no file at all keys as that fact, and the gate then runs and
+# fails its own checks loudly. KAYA_GATE_ARTIFACT_ROOT is check-keyed's
+# self-test seam and nothing else's: it re-roots these paths so the
+# negative can prove a marker flip busts the key without rebuilding a
+# dylib.
+ARTIFACT_GATES = {
+    "check-abort": ["target/debug/libkaya.dylib"],
+    "check-wheel": ["target/debug/libkaya.dylib"],
+    "check-empty-child": ["target/debug/libkaya.dylib"],
+    "check-pane-ladder": ["target/debug/libkaya.dylib"],
+}
+
+
+def embedded_ids(p):
+    """Every build-id marker in the file, sorted — the artifact's own
+    statement of the sources it came from."""
+    blob = p.read_bytes()
+    found, at = set(), 0
+    while (at := blob.find(PREFIX, at)) != -1:
+        found.add(bytes(blob[at + len(PREFIX) : at + len(PREFIX) + 16]))
+        at += len(PREFIX)
+    return sorted(found)
 
 # Anything skipped here is invisible to the id, so the list stays short:
 # over-skipping is how an id starts lying.
@@ -196,7 +238,20 @@ def gate_key(name):
         # includes build output, so the cache stops hitting — slow, never
         # wrong, which is the direction a fallback has to fail in.
         paths = files([n for n in names if (root / n).exists()])
-    return digest(paths)
+    h = hashlib.sha256(digest(paths).encode())
+    # The artifact half: the built file's EMBEDDED build-id — what it
+    # was really built from — see ARTIFACT_GATES for why never the raw
+    # bytes.
+    artifact_root = pathlib.Path(os.environ.get("KAYA_GATE_ARTIFACT_ROOT", root))
+    for rel in ARTIFACT_GATES.get(name, []):
+        p = artifact_root / rel
+        h.update(f"artifact:{rel}\0".encode())
+        if not p.is_file():
+            h.update(b"absent")
+            continue
+        ids = embedded_ids(p)
+        h.update(b"|".join(ids) if ids else b"unmarked")
+    return h.hexdigest()[:16]
 
 
 PREFIX = b"kaya-build-id:"
@@ -209,6 +264,15 @@ if args[0] == "--gate":
     if len(args) != 2 or args[1] not in GATES:
         sys.exit(f"build-id: --gate wants one of: {', '.join(sorted(GATES))}")
     print(gate_key(args[1]))
+    sys.exit(0)
+
+if args[0] == "--gate-artifacts":
+    # The census surface for check-keyed's clause 6: which built files
+    # ride this gate's key. Empty output means none.
+    if len(args) != 2 or args[1] not in GATES:
+        sys.exit(f"build-id: --gate-artifacts wants one of: {', '.join(sorted(GATES))}")
+    for rel in ARTIFACT_GATES.get(args[1], []):
+        print(rel)
     sys.exit(0)
 
 if args[0] != "--verify":

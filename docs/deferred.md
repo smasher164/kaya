@@ -4528,3 +4528,52 @@ clause — this leg has no wrapper beyond a11y-leg.sh. If it repeats:
 core-dump the container (ulimit -c unlimited, coredumpctl or
 /proc/sys/kernel/core_pattern in docker), and look at the RTS's
 foreign-finalizer ordering against gtk_main teardown, not at the scene.
+## Test-speed profile 2026-08-20, and the two speedups that need a ruling
+KEY: test speed, keyed cache, matrix bound, save panel cost, clipboard prompt cost
+
+The maintainer asked for faster feature iteration; the day's runs were
+profiled before anything was touched. The measured map, so nobody
+re-measures it blind: the matrix's bound is the mac lane (~500s
+contended = the 41-gate sweep ~150s + 320 legs at ~230s wall, only
+~1.7x parallel BY DESIGN — the AX-degradation trap). Gate sweep: 148s
+cold / 46s warm-keyed; the warm residue is the deliberately-unkeyed
+artifact gates (check-abort ~13s, the two interpreter-compiling probes
+~5s each). Per-leg medians are healthy everywhere (mac 0-1s, linux
+1-2s, windows 1-2s); the whales are SEMANTIC, not waste: the mac save
+legs are 2 x ~8.7s of NSSavePanel presentation, the panel service's own
+cost on this box (measured 2026-08-09, recorded in
+kayaAwaitSavePanelState's comment), and the iOS clipboard legs are ~9s
+per pasteboard operation, most of it the foreign-read privacy prompt
+dance that IS the thing under test. The stall scenes' 8s is the scene's
+own design.
+
+LANDED the same day: the keyed cache now RECORDS on full sweeps
+(consults nothing — check-keyed's 5b clauses hold both halves), so the
+first KAYA_FAST run after any full sweep is warm; and the windows
+caption-centre probe polls for its own "PROVE: done" instead of
+sleeping a guessed 50s (60s -> 22s, every windows lane).
+
+BOTH PROPOSALS WERE RATIFIED AND LANDED 2026-08-20, and the landing
+measured two defects nobody had seen:
+1. THE ARTIFACT GATES ARE KEYED on sources plus the artifact's
+   EMBEDDED build-id (never its raw bytes: every relink mints a fresh
+   LC_UUID, and gen-guests' every-sweep restore used to touch source
+   mtimes and trigger exactly such a relink — a raw-byte key was
+   measured never hitting at all. gen-guests now gives byte-identical
+   files their pre-check mtimes back, so sweeps stop relinking
+   entirely). Warm sweep: 46s -> 23s, 28 of 41 gates keyed;
+   check-keyed's 5c clauses hold the marker-follows rule in both
+   directions, and the CLAUDE.md sentence moved with the ruling.
+2. THE GATE SWEEP IS ITS OWN CONCURRENT MATRIX UNIT: validate-all
+   computes a same-tree fingerprint at t0, launches all five lanes
+   plus the sweep together, and the mac lane skips its in-lane sweep
+   while the fingerprint matches (a within-run handshake — a hand-run
+   validate-mac sees no token and sweeps as always). First attempt
+   put the sweep BEFORE the lanes and merely relocated the
+   serialization (530s, measured); the concurrent shape needed two
+   safety fixes it flushed out — build-dylib now holds a lock (two
+   builders can arrive in one second) and REPLACES the dylib
+   atomically instead of deleting first, which had a ~30s no-dylib
+   hole that eight legs died in on the first concurrent run. Matrix:
+   ~504-546s -> 450/452s on consecutive ALL PASS runs; the bound is
+   now the iOS lane, and the mac lane runs its 320 legs in ~280s.
