@@ -110,9 +110,14 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 // Material 3 adaptive: Android's OWN list-detail container.
 // calculatePaneScaffoldDirective lives in `.layout`, not in `.adaptive`
-// beside currentWindowAdaptiveInfo.
+// beside currentWindowAdaptiveInfo, whose Large/XL opt-in is what
+// carries a third partition at 1200dp — docs/multicolumn-plan.md; the
+// 1.2.0 pin exists for it (at 1.0.0 three panes were unreachable at
+// every width, and 1.2.0 spells the opt-in as a parameter rather than
+// the V2 name the release notes trailed).
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.layout.AdaptStrategy
 import androidx.compose.material3.adaptive.layout.AnimatedPane
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldDefaults
@@ -600,7 +605,13 @@ object KayaSceneModel {
     /// stamped by the arm that ran, never derived from `panes` or
     /// the width, so expect_split cannot agree with the lowering by
     /// construction (docs/traps.md).
-    var splitPresentation = "stacked" // split | stacked
+    var splitPresentation = "stacked" // split3 | split | stacked
+    /// The ThreePaneScaffoldValue the scaffold was LAST LAID OUT from —
+    /// stashed by the render arm so expect_panes reads the arrangement
+    /// that really rendered, role by role, rather than recomputing one
+    /// the screen never took. Null until a pane arm has run.
+    @OptIn(ExperimentalMaterial3AdaptiveApi::class)
+    var paneValue: ThreePaneScaffoldValue? = null
     /// Does this surface hold UNSAVED WORK (wprop 7;
     /// docs/dirty-plan.md).
     ///
@@ -1437,13 +1448,7 @@ object KayaCompose {
                         WPROP_VETO_CLOSE -> readBool(b)
                         WPROP_SECTIONS_PRESENTATION ->
                             KayaSceneModel.sectionsPresentation = readI64(b)
-                        WPROP_PANES -> {
-                            val ceiling = readI64(b)
-                            // A ceiling of 3 refuses rather than silently
-                            // presenting two (docs/multicolumn-plan.md).
-                            if (ceiling >= 3) depthStub("panes")
-                            KayaSceneModel.panes = ceiling
-                        }
+                        WPROP_PANES -> KayaSceneModel.panes = readI64(b)
                         // The unsaved-work mark (docs/dirty-plan.md D4).
                         // It APPLIES and lowers to NO CHROME, which is
                         // not being ignored: expect_dirty reads the
@@ -5890,12 +5895,11 @@ object KayaCompose {
                     }
                     "expect_panes" -> {
                         // `<size class>/<positions>` (docs/multicolumn-plan.md
-                        // D4). Positions DERIVED from the arm stamp and the
-                        // stack, harness.rs's own two-pane rule: this
-                        // backend's split really is root + top, and its
-                        // stacked really is the top alone. The three-pane
-                        // slice replaces this with a real
-                        // ThreePaneScaffoldValue read.
+                        // D4). Positions from the ThreePaneScaffoldValue the
+                        // scaffold was really laid out from, role by role —
+                        // an EMPTY slot contributes no position (D1: a pane
+                        // is a surface from the stack). The serial arm has
+                        // no arrangement and reads its top.
                         val want = quotedHead(line.substring(parts[0].length))?.first ?: ""
                         val stamped =
                             onUi(activity) {
@@ -5921,11 +5925,7 @@ object KayaCompose {
                             }
                         } else {
                             val positions =
-                                if (halves.getOrNull(1) == "split") {
-                                    if (stack == 0) "0" else "0,$stack"
-                                } else {
-                                    "$stack"
-                                }
+                                onUi(activity) { kayaPanePositions() }
                             val got = halves[0] + "/" + positions
                             if (got == want) {
                                 observed.add("panes $want")
@@ -6215,14 +6215,14 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// The one spelling of "this backend has not reached that scene yet" —
-// what check-stubs and check-steps read, never a sentence of its own
-// (tools/lib/hand-rolled-stubs.py), paid for by an OPEN entry in
-// docs/deferred.md (tools/lib/stub-ledger.py).
-internal fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on this backend — " +
-            "it is a depth slice; see CLAUDE.md's sequencing")
+// No `depthStub` helper lives here: this backend has no depth stub,
+// and check-detekt's UnusedPrivateMember would report an unused
+// one. The next depth slice writes it back in EXACTLY this spelling
+// — `depthStub("<scene>")`, which is what check-stubs and
+// check-steps read, never a sentence of its own
+// (tools/lib/hand-rolled-stubs.py fails a hand-rolled refusal) —
+// and buys its silence with an OPEN entry in docs/deferred.md
+// (tools/lib/stub-ledger.py).
 
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
@@ -8606,7 +8606,8 @@ fun KayaRoot() {
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 internal fun kayaPaneDirective(): PaneScaffoldDirective =
-    calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
+    calculatePaneScaffoldDirective(
+        currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true))
 
 /** The pane arrangement [ListDetailPaneScaffold] lays out from: which
  * roles are expanded and which are hidden.
@@ -8625,28 +8626,86 @@ internal fun kayaPaneDirective(): PaneScaffoldDirective =
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 internal fun kayaScaffoldValue(directive: PaneScaffoldDirective): ThreePaneScaffoldValue =
     calculateThreePaneScaffoldValue(
-        directive.maxHorizontalPartitions,
-        ListDetailPaneScaffoldDefaults.adaptStrategies(),
-        ThreePaneScaffoldDestinationItem<Nothing>(
-            if (KayaSceneModel.navEntries.isEmpty()) {
-                ListDetailPaneScaffoldRole.List
-            } else {
-                ListDetailPaneScaffoldRole.Detail
-            }
+        // THE CEILING IS A CAP (docs/multicolumn-plan.md D2): `panes 2`
+        // on a 1200dp window is a real thing to say and is honored
+        // here — which is also what keeps the V2 breakpoints' third
+        // partition away from every two-pane window, so the existing
+        // tablet legs render exactly as they did before the 1.2.0 bump.
+        minOf(directive.maxHorizontalPartitions, KayaSceneModel.panes.toInt()),
+        // The list-detail defaults are all Hide today; SPELLED so an
+        // upstream default change cannot flip collapse semantics
+        // silently — the SupportingPane sibling defaults to Reflow,
+        // which keeps both roots on screen stacked, a state kaya's
+        // model has no word for (docs/multicolumn-plan.md D3).
+        ListDetailPaneScaffoldDefaults.adaptStrategies(
+            detailPaneAdaptStrategy = AdaptStrategy.Hide,
+            listPaneAdaptStrategy = AdaptStrategy.Hide,
+            extraPaneAdaptStrategy = AdaptStrategy.Hide,
         ),
+        kayaPaneHistory(),
     )
 
-/** Is the scaffold showing BOTH list-detail panes: the arrangement
- * question, asked of the arrangement.
- *
- * Named role by role rather than counted, because "both panes are on
- * screen" is exactly what the two roles say — and `expandedCount`,
- * which would say it in one word, is internal to the library in
- * 1.0.0. */
+/** THE HISTORY IS THE STACK (docs/multicolumn-plan.md D1/D3). The pane
+ * set follows the destination history, newest first, then Detail, List,
+ * Extra — so fed the stack's own order this walk IS "the shallowest
+ * pane sheds first", and at one partition the newest destination alone
+ * survives, which is the phone collapse. A synthesized single item was
+ * exactly right for two roles and silently wrong for three: with a
+ * history that can never name Extra, the pane the user navigated to is
+ * the one Material hides. Still no navigator dependency — these are
+ * plain values, and kaya's core owns the stack. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun kayaPaneHistory(): List<ThreePaneScaffoldDestinationItem<Nothing>> =
+    buildList {
+        add(ThreePaneScaffoldDestinationItem(ListDetailPaneScaffoldRole.List))
+        if (KayaSceneModel.navEntries.isNotEmpty()) {
+            add(ThreePaneScaffoldDestinationItem(ListDetailPaneScaffoldRole.Detail))
+        }
+        if (KayaSceneModel.panes >= 3 && KayaSceneModel.navEntries.size >= 2) {
+            add(ThreePaneScaffoldDestinationItem(ListDetailPaneScaffoldRole.Extra))
+        }
+    }
+
+/** How many pane roles the arrangement expanded: the arrangement
+ * question, asked of the arrangement. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun kayaExpandedPanes(value: ThreePaneScaffoldValue): Int =
+    listOf(
+        ListDetailPaneScaffoldRole.List,
+        ListDetailPaneScaffoldRole.Detail,
+        ListDetailPaneScaffoldRole.Extra,
+    ).count { value[it] == PaneAdaptedValue.Expanded }
+
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 internal fun kayaBothPanesExpanded(value: ThreePaneScaffoldValue): Boolean =
-    value[ListDetailPaneScaffoldRole.List] == PaneAdaptedValue.Expanded &&
-        value[ListDetailPaneScaffoldRole.Detail] == PaneAdaptedValue.Expanded
+    kayaExpandedPanes(value) >= 2
+
+/** expect_panes' position half (docs/multicolumn-plan.md D4): the stack
+ * indices on screen, ascending, comma-joined. Each expanded role maps
+ * to the slot it holds — List the base root, Detail the first entry at
+ * a ceiling of 3 or the top at 2, Extra the top — and an expanded role
+ * over an EMPTY slot contributes nothing. With no scaffold laid out
+ * (the serial arm) the top alone is on screen. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun kayaPanePositions(): String {
+    val entries = KayaSceneModel.navEntries.size
+    val value = KayaSceneModel.paneValue ?: return "$entries"
+    val third = KayaSceneModel.panes >= 3
+    val positions = buildList {
+        if (value[ListDetailPaneScaffoldRole.List] == PaneAdaptedValue.Expanded) add(0)
+        if (value[ListDetailPaneScaffoldRole.Detail] == PaneAdaptedValue.Expanded &&
+            entries >= 1
+        ) {
+            add(if (third) 1 else entries)
+        }
+        if (value[ListDetailPaneScaffoldRole.Extra] == PaneAdaptedValue.Expanded &&
+            entries >= 2
+        ) {
+            add(entries)
+        }
+    }
+    return if (positions.isEmpty()) "-" else positions.sorted().joinToString(",")
+}
 
 /** Whether this window is presenting its entry stack as list-detail
  * right now, meaning both panes are on screen.
@@ -8735,15 +8794,28 @@ private fun KayaSurface() {
             // Material resolved, for BOTH outcomes, from the one value
             // the scaffold below is laid out from. GTK reads
             // is_collapsed and Windows reads TwoPaneView's Mode for
-            // exactly this reason.
+            // exactly this reason. expect_panes reads the same stashed
+            // value role by role.
+            KayaSceneModel.paneValue = scaffoldValue
             KayaSceneModel.splitPresentation =
-                if (kayaBothPanesExpanded(scaffoldValue)) "split" else "stacked"
+                when (kayaExpandedPanes(scaffoldValue)) {
+                    3 -> "split3"
+                    2 -> "split"
+                    else -> "stacked"
+                }
+            // WHICH SLOT EACH ROLE HOLDS is the ceiling's call (D1):
+            // at 2 the detail is the TOP of the stack; at 3 the detail
+            // is the FIRST entry and the extra pane holds the rest's
+            // top — the last pane always holds the top of the stack.
+            val third = KayaSceneModel.panes >= 3
+            val detailEntry =
+                if (third) KayaSceneModel.navEntries.firstOrNull() else topEntry
             ListDetailPaneScaffold(
                 directive = directive,
                 value = scaffoldValue,
                 // AnimatedPane is what carries the motion; the panes
-                // are otherwise the same two roots as before — the
-                // mounted root leads, the stack's top is the detail.
+                // are otherwise the same roots as before — the mounted
+                // root leads.
                 listPane = {
                     AnimatedPane {
                         KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
@@ -8751,19 +8823,35 @@ private fun KayaSurface() {
                 },
                 detailPane = {
                     AnimatedPane {
-                        topEntry?.root?.let { KayaRender(it, isRoot = true) }
+                        detailEntry?.root?.let { KayaRender(it, isRoot = true) }
                     }
                 },
+                extraPane =
+                    if (third) {
+                        {
+                            AnimatedPane {
+                                if (KayaSceneModel.navEntries.size >= 2) {
+                                    topEntry?.root?.let { KayaRender(it, isRoot = true) }
+                                }
+                            }
+                        }
+                    } else {
+                        null
+                    },
             )
         } else if (topEntry != null) {
             // The serial arm stamps too: an observation only one arm
-            // writes is derived-by-default in the other.
+            // writes is derived-by-default in the other. No scaffold is
+            // laid out here, so no stale arrangement may linger for
+            // expect_panes to read.
             KayaSceneModel.splitPresentation = "stacked"
+            KayaSceneModel.paneValue = null
             // The stack's top is the one visible screen; the covered
             // root below stays alive (retained-until-popped).
             topEntry.root?.let { KayaRender(it, isRoot = true) }
         } else {
             KayaSceneModel.splitPresentation = "stacked"
+            KayaSceneModel.paneValue = null
             KayaSceneModel.root?.let { root ->
                 // The wrapper hugs the mounted container, so its size IS
                 // the root's — what expect_root_fills compares against the

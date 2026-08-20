@@ -120,6 +120,11 @@ executable split
   main-is: split.hs
   build-depends: kaya-guests
 
+executable panes
+  import: shared
+  main-is: panes.hs
+  build-depends: kaya-guests
+
 executable scroll
   import: shared
   main-is: scroll.hs

@@ -85,6 +85,9 @@ public final class Main {
             case "listdetail":
                 app = Split::app;
                 break;
+            case "panes":
+                app = Panes::app;
+                break;
             case "scroll":
                 app = Scroll::app;
                 break;

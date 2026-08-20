@@ -51,8 +51,14 @@ dependencies {
     // also what check-pins wants. The NAVIGATION artifact is
     // deliberately absent: its navigator owns a destination history,
     // and kaya's core already owns the stack.
-    implementation("androidx.compose.material3.adaptive:adaptive:1.0.0")
-    implementation("androidx.compose.material3.adaptive:adaptive-layout:1.0.0")
+    // 1.2.0, DELIBERATELY (docs/multicolumn-plan.md Q4): the V2 window
+    // size classes carry Large/XL, and with them a THIRD horizontal
+    // partition at 1200dp — at 1.0.0 three panes were structurally
+    // unreachable at every width. The declared-ceiling cap in
+    // kayaScaffoldValue is what keeps the extra partition away from
+    // two-pane windows, so the existing tablet legs render unchanged.
+    implementation("androidx.compose.material3.adaptive:adaptive:1.2.0")
+    implementation("androidx.compose.material3.adaptive:adaptive-layout:1.2.0")
     // THE SEMANTIC ICON VOCABULARY's glyphs (docs/styling-plan.md D6).
     // Version WRITTEN OUT rather than left to the BOM above, and the
     // number is not arbitrary: 1.7.8 is the LAST version these two

@@ -4436,15 +4436,34 @@ until their breadth slices land, on the record here:
 
 - DEPTH STUB: panes on gtk
 - DEPTH STUB: panes on winui
-- DEPTH STUB: panes on compose
+- ~~DEPTH STUB: panes on compose~~ (LANDED 2026-08-20: adaptive 1.2.0
+  with the Large/XL opt-in, the declared-ceiling cap, the stack-derived
+  destination history, the extra pane, and expect_panes reading the
+  stashed ThreePaneScaffoldValue role by role)
 
 Breadth still owed: the GTK nesting (nav-in-nav-content, cumulative
 breakpoint table, four-boolean stamp), the WinUI nest (depth-first
-release_split, priority chain), Compose's extraPane (the material3
-pin bump, derived destination history), the iPadOS three-pane legs,
-the measured Windows/GTK floors before any shared literal below 1400,
-the seven remaining guest languages, and DESIGN.md's "Adaptive
-list-detail" section rewrite (§2.6, in the landing commit).
+release_split, priority chain), the iPadOS three-pane legs, the
+measured Windows/GTK floors before any shared literal below 1400, an
+android-lane panes scene once the AVD/band ruling lands (the live
+three-pane observation so far is a scratch-script probe on the 1280dp
+tablet, `regular/0,1,2` read from the scaffold's own value,
+2026-08-20), and DESIGN.md's "Adaptive list-detail" section rewrite
+(§2.6, in the landing commit). ~~The seven remaining guest languages~~
+(LANDED 2026-08-20: all eight panes guests green on the mac lane, 320
+legs) and ~~Compose's extraPane~~ (LANDED 2026-08-20, the stub strike
+above).
+
+WATCH — a Compose click emitted within ~half a second of a pane's
+ENTRANCE ANIMATION can drop: measured on the tablet probe (click
+button#1 straight after expect_entries 1 → the push never arrived,
+twice; the same click after an expect_panes retry or a settle 800 →
+landed, every time). No frozen scene can reach it — they all assert
+between actions, which is the idiom — and the emit path is
+tag-routed, so the drop is downstream of KayaPresent.emitClicked. If
+an android leg ever fails with "click reported ok, no push", this is
+the signature; instrument the go side's occurrence queue before
+blaming the scene.
 
 ## The refusal affordances are never asserted PRESENT (promoted 2026-08-19)
 KEY: affordance presence, refuse-when-absent, four backends

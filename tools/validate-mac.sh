@@ -34,7 +34,7 @@ timing() {
 # THE scene list: the mechanical per-scene surfaces below derive from
 # it — one registration per new scene; the leg blocks stay explicit
 # because they encode per-language coverage decisions.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface panes"
+DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -834,11 +834,21 @@ run split-swift-swiftui env KAYA_SELFTEST=split target/swift-guests/split
 run split-java-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The panes DEPTH slice (docs/multicolumn-plan.md §2): the rust leg on
-# this backend is the whole roster until breadth fans the guest out.
+# The panes scene: the three-pane ceiling and the mac ladder
+# (docs/multicolumn-plan.md), all eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script panes)"
 export KAYA_SELFTEST_SCRIPT
 run panes-rust-swiftui env KAYA_SELFTEST=panes "$RUST_GUESTS"/panes
+run panes-python-swiftui env KAYA_SELFTEST=panes python3 guests/python/panes.py
+run panes-go-swiftui env KAYA_SELFTEST=panes target/go-guests/kaya-go
+run panes-csharp-swiftui env KAYA_SELFTEST=panes KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run panes-ocaml-swiftui env KAYA_SELFTEST=panes KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/panes.exe
+run panes-haskell-swiftui env KAYA_SELFTEST=panes "$(hs_bin panes)"
+run panes-swift-swiftui env KAYA_SELFTEST=panes target/swift-guests/panes
+run panes-java-swiftui env KAYA_SELFTEST=panes KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The listdetail scene: THE SAME GUESTS, asserting list-detail's bare
 # invariant at whatever width the host gives — a scene selects a
