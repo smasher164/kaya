@@ -276,6 +276,67 @@ for f in tools/scenes/*.steps; do
     }
 done
 
+# THE LINUX STAGES MUST FIT EVERY RESIZE, and the lane's text scale
+# must stay pinned. A resize wider than the Xvfb screen or the sway
+# output leaves the window at whatever the compositor allowed — the
+# breakpoints then legitimately show fewer panes and the leg reads as a
+# backend bug rather than a small stage. And libadwaita's sp unit
+# scales with the text factor (860sp is 1075px at large text), so a
+# byte-frozen width is reproducible only while the factor is 1.0 —
+# run-suites.sh unsets the env overrides, and this clause keeps both
+# facts from quietly rotting (docs/multicolumn-plan.md D4).
+linux_stage_lint() {
+    python3 -c '
+import re
+import sys
+
+runner = open("tools/linux/run-suites.sh").read()
+stages = [int(m.group(1)) for m in re.finditer(r"-screen 0 (\d+)x\d+x24", runner)]
+stages += [int(m.group(1)) for m in re.finditer(r"output \* resolution (\d+)x\d+", runner)]
+bad = []
+if len(stages) < 2:
+    bad.append("tools/linux/run-suites.sh: could not read both protocol stages "
+               "(the Xvfb -screen and sway output lines moved) — this clause is blind")
+if "unset GDK_DPI_SCALE GDK_SCALE" not in runner:
+    bad.append("tools/linux/run-suites.sh: the text-scale pin (unset GDK_DPI_SCALE "
+               "GDK_SCALE) is gone — sp-unit breakpoints are then a different pixel "
+               "width per run and no byte-frozen resize is reproducible")
+widest = 0
+where = ""
+for path in sys.argv[1:]:
+    for n, line in enumerate(open(path).read().splitlines(), 1):
+        s = line.strip()
+        if s.startswith("#"):
+            continue
+        m = re.match(r"resize_window\s+(\d+)x\d+", s)
+        if m and int(m.group(1)) > widest:
+            widest, where = int(m.group(1)), f"{path}:{n}"
+for stage in stages:
+    if widest > stage:
+        bad.append(f"{where}: resize_window to {widest} exceeds a linux stage of "
+                   f"{stage}px — grow the Xvfb screen and the sway output in "
+                   f"run-suites.sh, or the window silently stays small")
+for b in bad:
+    print(b)
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
+# The guard guards itself, both directions: an oversized resize must be
+# caught, and the real roster must pass.
+STAGE_T="$(mktemp -d)"
+printf 'expect_entries 0\nresize_window 9999x800\nexpect_panes\n' > "$STAGE_T/huge.steps"
+if linux_stage_lint "$STAGE_T/huge.steps" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a resize wider than the linux stages passed)" >&2
+    exit 1
+fi
+rm -rf "$STAGE_T"
+if ! linux_stage_lint tools/scenes/*.steps >/dev/null; then
+    linux_stage_lint tools/scenes/*.steps >&2
+    echo "check-steps: the linux stages cannot hold the scene roster (above)" >&2
+    status=1
+fi
+
 # Raw CR bytes: the scripts are LF files by contract. The Swift
 # interpreter splits script text on "\n", and Swift's grapheme-based
 # split sees CRLF as ONE cluster — a CRLF-ended script would parse as

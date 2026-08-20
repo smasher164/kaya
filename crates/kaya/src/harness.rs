@@ -1027,6 +1027,12 @@ pub trait Stage: Send + 'static {
     /// class. A derived answer agrees with the lowering by construction and
     /// cannot see the defect being gated.
     fn split_presentation(&self) -> String;
+    /// The window's visible panes, `<size class>/<positions>` — see
+    /// Step::ExpectPanes. Positions must come from the backend's REAL
+    /// arrangement wherever more than two panes can stand; a two-pane
+    /// world may compose `panes_positions` over its split stamp, which
+    /// is exact there (root + top, or the top alone).
+    fn panes_reading(&self) -> String;
     /// The menu item's state along one axis, read from the platform's real
     /// menu chrome and spelled in the steps grammar's own words
     /// ("enabled"/"disabled", "checked"/"unchecked", "value N") — never a
@@ -2010,14 +2016,13 @@ fn check_panes_reading(spec: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The visible-position half of this backend family's panes reading,
-/// derived from the split stamp and the stack because a TWO-pane world
-/// can say no more: `split` really is root + top on GTK and WinUI, and
-/// `stacked` really is the top alone. The moment either backend grows
-/// a third pane (drops its panes depth stub), panes.steps runs on its
-/// lane and this derivation fails the wide leg loudly — the breadth
-/// slice replaces it with a real arrangement read then.
-fn panes_positions(presentation: &str, entries: usize) -> String {
+/// The visible-position half of a TWO-pane world's panes reading,
+/// derived from the split stamp and the stack, which is exact there:
+/// `split` really is root + top, and `stacked` really is the top
+/// alone. A backend with a third pane must answer Stage::panes_reading
+/// from its real arrangement instead — the wide leg of panes.steps
+/// fails loudly against this derivation.
+pub(crate) fn panes_positions(presentation: &str, entries: usize) -> String {
     match (presentation, entries) {
         ("split", 0) => "0".to_owned(),
         ("split", n) => format!("0,{n}"),
@@ -3124,16 +3129,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             })),
             Step::ExpectPanes(want) => Some(poll(|| {
-                let stamped = stage.split_presentation();
-                let (class, presentation) =
-                    stamped.split_once('/').unwrap_or(("unknown", "stacked"));
-                let entries = stage.entry_count(0);
                 let Some(want) = want else {
                     // The bare form: expect_split's own asymmetric
                     // invariant, on the ARM stamp rather than the
                     // position list — an occupied pane beside an EMPTY
                     // slot is one visible position and still correct
                     // (docs/multicolumn-plan.md D1/D4).
+                    let stamped = stage.split_presentation();
+                    let entries = stage.entry_count(0);
                     return if split_presentation_fits(&stamped, entries) {
                         Ok("panes fit".to_owned())
                     } else {
@@ -3143,7 +3146,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                         ))
                     };
                 };
-                let got = format!("{class}/{}", panes_positions(presentation, entries));
+                let got = stage.panes_reading();
                 if got == *want {
                     Ok(format!("panes {got}"))
                 } else {
@@ -3914,6 +3917,9 @@ mod tests {
         fn split_presentation(&self) -> String {
             "unknown/stacked".to_owned()
         }
+        fn panes_reading(&self) -> String {
+            "unknown/0".to_owned()
+        }
         fn ax(&self, _: Target) -> String {
             "button/Save".to_owned()
         }
@@ -4218,6 +4224,9 @@ mod tests {
         fn split_presentation(&self) -> String {
             "unknown/stacked".to_owned()
         }
+        fn panes_reading(&self) -> String {
+            "unknown/0".to_owned()
+        }
         fn ax(&self, _: Target) -> String {
             "unknown/".to_owned()
         }
@@ -4420,6 +4429,9 @@ mod tests {
         fn resize_window(&self, _: u64, _: f64, _: f64) {}
         fn split_presentation(&self) -> String {
             "unknown/stacked".to_owned()
+        }
+        fn panes_reading(&self) -> String {
+            "unknown/0".to_owned()
         }
         fn ax(&self, _: Target) -> String {
             "unknown/".to_owned()

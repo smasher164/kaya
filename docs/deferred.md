@@ -4352,6 +4352,13 @@ denial is one emulator's storage state, not a missing grant. If it
 repeats, dumpsys the mount and appops state of the DEVICE the leg drew,
 not the guest.
 
+Second sighting 2026-08-20, different symptom, same family: on a pool
+~12 runs old, save-jvm's dialog answered with a NULL picked file and
+the Java guest NPE'd in readBack; a pool cold boot and the next matrix
+ran ALL PASS (the docs/traps.md pool-degradation rule, applied). The
+guest could also guard the null with its own sentence instead of an
+NPE — worth taking with the affordance-presence milestone.
+
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
 
@@ -4434,7 +4441,12 @@ harness implementations, panes.steps and the rust guest. The three
 backends the depth slice leaves behind refuse a ceiling of 3 loudly
 until their breadth slices land, on the record here:
 
-- DEPTH STUB: panes on gtk
+- ~~DEPTH STUB: panes on gtk~~ (LANDED 2026-08-20: the nested pair with
+  the inner view in the OUTER'S CONTENT slot — probed live first; the
+  cumulative rung table makes a non-cumulative breakpoint list
+  inexpressible; show-content driven from the stack on both views; the
+  back affordance from the reveals-a-covered-surface rule; the lane's
+  stages grown to 1600x1000 and its text scale pinned)
 - DEPTH STUB: panes on winui
 - ~~DEPTH STUB: panes on compose~~ (LANDED 2026-08-20: adaptive 1.2.0
   with the Large/XL opt-in, the declared-ceiling cap, the stack-derived

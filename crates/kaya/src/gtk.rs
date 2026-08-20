@@ -941,16 +941,21 @@ struct CoreState {
     /// to top (DESIGN.md, Navigation).
     nav_entries: HashMap<u64, GtkNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
-    /// list_detail per window (wprop 6; DESIGN.md, Adaptive list-detail):
-    /// does this window ASK for the adaptive presentation. Whether it GETS
-    /// one is the size class's answer, resolved in refresh_nav.
-    list_detail: HashMap<u64, bool>,
+    /// The declared pane CEILING per window (wprop 6;
+    /// docs/multicolumn-plan.md D2): how many side-by-side stack
+    /// surfaces this window asks for. How many it GETS is GNOME's
+    /// answer, resolved in refresh_nav's breakpoints.
+    panes: HashMap<u64, i64>,
     /// The presentation refresh_nav ACTUALLY rendered, per window — stamped
-    /// by the arm that ran, never derived from `list_detail` or the width.
+    /// by the arm that ran, never derived from the ceiling or the width.
     split_presentation: HashMap<u64, &'static str>,
     /// The live AdwNavigationSplitView per window. It answers whether it
     /// collapsed, the only honest reading once GNOME owns that decision.
     split_views: HashMap<u64, adw::NavigationSplitView>,
+    /// The INNER split view at a ceiling of three — the nested pair is
+    /// the three-pane construct (the priority IS the nesting), and the
+    /// panes reading needs both views' four booleans at once.
+    inner_splits: HashMap<u64, adw::NavigationSplitView>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, page
     /// containers by section id, the GtkStack that materializes the switcher,
     /// and the selection mirror. A section's page swaps between its own root
@@ -1946,6 +1951,224 @@ fn user_back(core: &mut CoreState, window: u64) {
 
 /// Reconcile the window's visible state with its stack: the top entry's root
 /// and title (the entry title IS the window title while covered), or the
+/// The visible stack positions at a ceiling of three, read from BOTH
+/// views' four booleans in one pass (a composite recomputed from any
+/// single notify names a state that is legal at some other width) plus
+/// slot occupancy — an empty slot is a visible column but not a pane
+/// (docs/multicolumn-plan.md D1/D4). None when no three-pane pair is up.
+fn three_pane_positions(core: &CoreState, window: u64) -> Option<Vec<u64>> {
+    let outer = core.split_views.get(&window)?;
+    let inner = core.inner_splits.get(&window)?;
+    let entries = core.nav_stacks.get(&window).map_or(0, |s| s.len()) as u64;
+    let inner_positions = |v: &mut Vec<u64>| {
+        if inner.is_collapsed() {
+            if inner.shows_content() {
+                if entries >= 2 {
+                    v.push(entries);
+                }
+            } else if entries >= 1 {
+                v.push(1);
+            }
+        } else {
+            if entries >= 1 {
+                v.push(1);
+            }
+            if entries >= 2 {
+                v.push(entries);
+            }
+        }
+    };
+    let mut positions = Vec::new();
+    if outer.is_collapsed() {
+        if outer.shows_content() {
+            inner_positions(&mut positions);
+        } else {
+            positions.push(0);
+        }
+    } else {
+        positions.push(0);
+        inner_positions(&mut positions);
+    }
+    Some(positions)
+}
+
+/// The back affordance at a ceiling of three: visible exactly when
+/// popping the top would REVEAL a covered surface into a visible slot —
+/// the surface beneath the top is not on screen. The same rule the mac
+/// detail column's chevron computes for itself (its stack is non-empty
+/// exactly then), so the affordance is uniform across the platforms.
+fn three_pane_back_visible(core: &CoreState, window: u64) -> bool {
+    let entries = core.nav_stacks.get(&window).map_or(0, |s| s.len()) as u64;
+    if entries == 0 {
+        return false;
+    }
+    match three_pane_positions(core, window) {
+        Some(positions) => !positions.contains(&(entries - 1)),
+        None => false,
+    }
+}
+
+/// The ceiling-3 arm: pane 0 the base root, pane 1 the first entry, the
+/// trailing pane the REST of the stack's top — two nested
+/// AdwNavigationSplitViews, the inner in the OUTER'S CONTENT slot. The
+/// nesting IS the priority: collapsing the outer puts the root and the
+/// inner pair into an AdwNavigationView, so the SHALLOWEST pane sheds
+/// first and back reaches the root — the collapsed prefix-stack, probed
+/// live before this was written (docs/multicolumn-plan.md D3). Returns
+/// false when the window has no root yet.
+fn refresh_three_panes(core: &mut CoreState, window: u64, target: &gtk4::Window) -> bool {
+    use adw::prelude::*;
+    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+    let Some(base) = core.window_roots.get(&window).cloned() else {
+        return false;
+    };
+    let entries = core.nav_stacks.get(&window).cloned().unwrap_or_default();
+    let first = entries.first().copied();
+    let deep_top = if entries.len() >= 2 { entries.last().copied() } else { None };
+
+    let inner = adw::NavigationSplitView::new();
+    if let Some(entry) = first.and_then(|id| core.nav_entries.get(&id)) {
+        if let Some(root) = entry.root.clone() {
+            unparent(&root);
+            let page = adw::NavigationPage::builder()
+                .child(&root)
+                .title(entry.title.clone())
+                .tag("middle")
+                .build();
+            inner.set_sidebar(Some(&page));
+        }
+    }
+    if let Some(entry) = deep_top.and_then(|id| core.nav_entries.get(&id)) {
+        if let Some(root) = entry.root.clone() {
+            unparent(&root);
+            let page = adw::NavigationPage::builder()
+                .child(&root)
+                .title(entry.title.clone())
+                .tag("detail")
+                .build();
+            inner.set_content(Some(&page));
+        }
+    }
+    // show-content on each view is the ONE stack fact it is told —
+    // measured: it defaults false, and a collapsed view then stands on
+    // its sidebar whatever the stack says.
+    inner.set_show_content(deep_top.is_some());
+
+    let outer = adw::NavigationSplitView::new();
+    unparent(&base);
+    let list = adw::NavigationPage::builder()
+        .child(&base)
+        .title(core.window_titles.get(&window).cloned().unwrap_or_default())
+        .tag("list")
+        .build();
+    outer.set_sidebar(Some(&list));
+    let inner_page = adw::NavigationPage::builder()
+        .child(&inner)
+        .title(
+            first
+                .and_then(|id| core.nav_entries.get(&id))
+                .map(|e| e.title.clone())
+                .unwrap_or_default(),
+        )
+        .tag("inner")
+        .build();
+    outer.set_content(Some(&inner_page));
+    outer.set_show_content(!entries.is_empty());
+
+    // THE RUNG TABLE, widest first, from GNOME's own documented
+    // thresholds. Each rung's setter set is the UNION of itself and
+    // every wider rung BY CONSTRUCTION (the accumulating loop):
+    // libadwaita applies exactly ONE breakpoint and resets unapplied
+    // setters, so a non-cumulative list shows two panes at phone width
+    // with no warning. This shape makes that list inexpressible.
+    let bin = adw::BreakpointBin::builder()
+        .width_request(1)
+        .height_request(1)
+        .child(&outer)
+        .build();
+    let rungs: [(&str, &adw::NavigationSplitView); 2] =
+        [("max-width: 860sp", &outer), ("max-width: 500sp", &inner)];
+    let mut cumulative: Vec<&adw::NavigationSplitView> = Vec::new();
+    for (condition, view) in &rungs {
+        cumulative.push(view);
+        if let Ok(condition) = adw::BreakpointCondition::parse(condition) {
+            let breakpoint = adw::Breakpoint::new(condition);
+            for view in &cumulative {
+                breakpoint.add_setter(*view, "collapsed", Some(&true.to_value()));
+            }
+            bin.add_breakpoint(breakpoint);
+        }
+    }
+
+    // The user's back, caught where libadwaita reports it, one view at
+    // a time. Each guard names the ONLY stack depth at which that
+    // view's group-back is a pop of kaya's stack — the rebuild's own
+    // set_show_content(false) writes arrive at other depths and must
+    // not pop (the two-pane arm's rule, one view deeper).
+    inner.connect_show_content_notify(move |view| {
+        if view.shows_content() {
+            return;
+        }
+        glib::idle_add_local_once(move || {
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return };
+                if core.nav_stacks.get(&window).is_some_and(|s| s.len() >= 2) {
+                    user_back(core, window);
+                }
+            });
+        });
+    });
+    outer.connect_show_content_notify(move |view| {
+        if view.shows_content() {
+            return;
+        }
+        glib::idle_add_local_once(move || {
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return };
+                if core.nav_stacks.get(&window).is_some_and(|s| s.len() == 1) {
+                    user_back(core, window);
+                }
+            });
+        });
+    });
+
+    // THE BACK AFFORDANCE FOLLOWS THE LADDER: recomputed from all four
+    // booleans on an idle after any of them moves (a breakpoint applies
+    // during allocation, and CORE may be borrowed by the apply that
+    // caused it — the two-pane arm's timing, doubled).
+    let refresh_back = move || {
+        glib::idle_add_local_once(move || {
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return };
+                let visible = three_pane_back_visible(core, window);
+                if let Some(back) = core.back_buttons.get(&window) {
+                    use gtk4::prelude::WidgetExt;
+                    back.set_visible(visible);
+                }
+            });
+        });
+    };
+    outer.connect_collapsed_notify(move |_| refresh_back());
+    inner.connect_collapsed_notify(move |_| refresh_back());
+
+    set_window_content(core, window, Some(bin.upcast_ref::<gtk4::Widget>()));
+    // WITH AN EMPTY STACK THE WINDOW KEEPS ITS OWN TITLE, never the
+    // empty string (the two-pane arm's rule).
+    let title = entries
+        .last()
+        .and_then(|id| core.nav_entries.get(id))
+        .map(|e| e.title.clone())
+        .unwrap_or_else(|| core.window_titles.get(&window).cloned().unwrap_or_default());
+    target.set_title(Some(&title));
+    core.split_views.insert(window, outer);
+    core.inner_splits.insert(window, inner);
+    let visible = three_pane_back_visible(core, window);
+    if let Some(back) = core.back_buttons.get(&window) {
+        back.set_visible(visible);
+    }
+    true
+}
+
 /// window's own when the stack is empty; the back button shows only over
 /// entries.
 fn refresh_nav(core: &mut CoreState, window: u64) {
@@ -1959,10 +2182,17 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
     let target = gtk_window(core, window);
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
 
-// ADAPTIVE LIST-DETAIL (DESIGN.md). Both halves must hold: the app asked
-// (wprop 6) and the window IS regular — the same 600 boundary every other
-// backend draws, read off the real window.
-    let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
+// ADAPTIVE PANES (DESIGN.md; docs/multicolumn-plan.md). The app asked
+// once (wprop 6, a ceiling); how many panes materialize is GNOME's
+// breakpoint answer, never a width kaya tested.
+    let ceiling = core.panes.get(&window).copied().unwrap_or(1);
+    core.inner_splits.remove(&window);
+    if ceiling >= 3 {
+        if refresh_three_panes(core, window, &target) {
+            return;
+        }
+    }
+    let wants_split = ceiling == 2;
 // No `top.is_some()` requirement: an empty stack on a regular window shows
 // the leading pane and an EMPTY trailing one (DESIGN.md). No width test
 // either — AdwNavigationSplitView collapses on a BREAKPOINT, GNOME's
@@ -4871,16 +5101,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.borrow_mut().insert(window.0, *on);
                 }
-                // BRIDGE (docs/multicolumn-plan.md): until this backend's
-                // three-pane slice lands, a ceiling of 2 lowers as the
-                // two-pane split and 1 as the serial stack — the exact
-                // observable list_detail had. A ceiling of 3 refuses
-                // rather than silently presenting two.
                 (WindowProp::Panes, Value::I64(n)) => {
-                    if *n >= 3 {
-                        crate::depth_stub("panes");
-                    }
-                    core.list_detail.insert(window.0, *n >= 2);
+                    core.panes.insert(window.0, *n);
                     refresh_nav(core, window.0);
                 }
                 // The unsaved-work marker beside the header-bar title
@@ -6785,7 +7007,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 aux_windows: HashMap::new(),
                 nav_entries: HashMap::new(),
                 nav_stacks: HashMap::new(),
-                list_detail: HashMap::new(),
+                panes: HashMap::new(),
+                inner_splits: HashMap::new(),
                 split_presentation: HashMap::new(),
                 split_views: HashMap::new(),
                 sections: HashMap::new(),
@@ -7513,21 +7736,74 @@ impl crate::harness::Stage for GtkStage {
                 return "<the primary window is not materialized>".to_owned();
             };
             let class = if width >= 600 { "regular" } else { "compact" };
-            // THE WIDGET'S OWN ANSWER, not a value the arm stamped about
-            // itself: GNOME decides where this collapses. A window that
-            // never requested list-detail has no widget, and falls back to
-            // the serial arm's stamp.
-            let presentation = match core.split_views.get(&0) {
-                Some(view) => {
+            // THE WIDGETS' OWN ANSWER, not a value the arm stamped about
+            // itself: GNOME decides where this collapses. At a ceiling of
+            // three the answer is the nested pair's four booleans read in
+            // one pass; a window that never requested panes has no widget
+            // and falls back to the serial arm's stamp.
+            let presentation = match (core.split_views.get(&0), core.inner_splits.get(&0)) {
+                (Some(outer), Some(inner)) => {
+                    match (outer.is_collapsed(), inner.is_collapsed(), outer.shows_content()) {
+                        (false, false, _) => "split3",
+                        (false, true, _) | (true, false, true) => "split",
+                        (true, _, false) | (true, true, true) => "stacked",
+                    }
+                }
+                (Some(view), None) => {
                     if view.is_collapsed() {
                         "stacked"
                     } else {
                         "split"
                     }
                 }
-                None => core.split_presentation.get(&0).copied().unwrap_or("stacked"),
+                _ => core.split_presentation.get(&0).copied().unwrap_or("stacked"),
             };
             format!("{class}/{presentation}")
+        })
+    }
+
+    fn panes_reading(&self) -> String {
+        Self::on_main(|core| {
+            let Some(width) = window_width(core, 0) else {
+                return "<the primary window is not materialized>".to_owned();
+            };
+            let class = if width >= 600 { "regular" } else { "compact" };
+            // The three-pane pair's REAL arrangement when one is up;
+            // the two-pane and serial worlds keep the derivation, which
+            // is exact there (root + top, or the top alone).
+            match three_pane_positions(core, 0) {
+                Some(positions) => {
+                    let spelled = if positions.is_empty() {
+                        "-".to_owned()
+                    } else {
+                        positions
+                            .iter()
+                            .map(u64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    };
+                    format!("{class}/{spelled}")
+                }
+                None => {
+                    let presentation = match core.split_views.get(&0) {
+                        Some(view) => {
+                            if view.is_collapsed() {
+                                "stacked"
+                            } else {
+                                "split"
+                            }
+                        }
+                        None => {
+                            core.split_presentation.get(&0).copied().unwrap_or("stacked")
+                        }
+                    };
+                    let entries = core.nav_stacks.get(&0).map_or(0, |s| s.len());
+                    format!(
+                        "{class}/{}",
+                        crate::harness::panes_positions(presentation, entries)
+                    )
+                }
+            }
         })
     }
 
@@ -8071,6 +8347,8 @@ impl crate::harness::Stage for GtkStage {
         // collapses any selection. The characters follow with the SMALLEST
         // inter-key delay each tool takes (wtype refuses 0 — "Invalid sleep
         // time", measured), keeping the burst inside GDK's event reading.
+        let pid_arg;
+        let window_arg;
         let (tool, args): (&str, Vec<&str>) = if linux_wayland_session() {
             (
                 "wtype",
@@ -8080,28 +8358,83 @@ impl crate::harness::Stage for GtkStage {
                 ],
             )
         } else {
-            ("xdotool", vec!["key", "ctrl+End", "type", "--delay", "0", text])
+            // THE POINTER IS PARKED OVER THE PRIMARY WINDOW FIRST, and
+            // focus re-asserted: the lane has no window manager, so a
+            // closing dialog's X focus reverts to POINTERROOT — whoever
+            // is under the pointer gets FocusIn, and GTK delivers keys
+            // only while its toplevel is active. The pointer rests at
+            // the screen's centre: inside the window on a 1024x768
+            // stage and on the ROOT of a larger one, which is how
+            // growing the Xvfb screen turned editor-go-x11's
+            // post-dialog typing into keys that landed nowhere
+            // (measured 2026-08-20, deterministic per size, while GTK's
+            // own focus widget read correctly the whole time —
+            // active=false was the discriminating print). The window id
+            // is resolved by pid first because this xdotool rejects an
+            // explicit `%1` stack reference as an unknown command.
+            ("xdotool", {
+                pid_arg = std::process::id().to_string();
+                let found = std::process::Command::new("xdotool")
+                    .args(["search", "--onlyvisible", "--pid", pid_arg.as_str()])
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                    .unwrap_or_default();
+                window_arg = found.split_whitespace().next().unwrap_or("").to_owned();
+                if window_arg.is_empty() {
+                    vec!["key", "ctrl+End", "type", "--delay", "0", text]
+                } else {
+                    vec![
+                        "mousemove", "--window", &window_arg, "40", "40",
+                        "windowfocus", &window_arg, "key", "ctrl+End", "type",
+                        "--delay", "0", text,
+                    ]
+                }
+            })
         };
-        let out = std::process::Command::new(tool)
-            .args(&args)
-            .output()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "kaya: the typing verb needs {tool}: {e} — the lane image installs it \
-                     (tools/linux/Dockerfile; docs/undo-plan.md A8)"
-                )
-            });
-        assert!(
-            out.status.success(),
-            "kaya: {tool} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        let send = || {
+            let out = std::process::Command::new(tool)
+                .args(&args)
+                .output()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "kaya: the typing verb needs {tool}: {e} — the lane image installs it \
+                         (tools/linux/Dockerfile; docs/undo-plan.md A8)"
+                    )
+                });
+            assert!(
+                out.status.success(),
+                "kaya: {tool} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        send();
         // Point 4: every character delivered AND processed.
         let Some((id, before)) = target else { return };
         let want = format!("{before}{text}");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+        // THE SEND IS RETRIED ONCE, savename's rule on this platform's
+        // soil: a GTK dialog's X teardown can reset input focus AFTER
+        // the focus-then-keys chain ran — the reset races the send, and
+        // it lands later the more pixels the software renderer pushes,
+        // which is how growing the Xvfb screen turned a green leg red
+        // (measured 2026-08-20, deterministic per size). The retry is
+        // taken ONLY when the field provably holds exactly the pre-send
+        // text: a partial landing means the keys are reaching the
+        // field, and a resend there would append twice.
+        let mut resent = false;
+        let mut deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
         loop {
             let now = Self::on_main(move |core| core.text_of(id).unwrap_or_default());
+            if !resent && now == before && std::time::Instant::now() >= deadline {
+                eprintln!(
+                    "KAYA_UNDO_TRACE: type {text:?} did not land within 2s and the field \
+                     is untouched — re-asserting focus and sending once more"
+                );
+                resent = true;
+                send();
+                deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+                continue;
+            }
             if now == want {
                 // AND THE KEYS FILLED THE NATIVE HISTORY, the one thing a
                 // stand-in cannot fake: a `set_text` here would satisfy every
@@ -8119,10 +8452,59 @@ impl crate::harness::Stage for GtkStage {
             }
             if std::time::Instant::now() >= deadline {
                 // NOT a verdict — the contract says a following assertion
-                // reports the mismatch — but never silent either.
+                // reports the mismatch — but never silent either. And it
+                // prints WHAT IT MEASURED (the diagnostics rule): every
+                // toplevel's active state and focus widget, plus X's own
+                // focus window — the discriminators between keys that
+                // went to the wrong window and keys GTK routed away.
+                let toplevels = Self::on_main(|_| {
+                    use gtk4::gio::prelude::ListModelExt;
+                    use gtk4::prelude::{GtkWindowExt, WidgetExt};
+                    let list = gtk4::Window::toplevels();
+                    let mut out = Vec::new();
+                    for i in 0..list.n_items() {
+                        let Some(window) = list
+                            .item(i)
+                            .and_then(|o| o.downcast::<gtk4::Window>().ok())
+                        else {
+                            continue;
+                        };
+                        out.push(format!(
+                            "{:?}(visible={} active={} focus={})",
+                            window.title().unwrap_or_default(),
+                            window.is_visible(),
+                            window.is_active(),
+                            GtkWindowExt::focus(&window)
+                                .map(|f| f.type_().name().to_owned())
+                                .unwrap_or_else(|| "<none>".to_owned()),
+                        ));
+                    }
+                    out.join(", ")
+                });
+                let xfocus = std::process::Command::new("xdotool")
+                    .args(["getwindowfocus", "getwindowname"])
+                    .output()
+                    .map(|o| {
+                        String::from_utf8_lossy(&o.stdout).trim().to_owned()
+                    })
+                    .unwrap_or_else(|e| format!("<{e}>"));
+                let pid = std::process::id().to_string();
+                let mine = std::process::Command::new("xdotool")
+                    .args(["search", "--onlyvisible", "--pid", &pid])
+                    .output()
+                    .map(|o| {
+                        String::from_utf8_lossy(&o.stdout)
+                            .split_whitespace()
+                            .map(String::from)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_else(|e| format!("<{e}>"));
                 eprintln!(
                     "KAYA_UNDO_TRACE: type {text:?} never landed: the field holds {now:?}, \
-                     expected {want:?} after {tool} reported success"
+                     expected {want:?} after {tool} reported success; toplevels: \
+                     [{toplevels}]; x focus window: {xfocus:?}; this pid's visible x \
+                     windows: [{mine}]"
                 );
                 return;
             }

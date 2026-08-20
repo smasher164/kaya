@@ -91,6 +91,20 @@ tools/check-pane-ladder.sh are the code):
   because no shared scene may sample any width inside the panes band —
   the platforms legitimately disagree across all of 400..1400 for three
   panes, so panes.steps samples the extremes only, per D5.
+- THE GTK [INFER]S ARE MEASURED (2026-08-20, a standalone adw probe in
+  the lane's own container, xvfb): the nested AdwNavigationSplitView in
+  the OUTER'S CONTENT slot collapses and restores cleanly through a
+  cumulative breakpoint pair (1400 -> both open; 700 -> outer collapsed;
+  360 -> both), and driving show-content false on the inner then the
+  outer walks detail -> middle -> root — the collapsed prefix-stack,
+  exactly what D1 wanted from this slot. TWO FINDINGS THE CODE NOW
+  ENCODES: `show-content` DEFAULTS FALSE, so a collapsed view stands on
+  its sidebar whatever the stack says until kaya drives it (the
+  two-pane arm's one-stack-fact, needed on both views); and the back
+  affordance's uniform rule is computable — visible iff popping the top
+  reveals a covered surface into a visible slot — which reproduces the
+  mac chevron at every rung, including its absence at the middle rung
+  with a two-deep stack.
 
 ~~Status: DRAFT, 2026-08-19. NOTHING RATIFIED.~~ (superseded the same
 day by the RATIFIED block above — this was the draft's own status line,

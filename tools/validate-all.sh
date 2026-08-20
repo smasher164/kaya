@@ -131,18 +131,20 @@ if [ "$MODE" = parallel ]; then
             # here would let this lane double again before saying a
             # word, which is exactly what let the old cost hide.
             mac) budget=560 ;;
-            # 420 since 2026-08-07, raised in the commit that made the
-            # lane slower, as this block asks. The text-ranges scene added
-            # 16 legs (rust and the C floor, both protocols, plus the
-            # eight-language sweep): 444 -> 460. STANDALONE the lane is
-            # UNCHANGED in kind — measured twice on the final tree, 218s
-            # and 219s, 460 legs, 0 failures, slowest leg 8s (stall, as
-            # ever). Under five-lane contention those 16 legs cost ~95s:
-            # three consecutive matrices measured 337s, 338s, 337s, where
-            # the old 300 was set against ~240s at 444 legs. 420 keeps the
-            # same ~1.25x headroom over the contended time that mac's 540
-            # keeps over its 420-442.
-            linux) budget=420 ;;
+            # 450 since 2026-08-20, raised in the commit that made the
+            # lane bigger, as this block asks: the panes scene added 14
+            # legs (seven languages, both protocols), 550 -> 564.
+            # STANDALONE the lane is UNCHANGED in kind — 564 legs green
+            # in the runs that landed the slice, panes legs 2-3s each —
+            # and the first contended matrix after read 442s against the
+            # old 420, which is the ~28s the legs themselves cost. 450
+            # keeps the same ~1.25x-over-contended headroom this block
+            # has always kept.
+            #
+            # The history it extends: 420 since 2026-08-07, when
+            # text-ranges added 16 legs (444 -> 460; contended 337s
+            # measured thrice against the old 300-at-~240s).
+            linux) budget=450 ;;
             # 480 since 2026-08-03, and the ceiling moved in the commit
             # that made the lane slower, as this block asks. Two
             # measured reasons, neither a change in kind: filedialog_java

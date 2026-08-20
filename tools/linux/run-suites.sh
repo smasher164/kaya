@@ -31,7 +31,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests.
 DEPTH_SCENES=""
@@ -178,7 +178,20 @@ export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 cat >/tmp/sway.conf <<'SWAY'
 for_window [app_id=".*"] floating enable
+output * resolution 1600x1000
 SWAY
+# 1600x1000 ON BOTH PROTOCOLS (the Xvfb screen below matches): the
+# panes scene resizes to 1400, and a stage smaller than the resize
+# leaves the window at whatever the compositor allowed — the breakpoint
+# then legitimately shows fewer panes and the leg reads as a backend
+# bug rather than a small screen.
+#
+# THE TEXT SCALE IS PINNED at 1.0 (docs/multicolumn-plan.md D4):
+# libadwaita's sp unit scales with the text-scaling factor, so the
+# 860sp/500sp rungs are 860px/500px only while nothing scales text.
+# The container has no settings daemon, so the default IS 1.0; the
+# unsets keep an override from sneaking in through docker -e.
+unset GDK_DPI_SCALE GDK_SCALE
 WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1     sway -c /tmp/sway.conf &>/tmp/sway.log &
 COMPOSITOR_PID=$!
 KAYA_WAYLAND_SOCKET=""
@@ -299,12 +312,12 @@ run_one() {
         case "$proto" in
             x11)
                 KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
-                    xvfb-run -a -s "-screen 0 1024x768x24" \
+                    xvfb-run -a -s "-screen 0 1600x1000x24" \
                     /work/tools/linux/record-leg.sh x11 "$dir" "$@"
                 ;;
             wayland)
                 KAYA_SELFTEST=1 GDK_BACKEND=wayland timeout 180 \
-                    xvfb-run -a -s "-screen 0 1024x768x24" \
+                    xvfb-run -a -s "-screen 0 1600x1000x24" \
                     /work/tools/linux/record-leg.sh wayland "$dir" "$@"
                 ;;
         esac
@@ -313,7 +326,7 @@ run_one() {
     case "$proto" in
         x11)
             KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
-                xvfb-run -a -s "-screen 0 1024x768x24" "$@"
+                xvfb-run -a -s "-screen 0 1600x1000x24" "$@"
             ;;
         wayland)
             KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \
@@ -882,6 +895,23 @@ for proto in x11 wayland; do
     # at whatever width this lane's window manager hands them — a scene
     # selects a SCRIPT, never an app. Through a11y-leg.sh: its one
     # real-tree assertion is an AT-SPI read.
+    # The panes scene: the THREE-pane ceiling on the nested split views
+    # (docs/multicolumn-plan.md), all seven of this lane's languages.
+    # Through a11y-leg.sh: the scene reads the real AT-SPI tree.
+    run "$proto" panes-rust env KAYA_SELFTEST=panes \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/panes"
+    run "$proto" panes-python env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/panes.py
+    run "$proto" panes-go env KAYA_SELFTEST=panes \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" panes-csharp env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" panes-ocaml env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/panes.exe
+    run "$proto" panes-haskell env KAYA_SELFTEST=panes \
+        tools/linux/a11y-leg.sh "$(hs_bin panes)"
+    run "$proto" panes-java env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" listdetail-rust env KAYA_SELFTEST=listdetail \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" listdetail-python env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \

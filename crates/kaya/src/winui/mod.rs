@@ -12676,6 +12676,24 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|_| "unknown/stacked".to_owned())
     }
 
+    fn panes_reading(&self) -> String {
+        // The two-pane derivation, exact while this backend's ceiling
+        // is two (root + top, or the top alone). Its three-pane slice
+        // replaces this with the nested TwoPaneViews' own Modes — the
+        // wide leg of panes.steps fails loudly against a derivation.
+        let stamped = self.split_presentation();
+        let (class, presentation) =
+            stamped.split_once('/').unwrap_or(("unknown", "stacked"));
+        let entries = Self::on_ui_read(|core| {
+            Ok(core.nav_stacks.get(&0).map_or(0, |s| s.len()))
+        })
+        .unwrap_or(0);
+        format!(
+            "{class}/{}",
+            crate::harness::panes_positions(presentation, entries)
+        )
+    }
+
     fn menu_presentation(&self) -> String {
         // XAML has no size-class type; its own adaptive triggers are
         // width thresholds (`MinWindowWidth`), so a width rule IS the

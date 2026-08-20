@@ -4012,3 +4012,30 @@ matrix ran ALL PASS. The mac lane has the same trap one platform over
 subsystem, LANE-WIDE"). The rule: on a long session, when a SECOND
 unrelated android one-off appears, reboot the pool BEFORE chasing the
 leg — the reboot costs two minutes and the chase costs an evening.
+
+## The x11 lane has NO window manager, so X focus reverts to POINTERROOT
+## when a dialog closes — and the POINTER'S POSITION decides who types
+
+Measured 2026-08-20, deterministic per screen size: growing the Xvfb
+screen from 1024x768 (to hold the panes scene's 1400px resize) turned
+editor-go-x11's post-dialog typing into keys that landed nowhere, on
+every run, while the SAME leg stayed green at 1024x768 and the failure
+followed ANY growth of either axis. The mechanism: without a WM,
+closing the GTK file dialog reverts X input focus to PointerRoot, so
+FocusIn goes to whatever sits under the pointer — which rests at the
+screen's centre, INSIDE an 800x600 window on the old stage and on the
+bare root of a bigger one. GTK then reads active=false on its toplevel
+and delivers no keys, while its OWN focus widget still reports the
+textarea — so expect_focused passes, xdotool reports success, and the
+buffer never moves. Every plausible-looking fix short of the real one
+fails: re-asserting focus with `xdotool windowfocus` does not flip
+GTK's active state (GDK tracks FocusIn on its focus proxy, not a
+direct XSetInputFocus on the toplevel), and a 2s-later resend dies the
+same way. THE FIX IS THE POINTER: the typing verb now parks it over
+the primary window (mousemove --window <id> 40 40) before focusing and
+typing, so every later PointerRoot revert lands on kaya's window. The
+diagnosis took the discriminating print — each toplevel's
+visible/active/focus plus X's focus window — added to KAYA_UNDO_TRACE's
+timeout branch, where it stays. If typed keys ever vanish on the x11
+leg again, read that trace FIRST: active=false with the right focus
+widget is this trap; a wrong focus widget is a different one.

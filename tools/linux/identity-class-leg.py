@@ -223,6 +223,17 @@ def matches_wayland(words, name):
     return words[0] == name
 
 
+# A reading that could have come from a LIVE window, per backend: X11's
+# class is a pair from realize onward, so a placeholder 1-tuple is the
+# destroy race; wayland's app_id is a string, None before/after life.
+def settled_x11(words):
+    return len(words) == 2
+
+
+def settled_wayland(words):
+    return words[0] is not None
+
+
 def main():
     if len(sys.argv) < 2:
         fail("needs the leg's command line")
@@ -272,7 +283,19 @@ def main():
             if found:
                 samples["count"] += 1
                 samples["peak"] = max(samples["peak"], len(found))
-                if len(found) >= 2:
+                # AND EVERY WINDOW MUST HAVE YIELDED A LIVE READING: a
+                # mapped GTK window carries its class from realize
+                # onward, so a sample with any placeholder reading is
+                # the DESTROY RACE — windows still listed while their
+                # properties are already gone (measured under the
+                # concurrent matrix, 2026-08-20: the count anchor alone
+                # took a both-windows-stripped teardown sample as the
+                # verdict and failed a leg for shutting down, the exact
+                # state the comment above promises to skip).
+                settled = settled_x11 if backend == "x11" else settled_wayland
+                if len(found) >= 2 and all(
+                    settled(words) for words in found.values()
+                ):
                     samples["last"] = found
                 shape = describe(found)
                 if not history or history[-1] != shape:
