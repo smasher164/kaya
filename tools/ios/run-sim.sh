@@ -1523,8 +1523,20 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest"
         fi
     done
-    drain
-    timing swift-build+legs
+    # UNDER `all` THE PHASES INTERLEAVE (2026-08-20): the pool is three
+    # devices and the whale legs — clipboard at ~75s each — live one
+    # per app family, so draining here queued the whales BEHIND each
+    # other and the serialization was the whole matrix's bound. Each
+    # family's build still finishes before its legs queue; the next
+    # family's build overlaps the pool's work; one drain at the end
+    # collects every verdict. A single-suite run and recording mode
+    # keep the old serial shape (a film wants its legs in order).
+    if [ "$SUITE" = all ] && [ -z "${KAYA_RECORD:-}" ]; then
+        timing swift-built+queued
+    else
+        drain
+        timing swift-build+legs
+    fi
 fi
 
 # The Go guest suite: the same C ABI floor the swift suite reaches. Go
@@ -1626,8 +1638,13 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on editor-go "$APP" dev.kaya.editorgo editor-go editor editor \
         '' close_window expect_dirty
-    drain
-    timing go-build+legs
+    # The swift phase's interleave rule, verbatim.
+    if [ "$SUITE" = all ] && [ -z "${KAYA_RECORD:-}" ]; then
+        timing go-built+queued
+    else
+        drain
+        timing go-build+legs
+    fi
 fi
 
 if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
@@ -1930,8 +1947,19 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on dirty-swiftui "$APP" dev.kaya.dirtyswiftui dirty-swiftui \
         dirty dirty '' close_window expect_dirty
-    drain
-    timing swiftui-build+legs
+    if [ "$SUITE" = all ] && [ -z "${KAYA_RECORD:-}" ]; then
+        timing swiftui-built+queued
+    else
+        drain
+        timing swiftui-build+legs
+    fi
+fi
+
+# The interleaved pool's one collection point (empty arrays no-op for
+# the serial shapes, which drained inside their phases).
+drain
+if [ "$SUITE" = all ] && [ -z "${KAYA_RECORD:-}" ]; then
+    timing all-legs-drained
 fi
 
 rec_suite_stop || status=1

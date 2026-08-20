@@ -121,17 +121,25 @@ let () =
         ignore (pick_file ~on_result:opened ())
       in
       let save_back () =
-        let file = Option.get !source in
-        work (fun () -> "saved " ^ write_back file "second draft")
+        (* A missing handle is an open that never landed — its OWN
+           sentence, never an exception: a crashed guest masks the real
+           failure (docs/deferred.md, save-jvm WATCH). *)
+        match !source with
+        | None -> write status (Str "nothing open to save")
+        | Some file ->
+            work (fun () -> "saved " ^ write_back file "second draft")
       in
       let save_as () =
         ignore (save_file ~on_result:saved "copy")
       in
       let reopen () =
-        let first = Option.get !source in
-        let second = Option.get !destination in
-        work (fun () ->
-            Printf.sprintf "reopened %s %s" (read_back first) (read_back second))
+        (* The missing-handle guard, same reason as save_back's. *)
+        match (!source, !destination) with
+        | Some first, Some second ->
+            work (fun () ->
+                Printf.sprintf "reopened %s %s" (read_back first)
+                  (read_back second))
+        | _ -> write status (Str "nothing to reopen")
       in
 
       let root =

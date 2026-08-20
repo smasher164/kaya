@@ -53,15 +53,13 @@ writeBack file text = do
         Left e -> return ("write failed: " ++ show (e :: SomeException))
         Right () -> readBack file
 
--- | The handle a step needs and the scene guarantees. Reaching the error
--- means the script ran out of order, which is a broken scene rather than
--- a state an app should branch on.
-required :: String -> IORef (Maybe PickedFile) -> IO PickedFile
-required what ref = do
-  held <- readIORef ref
-  case held of
-    Just file -> return file
-    Nothing -> error ("the save scene " ++ what)
+-- | The handle a step holds, or Nothing when the dialog that should
+-- have filled it never answered (cancelled, or swallowed under load).
+-- The caller writes its OWN sentence for that — never an error: a
+-- crashed guest masks the real failure (docs/deferred.md, save-jvm
+-- WATCH).
+held :: IORef (Maybe PickedFile) -> IO (Maybe PickedFile)
+held = readIORef
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -119,20 +117,24 @@ main = kayaMain $ \app -> do
           buttonOn -- button#1
             "save"
             ( do
-                file <- required "opens a file before saving" sourceRef
-                work (("saved " ++) <$> writeBack file "second draft")
+                file <- held sourceRef
+                case file of
+                  Nothing -> buildTx app (writeSignal status (VStr "nothing open to save"))
+                  Just f -> work (("saved " ++) <$> writeBack f "second draft")
             )
             [],
           buttonOn "save as" (buildTx app (saveFile "copy" [] saved)) [], -- button#2
           buttonOn -- button#3
             "reopen"
             ( do
-                first <- required "opens a file" sourceRef
-                second <- required "saves as" destRef
-                work $ do
-                  one <- readBack first
-                  two <- readBack second
-                  return ("reopened " ++ one ++ " " ++ two)
+                first <- held sourceRef
+                second <- held destRef
+                case (first, second) of
+                  (Just one', Just two') -> work $ do
+                    one <- readBack one'
+                    two <- readBack two'
+                    return ("reopened " ++ one ++ " " ++ two)
+                  _ -> buildTx app (writeSignal status (VStr "nothing to reopen"))
             )
             []
         ]

@@ -1326,11 +1326,15 @@ run_probe() {
     run_ssh "type C:\\kaya\\out_probe.txt"
 }
 
-# Suites run in a pool KAYA_WIN_JOBS wide (default 4): each leg claims
-# a tile slot, launches its scheduled task through the hidden-window
-# shim with the slot argument, and polls its own output file. Verdicts
-# print in submission order at drain. Note: a timed-out leg's
-# kill_guests sweep is VM-wide and takes concurrent legs with it.
+# Suites run in a pool KAYA_WIN_JOBS wide (default 4 — measured, not
+# guessed: 6 looked right against the VM's -smp cpus=6, and two
+# contended matrices came back 417s and 431s against 390-397s at 4,
+# because the vCPUs are themselves oversubscribed against the host
+# while five lanes run; 2026-08-20): each leg claims a tile slot,
+# launches its scheduled task through the hidden-window shim with the
+# slot argument, and polls its own output file. Verdicts print in
+# submission order at drain. Note: a timed-out leg's kill_guests sweep
+# is VM-wide and takes concurrent legs with it.
 WIDTH="${KAYA_WIN_JOBS:-4}"
 leg_names=()
 leg_pids=()

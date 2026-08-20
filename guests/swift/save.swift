@@ -117,8 +117,12 @@ app.build { tx in
         tx.button("save") { _ in  // button#1
             // SAVE-BACK NEEDS NO DIALOG: the handle the user chose with
             // is writable — the claim this step drives.
+            // A missing handle is an open that never landed — its OWN
+            // sentence, never a crash: a crashed guest masks the real
+            // failure (docs/deferred.md, save-jvm WATCH).
             guard let file = source else {
-                fatalError("kaya: the scene opens a file before saving")
+                tx.write(status, .str("nothing open to save"))
+                return
             }
             work { "saved \(writeBack(file, "second draft"))" }
         }
@@ -130,8 +134,10 @@ app.build { tx in
         tx.button("reopen") { _ in  // button#3
             // BOTH, in order: a save that went to the wrong handle passes
             // every earlier step and fails here.
+            // The missing-handle guard, same reason as save's.
             guard let first = source, let second = destination else {
-                fatalError("kaya: the scene opens a file and saves as before reopening")
+                tx.write(status, .str("nothing to reopen"))
+                return
             }
             work { "reopened \(readBack(first)) \(readBack(second))" }
         }

@@ -82,8 +82,17 @@ final class Save {
                                 .show());
                 tx.button("save", inner -> { // button#1
                     // Save-back needs no dialog: the handle the user
-                    // chose the file with is writable.
+                    // chose the file with is writable. A null handle is
+                    // an open that never landed (cancelled, or the
+                    // dialog swallowed under load) — its OWN sentence,
+                    // never an NPE: the crash took the process and
+                    // masked the real failure for four sightings
+                    // (docs/deferred.md, save-jvm WATCH).
                     KayaApp.PickedFile file = held.source;
+                    if (file == null) {
+                        inner.write(status, "nothing open to save");
+                        return;
+                    }
                     work(app, status,
                             () -> "saved " + writeBack(file, "second draft"));
                 });
@@ -105,8 +114,13 @@ final class Save {
                 tx.button("reopen", inner -> { // button#3
                     // BOTH, in order: a save that went to the wrong
                     // handle passes every earlier step and fails here.
+                    // The null guard, same reason as button#1's.
                     KayaApp.PickedFile first = held.source;
                     KayaApp.PickedFile second = held.destination;
+                    if (first == null || second == null) {
+                        inner.write(status, "nothing to reopen");
+                        return;
+                    }
                     work(app, status, () ->
                             "reopened " + readBack(first) + " " + readBack(second));
                 });

@@ -144,8 +144,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 work(Box::new(move || format!("opened {}", read_back(&file))));
             }
             Msg::SaveBack => {
-                // No dialog: the handle the user opened with is writable.
-                let file = source.clone().expect("the scene opens a file before saving");
+                // No dialog: the handle the user opened with is
+                // writable. A missing handle is an open that never
+                // landed — its OWN sentence, never a panic: a crashed
+                // guest masks the real failure (docs/deferred.md,
+                // save-jvm WATCH).
+                let Some(file) = source.clone() else {
+                    ctx.apply(|tx| tx.write(status, "nothing open to save"));
+                    continue;
+                };
                 work(Box::new(move || format!("saved {}", write_back(&file, "second draft"))));
             }
             Msg::SaveAs => {
@@ -166,8 +173,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Reopen => {
                 // BOTH, in order: a save-as that quietly wrote back into
                 // the ORIGINAL passes every earlier step and fails here.
-                let first = source.clone().expect("the scene opens a file");
-                let second = destination.clone().expect("the scene saves as");
+                // The missing-handle guard, same reason as SaveBack's.
+                let (Some(first), Some(second)) = (source.clone(), destination.clone())
+                else {
+                    ctx.apply(|tx| tx.write(status, "nothing to reopen"));
+                    continue;
+                };
                 work(Box::new(move || {
                     format!("reopened {} {}", read_back(&first), read_back(&second))
                 }));

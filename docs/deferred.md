@@ -4355,9 +4355,35 @@ not the guest.
 Second sighting 2026-08-20, different symptom, same family: on a pool
 ~12 runs old, save-jvm's dialog answered with a NULL picked file and
 the Java guest NPE'd in readBack; a pool cold boot and the next matrix
-ran ALL PASS (the docs/traps.md pool-degradation rule, applied). The
-guest could also guard the null with its own sentence instead of an
-NPE — worth taking with the affordance-presence milestone.
+ran ALL PASS (the docs/traps.md pool-degradation rule, applied).
+
+FOURTH SIGHTING the same day KILLED the pool-degradation story: it
+fired one matrix after a cold boot, always save-jvm, always under the
+heaviest five-lane contention (the concurrent-matrix shape raised
+it) — a real race in which DocumentsUI answers a dialog with
+nothing, not a tired emulator. What made every sighting cost an
+investigation was the GUESTS: seven of the eight save guests crashed
+on the never-filled handle (a raw NPE in Java; DELIBERATE
+crash-guards everywhere else — .expect, Option.get, fatalError,
+error, panic, throw — resting on "the scene opens a file before
+saving", which a swallowed dialog falsifies), and the crash took the
+process, ate the 62s timeout, and masked the step that actually
+failed. ALL EIGHT now write a sentence instead ("nothing open to
+save" / "nothing to reopen"), so a recurrence fails CLEANLY at the
+"opened first draft" expect with the dialog trace visible — which is
+what the next investigation reads first. The dialog-answers-nothing
+race itself is still open, NARROWED BY ONE FALSIFICATION: forcing
+activity recreation (always_finish_activities on all four pool
+devices, the full lane run under it) passed every save leg — kaya's
+result plumbing survives recreation, so that classic is NOT the
+cause. What the clean failures show: the second save dialog was live,
+renamed, verified, its SAVE pressed and the panel gone — and the
+guest's label still read the FIRST cycle's "save cancelled", which
+smells like a result that never arrived rather than a fresh cancel.
+The next sighting decides it: the runner's on-FAIL dump now keeps the
+harness trace (it used to keep only crash-shaped lines, which after
+the guest guards is nothing — "Bad arguments" and a one-line verdict
+was the whole evidence four times).
 
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
@@ -4564,6 +4590,25 @@ measured two defects nobody had seen:
    entirely). Warm sweep: 46s -> 23s, 28 of 41 gates keyed;
    check-keyed's 5c clauses hold the marker-follows rule in both
    directions, and the CLAUDE.md sentence moved with the ruling.
+SAME-CLAIM OVERLAP AUDIT, 2026-08-20 (the maintainer asked whether
+two scenes ever assert the same behavior; surveyed by assertion-verb
+inventory across all 40 scenes, then by reading every suspicious
+pair's actual claims): the roster is essentially free of it, and each
+suspect resolved on the record. identity.steps' expect_toolbar pair
+LOOKS like toolbar.steps' opening but is the custom-caption identity
+sink's witness (its own comment block says so — a promotion mints the
+custom caption that replaces the system-drawn icon, and the assert
+proves that arm was reached, not toolbar semantics). window vs panels
+both read window sizes — of DIFFERENT windows (primary prop vs aux).
+milestone2 re-covers click/label foundations but is seven ~free steps
+and the harness's own parse fixture. editor re-asserts save/dirty/
+ranges/menus claims deliberately — it is the integration artifact, one
+leg per lane. save.steps embeds an open-picker cycle as setup for its
+reopen claims (~2s of a leg whose 17s is the panel service). The
+expensive legs are expensive for SEMANTIC reasons — NSSavePanel's
+presentation, the iOS paste prompt, the stall scene's deliberate block
+— not duplication.
+
 2. THE GATE SWEEP IS ITS OWN CONCURRENT MATRIX UNIT: validate-all
    computes a same-tree fingerprint at t0, launches all five lanes
    plus the sweep together, and the mac lane skips its in-lane sweep

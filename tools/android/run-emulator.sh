@@ -736,6 +736,13 @@ run_apk_on() {
         adb -s "$serial" logcat -d -b crash,main -s AndroidRuntime:E Go:E kaya:E DEBUG:F \
             2>/dev/null | grep -E "panicked at|Abort message|FATAL EXCEPTION" | head -5
         adb -s "$serial" logcat -d -s AndroidRuntime:E Go:E DEBUG:F | tail -30
+        # AND THE HARNESS TRACE, since the save guests stopped crashing
+        # (2026-08-20): a clean failure used to keep only crash-shaped
+        # lines, which is NOTHING — four save-dialog sightings were
+        # investigated off a one-line verdict because the step timings
+        # died with the buffer. Bounded: the last 60 kaya-tag lines are
+        # the whole leg for every scene in the roster.
+        adb -s "$serial" logcat -d -s kaya:* 2>/dev/null | tail -60
         failed=1
     fi
     [ "$failed" = 0 ]

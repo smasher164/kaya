@@ -115,8 +115,15 @@ def open_file():
 
 def save_back():
     # Save-back needs no dialog — the user already chose this file, and
-    # the handle they chose it with is writable.
+    # the handle they chose it with is writable. A missing handle is an
+    # open that never landed (cancelled, or the dialog swallowed under
+    # load) — its OWN sentence, never a crash: a crashed guest takes
+    # the process and masks the real failure (docs/deferred.md,
+    # save-jvm WATCH).
     file = source
+    if file is None:
+        status.set("nothing open to save")
+        return
     work(lambda: f"saved {write_back(file, 'second draft')}")
 
 
@@ -130,8 +137,12 @@ def save_as():
 
 def reopen():
     # BOTH, in order: a save that went to the wrong handle passes every
-    # earlier step and fails here.
+    # earlier step and fails here. The missing-handle guard, same
+    # reason as save_back's.
     first, second = source, destination
+    if first is None or second is None:
+        status.set("nothing to reopen")
+        return
     work(lambda: f"reopened {read_back(first)} {read_back(second)}")
 
 

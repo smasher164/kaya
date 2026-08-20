@@ -146,10 +146,17 @@ static class SaveScene
                 tx.Button("open", onClick: inner =>       // button#0
                     inner.PickFile(onResult: Picked));
 
-                tx.Button("save", onClick: _ =>           // button#1
+                tx.Button("save", onClick: inner =>       // button#1
                 {
-                    var file = source ?? throw new InvalidOperationException(
-                        "kaya: the scene opens a file before saving");
+                    // A missing handle is an open that never landed —
+                    // its OWN sentence, never a throw: a crashed guest
+                    // masks the real failure (docs/deferred.md,
+                    // save-jvm WATCH).
+                    if (source is not PickedFile file)
+                    {
+                        inner.Write(status, "nothing open to save");
+                        return;
+                    }
                     Work(() => "saved " + WriteBack(file, "second draft"));
                 });
 
@@ -158,12 +165,15 @@ static class SaveScene
                 tx.Button("save as", onClick: inner =>    // button#2
                     inner.SaveFile("copy", onResult: Saved));
 
-                tx.Button("reopen", onClick: _ =>         // button#3
+                tx.Button("reopen", onClick: inner =>     // button#3
                 {
-                    var first = source ?? throw new InvalidOperationException(
-                        "kaya: the scene opens a file");
-                    var second = destination ?? throw new InvalidOperationException(
-                        "kaya: the scene saves as");
+                    // The missing-handle guard, same reason as save's.
+                    if (source is not PickedFile first
+                        || destination is not PickedFile second)
+                    {
+                        inner.Write(status, "nothing to reopen");
+                        return;
+                    }
                     Work(() => $"reopened {ReadBack(first)} {ReadBack(second)}");
                 });
             }));

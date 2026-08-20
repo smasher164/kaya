@@ -152,8 +152,12 @@ func App() *kaya.App {
 			tx.Button("save", func(tx *kaya.Tx) { // button#1
 				// SAVE-BACK NEEDS NO DIALOG: the user already chose this
 				// file, and the handle they chose it with is writable.
+				// A nil handle is an open that never landed — its
+				// OWN sentence, never a panic: a crashed guest masks
+				// the real failure (docs/deferred.md, save-jvm WATCH).
 				if source == nil {
-					panic("kaya: the save scene opens a file before it saves one")
+					tx.Write(status, "nothing open to save")
+					return
 				}
 				file := *source
 				work(func() string { return "saved " + writeBack(file, "second draft") })
@@ -176,8 +180,10 @@ func App() *kaya.App {
 			tx.Button("reopen", func(tx *kaya.Tx) { // button#3
 				// BOTH, in order: a save that went to the wrong handle
 				// passes every earlier step and fails here.
+				// The nil guard, same reason as save's.
 				if source == nil || destination == nil {
-					panic("kaya: the save scene opens a file and saves as before it reopens")
+					tx.Write(status, "nothing to reopen")
+					return
 				}
 				first, second := *source, *destination
 				work(func() string {

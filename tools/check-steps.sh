@@ -1775,9 +1775,13 @@ for scenes in lists:
         continue
     seen += 1
     block = text[scenes.end():]
-    stop = block.find("\n    drain\n")
-    if stop >= 0:
-        block = block[:stop]
+    # The block ends at the phase-closing `timing` call, which both the
+    # drained and the interleaved shapes carry (the drain itself moved
+    # inside a conditional when the phases learned to interleave,
+    # 2026-08-20).
+    stop = re.search(r"\n +timing ", block)
+    if stop:
+        block = block[:stop.start()]
     if "queue_pad_leg" in block:
         bad.append(f"{path}: clipboard is in IOS_{lang}_SCENES and that block queues with "
                    f"queue_pad_leg — the pad is one lockless device")
@@ -1988,8 +1992,8 @@ hits="$(ios_perturb tools/ios/run-sim.sh \
     '(?m)^clip_relay_check (.*)\n' '' "$IOS_T/late.sh")"
 ios_applied "$hits" "the late-check removal half"
 hits="$(ios_perturb "$IOS_T/late.sh" \
-    '(?m)^    drain\n    timing swiftui-build\+legs' \
-    'clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1\n    drain\n    timing swiftui-build+legs' \
+    '(?m)^        drain\n        timing swiftui-build\+legs' \
+    'clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1\n        drain\n        timing swiftui-build+legs' \
     "$IOS_T/late.sh")"
 ios_applied "$hits" "the late-check insertion half"
 ios_selftest "$IOS_T/late.sh" "measured AFTER the first leg" \
@@ -2025,8 +2029,8 @@ hits="$(ios_perturb tools/ios/run-sim.sh \
     '(?m)^    picker_warm (.*)\n' '' "$IOS_T/latewarm.sh")"
 ios_applied "$hits" "the late-warm removal half"
 hits="$(ios_perturb "$IOS_T/latewarm.sh" \
-    '(?m)^    drain\n    timing swiftui-build\+legs' \
-    'picker_warm "${UDIDS[0]}" || exit 1\n    drain\n    timing swiftui-build+legs' \
+    '(?m)^        drain\n        timing swiftui-build\+legs' \
+    'picker_warm "${UDIDS[0]}" || exit 1\n        drain\n        timing swiftui-build+legs' \
     "$IOS_T/latewarm.sh")"
 ios_applied "$hits" "the late-warm insertion half"
 picker_selftest "$IOS_T/latewarm.sh" "warmed AFTER the first leg" \

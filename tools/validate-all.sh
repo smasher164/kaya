@@ -203,7 +203,13 @@ if [ "$MODE" = parallel ]; then
             # measures 610s at 267 legs. Raising a ceiling to fit an
             # environmental anomaly is how a guard stops guarding.
             ios) budget=540 ;;
-            android) budget=250 ;;
+            # 310 since 2026-08-20: the pool-degradation trap's remedy
+            # is a COLD BOOT (docs/traps.md), and the reboot run then
+            # carries ~60-90s of emulator startup that the old 250 —
+            # set against a warm pool — read as an anomaly. 310 clears
+            # a measured cold-boot run (267s) with the usual headroom
+            # while still catching a change in kind on a warm one.
+            android) budget=310 ;;
             # The sweep as its own concurrent unit (2026-08-20):
             # measured 250s under five-lane contention the day it moved
             # out of the mac lane; ~1.25x headroom like the others.
