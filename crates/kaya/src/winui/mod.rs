@@ -437,14 +437,19 @@ struct CoreState {
     /// and title come back when its stack empties.
     nav_entries: HashMap<u64, WinNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
-    /// list_detail per window (wprop 6) and the presentation
-    /// refresh_nav ACTUALLY rendered — stamped by the arm that ran,
-    /// never derived (docs/traps.md).
-    list_detail: HashMap<u64, bool>,
+    /// The declared pane CEILING per window (wprop 6;
+    /// docs/multicolumn-plan.md D2), and the presentation refresh_nav
+    /// ACTUALLY rendered — stamped by the arm that ran, never derived
+    /// (docs/traps.md).
+    panes: HashMap<u64, i64>,
     split_presentation: HashMap<u64, &'static str>,
-    /// The live list-detail Grid per window, kept so the next render
-    /// can release the roots it holds (see release_split).
+    /// The live split view per window, kept so the next render can
+    /// release the roots it holds (see release_split).
     split_views: HashMap<u64, TwoPaneView>,
+    /// The INNER TwoPaneView at a ceiling of three — the nest IS the
+    /// three-pane construct (the priority is a CHAIN of PanePriority
+    /// bits), and the panes reading folds both views' Modes.
+    inner_splits: HashMap<u64, TwoPaneView>,
     window_roots: HashMap<u64, UIElement>,
     /// The WIDGET ID of each mounted surface root, by surface (window,
     /// pushed navigation entry or section pane). It is what tells
@@ -2006,6 +2011,170 @@ fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
     Ok(())
 }
 
+/// The visible stack positions at a ceiling of three, folded from BOTH
+/// views' Modes — the control's own answer at each level of the nest,
+/// never a width kaya measured — plus slot occupancy: an empty slot is
+/// a visible column but not a pane (docs/multicolumn-plan.md D1/D4).
+/// Which pane a SinglePane view shows follows the PanePriority kaya
+/// declared, the platform's contract. None when no three-pane nest is
+/// up.
+fn three_pane_positions(core: &CoreState, window: u64) -> Option<Vec<u64>> {
+    let outer = core.split_views.get(&window)?;
+    let inner = core.inner_splits.get(&window)?;
+    let entries = core.nav_stacks.get(&window).map_or(0, |s| s.len()) as u64;
+    let outer_wide = outer.Mode().ok()? != TwoPaneViewMode::SinglePane;
+    let inner_wide = inner.Mode().ok()? != TwoPaneViewMode::SinglePane;
+    let inner_positions = |v: &mut Vec<u64>| {
+        if inner_wide {
+            if entries >= 1 {
+                v.push(1);
+            }
+            if entries >= 2 {
+                v.push(entries);
+            }
+        } else if entries >= 2 {
+            v.push(entries);
+        } else if entries >= 1 {
+            v.push(1);
+        }
+    };
+    let mut positions = Vec::new();
+    if outer_wide {
+        positions.push(0);
+        inner_positions(&mut positions);
+    } else if entries >= 1 {
+        inner_positions(&mut positions);
+    } else {
+        positions.push(0);
+    }
+    Some(positions)
+}
+
+/// The back affordance at a ceiling of three: the TOP entry's bar,
+/// visible exactly when popping would REVEAL a covered surface into a
+/// visible slot — the surface beneath the top is not on screen. The
+/// uniform rule (the mac chevron and the GTK button compute the same
+/// answer); every other entry's bar stays collapsed.
+fn apply_three_pane_back_bar(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let entries = core.nav_stacks.get(&window).cloned().unwrap_or_default();
+    let count = entries.len() as u64;
+    let reveal = count >= 1
+        && three_pane_positions(core, window)
+            .is_some_and(|positions| !positions.contains(&(count - 1)));
+    for (i, id) in entries.iter().enumerate() {
+        if let Some(back) = core.nav_entries.get(id).and_then(|e| e.back_button.clone()) {
+            let back: UIElement = back.cast()?;
+            let is_top = i + 1 == entries.len();
+            back.SetVisibility(if is_top && reveal {
+                Visibility::Visible
+            } else {
+                Visibility::Collapsed
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// The ceiling-3 arm: pane 0 the base root, pane 1 the first entry,
+/// the trailing pane the REST of the stack's top — two nested
+/// TwoPaneViews, the inner in the outer's STAR-SIZED Pane2 (an
+/// auto-sized parent would give it no width to measure its own
+/// threshold against). The priority is a CHAIN of PanePriority bits:
+/// outer keeps its content, inner keeps its detail — two binary
+/// declarations composing into D1's shallowest-sheds-first. The
+/// collapse ORDER is emergent from each view measuring the space the
+/// nest hands it; kaya declares no threshold and computes none.
+/// Returns false when the window has no root yet.
+fn refresh_three_panes(core: &mut CoreState, window: u64) -> windows_core::Result<bool> {
+    let Some(base) = core.window_roots.get(&window).cloned() else {
+        return Ok(false);
+    };
+    let entries = core.nav_stacks.get(&window).cloned().unwrap_or_default();
+    let first = entries.first().copied();
+    let deep_top = if entries.len() >= 2 { entries.last().copied() } else { None };
+    let content = first
+        .and_then(|id| core.nav_entries.get(&id))
+        .and_then(|e| e.wrapper.clone());
+    let detail = deep_top
+        .and_then(|id| core.nav_entries.get(&id))
+        .and_then(|e| e.wrapper.clone());
+
+    let width = window_client_width(core, window).unwrap_or(0.0);
+    let outer_lead = crate::protocol::leading_pane_width(width);
+
+    let inner = TwoPaneView::new()?;
+    inner.SetMinTallModeHeight(f64::INFINITY)?;
+    inner.SetWideModeConfiguration(TwoPaneViewWideModeConfiguration::LeftRight)?;
+    inner.SetPane1Length(GridLength {
+        Value: crate::protocol::leading_pane_width((width - outer_lead).max(0.0)),
+        GridUnitType: GridUnitType::Pixel,
+    })?;
+    inner.SetPane2Length(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Star,
+    })?;
+    inner.SetPanePriority(if deep_top.is_some() {
+        TwoPaneViewPriority::Pane2
+    } else {
+        TwoPaneViewPriority::Pane1
+    })?;
+    let content_el: UIElement = match &content {
+        Some(c) => windows_core::Interface::cast(c)?,
+        None => windows_core::Interface::cast(&Grid::new()?)?,
+    };
+    let detail_el: UIElement = match &detail {
+        Some(d) => windows_core::Interface::cast(d)?,
+        None => windows_core::Interface::cast(&Grid::new()?)?,
+    };
+    inner.SetPane1(&content_el)?;
+    inner.SetPane2(&detail_el)?;
+
+    let outer = TwoPaneView::new()?;
+    outer.SetMinTallModeHeight(f64::INFINITY)?;
+    outer.SetWideModeConfiguration(TwoPaneViewWideModeConfiguration::LeftRight)?;
+    outer.SetPane1Length(GridLength {
+        Value: outer_lead,
+        GridUnitType: GridUnitType::Pixel,
+    })?;
+    outer.SetPane2Length(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Star,
+    })?;
+    outer.SetPanePriority(if entries.is_empty() {
+        TwoPaneViewPriority::Pane1
+    } else {
+        TwoPaneViewPriority::Pane2
+    })?;
+    detach_window_content(core, window)?;
+    outer.SetPane1(&base)?;
+    let inner_el: UIElement = windows_core::Interface::cast(&inner)?;
+    outer.SetPane2(&inner_el)?;
+    core.split_views.insert(window, outer.clone());
+    core.inner_splits.insert(window, inner.clone());
+    let el: UIElement = windows_core::Interface::cast(&outer)?;
+    set_window_content(core, window, &el)?;
+    refresh_caption(core, window)?;
+    // The back bar follows BOTH controls' modes, now and on every
+    // change — Mode is decided during layout, so the build-time read
+    // alone would predate this arrangement (docs/traps.md).
+    apply_three_pane_back_bar(core, window)?;
+    let handler = TypedEventHandler::new(move |_, _| {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return Ok(()) };
+            apply_three_pane_back_bar(core, window)
+        })
+    });
+    outer.ModeChanged(&handler)?;
+    let handler = TypedEventHandler::new(move |_, _| {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return Ok(()) };
+            apply_three_pane_back_bar(core, window)
+        })
+    });
+    inner.ModeChanged(&handler)?;
+    Ok(true)
+}
+
 /// Reconcile the window's visible state with its stack: the top
 /// entry's wrapper and title (the entry title IS the window title
 /// while covered), or the window's own root and title when the stack
@@ -2024,7 +2193,14 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     // Whichever arm is about to run, the previous split render must let
     // go of the roots first.
     release_split(core, window)?;
-    let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
+    // ADAPTIVE PANES (docs/multicolumn-plan.md): the ceiling is the
+    // app's one declaration; how many panes fit is each TwoPaneView's
+    // own Mode, decided level by level in the nest.
+    let ceiling = core.panes.get(&window).copied().unwrap_or(1);
+    if ceiling >= 3 && refresh_three_panes(core, window)? {
+        return Ok(());
+    }
+    let wants_split = ceiling == 2;
     // SHORT-CIRCUITED on wants_split: a window reconciling before its
     // first mount legitimately has no content to measure, and propagating
     // the read unconditionally made every nav scene fail.
@@ -2047,6 +2223,15 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             .and_then(|e| e.wrapper.clone());
         if let Some(base) = base {
             let view = TwoPaneView::new()?;
+            // TALL MODE IS KILLED, the platform's own way: without this,
+            // a compact-width window TALLER than 641 stacks both panes
+            // top-over-bottom — a screen no other backend can produce,
+            // with the leading pane's WIDTH applied as a HEIGHT and the
+            // back affordance gone. Every scene height happens to be
+            // 600, so the lane's green rested on a 41-DIP coincidence
+            // (docs/multicolumn-plan.md; the check-steps clause holds
+            // this call present on every TwoPaneView).
+            view.SetMinTallModeHeight(f64::INFINITY)?;
             view.SetWideModeConfiguration(TwoPaneViewWideModeConfiguration::LeftRight)?;
             // Leading pane sized, trailing pane takes the rest — see
             // protocol::leading_pane_width. TwoPaneView's OWN default is
@@ -5490,6 +5675,14 @@ fn apply_split_back_bar(core: &CoreState, window: u64) -> windows_core::Result<(
 /// The split Grid is the only container that keeps a root outside the
 /// window's own content path, so emptying it is the whole job.
 fn release_split(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    // DEPTH-FIRST: the inner view's panes first, then the outer's.
+    // Nulling the outer alone leaves the inner still holding two roots,
+    // and the next render's append is the same non-unwinding abort one
+    // level down.
+    if let Some(inner) = core.inner_splits.remove(&window) {
+        inner.SetPane1(None::<&UIElement>)?;
+        inner.SetPane2(None::<&UIElement>)?;
+    }
     if let Some(view) = core.split_views.remove(&window) {
         // TwoPaneView holds its panes as PROPERTIES, not in a Children
         // collection, so emptying it means nulling both. Same reason as
@@ -9408,15 +9601,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
-                // BRIDGE (docs/multicolumn-plan.md): a ceiling of 2
-                // lowers as the two-pane split, 1 as the serial stack,
-                // until this backend's three-pane slice lands. A ceiling
-                // of 3 refuses rather than silently presenting two.
                 (WindowProp::Panes, Value::I64(n)) => {
-                    if *n >= 3 {
-                        crate::depth_stub("panes");
-                    }
-                    core.list_detail.insert(window.0, *n >= 2);
+                    core.panes.insert(window.0, *n);
                     refresh_nav(core, window.0)?;
                 }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
@@ -11867,7 +12053,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             selected_sections: HashMap::new(),
             sections_presentation: HashMap::new(),
             nav_stacks: HashMap::new(),
-            list_detail: HashMap::new(),
+            panes: HashMap::new(),
+            inner_splits: HashMap::new(),
             split_presentation: HashMap::new(),
             split_views: HashMap::new(),
             window_roots: HashMap::new(),
@@ -12657,15 +12844,26 @@ impl crate::harness::Stage for WinUiStage {
                 Some(_) => "compact",
                 None => "unknown",
             };
-            // THE CONTROL'S OWN ANSWER, not a value the arm stamped
+            // THE CONTROLS' OWN ANSWER, not a value the arm stamped
             // about itself. Windows decides where one pane becomes two,
             // so the only honest reading of which presentation happened
-            // is to ask the control. A window that never asked for
-            // list-detail has no control, and falls back to the serial
-            // arm's stamp.
-            let presentation = match core.split_views.get(&0).map(|v| v.Mode()) {
-                Some(Ok(mode)) if mode != TwoPaneViewMode::SinglePane => "split",
-                Some(Ok(_)) => "stacked",
+            // is to ask the control — at a ceiling of three, BOTH
+            // controls, folded. A window that never asked for panes has
+            // no control, and falls back to the serial arm's stamp.
+            let presentation = match (
+                core.split_views.get(&0).map(|v| v.Mode()),
+                core.inner_splits.get(&0).map(|v| v.Mode()),
+            ) {
+                (Some(Ok(outer)), Some(Ok(inner))) => {
+                    let wide = |m: TwoPaneViewMode| m != TwoPaneViewMode::SinglePane;
+                    match (wide(outer), wide(inner)) {
+                        (true, true) => "split3",
+                        (true, false) | (false, true) => "split",
+                        (false, false) => "stacked",
+                    }
+                }
+                (Some(Ok(mode)), None) if mode != TwoPaneViewMode::SinglePane => "split",
+                (Some(Ok(_)), None) => "stacked",
                 _ => core.split_presentation.get(&0).copied().unwrap_or("stacked"),
             };
             Ok(format!("{class}/{presentation}"))
@@ -12677,21 +12875,39 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn panes_reading(&self) -> String {
-        // The two-pane derivation, exact while this backend's ceiling
-        // is two (root + top, or the top alone). Its three-pane slice
-        // replaces this with the nested TwoPaneViews' own Modes — the
-        // wide leg of panes.steps fails loudly against a derivation.
-        let stamped = self.split_presentation();
-        let (class, presentation) =
-            stamped.split_once('/').unwrap_or(("unknown", "stacked"));
-        let entries = Self::on_ui_read(|core| {
-            Ok(core.nav_stacks.get(&0).map_or(0, |s| s.len()))
+        // The nested TwoPaneViews' own Modes when a nest is up; the
+        // two-pane worlds keep the derivation, which is exact there
+        // (root + top, or the top alone).
+        Self::on_ui_read(|core| {
+            let class = match window_client_width(core, 0) {
+                Some(w) if w >= 600.0 => "regular",
+                Some(_) => "compact",
+                None => "unknown",
+            };
+            if let Some(positions) = three_pane_positions(core, 0) {
+                let spelled = if positions.is_empty() {
+                    "-".to_owned()
+                } else {
+                    positions
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                return Ok(format!("{class}/{spelled}"));
+            }
+            let presentation = match core.split_views.get(&0).map(|v| v.Mode()) {
+                Some(Ok(mode)) if mode != TwoPaneViewMode::SinglePane => "split",
+                Some(Ok(_)) => "stacked",
+                _ => core.split_presentation.get(&0).copied().unwrap_or("stacked"),
+            };
+            let entries = core.nav_stacks.get(&0).map_or(0, |s| s.len());
+            Ok(format!(
+                "{class}/{}",
+                crate::harness::panes_positions(presentation, entries)
+            ))
         })
-        .unwrap_or(0);
-        format!(
-            "{class}/{}",
-            crate::harness::panes_positions(presentation, entries)
-        )
+        .unwrap_or_else(|_| "unknown/-".to_owned())
     }
 
     fn menu_presentation(&self) -> String {

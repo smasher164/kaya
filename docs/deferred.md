@@ -4435,11 +4435,14 @@ plan was ratified 5/5 the same day (docs/multicolumn-plan.md).
 
 Progress: the `panes` wire slice landed 2026-08-19 (fb9ac93 — the
 ceiling replaces list_detail at wprop 6, all eight bindings, both
-interpreters, observables unchanged). The macOS DEPTH slice is in
-flight: KayaSplitRoot3, the mac ladder, `expect_panes` in all three
-harness implementations, panes.steps and the rust guest. The three
-backends the depth slice leaves behind refuse a ceiling of 3 loudly
-until their breadth slices land, on the record here:
+interpreters, observables unchanged). The macOS depth slice landed
+2026-08-20 (9fbe4e7: KayaSplitRoot3, the mac ladder with its own gate,
+`expect_panes` in all three harness implementations, panes.steps, the
+rust guest), then the eight-language guest fan-out and Compose
+(2f8e49e), GTK (e42efa7), and WinUI — ALL FOUR BACKENDS now present a
+declared ceiling of three, every slice validated by a full matrix, and
+DESIGN.md's section is rewritten as "Adaptive panes" with Q5's
+authority. The stub records below are the per-backend closes:
 
 - ~~DEPTH STUB: panes on gtk~~ (LANDED 2026-08-20: the nested pair with
   the inner view in the OUTER'S CONTENT slot — probed live first; the
@@ -4447,24 +4450,31 @@ until their breadth slices land, on the record here:
   inexpressible; show-content driven from the stack on both views; the
   back affordance from the reveals-a-covered-surface rule; the lane's
   stages grown to 1600x1000 and its text scale pinned)
-- DEPTH STUB: panes on winui
+- ~~DEPTH STUB: panes on winui~~ (LANDED 2026-08-20: the nested
+  TwoPaneViews with the inner in the star-sized Pane2, the PanePriority
+  chain spelling D1's order, Tall mode killed by infinity on every
+  view — with a check-steps clause holding the kill present, since the
+  lane's green otherwise rests on every scene height being 600 — and
+  release_split walking the nest depth-first)
 - ~~DEPTH STUB: panes on compose~~ (LANDED 2026-08-20: adaptive 1.2.0
   with the Large/XL opt-in, the declared-ceiling cap, the stack-derived
   destination history, the extra pane, and expect_panes reading the
   stashed ThreePaneScaffoldValue role by role)
 
-Breadth still owed: the GTK nesting (nav-in-nav-content, cumulative
-breakpoint table, four-boolean stamp), the WinUI nest (depth-first
-release_split, priority chain), the iPadOS three-pane legs, the
-measured Windows/GTK floors before any shared literal below 1400, an
-android-lane panes scene once the AVD/band ruling lands (the live
-three-pane observation so far is a scratch-script probe on the 1280dp
-tablet, `regular/0,1,2` read from the scaffold's own value,
-2026-08-20), and DESIGN.md's "Adaptive list-detail" section rewrite
-(§2.6, in the landing commit). ~~The seven remaining guest languages~~
-(LANDED 2026-08-20: all eight panes guests green on the mac lane, 320
-legs) and ~~Compose's extraPane~~ (LANDED 2026-08-20, the stub strike
-above).
+The residue, each with its trigger (the milestone's tail, not its
+body): PHONE-LANE FROZEN SCENES — panes.steps is desktop-only by
+policy (it resizes), so the iPad and android three-pane observations
+are live probes on the record (the 1280dp tablet read
+`regular/0,1,2` from the scaffold's own value 2026-08-20; the iPad
+three-column form was measured live at 1032pt during the research
+pass) rather than frozen legs; a no-resize three-pane scene in
+listdetail.steps' mold needs the tablet-AVD/band ruling first.
+MEASURED FLOORS — before any shared literal below 1400, the Windows
+nest's real three-pane floor and the GTK lane's at pinned text scale
+must be measured (the band's 1400 top is safe by construction).
+LISTDETAIL.STEPS stays at panes 2 deliberately: it is the two-pane
+bare-invariant scene and every lane runs it; whether it grows a
+three-pane sibling is the same AVD/band decision.
 
 WATCH — a Compose click emitted within ~half a second of a pane's
 ENTRANCE ANIMATION can drop: measured on the tablet probe (click

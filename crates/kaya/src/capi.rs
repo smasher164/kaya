@@ -595,8 +595,8 @@ pub const KAYA_WPROP_WIDTH: u32 = 2;
 pub const KAYA_WPROP_HEIGHT: u32 = 3;
 pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 
-/// The window prop asking for the adaptive list-detail presentation of
-/// this window's entry stack (DESIGN.md, Adaptive list-detail).
+/// The window prop declaring the pane CEILING for this window's entry
+/// stack (DESIGN.md, Adaptive panes).
 pub const KAYA_WPROP_PANES: u32 = 6;
 /// The panes enum's values (spec enum "panes"): the counts themselves.
 pub const KAYA_PANES_ONE: u32 = 1;

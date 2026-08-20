@@ -336,7 +336,7 @@ one construct for a window's attributes — a prop chain (`tx.window(0)
 labeled function, a config list, or a scope, per the language's idiom
 — and the PRIMARY window's construct accepts exactly the
 created-window construct's attribute set (title, width/height,
-veto_close, list_detail, sections_presentation, dirty, inset, the
+veto_close, panes, sections_presentation, dirty, inset, the
 close handlers, and the history handlers on_undone/on_redone — the
 undo ledger is per-window, so its observers are window attributes like
 any other).
@@ -1626,20 +1626,23 @@ affordance per platform, and entry-targeted expect_title — all four
 layers in both interpreters from the start, per the
 interpreter-backend doctrine.
 
-### Adaptive list-detail — ratified 2026-07-26
+### Adaptive panes — ratified 2026-07-26 as list-detail, extended to a ceiling of three 2026-08-19 (docs/multicolumn-plan.md, all five questions ruled)
 
-The size-class axis is in place, and this is its second lowering. The surface
-that makes the axis pay is list-detail: a regular window showing a list
-and its detail side by side where a compact one shows one at a time.
+The size-class axis is in place, and this is its second lowering. The
+surface that makes the axis pay is panes: a regular window showing two
+or three of its stack's surfaces side by side where a compact one shows
+one at a time.
 
 **It is a PRESENTATION of the entry stack, not a new container.** A
-window is marked list-detail; on a regular window its base root renders
-in the leading pane and the top of its entry stack in the trailing one,
-and on a compact window only the top renders — which is exactly what
-navigation already does today. `push_entry`, `pop_entry`,
-`entry_popped` and `intercept_back` are unchanged, and the compact
-collapse costs no new machinery because the compact case IS the
-existing behavior.
+window declares a pane CEILING; pane 0 is the window's base root, pane
+*j* holds entry *j-1*, and the LAST pane always holds the TOP of the
+stack — anything between the prefix and the top is retained and
+covered, exactly as navigation already does. When fewer panes fit than
+the ceiling asks, the visible panes are the LAST of them: the
+shallowest sheds first, because the stack order IS the priority.
+`push_entry`, `pop_entry`, `entry_popped` and `intercept_back` are
+unchanged, and the compact collapse costs no new machinery because the
+compact case IS the existing behavior.
 
 The alternative — a `split` widget kind holding two children — was
 rejected on the grammar rule this document already states: the three
@@ -1649,8 +1652,8 @@ navigation, or swap in place and grow its own back affordance,
 duplicating push/pop/intercept_back one layer down. Both spend new
 vocabulary to re-describe a stack kaya already owns.
 
-The platforms agree, and three of the four say so in their names.
-libadwaita's is `AdwNavigationSplitView` — one object that shows
+The platforms agree at two panes, and three of the four say so in their
+names. libadwaita's is `AdwNavigationSplitView` — one object that shows
 sidebar and content side by side when wide and stacks them when narrow.
 Apple unifies `NavigationSplitView` with `NavigationStack` and lets the
 size class choose. Compose's `ListDetailPaneScaffold` carries a
@@ -1660,19 +1663,37 @@ the 4/4 native intersection the admission policy asks for — and worth
 distinguishing from the DRAGGABLE splitter it is easily confused with,
 which is 2/4 and does not qualify.
 
+THE THIRD PANE IS ADMITTED with Windows stated as the weak leg
+(docs/multicolumn-plan.md Q2): Apple's three-column form, Compose's
+`extraPane`, and GNOME's sanctioned nesting are native; WinUI composes
+two nested `TwoPaneView`s whose `PanePriority` bits chain into the
+declared order. On macOS — the one platform with no compact mode to
+defer to — kaya's own minimum-width arithmetic decides how many columns
+fit (Q3: the maintainer finds the native crush undesirable; the
+minimums are the model's alone and are declared to NOBODY, because a
+declared minimum becomes the window's floor and collapse can then
+never fire).
+
 The vocabulary:
 
-- **`list_detail`** (Bool, default false) joins the WINDOW prop table.
-  A window, not an entry, because the stack is per-window and the
-  question "how does this surface present its stack" is the window's.
-- **Deeper entries replace the trailing pane.** With a stack of three
-  on a regular window, the base root holds the leading pane and the top
-  entry the trailing one; the middle stays retained and covered, the
-  same rule navigation already has. No three-pane form in v1 — Apple
-  has one, nobody else does, and it is not the intersection.
-- **An empty stack on a regular window** shows the leading pane and the
-  platform's own empty trailing state. Nothing to invent: every one of
-  the four has one.
+- **`panes`** (integer, 1-3, default 1) at WINDOW prop slot 6,
+  REPLACING the Bool it began as (Q5; churn is free): 1 is serial
+  navigation, 2 the ratified list-detail, 3 sidebar/content/detail. A
+  window, not an entry, because the stack is per-window. AN INTEGER IS
+  A CAP and a cap is safe: `panes 2` on a wide display is honored, and
+  a ceiling can only reduce, never force a pane onto a window too
+  small for it. How many of the declared panes FIT is the platform's
+  re-decision at every width; kaya spells no threshold in any unit.
+- **A pane slot with no content still exists.** An empty stack on a
+  regular window shows the leading pane and the platform's own empty
+  trailing state; a ceiling of three with one entry shows root, the
+  entry, and an empty slot. Building only occupied slots would swap
+  containers on every push, losing state, animation and focus.
+- **The back affordance is uniform by a computable rule**: visible
+  exactly when popping the top would REVEAL a covered surface into a
+  visible slot. Fully spread, the top covers nothing and the affordance
+  is absent; collapsed, each pop reveals the surface beneath — the
+  phone rule, which is where it came from.
 
 The gate, and the reason `resize_window` belongs to this milestone
 rather than preceding it: a verb that drives a transition no code
@@ -1690,11 +1711,23 @@ specializes gates nothing.
   not be showing one pane while its stack holds two. The other
   direction is legitimate — what counts as wide enough is the
   platform's call, and a compact window is never asked to show two.
+- **`expect_panes`** is its three-pane successor and names POSITIONS,
+  not a count (`regular/0,1,2`; docs/multicolumn-plan.md D4): the
+  defect it gates is a lowering showing the WRONG panes, and a count
+  cannot see it. Every backend reads its wrapper's real arrangement —
+  the NSSplitView's columns by width and hiddenness, the scaffold's own
+  `ThreePaneScaffoldValue`, the nested views' four booleans or two
+  Modes — never the declaration. Its bare form carries expect_split's
+  invariant unchanged, and it is the only spelling legal inside
+  400..1400, where the platforms' three-pane floors legitimately
+  disagree (Material 1200dp, GNOME 860sp, WinUI's nest higher still) —
+  the middle rung is deliberately unsampleable by a shared scene, and
+  each lane's own gate holds its ladder.
 
 Two further rulings, ratified 2026-07-27 with the wrapper adoption:
 
 - **Each platform decides where one pane becomes two, and kaya does not
-  draw that line.** The app declares `list_detail`; the presentation is
+  draw that line.** The app declares `panes`; the presentation is
   the platform's answer — which is the same reason there is no prop for
   WHICH way it presents. The four thresholds legitimately differ
   (GNOME collapses below 400sp, Material's standard directive wants
@@ -2598,7 +2631,7 @@ size-class transition and the scene re-asserts on the far side, so
 adaptivity is a matrix fact rather than a claim. Where a host cannot
 resize — a phone or tablet owns its own surfaces — the lane supplies the
 size class by picking a DEVICE instead, and the scene carries only
-assertions true at every width (see "Adaptive list-detail").
+assertions true at every width (see "Adaptive panes").
 
 ## Threading model and protocol
 

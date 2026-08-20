@@ -331,6 +331,57 @@ if linux_stage_lint "$STAGE_T/huge.steps" >/dev/null; then
     exit 1
 fi
 rm -rf "$STAGE_T"
+
+# EVERY TwoPaneView KILLS TALL MODE. TwoPaneView has a third mode no
+# other backend can produce: at compact width on a window TALLER than
+# 641, both panes stack top-over-bottom, the leading pane's WIDTH is
+# applied as a HEIGHT, and the back affordance disappears — while
+# expect_split reads "compact/split", which the bare invariant cannot
+# refuse. Every scene height happens to be 600, so the lane's green
+# rests on a 41-DIP coincidence unless every constructed view sets
+# MinTallModeHeight to infinity (the platform's own off switch). A
+# count, not a proximity match: the two must simply never diverge.
+tall_lint() {
+    python3 -c '
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+made = text.count("TwoPaneView::new")
+killed = text.count("SetMinTallModeHeight")
+if made == 0:
+    print(f"{sys.argv[1]}: no TwoPaneView is constructed at all — the split "
+          f"lowering moved and this clause is blind")
+    sys.exit(1)
+if killed < made:
+    print(f"{sys.argv[1]}: {made} TwoPaneView(s) constructed but only {killed} "
+          f"SetMinTallModeHeight call(s) — a view without one enters Tall mode "
+          f"on any tall-enough compact window (docs/multicolumn-plan.md)")
+    sys.exit(1)
+' "$1"
+}
+if ! tall_lint crates/kaya/src/winui/mod.rs >&2; then
+    status=1
+fi
+# The guard guards itself: a doctored copy with one kill removed must
+# fail, and the perturbation is PROVEN applied by the printed count.
+TALL_T="$(mktemp -d)"
+python3 - crates/kaya/src/winui/mod.rs "$TALL_T/doctored.rs" <<'PY'
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+needle = "SetMinTallModeHeight"
+count = text.count(needle)
+print(f"check-steps: tall self-test found {count} kill call(s), removing one")
+if count < 1:
+    sys.exit(1)
+open(sys.argv[2], "w", encoding="utf-8").write(
+    text.replace(needle, "XX_removed_XX", 1))
+PY
+if tall_lint "$TALL_T/doctored.rs" >/dev/null 2>&1; then
+    echo "check-steps: SELF-TEST FAIL (a TwoPaneView without the Tall kill passed)" >&2
+    exit 1
+fi
+rm -rf "$TALL_T"
 if ! linux_stage_lint tools/scenes/*.steps >/dev/null; then
     linux_stage_lint tools/scenes/*.steps >&2
     echo "check-steps: the linux stages cannot hold the scene roster (above)" >&2

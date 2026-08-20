@@ -383,9 +383,8 @@ final class KayaWindowModel: Identifiable {
     /// covered.
     var sections: [KayaSectionModel] = []
     var selectedSection: UInt64?
-    /// Whether this window presents its entry stack as list-detail (wprop 6;
-    /// DESIGN.md, Adaptive list-detail). The SIZE CLASS decides which one
-    /// materializes.
+    /// The pane CEILING this window asks for (wprop 6; DESIGN.md,
+    /// Adaptive panes). How many materialize is the platform's answer.
     var panes: Int64 = 1
     /// Whether this surface holds UNSAVED WORK (wprop 7; docs/dirty-plan.md).
     /// macOS lowers it to NSWindow.isDocumentEdited and nothing else; iOS

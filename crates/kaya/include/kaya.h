@@ -1115,8 +1115,8 @@
 #define KAYA_WPROP_VETO_CLOSE 4
 
 /**
- * The window prop asking for the adaptive list-detail presentation of
- * this window's entry stack (DESIGN.md, Adaptive list-detail).
+ * The window prop declaring the pane CEILING for this window's entry
+ * stack (DESIGN.md, Adaptive panes).
  */
 #define KAYA_WPROP_PANES 6
 

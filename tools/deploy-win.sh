@@ -75,6 +75,7 @@ for arg in "$@"; do
         confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
         split_rust|split_python|split_go|split_csharp|split_java) SUITE="$arg" ;;
+        panes_rust|panes_python|panes_go|panes_csharp|panes_java) SUITE="$arg" ;;
         listdetail_rust|listdetail_python|listdetail_go|listdetail_csharp|listdetail_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
@@ -305,7 +306,7 @@ timing vm-ready
 # because they encode per-language coverage decisions. The class this
 # kills: four hand-maintained lists in this file, where a forgotten
 # entry shipped every artifact except the one a leg needed.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend
 # can be validated before nine guests exist — the deploy-win twin of
@@ -1849,6 +1850,15 @@ case "$SUITE" in
         run_suite split_go
         run_suite split_csharp
         run_suite split_java
+        drain_suites
+        # The panes scene: the three-pane ceiling on the nested
+        # TwoPaneViews (docs/multicolumn-plan.md). Same launcher shapes
+        # as split, for the same ms-appx adjacency reasons.
+        run_suite panes_rust
+        run_suite panes_python
+        run_suite panes_go
+        run_suite panes_csharp
+        run_suite panes_java
         drain_suites
         run_suite listdetail_rust
         run_suite listdetail_python

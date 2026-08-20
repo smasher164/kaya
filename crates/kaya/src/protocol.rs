@@ -1123,13 +1123,13 @@ pub enum WindowProp {
     /// otherwise. Window-scoped because the GROUP is the unit
     /// (DESIGN.md, Sections).
     SectionsPresentation,
-    /// Whether this window presents its ENTRY STACK as list-detail
-    /// (Bool-valued; DESIGN.md, Adaptive list-detail). False is the
-    /// serial stack navigation has always had. True asks for the
-    /// adaptive presentation on a REGULAR window — base root leading,
-    /// top of stack trailing; a COMPACT window is unchanged, the compact
-    /// case being the default. There is deliberately no prop for WHICH
-    /// way it presents: that is the size class's answer.
+    /// The CEILING of side-by-side stack surfaces this window asks for
+    /// (I64-valued, 1-3; DESIGN.md, Adaptive panes). 1 is the serial
+    /// stack navigation has always had; 2 list-detail; 3
+    /// sidebar/content/detail. How many of them FIT is the platform's
+    /// re-decision at every width — there is deliberately no prop for a
+    /// threshold or for WHICH panes survive: the stack order is the
+    /// priority.
     Panes,
     /// Whether this surface holds UNSAVED WORK (Bool-valued; default
     /// false; docs/dirty-plan.md D1). State, never chrome: each backend
