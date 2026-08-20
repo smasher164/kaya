@@ -1437,7 +1437,13 @@ object KayaCompose {
                         WPROP_VETO_CLOSE -> readBool(b)
                         WPROP_SECTIONS_PRESENTATION ->
                             KayaSceneModel.sectionsPresentation = readI64(b)
-                        WPROP_PANES -> KayaSceneModel.panes = readI64(b)
+                        WPROP_PANES -> {
+                            val ceiling = readI64(b)
+                            // A ceiling of 3 refuses rather than silently
+                            // presenting two (docs/multicolumn-plan.md).
+                            if (ceiling >= 3) depthStub("panes")
+                            KayaSceneModel.panes = ceiling
+                        }
                         // The unsaved-work mark (docs/dirty-plan.md D4).
                         // It APPLIES and lowers to NO CHROME, which is
                         // not being ignored: expect_dirty reads the
@@ -4510,15 +4516,6 @@ object KayaCompose {
             " heading=" + kayaAxHeading(info) + ")"
     }
 
-    // No `depthStub` helper lives here: this backend has no depth stub,
-    // and check-detekt's UnusedPrivateMember would report an unused
-    // one. The next depth slice writes it back in EXACTLY this spelling
-    // — `depthStub("<scene>")`, which is what check-stubs and
-    // check-steps read, never a sentence of its own
-    // (tools/lib/hand-rolled-stubs.py fails a hand-rolled refusal) —
-    // and buys its silence with an OPEN entry in docs/deferred.md
-    // (tools/lib/stub-ledger.py).
-
     private fun quoted(parts: List<String>): String {
         val inner = parts.joinToString(" ").removeSurrounding("\"")
         // The grammar's escapes (harness.rs is the norm): \\n ->
@@ -5891,6 +5888,52 @@ object KayaCompose {
                             failures.add("split $got, wanted $want")
                         }
                     }
+                    "expect_panes" -> {
+                        // `<size class>/<positions>` (docs/multicolumn-plan.md
+                        // D4). Positions DERIVED from the arm stamp and the
+                        // stack, harness.rs's own two-pane rule: this
+                        // backend's split really is root + top, and its
+                        // stacked really is the top alone. The three-pane
+                        // slice replaces this with a real
+                        // ThreePaneScaffoldValue read.
+                        val want = quotedHead(line.substring(parts[0].length))?.first ?: ""
+                        val stamped =
+                            onUi(activity) {
+                                KayaSceneModel.formFactor +
+                                    "/" +
+                                    KayaSceneModel.splitPresentation
+                            }
+                        val stack = onUi(activity) { KayaSceneModel.navEntries.size }
+                        val halves = stamped.split("/", limit = 2)
+                        if (want.isEmpty()) {
+                            // The bare form: expect_split's asymmetric
+                            // invariant, on the ARM stamp.
+                            if (halves.size == 2 &&
+                                halves[0] == "regular" &&
+                                halves[1] == "stacked" &&
+                                stack >= 1
+                            ) {
+                                failures.add(
+                                    "presentation $stamped: a regular window must not " +
+                                        "show one pane while its stack holds two")
+                            } else {
+                                observed.add("panes fit")
+                            }
+                        } else {
+                            val positions =
+                                if (halves.getOrNull(1) == "split") {
+                                    if (stack == 0) "0" else "0,$stack"
+                                } else {
+                                    "$stack"
+                                }
+                            val got = halves[0] + "/" + positions
+                            if (got == want) {
+                                observed.add("panes $want")
+                            } else {
+                                failures.add("panes $got, wanted $want")
+                            }
+                        }
+                    }
                     "expect_menu_presentation" -> {
                         // `<size class>/<presentation>`: the platform's
                         // width reading, and the lowering that actually
@@ -6172,6 +6215,15 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
+// The one spelling of "this backend has not reached that scene yet" —
+// what check-stubs and check-steps read, never a sentence of its own
+// (tools/lib/hand-rolled-stubs.py), paid for by an OPEN entry in
+// docs/deferred.md (tools/lib/stub-ledger.py).
+internal fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on this backend — " +
+            "it is a depth slice; see CLAUDE.md's sequencing")
+
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
 

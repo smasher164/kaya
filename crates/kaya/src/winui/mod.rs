@@ -9408,10 +9408,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
-                // BRIDGE (docs/multicolumn-plan.md): a ceiling of 2 or 3
+                // BRIDGE (docs/multicolumn-plan.md): a ceiling of 2
                 // lowers as the two-pane split, 1 as the serial stack,
-                // until this backend's three-pane slice lands.
+                // until this backend's three-pane slice lands. A ceiling
+                // of 3 refuses rather than silently presenting two.
                 (WindowProp::Panes, Value::I64(n)) => {
+                    if *n >= 3 {
+                        crate::depth_stub("panes");
+                    }
                     core.list_detail.insert(window.0, *n >= 2);
                     refresh_nav(core, window.0)?;
                 }

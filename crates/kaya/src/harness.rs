@@ -515,6 +515,15 @@ pub enum Step {
     /// regular window must not show one pane while its stack holds two,
     /// but a compact window is never asked to show two.
     ExpectSplit(Option<String>),
+    /// The window's visible PANES, `<size class>/<positions>` with
+    /// positions the ascending stack indices on screen (0 = the base
+    /// root, j = entry j-1; docs/multicolumn-plan.md D4). Positions,
+    /// not a count: the defect this gates is a lowering showing the
+    /// WRONG panes, and a count cannot see it. `None` — the BARE form a
+    /// SHARED scene can carry — asserts expect_split's own asymmetric
+    /// invariant, unchanged: a regular window must not take the stacked
+    /// arm while its stack holds two.
+    ExpectPanes(Option<String>),
     /// The textarea's DECORATED RANGES, read from the platform's own
     /// text layer, spelled `<start>:<end>=<covered text>` per range and
     /// joined with `|` in ascending order. The empty string asserts that
@@ -639,6 +648,7 @@ impl Step {
             Step::Shortcut { .. } => false,
             Step::ResizeWindow { .. } => false,
             Step::ExpectSplit { .. } => true,
+            Step::ExpectPanes { .. } => true,
             Step::ExpectHighlights { .. } => true,
             Step::ExpectSelection { .. } => true,
             Step::ExpectRevealed { .. } => true,
@@ -1572,6 +1582,15 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     Step::ExpectSplit(Some(want))
                 }
             }
+            "expect_panes" => {
+                if rest.trim().is_empty() {
+                    Step::ExpectPanes(None)
+                } else {
+                    let want = parse_string(rest)?;
+                    check_panes_reading(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                    Step::ExpectPanes(Some(want))
+                }
+            }
             "expect_menu_presentation" => {
                 if rest.trim().is_empty() {
                     Step::ExpectMenuPresentation(None)
@@ -1956,6 +1975,54 @@ fn check_split_presentation(spec: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The reading of an expect_panes step: `<size class>/<positions>`,
+/// positions a comma-joined STRICTLY ASCENDING list of stack indices
+/// (docs/multicolumn-plan.md D4). Ascending because the panes ARE the
+/// stack's order — a scene spelling "2,1" is asserting an arrangement
+/// no lowering can produce, and the typo should die at parse.
+fn check_panes_reading(spec: &str) -> Result<(), String> {
+    const CLASSES: [&str; 3] = ["unknown", "compact", "regular"];
+    let Some((class, positions)) = spec.split_once('/') else {
+        return Err(format!("panes reading {spec:?} wants <size class>/<positions>"));
+    };
+    if !CLASSES.contains(&class) {
+        return Err(format!(
+            "panes reading {spec:?} has an unknown size class {class:?}; \
+             wanted one of {CLASSES:?}"
+        ));
+    }
+    let mut last: Option<u64> = None;
+    for part in positions.split(',') {
+        let Ok(n) = part.parse::<u64>() else {
+            return Err(format!(
+                "panes reading {spec:?} has a non-numeric position {part:?}"
+            ));
+        };
+        if last.is_some_and(|l| l >= n) {
+            return Err(format!(
+                "panes reading {spec:?} lists positions out of ascending order"
+            ));
+        }
+        last = Some(n);
+    }
+    Ok(())
+}
+
+/// The visible-position half of this backend family's panes reading,
+/// derived from the split stamp and the stack because a TWO-pane world
+/// can say no more: `split` really is root + top on GTK and WinUI, and
+/// `stacked` really is the top alone. The moment either backend grows
+/// a third pane (drops its panes depth stub), panes.steps runs on its
+/// lane and this derivation fails the wide leg loudly — the breadth
+/// slice replaces it with a real arrangement read then.
+fn panes_positions(presentation: &str, entries: usize) -> String {
+    match (presentation, entries) {
+        ("split", 0) => "0".to_owned(),
+        ("split", n) => format!("0,{n}"),
+        (_, n) => format!("{n}"),
+    }
 }
 
 /// The presentation spelling of an expect_menu_presentation step:
@@ -3056,6 +3123,33 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("split {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectPanes(want) => Some(poll(|| {
+                let stamped = stage.split_presentation();
+                let (class, presentation) =
+                    stamped.split_once('/').unwrap_or(("unknown", "stacked"));
+                let entries = stage.entry_count(0);
+                let Some(want) = want else {
+                    // The bare form: expect_split's own asymmetric
+                    // invariant, on the ARM stamp rather than the
+                    // position list — an occupied pane beside an EMPTY
+                    // slot is one visible position and still correct
+                    // (docs/multicolumn-plan.md D1/D4).
+                    return if split_presentation_fits(&stamped, entries) {
+                        Ok("panes fit".to_owned())
+                    } else {
+                        Err(format!(
+                            "presentation {stamped}: a regular window must not show \
+                             one pane while its stack holds two"
+                        ))
+                    };
+                };
+                let got = format!("{class}/{}", panes_positions(presentation, entries));
+                if got == *want {
+                    Ok(format!("panes {got}"))
+                } else {
+                    Err(format!("panes {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectMenuPresentation(want) => Some(poll(|| {
                 let got = stage.menu_presentation();
                 let Some(want) = want else {
@@ -3406,6 +3500,29 @@ mod tests {
                 "25,75".into()
             )
         );
+    }
+
+    /// The panes grammar and the two-pane derivation
+    /// (docs/multicolumn-plan.md D4). The refusals are the mistakes that
+    /// would otherwise read as a backend disagreeing with the scene.
+    #[test]
+    fn panes_grammar_and_derivation() {
+        for good in ["regular/0", "regular/0,1,2", "compact/2", "unknown/0"] {
+            check_panes_reading(good).unwrap();
+        }
+        for bad in ["regular", "wide/0", "regular/a", "regular/2,1", "regular/1,1"] {
+            check_panes_reading(bad).unwrap_err();
+        }
+        assert_eq!(parse("expect_panes").unwrap()[0], Step::ExpectPanes(None));
+        assert_eq!(
+            parse("expect_panes \"regular/0,1\"").unwrap()[0],
+            Step::ExpectPanes(Some("regular/0,1".into()))
+        );
+        parse("expect_panes \"regular/1,0\"").unwrap_err();
+        assert_eq!(panes_positions("split", 0), "0");
+        assert_eq!(panes_positions("split", 2), "0,2");
+        assert_eq!(panes_positions("stacked", 0), "0");
+        assert_eq!(panes_positions("stacked", 2), "2");
     }
 
     /// THE SAVE VERBS' GRAMMAR, and the refusals that matter. Each one is

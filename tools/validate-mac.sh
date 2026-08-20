@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface"
+DEPTH_SCENES="typeface panes"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -833,6 +833,12 @@ run split-haskell-swiftui env KAYA_SELFTEST=split "$(hs_bin split)"
 run split-swift-swiftui env KAYA_SELFTEST=split target/swift-guests/split
 run split-java-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The panes DEPTH slice (docs/multicolumn-plan.md §2): the rust leg on
+# this backend is the whole roster until breadth fans the guest out.
+KAYA_SELFTEST_SCRIPT="$(scene_script panes)"
+export KAYA_SELFTEST_SCRIPT
+run panes-rust-swiftui env KAYA_SELFTEST=panes "$RUST_GUESTS"/panes
 
 # The listdetail scene: THE SAME GUESTS, asserting list-detail's bare
 # invariant at whatever width the host gives — a scene selects a

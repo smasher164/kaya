@@ -558,32 +558,48 @@ case "choose":
         let listed = nodes.compactMap { rowName($0) }
         fail("no row named \(wanted); the picker lists \(listed)")
     }
-    let centre = CGPoint(x: row.frame.midX, y: row.frame.midY)
+    // The picker being gone is the proof a tap landed: one arriving
+    // before the list is interactive is swallowed with no error, and a
+    // swallowed tap and a slow dismissal are the same silence — so the
+    // WHOLE select-confirm round retries, savepress's rule (measured
+    // under the concurrent matrix, 2026-08-20: filedialog-go's row tap
+    // dropped the run after save-go's Save tap was; docs/deferred.md's
+    // WATCH entry). Rows are RE-WALKED each round, because what went
+    // stale may be the frame rather than the tap; single-selection
+    // answers on the row, multi-selection needs the strip's confirm
+    // (docs/traps.md), and the rounds converge for both — a re-tap
+    // that deselects a landed selection is corrected one round later.
     let tapper = Tapper(device: sim.device)
-    tapper.tap(at: centre, screen: screen)
-
-    // Single-selection answers on the tap; multi-selection selects and
-    // needs the strip's confirm (docs/traps.md). The picker going away
-    // is what tells the two apart.
-    if !waitForPickerGone(6) {
-        let strip = navigationStrip(sim, screen: screen)
-        if let (_, confirm) = strip.first(where: {
-            $0.0.hasPrefix("Open") || $0.0.hasPrefix("Done")
-        }) {
-            tapper.tap(at: confirm, screen: screen)
+    var lastCentre = CGPoint(x: row.frame.midX, y: row.frame.midY)
+    var pickerDismissed = false
+    var rounds = 0
+    while rounds < 3 && !pickerDismissed {
+        rounds += 1
+        if let fresh = pickerNodes()?
+            .first(where: { rowName($0).map { stem($0) == wanted } ?? false })
+        {
+            lastCentre = CGPoint(x: fresh.frame.midX, y: fresh.frame.midY)
+            tapper.tap(at: lastCentre, screen: screen)
         }
+        if !waitForPickerGone(6) {
+            let strip = navigationStrip(sim, screen: screen)
+            if let (_, confirm) = strip.first(where: {
+                $0.0.hasPrefix("Open") || $0.0.hasPrefix("Done")
+            }) {
+                tapper.tap(at: confirm, screen: screen)
+            }
+        }
+        pickerDismissed = waitForPickerGone()
     }
 
-    // The picker being gone is the proof the tap landed: a tap arriving
-    // before the list is interactive is swallowed with no error. The
-    // failure carries the numbers because a miss and a swallowed press
-    // look identical from here.
-    if !waitForPickerGone() {
+    // The failure carries the numbers because a miss and a swallowed
+    // press look identical from here.
+    if !pickerDismissed {
         let after = pickerNodes()?.compactMap { rowName($0) } ?? []
         let strip = navigationStrip(sim, screen: screen).map { $0.0 }
         fail(
-            "the picker was still up after choosing \(wanted): tapped \(centre) "
-                + "(row frame \(row.frame)) of a \(screen) screen; it now lists \(after) "
+            "the picker was still up after \(rounds) rounds of choosing \(wanted): "
+                + "last tapped \(lastCentre) of a \(screen) screen; it now lists \(after) "
                 + "and offers \(strip)")
     }
 
@@ -646,17 +662,37 @@ case "savepress":
     // and the match is EXACT: `press Save` falsely succeeds here on the
     // static text "Save as" (docs/deferred.md), and a prefix match lands
     // on "<App>, Actions Menu" and opens a context menu (measured).
+    //
+    // AND THE TAP IS RETRIED, NOT ONLY WAITED FOR — savename's measured
+    // rule, one gesture over: under a concurrent five-lane matrix the
+    // HID tap is dropped the way the AX set was (save-go, twice on
+    // 2026-08-20 — Save tapped at its real centre, sheet still up,
+    // 102/102 solo on either side; docs/deferred.md's WATCH entry).
+    // A dropped tap and a slow dismissal are the same silence, so the
+    // loop walks the strip AGAIN each round — a strip that no longer
+    // offers Save means the sheet is already going, and tapping there
+    // anyway would land on the app behind it, so that round only polls.
     guard waitForSaveSheet() != nil else { fail("no save dialog is up to save") }
-    let strip = navigationStrip(sim, screen: screen)
-    guard let (_, saveCentre) = strip.first(where: { $0.0 == "Save" }) else {
-        fail("no Save in the navigation strip; it offers \(strip.map { $0.0 })")
+    var pressedAt: CGPoint? = nil
+    var presses = 0
+    var sheetGone = false
+    while presses < 3 && !sheetGone {
+        presses += 1
+        let strip = navigationStrip(sim, screen: screen)
+        if let (_, saveCentre) = strip.first(where: { $0.0 == "Save" }) {
+            pressedAt = saveCentre
+            Tapper(device: sim.device).tap(at: saveCentre, screen: screen)
+        } else if presses == 1 {
+            fail("no Save in the navigation strip; it offers \(strip.map { $0.0 })")
+        }
+        // The sheet being gone is the proof, as in `choose`.
+        sheetGone = waitForPickerGone()
     }
-    Tapper(device: sim.device).tap(at: saveCentre, screen: screen)
-    // The sheet being gone is the proof, as in `choose`.
-    if !waitForPickerGone() {
+    if !sheetGone {
         let after = navigationStrip(sim, screen: screen).map { $0.0 }
         fail(
-            "the save dialog was still up after pressing Save: tapped \(saveCentre) "
+            "the save dialog was still up after \(presses) presses of Save: last tapped "
+                + "\(pressedAt.map(String.init(describing:)) ?? "nowhere") "
                 + "of a \(screen) screen; it now offers \(after)")
     }
 

@@ -76,6 +76,10 @@ VERB_FEATURE = {
     "expect_typeface": "typeface",
     # docs/app-identity-plan.md I8.
     "expect_app_icon": "identity",
+    # docs/multicolumn-plan.md D4. The verb, not the scene name: any
+    # scene asserting pane positions needs a backend that can show the
+    # declared ceiling.
+    "expect_panes": "panes",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

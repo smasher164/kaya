@@ -4872,10 +4872,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.window_veto.borrow_mut().insert(window.0, *on);
                 }
                 // BRIDGE (docs/multicolumn-plan.md): until this backend's
-                // three-pane slice lands, a ceiling of 2 or 3 lowers as
-                // the two-pane split and 1 as the serial stack — the
-                // exact observable list_detail had.
+                // three-pane slice lands, a ceiling of 2 lowers as the
+                // two-pane split and 1 as the serial stack — the exact
+                // observable list_detail had. A ceiling of 3 refuses
+                // rather than silently presenting two.
                 (WindowProp::Panes, Value::I64(n)) => {
+                    if *n >= 3 {
+                        crate::depth_stub("panes");
+                    }
                     core.list_detail.insert(window.0, *n >= 2);
                     refresh_nav(core, window.0);
                 }

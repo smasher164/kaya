@@ -1427,7 +1427,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # or ledgered below. window/panels drive aux windows and panel
     # chrome no phone has; split drives resize_window, rejected above.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-    IOS_DESKTOP_ONLY_SCENES="window panels split"
+    IOS_DESKTOP_ONLY_SCENES="window panels split panes"
     # NOT NARROWER any more, except by design: editor runs from the Go
     # suite alone (the plan chose Go so a binding's awkward corners
     # would show; there is no rust or swift editor guest). Everything

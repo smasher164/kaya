@@ -107,6 +107,12 @@ GATES = [
      "its macOS clause compiles the interpreter's own source against the BUILT "
      "libkaya and RUNS it, so an unchanged source tree is not an unchanged "
      "answer — check-abort's shape, one toolkit over"),
+    # The macOS pane ladder: no column minimum ever declared to SwiftUI,
+    # and the middle rung — which no shared scene may sample — walked
+    # for real in an NSWindow (docs/multicolumn-plan.md).
+    ("check-pane-ladder", ["tools/check-pane-ladder.sh"], False,
+     "its macOS clause compiles the interpreter's own source against the BUILT "
+     "libkaya and RUNS it — check-empty-child's shape, one milestone over"),
     ("check-wheel", ["tools/check-wheel.sh"], False,
      "it builds and imports a wheel out of target/, so an unchanged source "
      "tree is not an unchanged answer"),

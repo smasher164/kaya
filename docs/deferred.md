@@ -4351,6 +4351,28 @@ probe with a wider manifest measures a different app) — so a transient
 denial is one emulator's storage state, not a missing grant. If it
 repeats, dumpsys the mount and appops state of the DEVICE the leg drew,
 not the guest.
+
+## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
+KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
+
+Three matrices in a row, a different leg each time, every one 100%
+green solo: save-go's Save tap dropped twice (the sheet stayed up and
+the guest later read the teardown's `save cancelled`), then — with the
+Save retap in place — filedialog-go's ROW tap dropped the same way.
+The panes depth slice running those matrices touches no dialog path.
+The diagnosis is savename's own measured finding, one gesture over:
+on a machine also running four other lanes, a dispatched HID tap and
+a dropped one are the same silence. So the two dismissal-verified taps
+now retry the way `savename` always has — `savepress` up to three
+presses re-walking the strip each round (a strip no longer offering
+Save means the sheet is going, and that round only polls rather than
+tapping the app behind it), and `choose` retrying the whole
+select-confirm round with re-walked row frames, converging for single-
+and multi-selection both. WATCH half: if the signature returns WITH
+the retaps in place, the taps are not being dropped — keep the failing
+sim booted and read the control frames from simdrive's inventory,
+because a stationary control that eats three delivered taps is the
+sim's runloop, not the gesture.
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
 
@@ -4401,9 +4423,28 @@ declare a THIRD pane or any pane-role/priority vocabulary, and every
 platform ships a native construct for exactly that (NavigationSplitView's
 three columns, WinUI's pane patterns, Adw's split views, Compose's
 ListDetailPaneScaffold/SupportingPaneScaffold). The maintainer ranked
-this FIRST among feature milestones (2026-08-19), tables second. A
-research scout across all five platforms plus cross-toolkit prior art is
-in flight; its draft plan lands beside this entry for ratification.
+this FIRST among feature milestones (2026-08-19), tables second. The
+plan was ratified 5/5 the same day (docs/multicolumn-plan.md).
+
+Progress: the `panes` wire slice landed 2026-08-19 (fb9ac93 — the
+ceiling replaces list_detail at wprop 6, all eight bindings, both
+interpreters, observables unchanged). The macOS DEPTH slice is in
+flight: KayaSplitRoot3, the mac ladder, `expect_panes` in all three
+harness implementations, panes.steps and the rust guest. The three
+backends the depth slice leaves behind refuse a ceiling of 3 loudly
+until their breadth slices land, on the record here:
+
+- DEPTH STUB: panes on gtk
+- DEPTH STUB: panes on winui
+- DEPTH STUB: panes on compose
+
+Breadth still owed: the GTK nesting (nav-in-nav-content, cumulative
+breakpoint table, four-boolean stamp), the WinUI nest (depth-first
+release_split, priority chain), Compose's extraPane (the material3
+pin bump, derived destination history), the iPadOS three-pane legs,
+the measured Windows/GTK floors before any shared literal below 1400,
+the seven remaining guest languages, and DESIGN.md's "Adaptive
+list-detail" section rewrite (§2.6, in the landing commit).
 
 ## The refusal affordances are never asserted PRESENT (promoted 2026-08-19)
 KEY: affordance presence, refuse-when-absent, four backends

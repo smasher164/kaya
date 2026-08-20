@@ -1639,7 +1639,7 @@ fi
 # the coverage comment above: window/panels/split are desktop-only by
 # design.
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-ANDROID_DESKTOP_ONLY_SCENES="window panels split"
+ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"

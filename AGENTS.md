@@ -318,6 +318,22 @@ in docs/deferred.md.
    an unknown kind through the real KayaFlex/KayaCell; the static
    clauses hold all four backends' image arms present-and-empty and
    panic-free),
+   `tools/check-pane-ladder.sh` (the macOS pane ladder, live: macOS has
+   no compact mode to defer to, so kaya's own arithmetic decides how
+   many of a three-pane window's columns fit — and the MIDDLE rung is
+   observable nowhere else, because the platforms legitimately disagree
+   at every width inside check-steps' panes band, so no shared scene may
+   sample it. The static clause refuses any column MINIMUM declared to
+   SwiftUI — a declared minimum becomes the WINDOW's floor, collapse can
+   never fire, and resize_window silently no-ops, all measured
+   (docs/multicolumn-plan.md MECHANICS AMENDMENTS). The runtime clause
+   is check-empty-child's shape: the interpreter's own source compiled
+   with tools/checks/swiftui-pane-ladder.swift and run — the rung
+   arithmetic including content+detail < 600, which is what keeps the
+   bare expect_panes invariant true at every regular width, the
+   edge-triggered command rule the sidebar toggle depends on, and the
+   REAL NSSplitView walked 1400 -> 700 -> 1400 counting visible
+   columns),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside

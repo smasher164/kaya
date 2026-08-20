@@ -53,7 +53,48 @@ transcripts — the findings below are the durable record):
    level rule undoes the user's toggle, and a refused state must
    never be commanded (it re-issues forever, measured).
 
-Status: DRAFT, 2026-08-19. NOTHING RATIFIED. Five research briefs feed
+DEPTH-SLICE RESOLUTIONS (2026-08-20, the macOS slice landing these
+amendments; swift/KayaSwiftUI.swift KayaSplitRoot3 and
+tools/check-pane-ladder.sh are the code):
+- THE ONE-PANE RUNG IS UNREACHABLE ON MACOS, BY ARITHMETIC, AND THE
+  BARE INVARIANT IS WHAT FORCES THAT. D4's bare form promises a regular
+  window never stacks — so kaya's minimums are chosen with
+  content+detail (270+320=590) UNDER 600, the compact threshold: at
+  every regular width two panes fit, and one pane only ever happens
+  below 600, where the window leaves the split arm for the stack arm —
+  the SAME crossing panes=2 already ships, kaya's uniform collapse.
+  The ladder inside the split arm therefore has exactly two rungs
+  (.all above sidebar+content+detail = 790, .doubleColumn below), the
+  zero-width-content mechanism stays UNBUILT (amendment 2 records how
+  to build it if a platform ever needs it; shipping it dormant would be
+  an unexercised branch), and amendment 3's first [INFER] dissolves
+  with it — there is no zero-width column to render conditionally.
+  check-pane-ladder pins the ordering (content+detail < 600) so a
+  constants edit cannot silently reopen the gap.
+- EDGE-TRIGGERING IS CONFIRMED AND GATED: kayaPaneLadderCommand
+  returns a command only on a rung CROSSING (first measurement counts
+  as an edge from nothing), and check-pane-ladder's no-command-on-the-
+  level clauses are the sidebar toggle's protection, watched red.
+- D4's OTHER [INFER] — dropping the `entries >= 1` conjunct from the
+  bare form — is resolved the other way: the conjunct is KEPT, and not
+  provisionally. Under the positions vocabulary an empty-stack regular
+  window reads "regular/0" (one position, two empty slots) BY DESIGN,
+  so the bare form stays the ARM-STAMP invariant expect_split carries
+  (regular + stacked + entries >= 1 fails), and a one-position reading
+  beside empty slots is not a violation.
+- D5's sketch ends "regular/0,1,2" after popping the stack to zero; the
+  shipped scene ends "regular/0" — with only the root on the stack, the
+  wide window shows the root pane and two EMPTY slots (D1). The sketch
+  line was a draft slip, not a design change.
+- THE MIDDLE RUNG'S LIVE OBSERVATION lives in tools/check-pane-ladder.sh
+  (the real NSSplitView walked 1400 -> 700 -> 1400 in a real NSWindow),
+  because no shared scene may sample any width inside the panes band —
+  the platforms legitimately disagree across all of 400..1400 for three
+  panes, so panes.steps samples the extremes only, per D5.
+
+~~Status: DRAFT, 2026-08-19. NOTHING RATIFIED.~~ (superseded the same
+day by the RATIFIED block above — this was the draft's own status line,
+left standing when the ruling landed.) Five research briefs feed
 this (`mac-ios.md`, `windows.md`, `gtk.md`, `android.md`,
 `prior-art.md`, all in this directory) plus the read-only scout
 (`ground.md`). The maintainer ranked this milestone first, ahead of

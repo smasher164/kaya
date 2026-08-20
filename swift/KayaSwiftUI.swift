@@ -395,9 +395,9 @@ final class KayaWindowModel: Identifiable {
     /// not appearance: padding inside the mounted root, 16 unless the app says
     /// otherwise, 0 for full bleed. Every render site reads this.
     var inset: Double = 16
-    /// The presentation the view layer ACTUALLY rendered — "split" or
-    /// "stacked" — stamped by the arm that ran, never derived from
-    /// `panes` or `formFactor` (check-verbs' stamped-observation rule).
+    /// The presentation the view layer ACTUALLY rendered — "split",
+    /// "split3" or "stacked" — stamped by the arm that ran, never derived
+    /// from `panes` or `formFactor` (check-verbs' stamped-observation rule).
     var splitPresentation = "stacked"
     /// THE ARM THE SECTIONS RENDER ACTUALLY TOOK — "bar" or "sidebar",
     /// stamped by the body that rendered (the stamped-observation rule).
@@ -6546,6 +6546,42 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("split \(gotSplit), wanted \(wantSplit)")
                 }
+            case "expect_panes":
+                // `<size class>/<positions>` — the real NSSplitView's
+                // columns mapped to the stack slots they hold (the
+                // width-and-hiddenness rule, docs/multicolumn-plan.md
+                // MECHANICS AMENDMENTS 3); the stack arm reads its top.
+                let wantPanes = parts.count > 1 ? kayaQuoted(Array(parts[1...])) : ""
+                if wantPanes.isEmpty {
+                    // The bare form: expect_split's asymmetric invariant on
+                    // the ARM stamp — an occupied pane beside an EMPTY slot
+                    // is one visible position and still correct (D1), so
+                    // the position list carries no invariant of its own.
+                    let stamped = DispatchQueue.main.sync { () -> String in
+                        guard let window = kayaScene.windows[0] else {
+                            return "unknown/stacked"
+                        }
+                        return window.formFactor.rawValue + "/" + window.splitPresentation
+                    }
+                    let halves = stamped.split(separator: "/", maxSplits: 1)
+                    let stack = kayaScene.windows[0]?.entries.count ?? 0
+                    if halves.count == 2, halves[0] == "regular", halves[1] == "stacked",
+                        stack >= 1
+                    {
+                        failures.append(
+                            "presentation \(stamped): a regular window must not show "
+                                + "one pane while its stack holds two")
+                    } else {
+                        observed.append("panes fit")
+                    }
+                } else {
+                    let gotPanes = DispatchQueue.main.sync { kayaPanesReading(0) }
+                    if gotPanes == wantPanes {
+                        observed.append("panes \(wantPanes)")
+                    } else {
+                        failures.append("panes \(gotPanes), wanted \(wantPanes)")
+                    }
+                }
             case "expect_menu_presentation":
                 // `<size class>/<presentation>`. macOS reads the REAL bar
                 // (there are no size classes there, and a desktop window
@@ -11701,19 +11737,132 @@ struct KayaAuxRoot: View {
     }
 }
 
-/// Does `windowId` take the list-detail arm right now? Both halves must hold:
+/// Does `windowId` take a split arm right now? Both halves must hold:
 /// the app ASKED (wprop 6) and the window IS regular. The size class is the
 /// platform's answer, never the app's — that is what makes this adaptive.
+/// WHICH split root renders is the ceiling's call (2 or 3); a compact
+/// window takes the stack arm at any ceiling, kaya's uniform collapse
+/// (docs/multicolumn-plan.md Q3).
 func kayaSplitArm(_ windowId: UInt64) -> Bool {
     guard let w = kayaScene.windows[windowId] else { return false }
-    // BRIDGE (docs/multicolumn-plan.md): a ceiling of 2 or 3 takes
-    // the two-pane split until the three-pane slice lands.
     return w.panes >= 2 && w.formFactor == .regular
 }
 
-/// The list-detail presentation of a window's entry stack. Two panes, never
-/// three: Apple has a three-column form and nobody else does, so it is not the
-/// intersection.
+// --- The pane surfaces on screen, and the mac ladder ------------------
+// docs/multicolumn-plan.md: D1 (positions), D4 (the reader),
+// MECHANICS AMENDMENTS (what may be declared to SwiftUI and what must
+// not be).
+
+// KAYA'S OWN PANE MINIMUMS — the model's alone, DECLARED TO NOBODY.
+// A minimum handed to navigationSplitViewColumnWidth becomes the
+// WINDOW's floor: the collapse rule can then never fire and
+// resize_window turns into a silent no-op (MECHANICS AMENDMENTS 1).
+// content+detail stays UNDER 600, the compact threshold: below 600 the
+// window leaves the split arm entirely, so the two-pane rung is this
+// ladder's floor and the bare expect_panes invariant — a regular window
+// never stacks — holds at every regular width. tools/check-pane-ladder.sh
+// pins the arithmetic and that ordering.
+let kayaPaneMinSidebar: Double = 200
+let kayaPaneMinContent: Double = 270
+let kayaPaneMinDetail: Double = 320
+
+/// Which rung fits `width`: 3 when the window can hold all three of
+/// kaya's minimums, else 2. There is no 1 rung — one pane is the
+/// compact stack arm's territory (see the constants above).
+func kayaPaneRung(_ width: Double) -> Int {
+    width >= kayaPaneMinSidebar + kayaPaneMinContent + kayaPaneMinDetail ? 3 : 2
+}
+
+/// EDGE-TRIGGERED: a command only when a width CROSSING changes the
+/// rung, nil on the level — the sidebar toggle writes the same
+/// visibility binding, and a level-triggered rule would undo the
+/// user's choice on the next layout pass (MECHANICS AMENDMENTS 3).
+/// `from == nil` is the first real measurement: an edge from nothing.
+func kayaPaneLadderCommand(
+    from: Double?, to: Double
+) -> NavigationSplitViewVisibility? {
+    if let from, kayaPaneRung(from) == kayaPaneRung(to) { return nil }
+    return kayaPaneRung(to) == 3 ? .all : .doubleColumn
+}
+
+/// The expect_panes reading for `windowId`: `<size class>/<positions>`,
+/// positions ascending stack indices (0 the base root, j entry j-1).
+///
+/// On a macOS split arm the positions come from the REAL NSSplitView —
+/// each column counted visible by width AND hiddenness (a zero-width
+/// column keeps isHidden == false, so either signal alone over-reads) —
+/// mapped to the stack slot it holds, with an EMPTY slot contributing
+/// no position (D1: a pane is a surface from the stack). On the stack
+/// arm the one pane on screen is the TOP of the stack, the same
+/// stack-depth reading D4 prescribes for a collapsed column. View
+/// lifecycle is deliberately NOT the source: NavigationStack retains
+/// covered views without firing onDisappear, and an arm swap fires the
+/// outgoing arm's onDisappear after the incoming arm's onAppear.
+@MainActor
+func kayaPanesReading(_ windowId: UInt64) -> String {
+    guard let w = kayaScene.windows[windowId] else { return "unknown/-" }
+    let entries = w.entries.count
+    var positions: [Int] = []
+    var splitUp = false
+    #if os(macOS)
+        if let host = kayaNSWindows[windowId] ?? NSApp.keyWindow,
+            let content = host.contentView,
+            let split = kayaFindSplitView(content)
+        {
+            splitUp = true
+            let cols = split.arrangedSubviews.map {
+                $0.frame.width > 1 && !$0.isHidden
+            }
+            if cols.count >= 3 {
+                if cols[0] { positions.append(0) }
+                if cols[1], entries >= 1 { positions.append(1) }
+                if cols[2], entries >= 2 { positions.append(entries) }
+            } else {
+                if !cols.isEmpty, cols[0] { positions.append(0) }
+                if cols.count >= 2, cols[1], entries >= 1 { positions.append(entries) }
+            }
+        }
+    #endif
+    if !splitUp {
+        // No split view on screen: the stack arm's one pane is the TOP.
+        // On a non-macOS split arm (no NSSplitView exists there) the
+        // positions derive from the arm stamp and the stack — the
+        // harness.rs two-pane rule; the iOS real-arrangement read
+        // (UISplitViewController's columns) is its own slice's work.
+        switch w.splitPresentation {
+        case "split":
+            positions = entries == 0 ? [0] : [0, entries]
+        case "split3":
+            positions = [0]
+            if entries >= 1 { positions.append(1) }
+            if entries >= 2 { positions.append(entries) }
+        default:
+            positions = [entries]
+        }
+    }
+    let spelled =
+        positions.isEmpty ? "-" : positions.map(String.init).joined(separator: ",")
+    return w.formFactor.rawValue + "/" + spelled
+}
+
+#if os(macOS)
+    /// The first NSSplitView under `view` — NavigationSplitView's own,
+    /// when a split arm is up; nil on the stack arm.
+    func kayaFindSplitView(_ view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for sub in view.subviews {
+            if let found = kayaFindSplitView(sub) { return found }
+        }
+        return nil
+    }
+#endif
+
+/// The two-column presentation of a window's entry stack: pane 0 the
+/// base root, the trailing pane the TOP of the stack, the middles
+/// retained and covered exactly as navigation already does
+/// (docs/multicolumn-plan.md D1; the ceiling-3 form is KayaSplitRoot3,
+/// a separate struct because the two- and three-column
+/// NavigationSplitView initializers are different generic types).
 struct KayaSplitRoot: View {
     let windowId: UInt64
     @State private var scene = kayaScene
@@ -11758,6 +11907,103 @@ struct KayaSplitRoot: View {
     /// could never catch the defect.
     private func record() {
         kayaScene.windows[windowId]?.splitPresentation = "split"
+    }
+}
+
+/// The THREE-column presentation (docs/multicolumn-plan.md D1/D3):
+/// pane 0 the base root, pane 1 the first entry, and the detail column
+/// the REST of the stack — its own NavigationStack, so a deep stack
+/// keeps a real back item that appears exactly when this column COVERS
+/// something and survives every rung of the ladder. An empty pane slot
+/// still exists (D1): pushes deepen a column, never swap containers.
+struct KayaSplitRoot3: View {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+    /// SHARED with the platform's own sidebar toggle; kaya writes it
+    /// only on rung crossings (edge-triggered — see
+    /// kayaPaneLadderCommand).
+    @State private var visibility: NavigationSplitViewVisibility = .all
+    @State private var width: Double = 0
+    @State private var measured: Double? = nil
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $visibility) {
+            Group {
+                if let root = scene.windows[windowId]?.root {
+                    KayaRender(node: root, isRoot: true)
+                }
+            }
+            .padding(scene.windows[windowId]?.inset ?? 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .navigationTitle(kayaWindowCaption(windowId))
+            // Ideal ONLY, never a minimum (MECHANICS AMENDMENTS 1).
+            .navigationSplitViewColumnWidth(ideal: 220)
+        } content: {
+            Group {
+                if let first = scene.windows[windowId]?.entries.first {
+                    KayaEntryRoot(entryId: first.id)
+                } else {
+                    Color.clear
+                        .navigationTitle(kayaWindowCaption(windowId))
+                }
+            }
+            .navigationSplitViewColumnWidth(ideal: 300)
+        } detail: {
+            NavigationStack(path: kayaDetailPath()) {
+                Group {
+                    if let base = scene.windows[windowId]?.entries.dropFirst().first {
+                        KayaEntryRoot(entryId: base.id)
+                    } else {
+                        // The empty trailing slot carries the window title —
+                        // the KayaSplitRoot lesson, one column over.
+                        Color.clear
+                            .navigationTitle(kayaWindowCaption(windowId))
+                    }
+                }
+                .navigationDestination(for: UInt64.self) { eid in
+                    KayaEntryRoot(entryId: eid)
+                }
+            }
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { width = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in width = w }
+            }
+        )
+        #if os(macOS)
+            // THE MAC LADDER: macOS has no compact mode to defer to, so
+            // kaya's own arithmetic decides how many columns fit
+            // (docs/multicolumn-plan.md Q3). Everywhere else the
+            // container's native judgment drives visibility itself.
+            .onChange(of: width) { _, w in
+                if let command = kayaPaneLadderCommand(from: measured, to: w) {
+                    visibility = command
+                }
+                measured = w
+            }
+        #endif
+        .onAppear { record() }
+        .onChange(of: scene.windows[windowId]?.entries.count ?? 0) { record() }
+        // The brand rides every scene root (see KayaRoot's tint note).
+        .tint(kayaBrandTint())
+        .font(kayaBrandFont())
+    }
+
+    /// The detail column's slice of the stack: entries 2+, popped
+    /// through the same user-pop path the two-column arms use.
+    private func kayaDetailPath() -> Binding<[UInt64]> {
+        Binding(
+            get: {
+                (kayaScene.windows[windowId]?.entries.dropFirst(2) ?? []).map(\.id)
+            },
+            set: { newPath in kayaUserPops(windowId, to: newPath.count + 2) })
+    }
+
+    /// Stamp the arm THIS BODY TOOK (the stamped-observation rule).
+    private func record() {
+        kayaScene.windows[windowId]?.splitPresentation = "split3"
     }
 }
 
@@ -12906,10 +13152,16 @@ struct KayaRoot: View {
             // (each pane carries its own stack).
             KayaSectionsView(windowId: 0)
         } else if kayaSplitArm(0) {
-            // ADAPTIVE LIST-DETAIL (DESIGN.md): the base root takes the leading
-            // pane and the TOP of the stack the trailing one. The entries between
-            // stay retained and covered — the same rule navigation already has.
-            KayaSplitRoot(windowId: 0)
+            // ADAPTIVE PANES (DESIGN.md; docs/multicolumn-plan.md): the base
+            // root takes the leading pane, the TOP of the stack the trailing
+            // one, and a ceiling of three gives the first entry a middle
+            // column. The entries between stay retained and covered — the
+            // same rule navigation already has.
+            if (scene.windows[0]?.panes ?? 1) >= 3 {
+                KayaSplitRoot3(windowId: 0)
+            } else {
+                KayaSplitRoot(windowId: 0)
+            }
         } else {
         // The primary surface's stack: pushed entries cover this root serially;
         // the root is the stack's base and stays alive underneath. This arm
