@@ -198,6 +198,18 @@ import kotlinx.coroutines.launch
  */
 class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /**
+     * TABLE (docs/tables-plan.md): the declared header bar, stored by
+     * the apply pump; the synthesized-header lowering that DRAWS it is
+     * the Compose breadth slice. tableSorted is a column index or the
+     * wire's u32 no-column sentinel; sortTag is what a header click
+     * hands to kaya_emit_sort_requested verbatim.
+     */
+    var tableColumns: List<String> = emptyList()
+    var tableSorted: Int = -1
+    var tableDirection: Int = 0
+    var sortTag: ByteArray = ByteArray(0)
+
+    /**
      * KAYA'S MODEL MIRROR of the widget's text — what the app was last
      * told, and what a label renders.
      *
@@ -814,7 +826,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x2dd89e177006e976uL
+    private const val SPEC_HASH: ULong = 0x464a21716e58b2aauL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -849,6 +861,7 @@ object KayaCompose {
      * Android reader is the APK build, and the arm below skips it.
      */
     private const val APPLY_SET_APP_IDENTITY = 34
+    private const val APPLY_SET_COLUMN_HEADERS = 35
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -1929,6 +1942,30 @@ object KayaCompose {
                     // the read would pass on a run that declared nothing.
                     KayaSceneModel.appIdentityName = name
                     KayaSceneModel.appIdentityIcon = icon
+                }
+                APPLY_SET_COLUMN_HEADERS -> {
+                    // { u64 id; u32 sorted; u32 direction; u32 count;
+                    // u32 tag_len; Values titles; tag bytes }. STORED,
+                    // NOT YET DRAWN: the synthesized-header lowering is
+                    // the Compose breadth slice (docs/tables-plan.md);
+                    // decoding now keeps the pump total over the apply
+                    // vocabulary and feeds the verbs when they land.
+                    val id = b.long
+                    val sorted = b.int
+                    val direction = b.int
+                    val count = b.int
+                    val tagLen = b.int
+                    b.int // the Values run's own count
+                    b.int // reserved
+                    val titles = (0 until count).map { readString(b) }
+                    val tag = ByteArray(tagLen).also { b.get(it) }
+                    while (b.position() % 8 != 0) b.get()
+                    val node = KayaSceneModel.nodes[id]
+                        ?: error("kaya: set_columns targets unknown widget $id")
+                    node.tableColumns = titles
+                    node.tableSorted = sorted
+                    node.tableDirection = direction
+                    node.sortTag = tag
                 }
                 APPLY_SET_TYPEFACE -> {
                     // { u32 mask; u32 platform } then the default
@@ -4950,6 +4987,9 @@ object KayaCompose {
                                 failures.add("${parts[1]} children read \"$got\", wanted \"$want\"")
                         }
                     }
+                    "expect_columns" -> depthStub("table")
+                    "expect_rows" -> depthStub("table")
+                    "header_click" -> depthStub("table")
                     "expect_shares" -> {
                         // Percent of the CHILDREN'S SUM, not of the
                         // container, so spacing and padding (platform
@@ -6285,14 +6325,14 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// No `depthStub` helper lives here: this backend has no depth stub,
-// and check-detekt's UnusedPrivateMember would report an unused
-// one. The next depth slice writes it back in EXACTLY this spelling
-// — `depthStub("<scene>")`, which is what check-stubs and
-// check-steps read, never a sentence of its own
-// (tools/lib/hand-rolled-stubs.py fails a hand-rolled refusal) —
-// and buys its silence with an OPEN entry in docs/deferred.md
-// (tools/lib/stub-ledger.py).
+// A depth stub is a CALL, never a sentence — tools/check-stubs.sh
+// reads it, and its silence is bought by an OPEN entry in
+// docs/deferred.md (tools/lib/stub-ledger.py).
+private fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on android — " +
+            "it is a depth slice; see CLAUDE.md's sequencing",
+    )
 
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s

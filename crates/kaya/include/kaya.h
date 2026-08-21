@@ -58,6 +58,8 @@
 
 #define REC_REDONE 18
 
+#define REC_SORT_REQUESTED 19
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -176,6 +178,24 @@
  */
 #define TX_SET_APP_IDENTITY 44
 
+/**
+ * The column header bar on a For's container: titles plus the sort
+ * indicator, one atomic declaration (docs/tables-plan.md).
+ */
+#define TX_SET_COLUMN_HEADERS 45
+
+/**
+ * `sorted`'s no-column sentinel (alert_choice's cancel precedent).
+ */
+#define SORT_NONE UINT32_MAX
+
+/**
+ * `direction`'s two values, read only when `sorted` names a column.
+ */
+#define SORT_ASC 0
+
+#define SORT_DESC 1
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -260,6 +280,15 @@
  * because the LOWERING is what decodes a picture (app-identity-plan I5).
  */
 #define APPLY_SET_APP_IDENTITY 34
+
+/**
+ * The header bar for the For's live container, with the core-minted
+ * sort tag appended after the titles — { u32 tag_len; bytes } — which
+ * the backend hands to kaya_emit_sort_requested verbatim on a header
+ * click, exactly as a button's click tag rides (a stamped copy's
+ * identity is a node id plus key path no backend can compute).
+ */
+#define APPLY_SET_COLUMN_HEADERS 35
 
 #define VALUE_BOOL 1
 
@@ -647,6 +676,14 @@
 #define KAYA_OCCURRENCE_REDONE 18
 
 /**
+ * A column header was clicked: { u64 id; u32 path_len; u32 column;
+ * path_len values } — identity as in button_clicked, `column` the
+ * 0-based index in the declared order. A request; the guest sorts
+ * (docs/tables-plan.md).
+ */
+#define KAYA_OCCURRENCE_SORT_REQUESTED 19
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -838,6 +875,22 @@
 #define KAYA_TX_SET_APP_IDENTITY 44
 
 /**
+ * The column header bar on a For's container: { u64 widget; u32 sorted;
+ * u32 direction; u32 count; u32 reserved; count Str values } — titles
+ * plus the sort indicator, one atomic declaration (docs/tables-plan.md).
+ */
+#define KAYA_TX_SET_COLUMN_HEADERS 45
+
+/**
+ * `sorted`'s no-column sentinel, and `direction`'s two values.
+ */
+#define KAYA_SORT_NONE UINT32_MAX
+
+#define KAYA_SORT_ASC 0
+
+#define KAYA_SORT_DESC 1
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface geometry,
  * so KAYA_CAP_AUX_WINDOWS is unset there and create_window is a
@@ -989,6 +1042,13 @@
 #define KAYA_APPLY_SET_TYPEFACE 33
 
 #define KAYA_APPLY_SET_APP_IDENTITY 34
+
+/**
+ * The header bar with the core-minted sort tag after the titles
+ * ({ u32 tag_len } in the reserved slot; see the spec record) — the
+ * backend hands the tag to kaya_emit_sort_requested verbatim.
+ */
+#define KAYA_APPLY_SET_COLUMN_HEADERS 35
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -1524,6 +1584,11 @@ typedef struct KayaHostApi {
    * the wrong one on a static-Rust or RTLD_LOCAL-Python host.
    */
   uint64_t (*stalled_ms)(void);
+  /**
+   * A column-header click: the sort tag delivered with SET_COLUMNS,
+   * verbatim, plus the 0-based column index (docs/tables-plan.md).
+   */
+  void (*emit_sort_requested)(const uint8_t*, uintptr_t, uint32_t);
 } KayaHostApi;
 
 
@@ -1868,6 +1933,15 @@ void kaya_emit_alert_result(uint64_t alert, uint32_t choice);
  * CREATE record, handed back verbatim. Do not combine with kaya_run.
  */
 void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
+
+/**
+ * Presentation side: emit a column-header click, exactly as a
+ * backend's header handler would — `tag` is the sort tag delivered
+ * with the container's SET_COLUMNS record, handed back verbatim;
+ * `column` the 0-based index in the declared order. A REQUEST: the
+ * guest sorts (docs/tables-plan.md). Do not combine with kaya_run.
+ */
+void kaya_emit_sort_requested(const uint8_t *tag, uintptr_t tag_len, uint32_t column);
 
 /**
  * Presentation side: emit a checkbox toggle, exactly as a backend's

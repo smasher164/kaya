@@ -202,6 +202,9 @@ pub struct KayaHostApi {
     /// direct symbol binds whichever kaya the loader resolves, which is
     /// the wrong one on a static-Rust or RTLD_LOCAL-Python host.
     pub stalled_ms: extern "C" fn() -> u64,
+    /// A column-header click: the sort tag delivered with SET_COLUMNS,
+    /// verbatim, plus the 0-based column index (docs/tables-plan.md).
+    pub emit_sort_requested: unsafe extern "C" fn(*const u8, usize, u32),
 }
 
 unsafe extern "C" {
@@ -308,6 +311,7 @@ pub(crate) fn run() -> i32 {
         redo: crate::capi::kaya_redo,
         note_native_undo: crate::capi::kaya_note_native_undo,
         stalled_ms: crate::capi::kaya_stalled_ms,
+        emit_sort_requested: crate::capi::kaya_emit_sort_requested,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

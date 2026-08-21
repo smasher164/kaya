@@ -74,6 +74,11 @@ pub const KAYA_OCCURRENCE_PASTED: u16 = 16;
 /// of what an app hears.
 pub const KAYA_OCCURRENCE_UNDONE: u16 = 17;
 pub const KAYA_OCCURRENCE_REDONE: u16 = 18;
+/// A column header was clicked: { u64 id; u32 path_len; u32 column;
+/// path_len values } — identity as in button_clicked, `column` the
+/// 0-based index in the declared order. A request; the guest sorts
+/// (docs/tables-plan.md).
+pub const KAYA_OCCURRENCE_SORT_REQUESTED: u16 = 19;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -94,6 +99,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_PASTED == ring::REC_PASTED
         && KAYA_OCCURRENCE_UNDONE == ring::REC_UNDONE
         && KAYA_OCCURRENCE_REDONE == ring::REC_REDONE
+        && KAYA_OCCURRENCE_SORT_REQUESTED == ring::REC_SORT_REQUESTED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -238,6 +244,20 @@ const _: () = assert!(KAYA_TX_SET_BRAND_TYPEFACE == wire::TX_SET_BRAND_TYPEFACE)
 /// mask-plus-always-written-slot convention.
 pub const KAYA_TX_SET_APP_IDENTITY: u16 = 44;
 const _: () = assert!(KAYA_TX_SET_APP_IDENTITY == wire::TX_SET_APP_IDENTITY);
+/// The column header bar on a For's container: { u64 widget; u32 sorted;
+/// u32 direction; u32 count; u32 reserved; count Str values } — titles
+/// plus the sort indicator, one atomic declaration (docs/tables-plan.md).
+pub const KAYA_TX_SET_COLUMN_HEADERS: u16 = 45;
+const _: () = assert!(KAYA_TX_SET_COLUMN_HEADERS == wire::TX_SET_COLUMN_HEADERS);
+/// `sorted`'s no-column sentinel, and `direction`'s two values.
+pub const KAYA_SORT_NONE: u32 = u32::MAX;
+pub const KAYA_SORT_ASC: u32 = 0;
+pub const KAYA_SORT_DESC: u32 = 1;
+const _: () = assert!(
+    KAYA_SORT_NONE == wire::SORT_NONE
+        && KAYA_SORT_ASC == wire::SORT_ASC
+        && KAYA_SORT_DESC == wire::SORT_DESC
+);
 
 /// The protocol fingerprint this core was built from. Bindings carry the
 /// same value baked in at generation and assert agreement at load, so a
@@ -431,6 +451,11 @@ pub const KAYA_APPLY_SET_TYPEFACE: u16 = 33;
 const _: () = assert!(KAYA_APPLY_SET_TYPEFACE == wire::APPLY_SET_TYPEFACE);
 pub const KAYA_APPLY_SET_APP_IDENTITY: u16 = 34;
 const _: () = assert!(KAYA_APPLY_SET_APP_IDENTITY == wire::APPLY_SET_APP_IDENTITY);
+/// The header bar with the core-minted sort tag after the titles
+/// ({ u32 tag_len } in the reserved slot; see the spec record) — the
+/// backend hands the tag to kaya_emit_sort_requested verbatim.
+pub const KAYA_APPLY_SET_COLUMN_HEADERS: u16 = 35;
+const _: () = assert!(KAYA_APPLY_SET_COLUMN_HEADERS == wire::APPLY_SET_COLUMN_HEADERS);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -720,7 +745,7 @@ const _: () = assert!(
 // KAYA_OCCURRENCE_* silently lacked it. A new spec occurrence trips this
 // count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 18,
+    crate::spec::SPEC.occurrence.len() == 19,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -2420,6 +2445,24 @@ pub unsafe extern "C" fn kaya_emit_clicked(tag: *const u8, len: usize) {
     state().ring.push_record(ring::REC_BUTTON_CLICKED, tag);
 }
 
+/// Presentation side: emit a column-header click, exactly as a
+/// backend's header handler would — `tag` is the sort tag delivered
+/// with the container's SET_COLUMNS record, handed back verbatim;
+/// `column` the 0-based index in the declared order. A REQUEST: the
+/// guest sorts (docs/tables-plan.md). Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_sort_requested(tag: *const u8, tag_len: usize, column: u32) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty sort tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_sort_tag(tag, column);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_SORT_REQUESTED, &wire::sort_body(tag, column));
+}
+
 /// Presentation side: emit a checkbox toggle, exactly as a backend's
 /// change handler would — `tag` is the tag bytes delivered with the
 /// checkbox's CREATE record, `checked` the new state (0 or 1). Do not
@@ -2949,6 +2992,7 @@ mod tests {
             ("set_brand_accent", KAYA_TX_SET_BRAND_ACCENT),
             ("set_brand_typeface", KAYA_TX_SET_BRAND_TYPEFACE),
             ("set_app_identity", KAYA_TX_SET_APP_IDENTITY),
+            ("set_column_headers", KAYA_TX_SET_COLUMN_HEADERS),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2985,6 +3029,7 @@ mod tests {
             ("set_brand", KAYA_APPLY_SET_BRAND),
             ("set_typeface", KAYA_APPLY_SET_TYPEFACE),
             ("set_app_identity", KAYA_APPLY_SET_APP_IDENTITY),
+            ("set_column_headers", KAYA_APPLY_SET_COLUMN_HEADERS),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

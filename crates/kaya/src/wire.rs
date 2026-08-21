@@ -82,6 +82,14 @@ pub const TX_SET_BRAND_TYPEFACE: u16 = 43;
 /// typeface's mask-plus-always-written-slot convention, so the two
 /// records decode the same way.
 pub const TX_SET_APP_IDENTITY: u16 = 44;
+/// The column header bar on a For's container: titles plus the sort
+/// indicator, one atomic declaration (docs/tables-plan.md).
+pub const TX_SET_COLUMN_HEADERS: u16 = 45;
+/// `sorted`'s no-column sentinel (alert_choice's cancel precedent).
+pub const SORT_NONE: u32 = u32::MAX;
+/// `direction`'s two values, read only when `sorted` names a column.
+pub const SORT_ASC: u32 = 0;
+pub const SORT_DESC: u32 = 1;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -127,6 +135,12 @@ pub const APPLY_SET_TYPEFACE: u16 = 33;
 /// The app's identity, uninspected: the declaration's body verbatim,
 /// because the LOWERING is what decodes a picture (app-identity-plan I5).
 pub const APPLY_SET_APP_IDENTITY: u16 = 34;
+/// The header bar for the For's live container, with the core-minted
+/// sort tag appended after the titles — { u32 tag_len; bytes } — which
+/// the backend hands to kaya_emit_sort_requested verbatim on a header
+/// click, exactly as a button's click tag rides (a stamped copy's
+/// identity is a node id plus key path no backend can compute).
+pub const APPLY_SET_COLUMN_HEADERS: u16 = 35;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -1053,6 +1067,30 @@ pub fn decode_transaction_with_blobs(
                 };
                 TxOp::SetAppIdentity(crate::protocol::AppIdentity { name, icon })
             }
+            TX_SET_COLUMN_HEADERS => {
+                let widget = WidgetId(r.u64());
+                let sorted = r.u32();
+                let direction = r.u32();
+                let count = r.u32() as usize;
+                let _reserved = r.u32();
+                // The declared `count` and the list's own length must
+                // agree, or a header renders with the wrong arity on some
+                // platform (highlight_ranges' rule).
+                let flat = r.record();
+                assert!(
+                    flat.len() == count,
+                    "kaya: set_column_headers declares {count} columns but carries {} titles",
+                    flat.len()
+                );
+                let titles = flat
+                    .into_iter()
+                    .map(|v| match v {
+                        Value::Str(s) => s,
+                        other => panic!("kaya: a column title is {other:?}, wanted a string"),
+                    })
+                    .collect();
+                TxOp::SetColumnHeaders { widget, sorted, direction, titles }
+            }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -1715,6 +1753,31 @@ pub fn decode_click_tag(tag: &[u8]) -> Occurrence {
     }
 }
 
+// A sort-requested occurrence body IS the sort tag with the column
+// index patched into the reserved slot — { u64 id; u32 path_len;
+// u32 column; path_len values } — so the backend hands the tag back
+// verbatim plus one integer, exactly like every other tag door.
+pub fn sort_body(tag: &[u8], column: u32) -> Vec<u8> {
+    let mut b = tag.to_vec();
+    b[12..16].copy_from_slice(&column.to_le_bytes());
+    b
+}
+
+pub fn decode_sort_tag(tag: &[u8], column: u32) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::SortRequested { id: WidgetId(id), column }
+    } else {
+        Occurrence::InstanceSortRequested {
+            node: TemplateNodeId(id),
+            path,
+            column,
+        }
+    }
+}
+
 // A text-changed occurrence body: the widget's stored tag (identity,
 // same layout as a click) followed by the new text as a value. The
 // backend never learns what the tag means; it appends what the user
@@ -1988,6 +2051,26 @@ impl Writer {
                     for r in ranges {
                         write_value(b, &Value::I64(r.start as i64), blobs);
                         write_value(b, &Value::I64(r.stop as i64), blobs);
+                    }
+                })
+            }
+            ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {
+                self.record(APPLY_SET_COLUMN_HEADERS, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&sorted.to_le_bytes());
+                    b.extend_from_slice(&direction.to_le_bytes());
+                    b.extend_from_slice(&(titles.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(titles.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for title in titles {
+                        write_value(b, &Value::Str(title.clone()), blobs);
+                    }
+                    // The sort tag rides after the titles, 8-aligned as
+                    // every record body is padded (create's convention).
+                    b.extend_from_slice(tag);
+                    while b.len() % 8 != 0 {
+                        b.push(0);
                     }
                 })
             }
@@ -2370,6 +2453,20 @@ impl Writer {
                     for r in ranges {
                         write_value(b, &Value::I64(r.start as i64), blobs);
                         write_value(b, &Value::I64(r.stop as i64), blobs);
+                    }
+                })
+            }
+            TxOp::SetColumnHeaders { widget, sorted, direction, titles } => {
+                self.record(TX_SET_COLUMN_HEADERS, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&sorted.to_le_bytes());
+                    b.extend_from_slice(&direction.to_le_bytes());
+                    b.extend_from_slice(&(titles.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&(titles.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for title in titles {
+                        write_value(b, &Value::Str(title.clone()), blobs);
                     }
                 })
             }
@@ -3061,6 +3158,59 @@ mod tests {
         assert_eq!(decoded.len(), ops.len());
         for (a, b) in ops.iter().zip(decoded.iter()) {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    /// The header bar out and back — titles with spaces (the reason a
+    /// Str prop could not carry them), the sentinel, and both
+    /// directions — plus the sort body's column patch and its decode
+    /// on both identity shapes.
+    #[test]
+    fn set_columns_round_trips_and_the_sort_body_patches() {
+        let ops = vec![
+            TxOp::SetColumnHeaders {
+                widget: WidgetId(4),
+                sorted: SORT_NONE,
+                direction: SORT_ASC,
+                titles: vec!["Name".into(), "Date Modified".into()],
+            },
+            TxOp::SetColumnHeaders {
+                widget: WidgetId(4),
+                sorted: 1,
+                direction: SORT_DESC,
+                titles: vec!["Name".into(), "Size".into(), "Kind".into()],
+            },
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let decoded = decode_transaction(&w.into_bytes());
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+
+        let live = click_tag(4, &[]);
+        match decode_sort_tag(&live, 2) {
+            Occurrence::SortRequested { id, column } => {
+                assert_eq!(id, WidgetId(4));
+                assert_eq!(column, 2);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        // The body IS the tag with the column in the reserved slot.
+        let body = sort_body(&live, 2);
+        assert_eq!(&body[..12], &live[..12]);
+        assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 2);
+        let stamped = click_tag(9, &[Value::from("g1"), Value::I64(4)]);
+        match decode_sort_tag(&stamped, 0) {
+            Occurrence::InstanceSortRequested { node, path, column } => {
+                assert_eq!(node, TemplateNodeId(9));
+                assert_eq!(path, vec![Value::from("g1"), Value::I64(4)]);
+                assert_eq!(column, 0);
+            }
+            other => panic!("unexpected: {other:?}"),
         }
     }
 

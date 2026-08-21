@@ -10023,6 +10023,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
         }
+        ApplyOp::SetColumnHeaders { .. } => {
+            // STORED NOWHERE, DRAWN NOWHERE — YET: the details-view
+            // header lowering is this backend's breadth slice
+            // (docs/tables-plan.md; the table depth stub in the Stage
+            // impl below is the loud half). Consuming the record keeps
+            // the apply match total over the vocabulary.
+        }
         ApplyOp::SetAppIdentity(identity) => {
             // TWO SINKS FROM ONE DECLARATION, which is this platform's
             // whole shape (docs/app-identity-plan.md I3): the WINDOW's
@@ -13569,6 +13576,20 @@ impl crate::harness::Stage for WinUiStage {
                 other => panic!("kaya: is_focused not wired for {other:?} on winui"),
             }
         }).unwrap_or(false)
+    }
+
+
+    // The table verbs (docs/tables-plan.md): the synthesized-header
+    // lowering is this backend's breadth slice; until it lands the
+    // scene is a depth stub, ledgered open in docs/deferred.md.
+    fn columns_presented(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("table")
+    }
+    fn row_cells(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("table")
+    }
+    fn header_click(&self, _: crate::harness::Target, _: u32) {
+        crate::depth_stub("table")
     }
 
     fn child_texts(&self, t: crate::harness::Target) -> String {

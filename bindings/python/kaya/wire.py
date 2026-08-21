@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x2dd89e177006e976
+SPEC_HASH = 0x464a21716e58b2aa
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -178,6 +178,7 @@ TX_SHOW_SAVE_DIALOG = 41
 TX_SET_BRAND_ACCENT = 42
 TX_SET_BRAND_TYPEFACE = 43
 TX_SET_APP_IDENTITY = 44
+TX_SET_COLUMN_HEADERS = 45
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -212,6 +213,7 @@ APPLY_PRESENT_SAVE_DIALOG = 31
 APPLY_SET_BRAND = 32
 APPLY_SET_TYPEFACE = 33
 APPLY_SET_APP_IDENTITY = 34
+APPLY_SET_COLUMN_HEADERS = 35
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -230,6 +232,7 @@ OCC_CLIPBOARD_RESULT = 15
 OCC_PASTED = 16
 OCC_UNDONE = 17
 OCC_REDONE = 18
+OCC_SORT_REQUESTED = 19
 
 
 def _pad(b):
@@ -454,6 +457,10 @@ def tx_set_brand_typeface(mask, family, platforms, font):
 def tx_set_app_identity(mask, name, icon):
     """DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied."""
     return record(TX_SET_APP_IDENTITY, struct.pack("<I", mask) + struct.pack("<I", 0) + _enc.value(name) + _enc.value(icon))
+
+def tx_set_column_headers(widget_id, sorted, direction, count, titles):
+    """DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run."""
+    return record(TX_SET_COLUMN_HEADERS, struct.pack("<Q", widget_id) + struct.pack("<I", sorted) + struct.pack("<I", direction) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(titles))
 
 
 def tx_set_text(widget_id, text):
@@ -995,7 +1002,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).

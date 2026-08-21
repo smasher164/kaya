@@ -381,10 +381,21 @@ impl<T: KayaSum> Collection<T> {
     /// a nested For is the same statement one level in.
     pub fn rows<'t, 'b, S: ForScope<'b>>(&self, scope: &'t mut S) -> Rows<'t, 'b> {
         assert_root(self);
+        let tx = scope.zone_tx();
+        // The For's id, allocated HERE rather than at first iteration,
+        // so the builder chain (columns / on_sort) has the handle the
+        // statement form used to withhold (docs/tables-plan.md).
+        let for_id = if S::NESTED {
+            tx.ctx.alloc_node().0
+        } else {
+            tx.ctx.alloc_widget().0
+        };
         Rows {
-            tx: Some(scope.zone_tx()),
+            tx: Some(tx),
             collection: self.id,
             nested: S::NESTED,
+            for_id,
+            columns: None,
         }
     }
 
@@ -2462,6 +2473,21 @@ impl<'a> Tx<'a> {
         }
     }
 
+    /// Declare the column header bar on a For's container — the
+    /// expression forms' spelling; the statement form's is
+    /// `rows(tx).columns(...)`. One title per column plus the
+    /// indicator; the row template's root must be a `row` of exactly
+    /// one cell per column, refused loudly otherwise
+    /// (docs/tables-plan.md).
+    pub fn columns(&mut self, w: WidgetId, titles: &[&str], sort: Sort) {
+        self.ops.push(TxOp::SetColumnHeaders {
+            widget: w,
+            sorted: sort.sorted,
+            direction: sort.direction,
+            titles: titles.iter().map(|t| (*t).to_owned()).collect(),
+        });
+    }
+
     /// A For over `collection`: the closure declares the template, a
     /// blueprint stamped once per entry. Returns the For's widget id
     /// alongside the body's result, which is how handles declared inside
@@ -2705,6 +2731,76 @@ pub struct Rows<'t, 'b> {
     /// Which id space this For's own node comes from — see
     /// [`ForScope`].
     nested: bool,
+    /// The For's own id, allocated at construction so the builder
+    /// chain can hand it out before iteration begins.
+    for_id: u64,
+    /// A pending header-bar declaration, emitted by the Row's Drop
+    /// AFTER the template closes — set_columns validates the row
+    /// template against the declared arity, so it must follow the
+    /// bodies (docs/tables-plan.md).
+    columns: Option<(Vec<String>, Sort)>,
+}
+
+impl Rows<'_, '_> {
+    /// Declare the column header bar: one title per column, plus the
+    /// indicator. The row template's root must be a `row` of exactly
+    /// one cell per column — the core refuses a mismatch loudly.
+    /// `for mut row in items.rows(tx).columns(&["Name", "Size"], Sort::none())`.
+    pub fn columns(mut self, titles: &[&str], sort: Sort) -> Self {
+        self.columns_decl(titles.iter().map(|t| (*t).to_owned()).collect(), sort);
+        self
+    }
+
+    fn columns_decl(&mut self, titles: Vec<String>, sort: Sort) {
+        self.columns = Some((titles, sort));
+    }
+
+    /// The For's container handle — what a sort handler re-declares
+    /// the header against. Live zone only, like the table it names.
+    pub fn id(&self) -> WidgetId {
+        assert!(
+            !self.nested,
+            "kaya: a nested For's rows() has a template node, not a widget — \
+             nested tables are the fan-out's open surface (docs/tables-plan.md)"
+        );
+        WidgetId(self.for_id)
+    }
+
+    /// Register the header-click handler as part of the chain —
+    /// handlers scope to their creator, and the table's creator is
+    /// this For: `items.rows(tx).columns(...).on_sort(&msgs, Msg::Sort)`.
+    pub fn on_sort<M>(
+        self,
+        msgs: &Messages<M>,
+        f: impl Fn(u32) -> M + 'static,
+    ) -> Self {
+        msgs.on_sort(self.id(), f);
+        self
+    }
+}
+
+/// The header bar's sort indicator (docs/tables-plan.md): which column
+/// shows it, in which direction — the GUEST's declaration, re-sent
+/// with the new state after it handles a sort request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sort {
+    pub(crate) sorted: u32,
+    pub(crate) direction: u32,
+}
+
+impl Sort {
+    /// No indicator — the unsorted bar.
+    pub fn none() -> Self {
+        Sort { sorted: crate::wire::SORT_NONE, direction: crate::wire::SORT_ASC }
+    }
+    /// Ascending on `column` (0-based, in the declared order).
+    pub fn asc(column: u32) -> Self {
+        Sort { sorted: column, direction: crate::wire::SORT_ASC }
+    }
+    /// Descending on `column`.
+    pub fn desc(column: u32) -> Self {
+        Sort { sorted: column, direction: crate::wire::SORT_DESC }
+    }
 }
 
 impl<'t, 'b> Iterator for Rows<'t, 'b> {
@@ -2712,11 +2808,7 @@ impl<'t, 'b> Iterator for Rows<'t, 'b> {
 
     fn next(&mut self) -> Option<Row<'t, 'b>> {
         let tx = self.tx.take()?;
-        let id = if self.nested {
-            tx.ctx.alloc_node().0
-        } else {
-            tx.ctx.alloc_widget().0
-        };
+        let id = self.for_id;
         let parent = tx.current_parent();
         tx.ops.push(TxOp::CreateFor {
             id,
@@ -2728,6 +2820,7 @@ impl<'t, 'b> Iterator for Rows<'t, 'b> {
             tx: Some(tx),
             for_id: id,
             parent,
+            columns: self.columns.take(),
         })
     }
 }
@@ -2797,6 +2890,7 @@ pub struct Row<'t, 'b> {
     tx: Option<&'t mut Tx<'b>>,
     for_id: u64,
     parent: u64,
+    columns: Option<(Vec<String>, Sort)>,
 }
 
 impl<'b> Row<'_, 'b> {
@@ -2950,6 +3044,16 @@ impl Drop for Row<'_, '_> {
                     child: WidgetId(self.for_id),
                 });
             }
+            // After TemplateEnd, so the core can hold the row template
+            // to the declared arity the moment this arrives.
+            if let Some((titles, sort)) = self.columns.take() {
+                tx.ops.push(TxOp::SetColumnHeaders {
+                    widget: WidgetId(self.for_id),
+                    sorted: sort.sorted,
+                    direction: sort.direction,
+                    titles,
+                });
+            }
         }
     }
 }
@@ -3029,6 +3133,20 @@ impl<M> Messages<M> {
             w.0,
             Box::new(move |occ| match occ {
                 Occurrence::ButtonClicked { .. } => Some(msg.clone()),
+                _ => None,
+            }),
+        );
+    }
+
+    /// A column-header click on a table maps through `f`, which takes
+    /// the 0-based column index. A REQUEST: the guest reorders its
+    /// collection by key and re-declares the header with the new
+    /// indicator (docs/tables-plan.md).
+    pub fn on_sort(&self, w: WidgetId, f: impl Fn(u32) -> M + 'static) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::SortRequested { column, .. } => Some(f(*column)),
                 _ => None,
             }),
         );
@@ -3398,6 +3516,7 @@ impl<M> Messages<M> {
                 | Occurrence::TextChanged { id, .. }
                 | Occurrence::Toggled { id, .. }
                 | Occurrence::ValueChanged { id, .. }
+                | Occurrence::SortRequested { id, .. }
                 | Occurrence::Pasted { id, .. } => {
                     self.widgets.borrow().get(&id.0).and_then(|f| f(&occ))
                 }
@@ -3405,6 +3524,7 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceTextChanged { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
                 | Occurrence::InstanceValueChanged { node, .. }
+                | Occurrence::InstanceSortRequested { node, .. }
                 | Occurrence::InstancePasted { node, .. } => {
                     self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
                 }
@@ -6030,7 +6150,9 @@ mod tests {
                     | Occurrence::Pasted { .. }
                     | Occurrence::InstancePasted { .. }
                     | Occurrence::Undone { .. }
-                    | Occurrence::Redone { .. } => {}
+                    | Occurrence::Redone { .. }
+                    | Occurrence::SortRequested { .. }
+                    | Occurrence::InstanceSortRequested { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

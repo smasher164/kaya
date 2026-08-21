@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x2dd89e177006e976L
+let spec_hash = 0x464a21716e58b2aaL
 
 let value_bool = 1
 let value_i64 = 2
@@ -182,6 +182,7 @@ let tx_kind_show_save_dialog = 41
 let tx_kind_set_brand_accent = 42
 let tx_kind_set_brand_typeface = 43
 let tx_kind_set_app_identity = 44
+let tx_kind_set_column_headers = 45
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -216,6 +217,7 @@ let apply_kind_present_save_dialog = 31
 let apply_kind_set_brand = 32
 let apply_kind_set_typeface = 33
 let apply_kind_set_app_identity = 34
+let apply_kind_set_column_headers = 35
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -234,6 +236,7 @@ let occ_kind_clipboard_result = 15
 let occ_kind_pasted = 16
 let occ_kind_undone = 17
 let occ_kind_redone = 18
+let occ_kind_sort_requested = 19
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -589,6 +592,16 @@ let tx_set_app_identity mask name icon =
       Buffer.add_int32_le b 0l;
       encode_value b name;
       encode_value b icon)
+
+(* DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run. *)
+let tx_set_column_headers widget_id sorted direction count titles =
+  finish tx_kind_set_column_headers (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int sorted);
+      Buffer.add_int32_le b (Int32.of_int direction);
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b 0l;
+      encode_values b titles)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -1462,7 +1475,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in

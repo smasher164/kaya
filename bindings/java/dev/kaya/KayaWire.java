@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x2dd89e177006e976L;
+    public static final long SPEC_HASH = 0x464a21716e58b2aaL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -180,6 +180,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_BRAND_ACCENT = 42;
     public static final short TX_KIND_SET_BRAND_TYPEFACE = 43;
     public static final short TX_KIND_SET_APP_IDENTITY = 44;
+    public static final short TX_KIND_SET_COLUMN_HEADERS = 45;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -214,6 +215,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_BRAND = 32;
     public static final short APPLY_KIND_SET_TYPEFACE = 33;
     public static final short APPLY_KIND_SET_APP_IDENTITY = 34;
+    public static final short APPLY_KIND_SET_COLUMN_HEADERS = 35;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -232,6 +234,7 @@ public final class KayaWire {
     public static final short OCC_KIND_PASTED = 16;
     public static final short OCC_KIND_UNDONE = 17;
     public static final short OCC_KIND_REDONE = 18;
+    public static final short OCC_KIND_SORT_REQUESTED = 19;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -674,6 +677,18 @@ public final class KayaWire {
         b.putInt(0);
         encodeValue(b, name);
         encodeValue(b, icon);
+        return finish(b);
+    }
+
+    /** DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run. */
+    public static byte[] txSetColumnHeaders(long widgetId, int sorted, int direction, int count, Object[] titles) {
+        ByteBuffer b = begin(TX_KIND_SET_COLUMN_HEADERS);
+        b.putLong(widgetId);
+        b.putInt(sorted);
+        b.putInt(direction);
+        b.putInt(count);
+        b.putInt(0);
+        encodeValues(b, titles);
         return finish(b);
     }
 
@@ -1597,7 +1612,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED) {
             return null;
         }
         long id = b.getLong(8);

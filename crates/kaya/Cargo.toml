@@ -289,6 +289,10 @@ name = "reorder"
 path = "../../guests/rust/reorder.rs"
 
 [[example]]
+name = "table"
+path = "../../guests/rust/table.rs"
+
+[[example]]
 name = "feed"
 path = "../../guests/rust/feed.rs"
 

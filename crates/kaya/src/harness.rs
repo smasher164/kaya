@@ -202,6 +202,20 @@ pub enum Step {
     /// the given `|`-joined texts — the observation reorder ops are
     /// verified by (creation-order registries cannot see a move).
     ExpectOrder(Target, String),
+    /// Expect a table container's header bar as the TABLE PATH
+    /// presented it — "<size class>/<titles|joined> [^N|vN]" — read
+    /// from the render's own record, never the model echo
+    /// (docs/tables-plan.md).
+    ExpectColumns(Target, String),
+    /// Expect a table's rows as per-row cell label texts: rows
+    /// pipe-joined in the toolkit's child order, each row's cells
+    /// comma-joined — expect_order one level deeper, for the celled
+    /// shape whose moves creation-order registries cannot see.
+    ExpectRows(Target, String),
+    /// Click the table's column header at the 0-based index through
+    /// the platform's real header path, so it emits sort_requested
+    /// (select_section's drive-and-emit precedent).
+    HeaderClick(Target, u32),
     /// Expect the widget to hold keyboard focus — the observation the
     /// focus command is verified by (there is no other way to see
     /// focus land).
@@ -599,6 +613,9 @@ impl Step {
             Step::ExpectStall => true,
             Step::ExpectNoStall => true,
             Step::ExpectOrder { .. } => true,
+            Step::ExpectColumns { .. } => true,
+            Step::ExpectRows { .. } => true,
+            Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
             Step::ExpectRootFills { .. } => true,
@@ -719,6 +736,17 @@ pub trait Stage: Send + 'static {
     /// The texts of the container's label children, in child order, joined
     /// with `|` — the observation expect_order verifies.
     fn child_texts(&self, target: Target) -> String;
+    /// The table's header bar as the TABLE PATH presented it —
+    /// "<size class>/<titles|joined> [^N|vN]", empty when no table
+    /// rendered — read from the toolkit's own presentation, never the
+    /// model (docs/tables-plan.md).
+    fn columns_presented(&self, target: Target) -> String;
+    /// The table's rows as per-row cell label texts: rows `|`-joined in
+    /// the toolkit's child order, cells `,`-joined within a row.
+    fn row_cells(&self, target: Target) -> String;
+    /// Click the column header at `column` through the platform's real
+    /// header path, so it emits sort_requested.
+    fn header_click(&self, target: Target, column: u32);
     /// Whether the mounted root fills the window's content area, read from
     /// the toolkit after forcing pending layout: the empty string when it
     /// does (within one device unit — rounding is not a hug), otherwise a
@@ -1233,6 +1261,29 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_order wants a target and a string: {line:?}")
                 })?;
                 Step::ExpectOrder(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_columns" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_columns wants a target and a string: {line:?}")
+                })?;
+                Step::ExpectColumns(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_rows" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_rows wants a target and a string: {line:?}")
+                })?;
+                Step::ExpectRows(parse_target(target)?, parse_string(text)?)
+            }
+            "header_click" => {
+                let (target, index) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("header_click wants a target and a column index: {line:?}")
+                })?;
+                Step::HeaderClick(
+                    parse_target(target)?,
+                    index.trim().parse().map_err(|_| {
+                        format!("header_click wants a 0-based column index: {line:?}")
+                    })?,
+                )
             }
             "expect_shares" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -2717,6 +2768,38 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
+            Step::ExpectColumns(t, want) => {
+                if !matches!(t.kind, TargetKind::Column) {
+                    Some(Err(format!("{t:?} is not a table container target")))
+                } else {
+                    Some(poll(|| {
+                        let got = stage.columns_presented(*t);
+                        if got == *want {
+                            Ok(got)
+                        } else {
+                            Err(format!("{t:?} presents {got:?}, wanted {want:?}"))
+                        }
+                    }))
+                }
+            }
+            Step::ExpectRows(t, want) => {
+                if !matches!(t.kind, TargetKind::Column) {
+                    Some(Err(format!("{t:?} is not a table container target")))
+                } else {
+                    Some(poll(|| {
+                        let got = stage.row_cells(*t);
+                        if got == *want {
+                            Ok(got)
+                        } else {
+                            Err(format!("{t:?} rows {got:?}, wanted {want:?}"))
+                        }
+                    }))
+                }
+            }
+            Step::HeaderClick(t, column) => {
+                stage.header_click(*t, *column);
+                None
+            }
             Step::ExpectShares(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     Some(Err(format!("{t:?} is not a container target")))
@@ -3782,6 +3865,13 @@ mod tests {
         fn child_texts(&self, _: Target) -> String {
             "a|b".into()
         }
+        fn columns_presented(&self, _: Target) -> String {
+            String::new()
+        }
+        fn row_cells(&self, _: Target) -> String {
+            String::new()
+        }
+        fn header_click(&self, _: Target, _: u32) {}
         fn child_shares(&self, _: Target) -> String {
             "25,75".into()
         }
@@ -4112,6 +4202,13 @@ mod tests {
             fn child_texts(&self, _: Target) -> String {
                 String::new()
             }
+            fn columns_presented(&self, _: Target) -> String {
+                String::new()
+            }
+            fn row_cells(&self, _: Target) -> String {
+                String::new()
+            }
+            fn header_click(&self, _: Target, _: u32) {}
             fn child_shares(&self, _: Target) -> String {
                 String::new()
             }
@@ -4318,6 +4415,13 @@ mod tests {
             fn child_texts(&self, _: Target) -> String {
                 String::new()
             }
+            fn columns_presented(&self, _: Target) -> String {
+                String::new()
+            }
+            fn row_cells(&self, _: Target) -> String {
+                String::new()
+            }
+            fn header_click(&self, _: Target, _: u32) {}
             fn child_shares(&self, _: Target) -> String {
                 String::new()
             }

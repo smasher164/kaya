@@ -1,0 +1,23 @@
+# The table scene: column headers + click-to-sort on the For
+# vocabulary (docs/tables-plan.md). column#0 is the For container (the
+# root is a row, the reorder scene's rule). expect_columns reads the
+# header bar AS THE TABLE PATH PRESENTED IT — size class, titles in
+# visual order, the indicator as ^N (asc) or vN (desc); expect_rows
+# reads per-row cell labels in the toolkit's child order, rows joined
+# with `|`, cells with `,` — the two-level expect_order, because a
+# creation-order registry cannot see the moves a sort makes. A header
+# click is a REQUEST: the platform sorts nothing; the guest reorders
+# by key and re-declares the indicator, so every expectation below is
+# the guest's policy (same column flips, a new column starts
+# ascending) coming back through the toolkit.
+expect_columns column#0 "regular/Name|Size"
+expect_rows column#0 "banana,30|apple,10|cherry,20"
+header_click column#0 0
+expect_columns column#0 "regular/Name|Size ^0"
+expect_rows column#0 "apple,10|banana,30|cherry,20"
+header_click column#0 0
+expect_columns column#0 "regular/Name|Size v0"
+expect_rows column#0 "cherry,20|banana,30|apple,10"
+header_click column#0 1
+expect_columns column#0 "regular/Name|Size ^1"
+expect_rows column#0 "apple,10|cherry,20|banana,30"

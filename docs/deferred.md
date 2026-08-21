@@ -4340,6 +4340,45 @@ sites. The witness's same-line route clause is CORRECT and unchanged:
 with atomic lines it reads truth, and its refusal sentence is what
 cracked the case.
 
+## Tables — the depth slice landed on mac; the fan-out is open (2026-08-20)
+KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows
+
+The plan is docs/tables-plan.md (DESIGN.md's ratified column-props
+shape); the wire (TX 45 set_column_headers, APPLY 35, occurrence 19
+sort_requested), the core's six walls with watched negatives, the
+Rust surface (Tx::columns / rows().columns() / on_sort / Sort), the
+three harness verbs in all three implementations, and the SwiftUI
+Table lowering are in. The record was renamed set_column_headers
+mid-slice: `set_columns` collided with the grid `columns` PROP's
+generated per-prop setters in every binding (go builds broke on two
+TxSetColumns), and prop-derived names share one namespace with
+record-derived names in eight generators — a naming wall worth
+remembering. Open, per backend and surface:
+
+- **DEPTH STUB: table on compose** — the synthesized-header lowering
+  (Material has no component; DESIGN.md files it tier 3) plus the
+  three verbs; closes with the Compose breadth slice drawing the
+  header row and wiring the android legs.
+- **DEPTH STUB: table on swiftui/ios** — the size-class degrade
+  (headers hidden on compact, Apple's own Table behavior) and the
+  presented record's real size-class read (the depth slice hardcodes
+  "regular", honest only on macOS); closes when the iOS legs wire.
+- **DEPTH STUB: table on gtk** — GtkColumnView wants a model/factory
+  architecture the stamped-children pipeline does not have; probe
+  live first (the GTK panes precedent), likely landing the
+  synthesized header with SizeGroups; closes with the linux legs.
+- **DEPTH STUB: table on winui** — the details-view header Grid with
+  star-sized columns shared between header and cells; closes with
+  the windows legs.
+- The seven-language guest fan-out (the scene is shared verbatim);
+  ~~the statement form's missing For handle~~ (CLOSED same day: rows()
+  allocates the For id eagerly and the chain reads
+  `items.rows(tx).columns(...).on_sort(&msgs, Msg::Sort)` with `.id()`
+  for the handler's re-declaration — the guest moved onto it and the
+  guest-floor exemption died); and a census clause holding
+  `columns`/`on_sort` present in all eight bindings once the fan-out
+  lands, which no gate demands yet.
+
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state
 

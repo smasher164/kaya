@@ -1183,6 +1183,56 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   than echoing the request, so bytes that are not an image \
                   fail exactly like an icon that never applied.",
         },
+        Record {
+            kind: 45,
+            name: "set_column_headers",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("sorted", FieldTy::U32),
+                f("direction", FieldTy::U32),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("titles", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "DECLARE the column header bar on a For's container, \
+                  replacing whatever was declared before \
+                  (docs/tables-plan.md). `titles` holds `count` Str values, \
+                  one per column in visual order; `sorted` is the 0-based \
+                  index of the column showing the sort indicator, or \
+                  u32::MAX for none (alert_choice's cancel-sentinel \
+                  precedent); `direction` is 0 ascending, 1 descending, \
+                  read only when `sorted` names a column.\n\n\
+                  ONE RECORD FOR THE WHOLE BAR, titles and indicator \
+                  together, because the header's state is one declaration: \
+                  a sort flip re-sends a handful of short strings and buys \
+                  atomicity — no window where new titles show a stale \
+                  indicator. A dedicated record and not a prop because a \
+                  prop carries ONE Value and titles are many, with spaces \
+                  (`accepts`' space-separated trick is out); the carrier is \
+                  highlight_ranges' count-plus-Values shape.\n\n\
+                  THE TARGET IS THE FOR'S CONTAINER — there is no List \
+                  widget; a For materializes as a Column and this record is \
+                  what turns that container into a table where the size \
+                  class and the platform have the idiom (DESIGN.md's \
+                  column-props ruling). The root refuses a target that is \
+                  not a For container, a `count` of 0, an empty title, a \
+                  `sorted` outside 0..count that is not the sentinel, and a \
+                  `direction` past 1.\n\n\
+                  ROWS MUST FIT THE COLUMNS: with N columns declared, every \
+                  stamped row's template root must be a Row with exactly N \
+                  children, checked at stamp time in the core so every \
+                  backend inherits the wall — a mismatched template dies \
+                  naming the row and both counts instead of rendering N-1 \
+                  cells under N headers on some platforms and not others.\n\n\
+                  THE INDICATOR IS THE GUEST'S: a header click emits \
+                  sort_requested and changes nothing; the guest reorders \
+                  its collection by key and re-declares this record with \
+                  the new indicator. Configuration, not an occurrence \
+                  source — the echo doctrine. Not undoable: the header bar \
+                  is not state, and the order underneath it already rides \
+                  collection_move's undo run.",
+        },
     ],
     apply: &[
         Record {
@@ -1711,6 +1761,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   set-once arm — a backend never sees an identity it must \
                   un-apply.",
         },
+        Record {
+            kind: 35,
+            name: "set_column_headers",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("sorted", FieldTy::U32),
+                f("direction", FieldTy::U32),
+                f("count", FieldTy::U32),
+                f("tag_len", FieldTy::U32),
+                f("titles", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The tx record's body with the target resolved to the live \
+                  container's widget id (a nested For's declaration reaches \
+                  each stamped copy through the ordinary template replay), \
+                  plus `tag_len` bytes of core-minted SORT TAG after the \
+                  titles — the click-tag mechanism (create's convention): a \
+                  header click hands the tag to kaya_emit_sort_requested \
+                  verbatim with the column index, because a stamped copy's \
+                  identity is a node id plus key path no backend can \
+                  compute. The backend that has the idiom and a regular \
+                  size class presents the container as a table — native \
+                  headers, platform-managed resize, the indicator on \
+                  `sorted` — and the one that does not synthesizes a header \
+                  row above the stack or, on compact, shows none: \
+                  presentation degrades, the declaration does not \
+                  (docs/tables-plan.md). Nothing here reorders anything.",
+        },
     ],
     occurrence: &[
         Record {
@@ -2064,6 +2142,30 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   through here: it is the platform's own stack moving, \
                   which emits its ordinary text_changed (the A6 gap, \
                   bounded by the clear).",
+        },
+        Record {
+            kind: 19,
+            name: "sort_requested",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("column", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "The user clicked a column header. path_len key values \
+                  follow; identity reads as in button_clicked (path_len 0: \
+                  id is the For container's widget id; otherwise a template \
+                  node id plus the copy's key path, outermost first). \
+                  `column` is the 0-based index in the declared order.\n\n\
+                  A REQUEST, NOT A REPORT: nothing has changed on screen. \
+                  The platform never sorts the model — the guest reorders \
+                  its collection by key (collection_move: order is data) \
+                  and re-declares set_columns with the new indicator, the \
+                  same one-way flow as every control. Direction cycling is \
+                  guest policy, which is why no direction rides here. Only \
+                  the user's gesture emits — a programmatic set_columns is \
+                  configuration and stays silent (the echo doctrine). \
+                  Unclaimed, it drops like any unhandled occurrence.",
         },
     ],
     enums: &[
@@ -2458,6 +2560,7 @@ mod tests {
             ("set_brand_accent", wire::TX_SET_BRAND_ACCENT),
             ("set_brand_typeface", wire::TX_SET_BRAND_TYPEFACE),
             ("set_app_identity", wire::TX_SET_APP_IDENTITY),
+            ("set_column_headers", wire::TX_SET_COLUMN_HEADERS),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2505,6 +2608,7 @@ mod tests {
             ("set_brand", wire::APPLY_SET_BRAND),
             ("set_typeface", wire::APPLY_SET_TYPEFACE),
             ("set_app_identity", wire::APPLY_SET_APP_IDENTITY),
+                ("set_column_headers", wire::APPLY_SET_COLUMN_HEADERS),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -2532,6 +2636,7 @@ mod tests {
                 ("pasted", crate::ring::REC_PASTED),
                 ("undone", crate::ring::REC_UNDONE),
                 ("redone", crate::ring::REC_REDONE),
+                ("sort_requested", crate::ring::REC_SORT_REQUESTED),
             ]
         );
     }

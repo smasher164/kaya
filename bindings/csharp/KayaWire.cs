@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x2dd89e177006e976;
+    public const ulong SpecHash = 0x464a21716e58b2aa;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -179,6 +179,7 @@ static class KayaWire
     public const ushort TxKindSetBrandAccent = 42;
     public const ushort TxKindSetBrandTypeface = 43;
     public const ushort TxKindSetAppIdentity = 44;
+    public const ushort TxKindSetColumnHeaders = 45;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -213,6 +214,7 @@ static class KayaWire
     public const ushort ApplyKindSetBrand = 32;
     public const ushort ApplyKindSetTypeface = 33;
     public const ushort ApplyKindSetAppIdentity = 34;
+    public const ushort ApplyKindSetColumnHeaders = 35;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -231,6 +233,7 @@ static class KayaWire
     public const ushort OccKindPasted = 16;
     public const ushort OccKindUndone = 17;
     public const ushort OccKindRedone = 18;
+    public const ushort OccKindSortRequested = 19;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -736,6 +739,19 @@ static class KayaWire
         EncodeValue(w, name);
         EncodeValue(w, icon);
         return Finish(stream, w, TxKindSetAppIdentity);
+    }
+
+    /// DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run.
+    public static byte[] TxSetColumnHeaders(ulong widgetId, uint sorted, uint direction, uint count, object[] titles)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(sorted);
+        w.Write(direction);
+        w.Write(count);
+        w.Write(0u);
+        EncodeValues(w, titles);
+        return Finish(stream, w, TxKindSetColumnHeaders);
     }
 
     /// set_property with a constant text value.
@@ -1587,7 +1603,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

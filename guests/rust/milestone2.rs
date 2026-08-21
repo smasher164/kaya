@@ -123,6 +123,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::MenuValueChanged { .. }
             | Occurrence::InstanceMenuValueChanged { .. } => {}
             Occurrence::Undone { .. } | Occurrence::Redone { .. } => {}
+            Occurrence::SortRequested { .. } | Occurrence::InstanceSortRequested { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

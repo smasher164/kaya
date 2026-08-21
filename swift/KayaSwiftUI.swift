@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x2dd89e177006e976
+let kayaSpecHash: UInt64 = 0x464a21716e58b2aa
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -43,6 +43,9 @@ private let applySetTypeface: UInt16 = 33
 /// The app's declared identity (docs/app-identity-plan.md). The lowering
 /// is mac-only; see the `expect_app_icon` arm.
 private let applySetAppIdentity: UInt16 = 34
+private let applySetColumnHeaders: UInt16 = 35
+/// `tableSorted`'s no-column sentinel (the wire's SORT_NONE).
+let kayaSortNone: UInt32 = 0xFFFF_FFFF
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -355,6 +358,19 @@ final class KayaNode: Identifiable {
     var revealRequest: NSRange?
     var revealSeq = 0
     var children: [KayaNode] = []
+    /// TABLE (docs/tables-plan.md): the declared header bar — titles in
+    /// visual order, the indicator column (kayaSortNone for none) and
+    /// its direction, and the core-minted sort tag a header click hands
+    /// back verbatim. Empty titles = not a table.
+    var tableColumns: [String] = []
+    var tableSorted: UInt32 = 0xFFFF_FFFF
+    var tableDirection: UInt32 = 0
+    var sortTag: [UInt8] = []
+    /// What the TABLE PATH actually presented — written by the render,
+    /// never a model echo (the scroll-geometry precedent), so
+    /// expect_columns proves the table rendered rather than that the
+    /// wire arrived.
+    var tablePresented = ""
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
         self.id = id
@@ -2794,6 +2810,14 @@ enum KayaHost {
         api.emit_section_selected(window, section)
     }
 
+    /// A column-header click: the SET_COLUMNS sort tag verbatim plus
+    /// the 0-based column index — a REQUEST; the guest sorts.
+    static func emitSortRequested(_ tag: [UInt8], _ column: UInt32) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_sort_requested(buffer.baseAddress, UInt(buffer.count), column)
+        }
+    }
+
     static func emitToggled(_ tag: [UInt8], _ checked: Bool) {
         tag.withUnsafeBufferPointer { buffer in
             api.emit_toggled(buffer.baseAddress, UInt(buffer.count), checked ? 1 : 0)
@@ -3375,6 +3399,28 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                             + "\(identityIcon?.count ?? 0) icon bytes kept for the "
                             + "bundle read")
                 #endif
+            case applySetColumnHeaders:
+                // The header bar: { u64 id; u32 sorted; u32 direction;
+                // u32 count; u32 tag_len; Values titles; tag bytes }.
+                let cid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let csorted = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let cdirection = raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self)
+                let ccount = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self))
+                let ctagLen = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                var cat = body + 32
+                var ctitles: [String] = []
+                for _ in 0..<ccount {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: cat + 4, as: UInt32.self))
+                    ctitles.append(
+                        String(decoding: raw[(cat + 8)..<(cat + 8 + len)], as: UTF8.self))
+                    cat += 8 + len
+                    if cat % 8 != 0 { cat += 8 - cat % 8 }
+                }
+                let cnode = kayaScene.nodes[cid]!
+                cnode.tableColumns = ctitles
+                cnode.tableSorted = csorted
+                cnode.tableDirection = cdirection
+                cnode.sortTag = Array(raw[cat..<(cat + ctagLen)])
             case applyPresentSaveDialog:
                 // The platform's REAL save dialog (NSSavePanel), answered
                 // exactly once through kaya_emit_save_dialog_result — one
@@ -5228,6 +5274,77 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_columns":
+                #if !os(macOS)
+                    kayaDepthStub("table", on: "ios")
+                #endif
+                // The header bar as the TABLE PATH presented it — the
+                // render's own record (the scroll-geometry precedent),
+                // never the model echo: a wire that arrived but a table
+                // that never rendered reads as "", loudly. Spelling:
+                // "<size class>/<titles|joined> [^N|vN]".
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    kayaTarget(parts[1], "column", kayaScene.columns)?.tablePresented
+                }
+                if let got, kayaBytesEqual(got, want) {
+                    observed.append(got)
+                } else if let got {
+                    failures.append("\(parts[1]) presents \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "expect_rows":
+                #if !os(macOS)
+                    kayaDepthStub("table", on: "ios")
+                #endif
+                // Per-row cell label texts: rows in the toolkit's child
+                // order joined with `|`, each row's label cells joined
+                // with `,` — expect_order's read one level deeper, for
+                // the celled (table) shape whose moves a creation-order
+                // registry cannot see.
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    kayaTarget(parts[1], "column", kayaScene.columns)?.children
+                        .map { row in
+                            row.children
+                                .filter { $0.kind == kindLabel }
+                                .map { $0.text }
+                                .joined(separator: ",")
+                        }
+                        .joined(separator: "|")
+                }
+                if let got, kayaBytesEqual(got, want) {
+                    observed.append(got)
+                } else if let got {
+                    failures.append("\(parts[1]) rows \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "header_click":
+                #if !os(macOS)
+                    kayaDepthStub("table", on: "ios")
+                #endif
+                // The user's route: what the Table's sortOrder binding
+                // setter does for a real header click — the sort tag
+                // verbatim plus the column index, and NO model change:
+                // the indicator moves when the guest re-declares
+                // (select_section's drive-and-emit precedent).
+                let index = Int(parts[2]) ?? -1
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
+                        return "no such target \(parts[1])"
+                    }
+                    guard !node.tableColumns.isEmpty else {
+                        return "\(parts[1]) declares no columns"
+                    }
+                    guard index >= 0, index < node.tableColumns.count else {
+                        return "column \(parts[2]) of \(node.tableColumns.count)"
+                    }
+                    KayaHost.emitSortRequested(node.sortTag, UInt32(index))
+                    return nil
+                }
+                if let off { failures.append("header_click: \(off)") }
             case "expect_shares":
                 // The container's children as whole-percentage shares of
                 // their sum. Percent of the children's sum and not of the
@@ -7167,6 +7284,118 @@ struct KayaCell: Layout {
     }
 }
 
+/// The declared table's surface (docs/tables-plan.md): SwiftUI Table —
+/// NSTableView's wrapper on macOS, the native headers, resize and
+/// indicator — where the API can spell a DYNAMIC column count
+/// (TableColumnForEach; macOS 14.4 / iOS 17.4), and the plain stack
+/// below that floor. The sortOrder binding is the click path and
+/// nothing else: its getter presents the GUEST's declared indicator,
+/// its setter emits sort_requested and changes nothing — the platform
+/// never sorts the model (one-way flow, the echo doctrine's shape).
+private struct KayaColumnSpec: Identifiable {
+    let id: Int
+    let title: String
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+struct KayaColumnComparator: SortComparator {
+    var column: Int
+    var order: SortOrder
+    /// Never consulted for ordering — Table sorts nothing here; this
+    /// type is only the sortOrder binding's currency.
+    func compare(_ a: KayaNode, _ b: KayaNode) -> ComparisonResult { .orderedSame }
+}
+
+struct KayaTableSurface: View {
+    let node: KayaNode
+
+    var body: some View {
+        if #available(macOS 14.4, iOS 17.4, *) {
+            KayaNativeTable(node: node)
+        } else {
+            // Below the dynamic-column floor: the stack, headerless —
+            // presentation degrades, the declaration does not. The
+            // presented record stays empty, which is what
+            // expect_columns reports on such a host.
+            VStack(alignment: .leading, spacing: node.spacing) {
+                ForEach(node.children) { child in
+                    KayaRender(node: child, flexVertical: true, flexStretch: false)
+                }
+            }
+        }
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+private struct KayaNativeTable: View {
+    let node: KayaNode
+
+    private var specs: [KayaColumnSpec] {
+        node.tableColumns.enumerated().map { KayaColumnSpec(id: $0.offset, title: $0.element) }
+    }
+
+    private var sortOrder: Binding<[KayaColumnComparator]> {
+        Binding(
+            get: {
+                node.tableSorted == kayaSortNone
+                    ? []
+                    : [
+                        KayaColumnComparator(
+                            column: Int(node.tableSorted),
+                            order: node.tableDirection == 0 ? .forward : .reverse)
+                    ]
+            },
+            set: { requested in
+                // The user clicked a header: SwiftUI proposes a new
+                // order, and the proposal's COLUMN is the whole
+                // message — direction cycling is the guest's policy.
+                if let first = requested.first {
+                    KayaHost.emitSortRequested(node.sortTag, UInt32(first.column))
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        Table(node.children, sortOrder: sortOrder) {
+            TableColumnForEach(specs) { spec in
+                TableColumn(
+                    Text(spec.title),
+                    sortUsing: KayaColumnComparator(column: spec.id, order: .forward)
+                ) { (row: KayaNode) in
+                    // The core held every row template to the declared
+                    // arity; the guard is positional safety, never a
+                    // reachable state (check-empty-child's rule: one
+                    // node stays one widget even when it cannot show).
+                    if spec.id < row.children.count {
+                        KayaRender(
+                            node: row.children[spec.id], flexVertical: false,
+                            flexStretch: false)
+                    }
+                }
+            }
+        }
+        .onAppear { record() }
+        .onChange(of: node.tableColumns) { record() }
+        .onChange(of: node.tableSorted) { record() }
+        .onChange(of: node.tableDirection) { record() }
+    }
+
+    /// The presented record expect_columns reads — written by THIS
+    /// path only, so the observation proves the table rendered. The
+    /// spelling is expect_panes' size-class prefix plus the titles in
+    /// visual order and the indicator (^N asc / vN desc) when shown.
+    private func record() {
+        var presented = "regular/" + node.tableColumns.joined(separator: "|")
+        if node.tableSorted != kayaSortNone {
+            presented += node.tableDirection == 0 ? " ^" : " v"
+            presented += String(node.tableSorted)
+        }
+        let target = node
+        DispatchQueue.main.async { target.tablePresented = presented }
+    }
+}
+
 struct KayaFlex: Layout {
     let vertical: Bool
     let spacing: CGFloat
@@ -7908,7 +8137,14 @@ struct KayaRender: View {
             // size however large a frame it is offered, so nothing below it
             // would ever have leftover space to divide.
             Group {
-                if isRoot || node.children.contains(where: { $0.grow > 0 }) {
+                if !node.tableColumns.isEmpty {
+                    // The declared table (docs/tables-plan.md): native
+                    // headers where the platform's Table API can spell a
+                    // dynamic column count; the plain stack below that
+                    // availability floor. The row templates were held to
+                    // the declared arity by the core.
+                    KayaTableSurface(node: node)
+                } else if isRoot || node.children.contains(where: { $0.grow > 0 }) {
                     KayaFlex(vertical: true, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
                             // The cell fills the track KayaFlex proposes; the

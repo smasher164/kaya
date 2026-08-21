@@ -46,6 +46,7 @@ pub const REC_PASTED: u16 = 16;
 /// redo, and this says what the CORE put back. Same body shape for both.
 pub const REC_UNDONE: u16 = 17;
 pub const REC_REDONE: u16 = 18;
+pub const REC_SORT_REQUESTED: u16 = 19;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

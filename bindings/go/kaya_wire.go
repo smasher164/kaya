@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x2dd89e177006e976
+	SpecHash uint64 = 0x464a21716e58b2aa
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -181,6 +181,7 @@ const (
 	txSetBrandAccent = 42
 	txSetBrandTypeface = 43
 	txSetAppIdentity = 44
+	txSetColumnHeaders = 45
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -215,6 +216,7 @@ const (
 	applySetBrand = 32
 	applySetTypeface = 33
 	applySetAppIdentity = 34
+	applySetColumnHeaders = 35
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -233,6 +235,7 @@ const (
 	occPasted = 16
 	occUndone = 17
 	occRedone = 18
+	occSortRequested = 19
 )
 
 func pad8(b []byte) []byte {
@@ -701,6 +704,18 @@ func TxSetAppIdentity(mask uint32, name any, icon any) []byte {
 	b = binary.LittleEndian.AppendUint32(b, 0)
 	b = encodeValue(b, name)
 	b = encodeValue(b, icon)
+	return endRecord(b)
+}
+
+// TxSetColumnHeaders: DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run.
+func TxSetColumnHeaders(widgetId uint64, sorted uint32, direction uint32, count uint32, titles []any) []byte {
+	b := beginRecord(txSetColumnHeaders)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint32(b, sorted)
+	b = binary.LittleEndian.AppendUint32(b, direction)
+	b = binary.LittleEndian.AppendUint32(b, count)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, titles)
 	return endRecord(b)
 }
 
@@ -1767,7 +1782,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

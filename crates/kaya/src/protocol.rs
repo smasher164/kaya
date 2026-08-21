@@ -477,6 +477,14 @@ pub enum Occurrence {
     /// informational and post-fact. A programmatic SelectSection is
     /// configuration and stays silent (the echo doctrine).
     SectionSelected { window: WindowId, section: WindowId },
+    /// The user clicked a column header on a live For's table. A
+    /// REQUEST: nothing has changed on screen; the guest reorders its
+    /// collection by key and re-declares set_columns with the new
+    /// indicator (docs/tables-plan.md). Direction cycling is guest
+    /// policy, which is why none rides here.
+    SortRequested { id: WidgetId, column: u32 },
+    /// The header click on a stamped copy's nested table.
+    InstanceSortRequested { node: TemplateNodeId, path: Path, column: u32 },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The user moved a slider the guest created directly; one
@@ -1432,6 +1440,11 @@ pub enum TxOp {
     /// Scroll a range into the textarea's viewport. A pure effect:
     /// undo does not restore it (docs/undo-plan.md A2).
     RevealRange { widget: WidgetId, range: TextRange },
+    /// DECLARE the column header bar on a For's container, replacing the
+    /// previous declaration; `sorted` is a 0-based index or
+    /// SORT_NONE, `direction` 0 asc / 1 desc (docs/tables-plan.md).
+    /// In a template scope the target is the nested For's node id.
+    SetColumnHeaders { widget: WidgetId, sorted: u32, direction: u32, titles: Vec<String> },
 }
 
 /// A transaction: applied atomically, in submission order, last write
@@ -1535,6 +1548,16 @@ pub enum ApplyOp {
     SelectRange { id: WidgetId, range: NativeRange },
     /// Scroll the range into the widget's viewport, in native units.
     RevealRange { id: WidgetId, range: NativeRange },
+    /// The column header bar on the For's live container — titles in
+    /// visual order, the indicator on `sorted` (SORT_NONE for none),
+    /// `direction` 0 asc / 1 desc. Table presentation where the size
+    /// class and platform have the idiom; a synthesized header or, on
+    /// compact, none, where they do not. Header clicks hand `tag` to
+    /// kaya_emit_sort_requested verbatim with the column index — the
+    /// click-tag mechanism, because a stamped copy's identity is a
+    /// node id plus key path no backend can compute. Nothing here
+    /// reorders (docs/tables-plan.md).
+    SetColumnHeaders { id: WidgetId, sorted: u32, direction: u32, titles: Vec<String>, tag: Vec<u8> },
     /// The brand accent, DERIVED (docs/styling-plan.md D1): the seed —
     /// for Material, the one platform whose own derivation kaya defers
     /// to — plus per-appearance values no backend re-computes. Emitted
@@ -1661,6 +1684,20 @@ impl OccSink {
                     body[8..].copy_from_slice(&section.0.to_le_bytes());
                     ring.push_record(crate::ring::REC_SECTION_SELECTED, &body);
                 }
+                Occurrence::SortRequested { id, column } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(
+                        crate::ring::REC_SORT_REQUESTED,
+                        &crate::wire::sort_body(&tag, column),
+                    );
+                }
+                Occurrence::InstanceSortRequested { node, path, column } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(
+                        crate::ring::REC_SORT_REQUESTED,
+                        &crate::wire::sort_body(&tag, column),
+                    );
+                }
                 Occurrence::MenuActivated { item } => {
                     let tag = crate::wire::click_tag(item.0, &[]);
                     ring.push_record(crate::ring::REC_MENU_ACTIVATED, &tag);
@@ -1728,6 +1765,25 @@ impl OccSink {
                 ring.push_record(
                     crate::ring::REC_TOGGLED,
                     &crate::wire::toggled_body(tag, checked),
+                );
+            }
+        }
+    }
+
+    /// The same fast path for a column-header click: the stored sort
+    /// tag plus the column index, patched into the tag's reserved slot
+    /// (the sort_requested record IS a click tag with `column` where
+    /// `reserved` sits).
+    pub(crate) fn send_sort_tag(&self, tag: &[u8], column: u32) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_sort_tag(tag, column)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_SORT_REQUESTED,
+                    &crate::wire::sort_body(tag, column),
                 );
             }
         }

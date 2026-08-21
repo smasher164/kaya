@@ -380,6 +380,9 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ContextAttachNode { .. } => UndoVerdict::Refused("context_attach_node"),
         TxOp::SetMenuProp { .. } => UndoVerdict::Refused("set_menu_prop"),
         TxOp::CreateCollection { .. } => UndoVerdict::Refused("create_collection"),
+        // The header bar is not state; the order underneath it already
+        // rides collection_move's undo run (docs/tables-plan.md).
+        TxOp::SetColumnHeaders { .. } => UndoVerdict::Refused("set_column_headers"),
         TxOp::CreateFor { .. } => UndoVerdict::Refused("create_for"),
         TxOp::CreateWhen { .. } => UndoVerdict::Refused("create_when"),
         TxOp::VariantCase { .. } => UndoVerdict::Refused("variant_case"),
@@ -2155,6 +2158,82 @@ impl Scene {
                     key,
                     before,
                 } => self.move_entry(id, path, key, before, &mut out),
+                TxOp::SetColumnHeaders { widget, sorted, direction, titles } => {
+                    // The header bar on a live For's container
+                    // (docs/tables-plan.md). The walls, in order: the
+                    // target must BE a For's container, the bar must be
+                    // well-formed, and every variant's row template must
+                    // fit the declared arity — checked HERE, once, so a
+                    // mismatched template dies at declaration instead of
+                    // rendering N-1 cells under N headers on some
+                    // platforms and not others.
+                    let site = self
+                        .for_sites
+                        .values()
+                        .find(|s| s.container == widget)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "kaya: set_column_headers targets {widget:?}, which is not a For's \
+                                 container — columns are a declaration on the collection's \
+                                 own container (docs/tables-plan.md)"
+                            )
+                        });
+                    assert!(!titles.is_empty(), "kaya: set_column_headers declares no columns");
+                    for (i, title) in titles.iter().enumerate() {
+                        assert!(
+                            !title.is_empty(),
+                            "kaya: column {i}'s title is empty — a headerless column is \
+                             the undeclared case, not an empty string"
+                        );
+                    }
+                    let count = titles.len() as u32;
+                    assert!(
+                        sorted == crate::wire::SORT_NONE || sorted < count,
+                        "kaya: set_column_headers sorts column {sorted} of {count}"
+                    );
+                    assert!(
+                        direction <= crate::wire::SORT_DESC,
+                        "kaya: set_column_headers direction is {direction}, wanted 0 (asc) or 1 \
+                         (desc)"
+                    );
+                    for body in &site.bodies {
+                        let roots = &body.roots;
+                        assert!(
+                            roots.len() == 1,
+                            "kaya: a {count}-column table's row template must have ONE \
+                             root (a Row of cells); a variant here has {}",
+                            roots.len()
+                        );
+                        let root = roots[0];
+                        let root_kind = body.ops.iter().find_map(|op| match op {
+                            TplOp::Widget { node, kind } if *node == root => Some(*kind),
+                            _ => None,
+                        });
+                        assert!(
+                            root_kind == Some(WidgetKind::Row),
+                            "kaya: a {count}-column table's row template root must be a \
+                             Row of cells, not {root_kind:?}"
+                        );
+                        let cells = body
+                            .ops
+                            .iter()
+                            .filter(|op| matches!(op, TplOp::AddChild { parent, .. } if *parent == root))
+                            .count() as u32;
+                        assert!(
+                            cells == count,
+                            "kaya: the table declares {count} columns but a row template \
+                             has {cells} cells — every variant's root Row must hold \
+                             exactly one child per column"
+                        );
+                    }
+                    out.push(ApplyOp::SetColumnHeaders {
+                        id: widget,
+                        sorted,
+                        direction,
+                        titles,
+                        tag: crate::wire::click_tag(widget.0, &[]),
+                    });
+                }
                 TxOp::CreateFor { id, collection } => {
                     // Live For: a real container widget; its template
                     // scope opens here.
@@ -8572,6 +8651,137 @@ mod tests {
         );
         assert_eq!(scene.window_menus[&WindowId(2)], vec![MenuItemId(3)]);
         assert!(scene.window_shortcuts[&WindowId(2)].contains("primary+s"));
+    }
+
+    // --- Tables: set_columns's walls (docs/tables-plan.md) --------------
+
+    /// collection 1 rendered by For id 4 whose row template is a Row
+    /// (node 10) holding `cells` label children — the celled-table
+    /// shape every wall below perturbs.
+    fn table_scene(cells: usize) -> Transaction {
+        let mut tx = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str, ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+        ];
+        for i in 0..cells {
+            let id = 11 + i as u64;
+            tx.push(TxOp::CreateWidget { id: WidgetId(id), kind: WidgetKind::Label });
+            tx.push(TxOp::SetProperty {
+                widget: WidgetId(id),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: (i as u32).min(1) },
+            });
+            tx.push(TxOp::AddChild { parent: WidgetId(10), child: WidgetId(id) });
+        }
+        tx.push(TxOp::TemplateEnd);
+        tx.push(TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) });
+        tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        tx
+    }
+
+    fn set_columns(titles: &[&str], sorted: u32, direction: u32) -> TxOp {
+        TxOp::SetColumnHeaders {
+            widget: WidgetId(4),
+            sorted,
+            direction,
+            titles: titles.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn columns_declare_and_lower_with_the_sort_tag() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        let ops = scene.apply(vec![set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0)]);
+        match &ops[..] {
+            [ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag }] => {
+                assert_eq!(*id, WidgetId(4));
+                assert_eq!(*sorted, crate::wire::SORT_NONE);
+                assert_eq!(*direction, 0);
+                assert_eq!(titles, &["Name".to_string(), "Size".to_string()]);
+                assert_eq!(tag, &crate::wire::click_tag(4, &[]));
+            }
+            other => panic!("unexpected ops: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "not a For's container")]
+    fn columns_refuse_a_non_for_target() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(1),
+            sorted: crate::wire::SORT_NONE,
+            direction: 0,
+            titles: vec!["Name".into()],
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "declares no columns")]
+    fn columns_refuse_an_empty_bar() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply(vec![set_columns(&[], crate::wire::SORT_NONE, 0)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "title is empty")]
+    fn columns_refuse_an_empty_title() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply(vec![set_columns(&["Name", ""], crate::wire::SORT_NONE, 0)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "sorts column 5 of 2")]
+    fn columns_refuse_an_out_of_range_indicator() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply(vec![set_columns(&["Name", "Size"], 5, 0)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "direction is 3")]
+    fn columns_refuse_a_bad_direction() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply(vec![set_columns(&["Name", "Size"], 0, 3)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has 1 cells")]
+    fn columns_refuse_a_row_template_short_a_cell() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(1));
+        scene.apply(vec![set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "root must be a Row")]
+    fn columns_refuse_a_bare_label_row_template() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![set_columns(&["Name"], crate::wire::SORT_NONE, 0)]);
     }
 
     // --- Undo (docs/undo-plan.md D2-D5, A1-A3, §3) ----------------------

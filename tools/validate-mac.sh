@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface"
+DEPTH_SCENES="typeface table"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -868,6 +868,15 @@ run panes-haskell-swiftui env KAYA_SELFTEST=panes "$(hs_bin panes)"
 run panes-swift-swiftui env KAYA_SELFTEST=panes target/swift-guests/panes
 run panes-java-swiftui env KAYA_SELFTEST=panes KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The table scene: column headers + click-to-sort on the For
+# vocabulary (docs/tables-plan.md). THE DEPTH SLICE'S ONE LEG — the
+# rust guest on the SwiftUI Table lowering; the seven-language fan-out
+# and the other backends are the breadth slices, held open by the
+# depth-stub ledger entries.
+KAYA_SELFTEST_SCRIPT="$(scene_script table)"
+export KAYA_SELFTEST_SCRIPT
+run table-rust-swiftui env KAYA_SELFTEST=table "$RUST_GUESTS"/table
 
 # The listdetail scene: THE SAME GUESTS, asserting list-detail's bare
 # invariant at whatever width the host gives — a scene selects a

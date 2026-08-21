@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x2dd89e177006e976
+specHash = 0x464a21716e58b2aa
 
 valueBool :: Word32
 valueBool = 1
@@ -356,6 +356,8 @@ txKindSetBrandTypeface :: Word16
 txKindSetBrandTypeface = 43
 txKindSetAppIdentity :: Word16
 txKindSetAppIdentity = 44
+txKindSetColumnHeaders :: Word16
+txKindSetColumnHeaders = 45
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -424,6 +426,8 @@ applyKindSetTypeface :: Word16
 applyKindSetTypeface = 33
 applyKindSetAppIdentity :: Word16
 applyKindSetAppIdentity = 34
+applyKindSetColumnHeaders :: Word16
+applyKindSetColumnHeaders = 35
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -460,6 +464,8 @@ occKindUndone :: Word16
 occKindUndone = 17
 occKindRedone :: Word16
 occKindRedone = 18
+occKindSortRequested :: Word16
+occKindSortRequested = 19
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -667,6 +673,10 @@ txSetBrandTypeface mask family platforms font = wireRecord txKindSetBrandTypefac
 -- DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied.
 txSetAppIdentity :: Word32 -> Value -> Value -> Builder
 txSetAppIdentity mask name icon = wireRecord txKindSetAppIdentity (word32LE mask <> word32LE 0 <> encodeValue name <> encodeValue icon)
+
+-- DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run.
+txSetColumnHeaders :: Word64 -> Word32 -> Word32 -> Word32 -> [Value] -> Builder
+txSetColumnHeaders widgetId sorted direction count titles = wireRecord txKindSetColumnHeaders (word64LE widgetId <> word32LE sorted <> word32LE direction <> word32LE count <> word32LE 0 <> encodeValues titles)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1342,7 +1352,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
