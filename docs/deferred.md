@@ -4385,6 +4385,44 @@ harness trace (it used to keep only crash-shaped lines, which after
 the guest guards is nothing — "Bad arguments" and a one-line verdict
 was the whole evidence four times).
 
+FIFTH SIGHTING 2026-08-20, the first with the trace, and it narrowed
+hard: the THIRD dialog (cancel cycle, then save-as again) was live,
+renamed to "final", verified showing "final", file_save pressed and
+returned — and the label stayed on the cancel cycle's "save
+cancelled" through 5s of retries. Then the REOPEN button was clicked
+and PROCESSED (the guest wrote its "nothing to reopen" guard
+sentence), so the activity was alive and handling input the whole
+time; only the save result went missing. That leaves exactly two
+stories the label cannot split: DocumentsUI answered RESULT_CANCELED
+(the guest's cancel arm rewrites the very string already showing), or
+the delivery was lost outright. KayaCompose's two result callbacks
+now log KAYA_SAVE_RESULT / KAYA_PICK_RESULT with the resultCode on
+arrival — in the next sighting's dump, a line with code=0 convicts
+DocumentsUI, no line convicts the delivery path.
+
+SIXTH AND SEVENTH SIGHTINGS THE SAME DAY (the ghost now fires most
+contended matrices — today's speed work raised peak contention, and
+peak contention raises it), and the seventh carried both instruments:
+KAYA_ACTIVITY_RESULT (an onActivityResult override in milestone2kt's
+shell, logging every result the ACTIVITY receives) beside the
+registry callbacks. Dialogs 1 and 2 logged both lines 1ms apart;
+dialog 3 logged NEITHER. kaya's registry, callbacks and threading are
+EXONERATED — the result never reaches the app process. And even a
+no-setResult finish or a normal DocumentsUI death hands the caller
+RESULT_CANCELED, so a silently-absent record is abnormal one level
+up. The events buffer (read ~30min later; the main buffer had
+rotated) showed a ROUTINE tail: DocumentsUI cached-frozen
+(am_freeze) 10.4s after the press — its dialog activity finished
+normally, went cached, froze on the standard timer — so the loss sits
+between DocumentsUI's finish and ActivityManager's delivery to a
+RESUMED, input-processing caller. The runner's on-FAIL dump now also
+keeps the documentsui/am_ slice from events+main AT FAIL TIME (the
+window rotates out of main in about a minute). If that slice shows a
+clean setResult+finish, this is an AMS-side race the harness may need
+to tolerate — a remedy that needs Akhil's ruling, since retrying a
+save leg would launder exactly the class of bug kaya's own users
+would hit.
+
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
 
@@ -4406,6 +4444,18 @@ the retaps in place, the taps are not being dropped — keep the failing
 sim booted and read the control frames from simdrive's inventory,
 because a stationary control that eats three delivered taps is the
 sim's runloop, not the gesture.
+
+THAT BRANCH FIRED 2026-08-20, same day: save-go under the full
+matrix, and the failure message carried the inventory this entry
+asked for — Save still in the strip, STATIONARY at the same centre,
+after three delivered taps across ~18s of dismissal polling, on a leg
+stretched 21s -> 99s by contention. A starved sim's runloop stalling
+through that window is the conviction; the remedy matched the
+mechanism rather than the gesture: savepress and choose both went 3
+-> 6 rounds (~36s of window), free when healthy since the first round
+exits as soon as the sheet goes. If a sheet survives SIX rounds, stop
+raising the cap — that sim's runloop is not coming back, and the leg
+should fail into the pool-health question instead.
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
 
@@ -4622,3 +4672,32 @@ presentation, the iOS paste prompt, the stall scene's deliberate block
    hole that eight legs died in on the first concurrent run. Matrix:
    ~504-546s -> 450/452s on consecutive ALL PASS runs; the bound is
    now the iOS lane, and the mac lane runs its 320 legs in ~280s.
+
+THE BELOW-400 PUSH, 2026-08-20 (the maintainer asked for the matrix
+under ~400s; it reached 422 and three lanes now cluster at the bound):
+after the iOS phase interleave took the matrix to 438, three
+per-second-scale wastes were measured and removed. LINUX: every one of
+~280 x11 legs booted its own Xvfb (~0.5s each) and every one of 134
+a11y legs slept a FIXED second waiting for the at-spi launcher — the
+lane now claims displays from a booted-once pool (one leg per display
+at a time keeps xvfb-run's isolation; a failed leg reboots its display
+before releasing it) and polls the session bus for org.a11y.Bus
+instead of sleeping. Container suites 202s standalone; contended lane
+436 -> 319-397 across three matrices. The pool's servers must be
+DISOWNED — eight forever-running jobs pushed run()'s jobs-count
+throttle past JOBS and deadlocked the first leg, the drain comment's
+bare-wait trap through `jobs -rp`. WINDOWS: the per-leg host poll
+became a resident waiter on the VM (tools/guest/wait-exit.ps1) after
+tightening the host cadence measured BACKWARD (0.3s polling: 439
+contended vs 390-397 at 1s — each round pays a cmd.exe spawn on
+oversubscribed vCPUs), and with the spawn storm gone the pool width
+moved to the VM's own 6 (420 contended vs 434 at width 4 — the old
+6-loses-to-4 measurement was the storm's artifact, remeasured). iOS:
+clipctl RESIDENCY IS IMPOSSIBLE, measured and recorded at
+docs/clipboard-plan.md §8 finding 4 — a resident UIPasteboard proxy
+is frozen at first access (types, data AND changeCount), so the
+spawn-per-read is structural. The residue: linux 395 / ios 414 /
+windows 420 contended, matrix 422 — the three bound lanes are within
+25s of each other, and the next second comes from real work on all
+three fronts at once (per docs/clipboard-plan.md the iOS prompt dance
+is semantic), or from a Windows VM with more cores.

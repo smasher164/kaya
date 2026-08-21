@@ -573,7 +573,9 @@ case "choose":
     var lastCentre = CGPoint(x: row.frame.midX, y: row.frame.midY)
     var pickerDismissed = false
     var rounds = 0
-    while rounds < 3 && !pickerDismissed {
+    // Six rounds, savepress's 2026-08-20 raise: the stalled-runloop
+    // class holds a sheet through ~18s of taps and polling.
+    while rounds < 6 && !pickerDismissed {
         rounds += 1
         if let fresh = pickerNodes()?
             .first(where: { rowName($0).map { stem($0) == wanted } ?? false })
@@ -672,11 +674,18 @@ case "savepress":
     // loop walks the strip AGAIN each round — a strip that no longer
     // offers Save means the sheet is already going, and tapping there
     // anyway would land on the app behind it, so that round only polls.
+    // SIX rounds since 2026-08-20: the WATCH entry's predicted branch
+    // fired — save-go under the full matrix, Save present and
+    // STATIONARY in the strip after three centred taps across ~18s of
+    // dismissal polling, which convicts a starved sim's stalled
+    // runloop, not a dropped gesture. More rounds are free when
+    // healthy (the first exits as soon as the sheet goes) and give a
+    // stalled runloop ~36s to catch up.
     guard waitForSaveSheet() != nil else { fail("no save dialog is up to save") }
     var pressedAt: CGPoint? = nil
     var presses = 0
     var sheetGone = false
-    while presses < 3 && !sheetGone {
+    while presses < 6 && !sheetGone {
         presses += 1
         let strip = navigationStrip(sim, screen: screen)
         if let (_, saveCentre) = strip.first(where: { $0.0 == "Save" }) {

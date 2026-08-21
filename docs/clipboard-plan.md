@@ -1437,6 +1437,19 @@ plus a bounded press: one mechanism, covers the kind no other tool
 can, and it is foreign in the only sense that matters — the system
 itself gates it as another principal.
 
+AND THE SPAWN-PER-READ IS STRUCTURAL, NOT OVERHEAD (measured
+2026-08-20, hunting the ~2-3s each spawn costs the whale legs): a
+RESIDENT `UIPasteboard.general` in a spawned process is frozen at
+first access — a probe printing `changeCount`/`types`/`string` once a
+second for 15s reported `count=0 types=[]` on every line while two
+foreign writes replaced the board under it, and a fresh spawn
+immediately after read the second write back fine. Not just the
+change count (which was known not to cross): the entire view — types
+and data both. So a serve-mode clipctl reading verbs from stdin can
+never answer a read, and the per-op spawn is the only reader shape
+this platform has. Anyone re-attacking clipboard-leg latency starts
+somewhere else.
+
 ### 5. WHAT THE RUNNER ALREADY SETTLED (measured during recon)
 
 The simulator pasteboard is strictly PER-DEVICE (two sims held two

@@ -2476,6 +2476,13 @@ object KayaCompose {
             "kaya-file-dialog-$dialog",
             ActivityResultContracts.StartActivityForResult(),
         ) { result ->
+            // The save dialog's sibling line, same discriminator (see
+            // the save launcher below).
+            Log.i(
+                "kaya",
+                "KAYA_PICK_RESULT: dialog=$dialog code=${result.resultCode} " +
+                    "uri=${result.data?.data != null}",
+            )
             kayaLivePickerDialog = null
             kayaLivePickerLauncher?.unregister()
             kayaLivePickerLauncher = null
@@ -2584,6 +2591,17 @@ object KayaCompose {
             "kaya-save-dialog-$dialog",
             ActivityResultContracts.StartActivityForResult(),
         ) { result ->
+            // The save-jvm WATCH's discriminator (docs/deferred.md): a
+            // lost third-save result reads the same as a CANCELED one,
+            // because the guest's cancel arm rewrites the string the
+            // label already shows. This line in the on-FAIL dump splits
+            // them: present with code=0 means DocumentsUI answered
+            // cancel; absent means delivery itself was lost.
+            Log.i(
+                "kaya",
+                "KAYA_SAVE_RESULT: dialog=$dialog code=${result.resultCode} " +
+                    "uri=${result.data?.data != null}",
+            )
             kayaLivePickerDialog = null
             kayaLivePickerLauncher?.unregister()
             kayaLivePickerLauncher = null

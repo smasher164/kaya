@@ -212,8 +212,13 @@ if [ "$MODE" = parallel ]; then
             android) budget=310 ;;
             # The sweep as its own concurrent unit (2026-08-20):
             # measured 250s under five-lane contention the day it moved
-            # out of the mac lane; ~1.25x headroom like the others.
-            gates) budget=310 ;;
+            # out of the mac lane, then 304 and 314 in the next three
+            # matrices — the first sample was a light run, and the
+            # sweep's compile-heavy gates soak whatever cores the lanes
+            # leave free, so its contended time moves when THEIR shape
+            # does (the linux lane's display pool shifted it the same
+            # day). 390 keeps ~1.25x over the observed band's top.
+            gates) budget=390 ;;
             *) budget=0 ;;
         esac
         if [ "$budget" -gt 0 ] && [ "$secs" != '?' ] && [ "$secs" -gt "$budget" ]; then

@@ -246,13 +246,50 @@ fi
 # drains below run ALONE.
 
 # Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for serial):
-# xvfb-run -a gives each X11 leg its own display, and Wayland clients
+# X11 legs claim a display from a booted-once POOL, and Wayland clients
 # share the one headless compositor. Verdicts print in submission order
 # at drain; a FAIL prints its log.
 JOBS="${KAYA_JOBS:-8}"
 LEGS_DIR="$(mktemp -d)"
 leg_names=()
 leg_pids=()
+
+# THE X11 DISPLAY POOL, one Xvfb per pool slot, booted once (2026-08-20:
+# xvfb-run per leg re-paid ~half a second of server boot on every one of
+# ~280 x11 legs). One leg per display at a time — the claim lock in
+# run_one — so nothing in flight shares a screen, a pointer or an input
+# focus, which is the isolation xvfb-run bought. The a11y session stays
+# per-leg (its private XDG_RUNTIME_DIR isolates the at-spi socket, and
+# discovery rides the leg's own session bus — the proven wayland path,
+# not the root-window property). Pids live in FILES because run_one
+# executes in the pool's subshells. Not booted under KAYA_RECORD: a
+# film wants a display of its own, so recording keeps xvfb-run.
+x11_display_boot() { # display-number
+    Xvfb ":$1" -screen 0 1600x1000x24 &>"/tmp/xvfb-$1.log" &
+    echo $! >"$LEGS_DIR/.x11-pid-$1"
+    # NOT a job: run()'s throttle counts running jobs, and eight
+    # forever-running servers in the job table deadlocked it on the
+    # first leg (2026-08-20) — the drain comment's bare-wait trap,
+    # through `jobs -rp` instead of `wait`.
+    disown
+    local waited=0
+    until [ -S "/tmp/.X11-unix/X$1" ]; do
+        waited=$((waited + 1))
+        if [ "$waited" -gt 100 ]; then
+            echo "run-suites: Xvfb :$1 never made a socket" >&2
+            tail -5 "/tmp/xvfb-$1.log" >&2
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+X11_POOL=()
+if [ -z "${KAYA_RECORD:-}" ]; then
+    for kaya_d in $(seq 100 $((99 + JOBS))); do
+        x11_display_boot "$kaya_d" || exit 1
+        X11_POOL+=("$kaya_d")
+    done
+fi
 
 # ONE LEG, REPEATEDLY, is the only practical way to characterise a rare
 # flake, or to prove one fixed: a leg failing 1 in 20 needs about sixty
@@ -325,8 +362,35 @@ run_one() {
     fi
     case "$proto" in
         x11)
-            KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
-                xvfb-run -a -s "-screen 0 1600x1000x24" "$@"
+            # A display from the POOL, claimed for the whole leg — the
+            # wayland ring's one-compositor shape, bounded to one leg
+            # per display so nothing in flight ever shares a screen,
+            # a pointer or an input focus (the PointerRoot trap lives
+            # one file over). Booting a fresh Xvfb per leg cost every
+            # x11 leg ~half a second of pure startup (2026-08-20);
+            # recording mode keeps xvfb-run, since a film wants a
+            # display of its own.
+            local kaya_display
+            while :; do
+                for kaya_display in "${X11_POOL[@]}"; do
+                    if mkdir "$LEGS_DIR/.x11-$kaya_display" 2>/dev/null; then
+                        break 2
+                    fi
+                done
+                sleep 0.05
+            done
+            DISPLAY=":$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 "$@"
+            local kaya_rc=$?
+            if [ "$kaya_rc" -ne 0 ]; then
+                # A failed leg may leave windows behind; the next leg on
+                # this display must not meet them. Reboot it, still under
+                # the claim.
+                kill "$(cat "$LEGS_DIR/.x11-pid-$kaya_display" 2>/dev/null)" 2>/dev/null
+                rm -f "/tmp/.X11-unix/X$kaya_display" "/tmp/.X$kaya_display-lock"
+                x11_display_boot "$kaya_display"
+            fi
+            rmdir "$LEGS_DIR/.x11-$kaya_display" 2>/dev/null
+            return "$kaya_rc"
             ;;
         wayland)
             KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \

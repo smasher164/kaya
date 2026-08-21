@@ -743,6 +743,20 @@ run_apk_on() {
         # died with the buffer. Bounded: the last 60 kaya-tag lines are
         # the whole leg for every scene in the roster.
         adb -s "$serial" logcat -d -s kaya:* 2>/dev/null | tail -60
+        # AND THE SYSTEM'S SIDE OF A LOST DIALOG RESULT (2026-08-20,
+        # the save-jvm WATCH's seventh sighting): both app-side
+        # instruments proved a pressed save dialog's result never
+        # reaches the ACTIVITY — dialogs 1 and 2 log the activity line
+        # and the callback 1ms apart, dialog 3 logs neither — so the
+        # drop is DocumentsUI's or ActivityManager's, and only their
+        # own lines can say which. Read AT FAIL TIME because the main
+        # buffer rotates in about a minute on a busy leg (this
+        # sighting's window was gone half an hour later; the events
+        # buffer still held the am_ timeline, which is why it rides
+        # along). Bounded the same way.
+        adb -s "$serial" logcat -d -b events,main 2>/dev/null \
+            | grep -iE 'documentsui|has died|am_kill|am_freeze|am_proc_died|ANR in|force.?stop' \
+            | tail -60
         failed=1
     fi
     [ "$failed" = 0 ]

@@ -1,7 +1,9 @@
 package dev.kaya.milestone2kt
 
+import android.content.Intent
 import android.os.Bundle
 import android.system.Os
+import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import dev.kaya.KayaCompose
@@ -92,4 +94,16 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
         KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
+
+    // The save-jvm WATCH's second discriminator (docs/deferred.md): the
+    // fifth sighting proved the registered callback never runs for the
+    // lost save. This logs every result the ACTIVITY receives — a line
+    // here without a KAYA_SAVE_RESULT beside it convicts the registry's
+    // dispatch; no line at all convicts delivery upstream of the app.
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        Log.i("kaya", "KAYA_ACTIVITY_RESULT: rc=$requestCode code=$resultCode data=${data != null}")
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
 }

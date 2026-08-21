@@ -7,7 +7,8 @@
 # never asked for accessibility (measured 2026-07-25 —
 # python/go/csharp/ocaml died, rust and c survived; docs/HACKING.md).
 #
-# Runs INSIDE the runner's xvfb-run wrapper, like any other leg command.
+# Runs on the runner's claimed pool display (xvfb-run under
+# KAYA_RECORD), like any other leg command.
 set -uo pipefail
 
 # A PRIVATE RUNTIME DIR, because the accessibility bus's socket path is
@@ -33,9 +34,22 @@ eval "$(dbus-launch --sh-syntax)"
 export GTK_A11Y=atspi
 /usr/libexec/at-spi-bus-launcher --launch-immediately &
 launcher=$!
-# The registry must be up before the guest's first read races the
-# launcher's name acquisition.
-sleep 1
+# The launcher must own org.a11y.Bus on the session bus before the
+# guest's first read races its name acquisition — POLLED for that
+# exact fact, not slept: the fixed second this replaced was 134 legs
+# of pure wait per lane (2026-08-20), and the name lands in ~0.1s.
+# The cap keeps the old second's spirit; a leg that proceeds anyway
+# fails on its own reads, loudly.
+tries=0
+until dbus-send --print-reply --dest=org.freedesktop.DBus \
+    /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
+    string:org.a11y.Bus 2>/dev/null | grep -q 'boolean true'; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 40 ]; then
+        break
+    fi
+    sleep 0.05
+done
 
 "$@"
 status=$?

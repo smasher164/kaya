@@ -220,7 +220,11 @@ BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-
 # ConnectTimeout rides every call: when the guest OS wedges mid-run
 # (observed 2026-07-22 — UTM "started", sshd gone), each poll would
 # otherwise hang the full TCP timeout (~75s).
-SSH_MUX=(-o ConnectTimeout=5 -o ControlMaster=auto -o "ControlPath=$ROOT/target/.ssh-mux-%r@%h" -o ControlPersist=120)
+# ServerAlive rides the master: the leg waiter (run_one_suite) BLOCKS
+# in one mux channel for up to ~5 minutes, and without keepalives a
+# guest-OS wedge would hang it for the full deadline instead of
+# breaking the master in ~60s.
+SSH_MUX=(-o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ControlMaster=auto -o "ControlPath=$ROOT/target/.ssh-mux-%r@%h" -o ControlPersist=120)
 run_ssh() { ssh -n -o BatchMode=yes "${SSH_MUX[@]}" "$HOST" "$@"; }
 scp() { command scp "${SSH_MUX[@]}" "$@"; }
 
@@ -778,6 +782,7 @@ deploy_stamp() {
             "$ROOT"/tools/guest/*.vbs \
             "$ROOT/tools/guest/shot.ps1" \
             "$ROOT/tools/guest/desk-warm.ps1" \
+            "$ROOT/tools/guest/wait-exit.ps1" \
             "$ROOT"/bindings/go/*.go \
             "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
             "$ROOT"/bindings/csharp/*.cs \
@@ -805,6 +810,7 @@ else
         "$ROOT"/tools/guest/*.vbs \
         "$ROOT/tools/guest/shot.ps1" \
         "$ROOT/tools/guest/desk-warm.ps1" \
+        "$ROOT/tools/guest/wait-exit.ps1" \
         "$HOST:C:/kaya/" || {
         # WHAT TO DO NEXT, because scp's own message ("dest open ...:
         # Failure") names neither the cause nor the fix. A copy of
@@ -1326,16 +1332,19 @@ run_probe() {
     run_ssh "type C:\\kaya\\out_probe.txt"
 }
 
-# Suites run in a pool KAYA_WIN_JOBS wide (default 4 — measured, not
-# guessed: 6 looked right against the VM's -smp cpus=6, and two
-# contended matrices came back 417s and 431s against 390-397s at 4,
-# because the vCPUs are themselves oversubscribed against the host
-# while five lanes run; 2026-08-20): each leg claims a tile slot,
-# launches its scheduled task through the hidden-window shim with the
-# slot argument, and polls its own output file. Verdicts print in
-# submission order at drain. Note: a timed-out leg's kill_guests sweep
-# is VM-wide and takes concurrent legs with it.
-WIDTH="${KAYA_WIN_JOBS:-4}"
+# Suites run in a pool KAYA_WIN_JOBS wide (default 6, the VM's -smp —
+# measured TWICE because the answer flipped with the wait shape
+# (2026-08-20): under the old host-driven poll, width 6 lost to 4 in
+# contended matrices (417/431 against 390-397) — every worker's poll
+# paid a cmd.exe spawn on the oversubscribed vCPUs, and more workers
+# meant more storm. The resident waiter removed the storm, and width 6
+# then beat 4 contended, 420 against 434): each leg claims a tile
+# slot, launches its scheduled task through the hidden-window shim
+# with the slot argument, and blocks on the waiter for its output
+# file. Verdicts print in submission order at drain. Note: a timed-out
+# leg's kill_guests sweep is VM-wide and takes concurrent legs with
+# it.
+WIDTH="${KAYA_WIN_JOBS:-6}"
 leg_names=()
 leg_pids=()
 
@@ -1351,53 +1360,58 @@ run_one_suite() {
         return 1
     fi
     run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr \"wscript C:\\kaya\\run-hidden.vbs run_$name.cmd $slot\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
-    local tries=0
-    until run_ssh "type C:\\kaya\\out_$name.txt" 2>/dev/null | grep -q "EXIT="; do
-        tries=$((tries + 1))
-        if [ "$tries" -gt 300 ]; then
-            # A guest that never writes EXIT= is hung: kill it so it
-            # cannot hold kaya.dll into the next suite or deploy, and
-            # fail this leg loudly.
-            echo "$name: timed out waiting for output; killing guests" >&2
-            # IS THE VM EVEN ALIVE? The startup check runs ONCE, so an OS
-            # hang mid-lane is invisible: every remaining leg waits out its
-            # own 300s in silence while UTM still reports "started".
-            # Measured 2026-07-25 — a 14-minute stall with zero verdicts and
-            # no guests in tasklist, because the guest OS had died, not the
-            # guests. Checked FIRST, because "the VM is gone" makes every
-            # other diagnosis wrong.
-            if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; then
-                echo "$name: THE VM IS UNREACHABLE mid-lane — the guest OS hung," \
-                    "not the guests (utmctl will still say \"started\"; that is the" \
-                    "documented class in docs/traps.md). This lane is over; every" \
-                    "remaining leg fails fast against the .vm-dead flag instead of" \
-                    "burning its own timeout. Most likely cause is host contention:" \
-                    "the windows lane is reliable standalone and degrades under the" \
-                    "full five-lane matrix." >&2
-                touch "$LEGS_DIR/.vm-dead"
-                return 1
-            fi
-            kill_guests
-            # A plain timeout is recoverable; the WEDGED state is not, and
-            # taskkill cannot tell you which you have. Fingerprint it,
-            # because otherwise EVERY remaining leg pays this same 300s (110
-            # legs of that is an hours-long silent stall, measured
-            # 2026-07-25). Restart once per run: a wedge that recurs after a
-            # restart is not this class.
-            if guests_wedged; then
-                if mkdir "$LEGS_DIR/.vm-restarted" 2>/dev/null; then
-                    echo "$name: guests are WEDGED (tasklist lists them, taskkill reports no running instance) — the documented unkillable-terminating-state class; taskkill cannot clear it, restarting the VM" >&2
-                    vm_restart || true
-                else
-                    echo "$name: guests WEDGED AGAIN after a VM restart — not the known transient class; investigate rather than retrying" >&2
-                fi
-            fi
+    # ONE RESIDENT WAITER ON THE VM in place of a host-driven poll
+    # (2026-08-20): at any host cadence each round paid a cmd.exe spawn
+    # on vCPUs that are themselves oversubscribed under the matrix —
+    # tightening the cadence 1s -> 0.3s took the contended lane from
+    # 390-397s to 439s, the spawn storm costing more than the
+    # quantization it saved. wait-exit.ps1 polls the file LOCALLY at
+    # 150ms and prints it the moment EXIT= lands, charging one blocked
+    # mux channel instead; its 290s deadline is the old poll cap's
+    # ceiling, and a guest-OS wedge breaks the call at the master's
+    # keepalive (ServerAlive on SSH_MUX) rather than hanging it.
+    local out
+    out=$(run_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\kaya\\wait-exit.ps1 out_$name.txt 290")
+    if ! grep -q "EXIT=" <<<"$out"; then
+        # A guest that never writes EXIT= is hung: kill it so it
+        # cannot hold kaya.dll into the next suite or deploy, and
+        # fail this leg loudly.
+        echo "$name: timed out waiting for output; killing guests" >&2
+        # IS THE VM EVEN ALIVE? The startup check runs ONCE, so an OS
+        # hang mid-lane is invisible: every remaining leg waits out its
+        # own 300s in silence while UTM still reports "started".
+        # Measured 2026-07-25 — a 14-minute stall with zero verdicts and
+        # no guests in tasklist, because the guest OS had died, not the
+        # guests. Checked FIRST, because "the VM is gone" makes every
+        # other diagnosis wrong.
+        if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; then
+            echo "$name: THE VM IS UNREACHABLE mid-lane — the guest OS hung," \
+                "not the guests (utmctl will still say \"started\"; that is the" \
+                "documented class in docs/traps.md). This lane is over; every" \
+                "remaining leg fails fast against the .vm-dead flag instead of" \
+                "burning its own timeout. Most likely cause is host contention:" \
+                "the windows lane is reliable standalone and degrades under the" \
+                "full five-lane matrix." >&2
+            touch "$LEGS_DIR/.vm-dead"
             return 1
         fi
-        sleep 1
-    done
-    local out
-    out=$(run_ssh "type C:\\kaya\\out_$name.txt")
+        kill_guests
+        # A plain timeout is recoverable; the WEDGED state is not, and
+        # taskkill cannot tell you which you have. Fingerprint it,
+        # because otherwise EVERY remaining leg pays this same 300s (110
+        # legs of that is an hours-long silent stall, measured
+        # 2026-07-25). Restart once per run: a wedge that recurs after a
+        # restart is not this class.
+        if guests_wedged; then
+            if mkdir "$LEGS_DIR/.vm-restarted" 2>/dev/null; then
+                echo "$name: guests are WEDGED (tasklist lists them, taskkill reports no running instance) — the documented unkillable-terminating-state class; taskkill cannot clear it, restarting the VM" >&2
+                vm_restart || true
+            else
+                echo "$name: guests WEDGED AGAIN after a VM restart — not the known transient class; investigate rather than retrying" >&2
+            fi
+        fi
+        return 1
+    fi
     printf '%s\n' "$out"
     # The suite's verdict lives in the output file, not in any ssh exit
     # code. The verdict TEXT is the authority and the exit code only
