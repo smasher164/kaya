@@ -1453,7 +1453,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets table"
     # Machine-read by check-steps' wired(), which replaced a bare-name
     # grep that comments and unrelated code satisfied: a scene is wired
     # here IF AND ONLY IF it is in a list above, declared desktop-only,
@@ -1612,7 +1612,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # sysroot. Both ride CC rather than CGO_CFLAGS/CGO_LDFLAGS, because
     # cgo uses CC to LINK as well as compile and -isysroot needs both.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets table"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST. The bundles still differ — one per scene,
@@ -1942,6 +1942,30 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # "did not violate the invariant" into "the split arm ran".
     queue_pad_leg run_swiftui_on listdetail-swiftui-pad "$APP" dev.kaya.listdetailswiftui \
         listdetail-swiftui-pad listdetail listdetail 'expect_split "regular/split"'
+
+    # The table scene (docs/tables-plan.md): column headers and
+    # click-to-sort on the For vocabulary. The phone is compact, so this
+    # leg runs kaya's own header over KayaTableLayout — decision 5's
+    # revision, where a native Table would collapse to a first-column
+    # list and hide the declared columns.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example table
+    APP=$(make_bundle tablers-swiftui dev.kaya.tableswiftui "$TARGET_DIR/examples/table")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on table-swiftui "$APP" dev.kaya.tableswiftui table-swiftui table table
+    # The same bundle and scene on the iPad — THE ONLY LEG IN ANY LANE
+    # THAT RUNS UIKit's NATIVE Table (regular width, and the runtime is
+    # over TableColumnForEach's iOS 17.4 floor). NO EXTRA STEP, unlike
+    # the two pad legs above, and that is decision 5's revision showing
+    # through: with the size class gone from every table observable, the
+    # bytes a native tier presents and the bytes a synthesized tier
+    # presents are IDENTICAL BY DESIGN, so no assertion this leg could
+    # append would name the tier it ran. What it buys is that the native
+    # path executes at all. WHICH TIER EACH DEVICE TOOK IS NOT ASSERTED
+    # ANYWHERE and has to be re-measured by hand whenever the routing
+    # moves: perturb one tier's code, run this suite, and exactly one of
+    # these two legs may redden (measured both ways 2026-08-21).
+    queue_pad_leg run_swiftui_on table-swiftui-pad "$APP" dev.kaya.tableswiftui \
+        table-swiftui-pad table table
 
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and

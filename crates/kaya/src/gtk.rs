@@ -830,6 +830,204 @@ impl NativeWidget {
     }
 }
 
+/// The table's column gap — the one number every synthesized tier
+/// spells (docs/tables-plan.md decision 6; SwiftUI and Compose say 24
+/// too). The ROW gap is the For container's own spacing.
+const TABLE_COL_GAP: i32 = 24;
+
+/// The classes kaya's own header row wears. The reads find the header
+/// again by class rather than by a map, so all four table verbs are
+/// tree reads and none of them can agree with a model copy.
+const TABLE_HEADER_CLASS: &str = "kaya-table-header";
+const TABLE_CELL_CLASS: &str = "kaya-table-header-cell";
+
+/// A header cell's title sits FLUSH with the cells under it, so the
+/// theme's button padding and border come off: Adwaita's 10px inset
+/// would draw every title one place right of its column. Bold is the
+/// header's own weight, GTK's node name reaching the button's label.
+const TABLE_CSS: &str = "\
+.kaya-table-header-cell { padding: 0px; border: 0px; min-width: 0px; min-height: 0px; }
+.kaya-table-header-cell label { font-weight: bold; }
+";
+
+/// One declared table (docs/tables-plan.md): the header row this
+/// backend composed, the size groups that make a column's cells one
+/// width, and the sort tag a header click hands back verbatim.
+///
+/// GtkColumnView IS NOT USABLE HERE, measured rather than assumed
+/// (2026-08-21, this milestone's probe): a `GtkListItem` OWNS its
+/// child, so handing it a widget the stamp already parented fails
+/// `gtk_widget_set_parent`'s `parent == NULL` assertion and renders
+/// nothing, and the factory is driven by the model and the recycler
+/// rather than by kaya's stamp. The synthesized header is the landing
+/// docs/tables-plan.md decision 6 predicted.
+struct GtkTable {
+    header: gtk4::Box,
+    divider: gtk4::Separator,
+    /// One horizontal size group per column. Every member REQUESTS the
+    /// widest member's width — that is the content floor — and GtkBox
+    /// hands its leftover out equally among hexpanding children, so
+    /// floor-plus-distribute and the shared x positions are the
+    /// toolkit's arithmetic and not kaya's (both measured at two widths
+    /// before this landed).
+    groups: Vec<gtk4::SizeGroup>,
+    /// Shared with the click handlers so a re-declaration replaces the
+    /// tag without rebuilding the buttons.
+    tag: Rc<RefCell<Vec<u8>>>,
+}
+
+/// A container's children, in the toolkit's own order.
+fn children_of(widget: &impl IsA<gtk4::Widget>) -> Vec<gtk4::Widget> {
+    let mut out = Vec::new();
+    let mut child = widget.as_ref().first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        out.push(w);
+    }
+    out
+}
+
+/// The header row kaya composed on this For container, or None when no
+/// columns were declared on it. A TREE READ: the header leads the
+/// container's children and wears its class.
+fn table_header(column: &gtk4::Box) -> Option<gtk4::Box> {
+    let first = column.first_child()?;
+    let header = first.downcast::<gtk4::Box>().ok()?;
+    header.has_css_class(TABLE_HEADER_CLASS).then_some(header)
+}
+
+/// The stamped rows of a table container: everything after the header
+/// and its divider (all the children when no table was declared).
+fn table_rows(column: &gtk4::Box) -> Vec<gtk4::Widget> {
+    match table_header(column) {
+        None => children_of(column),
+        Some(header) => {
+            let mut out = Vec::new();
+            // The divider sits between the header and the first row.
+            let mut child = header.next_sibling().and_then(|d| d.next_sibling());
+            while let Some(w) = child {
+                child = w.next_sibling();
+                out.push(w);
+            }
+            out
+        }
+    }
+}
+
+/// The label inside a header cell — the widget that actually DRAWS the
+/// title, and the one `column_edges` measures. Reading the button
+/// instead would leave the stylesheet unobserved: with TABLE_CSS lost
+/// the theme's padding puts every title 10px right of its column while
+/// the buttons themselves stay exactly aligned, and no lane could see
+/// it.
+fn header_cell_label(cell: &gtk4::Widget) -> Option<gtk4::Label> {
+    cell.downcast_ref::<gtk4::Button>()?
+        .child()?
+        .downcast::<gtk4::Label>()
+        .ok()
+}
+
+/// The title a header cell is DRAWING, and its indicator — read off the
+/// button's own label, never the declaration.
+fn header_cell_text(cell: &gtk4::Widget) -> String {
+    header_cell_label(cell).map(|l| l.text().to_string()).unwrap_or_default()
+}
+
+/// Build the header row for a table of `cols` columns. Each cell is a
+/// REAL GtkButton, so `header_click` drives the same `clicked` a user's
+/// press does (the `emit_clicked` route `press` already uses).
+fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>) -> GtkTable {
+    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, TABLE_COL_GAP);
+    header.add_css_class(TABLE_HEADER_CLASS);
+    header.set_halign(gtk4::Align::Fill);
+    for index in 0..cols {
+        let label = gtk4::Label::new(None);
+        label.set_xalign(0.0);
+        label.set_halign(gtk4::Align::Fill);
+        let button = gtk4::Button::new();
+        button.set_child(Some(&label));
+        button.set_has_frame(false);
+        button.add_css_class(TABLE_CELL_CLASS);
+        button.set_hexpand(true);
+        button.set_halign(gtk4::Align::Fill);
+        let sink = sink.clone();
+        let tag = tag.clone();
+        let column = index as u32;
+        button.connect_clicked(move |_| {
+            // A REQUEST and nothing else (decision 3): the tag goes back
+            // verbatim with the column, this backend sorts nothing, and
+            // the indicator moves only when the guest re-declares.
+            let tag = tag.borrow();
+            sink.send_sort_tag(&tag, column);
+        });
+        header.append(&button);
+    }
+    let divider = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    divider.set_halign(gtk4::Align::Fill);
+    let groups = (0..cols)
+        .map(|_| gtk4::SizeGroup::new(gtk4::SizeGroupMode::Horizontal))
+        .collect();
+    GtkTable { header, divider, groups, tag }
+}
+
+/// Re-hang a declared table's header and re-tie its size groups. Runs
+/// after every transaction, because the rows a table is made of arrive
+/// (and move, and leave) in ops of their own: nothing about a stamped
+/// row's own AddChild says which table it lands in.
+fn reflow_table(core: &mut CoreState, id: u64) {
+    let Some(NativeWidget::Column(column)) = core.widgets.get(&WidgetId(id)) else {
+        return;
+    };
+    let column = column.clone();
+    let Some(table) = core.tables.get(&id) else { return };
+    let header = table.header.clone();
+    let divider = table.divider.clone();
+    let groups = table.groups.clone();
+    // The composed header leads the container's children whatever order
+    // the rows arrived in, and the divider follows it.
+    if header.parent().is_none() {
+        column.prepend(&header);
+    } else {
+        column.reorder_child_after(&header, None::<&gtk4::Widget>);
+    }
+    if divider.parent().is_none() {
+        column.insert_child_after(&divider, Some(&header));
+    } else {
+        column.reorder_child_after(&divider, Some(&header));
+    }
+    // Fresh membership every pass: a row that left takes its cells out
+    // of the groups with it, and a stale member would hold a width the
+    // table no longer draws.
+    for group in &groups {
+        for widget in group.widgets() {
+            group.remove_widget(&widget);
+        }
+    }
+    for (c, cell) in children_of(&header).into_iter().enumerate() {
+        if let Some(group) = groups.get(c) {
+            group.add_widget(&cell);
+        }
+    }
+    for row in table_rows(&column) {
+        let Some(row_box) = row.downcast_ref::<gtk4::Box>() else {
+            continue;
+        };
+        // A table row spans the table, and the gap between cells is the
+        // TABLE's, not the row template's.
+        row_box.set_halign(gtk4::Align::Fill);
+        row_box.set_spacing(TABLE_COL_GAP);
+        for (c, cell) in children_of(row_box).into_iter().enumerate() {
+            let Some(group) = groups.get(c) else { continue };
+            cell.set_hexpand(true);
+            cell.set_halign(gtk4::Align::Fill);
+            if let Some(label) = cell.downcast_ref::<gtk4::Label>() {
+                label.set_xalign(0.0);
+            }
+            group.add_widget(&cell);
+        }
+    }
+}
+
 /// One navigation entry: a pushed scene root, retained while covered
 /// (the widget refs here keep it alive), destroyed at pop.
 struct GtkNavEntry {
@@ -931,6 +1129,8 @@ struct CoreState {
     indeterminate: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     columns: Vec<gtk4::Box>,
     rows: Vec<gtk4::Box>,
+    /// The declared tables, by For-container id (see GtkTable).
+    tables: HashMap<u64, GtkTable>,
     window: gtk4::Window,
     /// Auxiliary surfaces by kaya window id (the primary is
     /// `window`); created hidden, presented at mount.
@@ -1125,6 +1325,12 @@ fn drain_transactions() {
         // A transaction can be an undo GROUP, and a group is a ledger entry:
         // Edit>Undo's enablement moved with it.
         refresh_roles(core);
+        // The rows a declared table is made of arrive, move and leave in
+        // ops of their own, so the table is reconciled once the batch
+        // has landed rather than inside any one of them.
+        for id in core.tables.keys().copied().collect::<Vec<_>>() {
+            reflow_table(core, id);
+        }
     });
 }
 
@@ -5034,6 +5240,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.clipboard.widgets.borrow_mut().remove(&id.0);
             core.clipboard.tags.borrow_mut().remove(&id.0);
             core.clipboard.accepts.borrow_mut().remove(&id.0);
+            // A destroyed For container takes its composed header with
+            // it; the entry would otherwise outlive the widget it holds.
+            core.tables.remove(&id.0);
             // A destroyed anchor takes its context attachment with it (menu
             // ITEMS are never destroyed): the popover unparents BEFORE the
             // widget leaves its container, and a dangling open-context claim
@@ -5692,12 +5901,51 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // `selection_bounds()` normalizes; the marks keep the direction.
             buffer.select_range(&stop, &start);
         }
-        ApplyOp::SetColumnHeaders { .. } => {
-            // STORED NOWHERE, DRAWN NOWHERE — YET: the details-view
-            // header lowering is this backend's breadth slice
-            // (docs/tables-plan.md; the table depth stub in the Stage
-            // impl below is the loud half). Consuming the record keeps
-            // the apply match total over the vocabulary.
+        ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {
+            // kaya's own header row over the For's stamped children
+            // (docs/tables-plan.md decision 6). The whole bar is ONE
+            // record, so this arm is idempotent: the cells are rebuilt
+            // only when the column COUNT moves, and a sort flip is a
+            // relabel plus a fresh tag.
+            let Some(NativeWidget::Column(column)) = core.widgets.get(&id) else {
+                return;
+            };
+            let column = column.clone();
+            let rebuild = !core
+                .tables
+                .get(&id.0)
+                .is_some_and(|t| children_of(&t.header).len() == titles.len());
+            if rebuild {
+                if let Some(old) = core.tables.remove(&id.0) {
+                    column.remove(&old.header);
+                    column.remove(&old.divider);
+                }
+                let table = build_table(
+                    &core.occurrences,
+                    titles.len(),
+                    Rc::new(RefCell::new(tag.clone())),
+                );
+                core.tables.insert(id.0, table);
+            }
+            let table = core.tables.get(&id.0).expect("just built");
+            *table.tag.borrow_mut() = tag;
+            for (index, cell) in children_of(&table.header).into_iter().enumerate() {
+                // The indicator rides the title, so `columns_presented`
+                // reads BOTH out of the toolkit's own text.
+                let mut text = titles[index].clone();
+                if sorted as usize == index {
+                    text.push(' ');
+                    text.push(if direction == 0 { '\u{25B2}' } else { '\u{25BC}' });
+                }
+                if let Some(label) = cell
+                    .downcast_ref::<gtk4::Button>()
+                    .and_then(|b| b.child())
+                    .and_then(|c| c.downcast::<gtk4::Label>().ok())
+                {
+                    label.set_text(&text);
+                }
+            }
+            reflow_table(core, id.0);
         }
         ApplyOp::SetAppIdentity(identity) => {
             // THE APP'S NAME AND ITS MARK, GTK's half
@@ -6938,6 +7186,13 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // rule at all (see set_container_inset).
         let container_inset_css = gtk4::CssProvider::new();
         watch_css_errors(&container_inset_css, &css_error);
+        // The table header's rules are STATIC, so this provider is loaded
+        // once and never held: the display owns it. Its own provider and
+        // never `css`, which the window-inset arm rewrites whole (the
+        // hazard typeface_css already carries).
+        let table_css = gtk4::CssProvider::new();
+        watch_css_errors(&table_css, &css_error);
+        load_kaya_css(&table_css, "table header", TABLE_CSS, &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
@@ -6957,6 +7212,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &typeface_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &table_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
@@ -7146,6 +7406,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
                 rows: Vec::new(),
+                tables: HashMap::new(),
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -8614,20 +8875,156 @@ impl crate::harness::Stage for GtkStage {
     }
 
 
-    // The table verbs (docs/tables-plan.md): the synthesized-header
-    // lowering is this backend's breadth slice; until it lands the
-    // scene is a depth stub, ledgered open in docs/deferred.md.
-    fn columns_presented(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("table")
+    // The table verbs (docs/tables-plan.md). All four are TREE READS of
+    // the header this backend composed and the rows the stamp parented,
+    // so none of them can agree with a model copy.
+    fn columns_presented(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.columns.len()) else {
+                return "<no such target>".to_string();
+            };
+            // Empty when no table rendered — the header row is what this
+            // reads, and a container with no columns declared has none.
+            let Some(header) = table_header(&core.columns[i]) else {
+                return String::new();
+            };
+            let mut titles = Vec::new();
+            let mut indicator = String::new();
+            for (index, cell) in children_of(&header).into_iter().enumerate() {
+                let text = header_cell_text(&cell);
+                if let Some(title) = text.strip_suffix(" \u{25B2}") {
+                    titles.push(title.to_string());
+                    indicator = format!(" ^{index}");
+                } else if let Some(title) = text.strip_suffix(" \u{25BC}") {
+                    titles.push(title.to_string());
+                    indicator = format!(" v{index}");
+                } else {
+                    titles.push(text);
+                }
+            }
+            format!("{}{indicator}", titles.join("|"))
+        })
     }
-    fn row_cells(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("table")
+
+    fn row_cells(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.columns.len()) else {
+                return "<no such target>".to_string();
+            };
+            // Child order as the toolkit holds it, both levels — the
+            // registries are creation-ordered and cannot see a move.
+            table_rows(&core.columns[i])
+                .into_iter()
+                .map(|row| {
+                    children_of(&row)
+                        .into_iter()
+                        .filter_map(|cell| {
+                            let label = cell.downcast::<gtk4::Label>().ok()?;
+                            core.labels
+                                .iter()
+                                .any(|l| l == &label)
+                                .then(|| label.text().to_string())
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .collect::<Vec<_>>()
+                .join("|")
+        })
     }
-    fn column_edges(&self, _: crate::harness::Target, _: usize) -> String {
-        crate::depth_stub("table")
+
+    fn column_edges(&self, t: crate::harness::Target, want: usize) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.columns.len()) else {
+                return "<no such target>".to_string();
+            };
+            let column = core.columns[i].clone();
+            // Pending resizes must land before any of this means
+            // anything; the first read after mount otherwise sees zeros.
+            while glib::MainContext::default().iteration(false) {}
+            let Some(header) = table_header(&column) else {
+                return "no columns declared on this container".to_string();
+            };
+            // kaya composes this header, so its cells are IN the claim
+            // (the native mac path, whose header is NSTableView's own,
+            // clusters cells alone). The header's LABELS, not its
+            // buttons — see header_cell_label.
+            let mut lines = vec![
+                children_of(&header)
+                    .into_iter()
+                    .map(|cell| {
+                        header_cell_label(&cell).map_or(cell, |l| l.upcast())
+                    })
+                    .collect::<Vec<_>>(),
+            ];
+            lines.extend(table_rows(&column).iter().map(children_of));
+            let target: gtk4::Widget = column.clone().upcast();
+            let mut edges: Vec<f64> = Vec::new();
+            // The narrowest line decides the span: one line that expands
+            // while the rest hug would otherwise answer for all of them.
+            let mut drawn = f64::MAX;
+            for line in &lines {
+                let mut end = None;
+                for cell in line {
+                    let Some(rect) = cell.compute_bounds(&target) else {
+                        return "the toolkit places no cell here yet".to_string();
+                    };
+                    edges.push(f64::from(rect.x()));
+                    end = Some(f64::from(rect.x()) + f64::from(rect.width()));
+                }
+                if let Some(end) = end {
+                    drawn = drawn.min(end);
+                }
+            }
+            if edges.is_empty() {
+                return "no cells".to_string();
+            }
+            edges.sort_by(|a, b| a.total_cmp(b));
+            let mut clusters: Vec<f64> = Vec::new();
+            for x in edges {
+                match clusters.last() {
+                    Some(last) if x - last <= 2.0 => {}
+                    _ => clusters.push(x),
+                }
+            }
+            if clusters.len() != want {
+                let at: Vec<i64> = clusters.iter().map(|x| x.round() as i64).collect();
+                return format!(
+                    "{} cell edge clusters at {at:?}px, wanted {want}",
+                    clusters.len()
+                );
+            }
+            // ...AND THE TABLE SPANS ITS TRACK. Alignment alone cannot
+            // see a content-hugging table: every cluster stays exactly
+            // right while the table draws in a corner of its viewport.
+            let track = child_track(&target).unwrap_or_else(|| f64::from(column.width()));
+            if drawn < track - 2.0 {
+                return format!("draws {}px of a {}px track", drawn.round(), track.round());
+            }
+            String::new()
+        })
     }
-    fn header_click(&self, _: crate::harness::Target, _: u32) {
-        crate::depth_stub("table")
+
+    fn header_click(&self, t: crate::harness::Target, column: u32) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let header = table_header(&core.columns[i]).unwrap_or_else(|| {
+                panic!("kaya: header_click on {t:?}, which declares no columns")
+            });
+            let cells = children_of(&header);
+            let cell = cells.get(column as usize).unwrap_or_else(|| {
+                panic!(
+                    "kaya: header_click column {column} on {t:?}, which presents {} columns",
+                    cells.len()
+                )
+            });
+            // The user's own route: a header cell IS a GtkButton, so
+            // this is `press`'s emit_clicked and the handler that emits
+            // sort_requested is the one the pointer would have run.
+            cell.downcast_ref::<gtk4::Button>()
+                .expect("kaya composed the header from buttons")
+                .emit_clicked();
+        });
     }
 
     fn child_texts(&self, t: crate::harness::Target) -> String {

@@ -6,8 +6,10 @@ the scene; validate-mac and the full matrix ALL PASS). 2026-08-21:
 decision 5 REVISED (headers at every width — the degrade died before
 its first commit), the Compose lowering rebuilt content-sized, the
 expect_column_edges observable added, and the android phone legs
-wired. The GTK and WinUI breadth slices are held open by the ledger's
-DEPTH STUB entries. DESIGN.md's 2026-07-24 survey ratified the shape
+wired. 2026-08-21, later the same day: the GTK, WinUI and iOS
+slices all landed (three agents in parallel worktrees, each lane
+green) — every backend now lowers tables and every lane runs the
+byte-shared scene; no DEPTH STUB entries remain open. DESIGN.md's 2026-07-24 survey ratified the shape
 this plan implements: "Table is not a separate widget admission: it
 is column props on the existing list vocabulary, lowered richly where
 the size class and the platform have the idiom and degraded to a
@@ -78,19 +80,31 @@ is a separate admission if a real app ever needs one).
    panes-style size-class ruling that no longer applies to tables).
 
 6. **Per-backend lowerings** (depth first on mac, then breadth):
-   - macOS/iPadOS regular: SwiftUI `Table` (NSTableView's wrapper —
-     the native headers, resize, and sort affordances are the point).
-     Dynamic column count needs `TableColumnForEach` (macOS 14.4+,
-     iOS 17.4+); below that availability floor the synthesized-header
-     tier serves, which only affects iPads on 16.0–17.3.
-   - GTK: to be probed live before committing — GtkColumnView is the
-     native construct but demands a model/factory architecture the
-     stamped-children pipeline does not have; the likely landing is
-     the synthesized header (SizeGroups aligning header cells with row
-     cells) unless the probe says ColumnView can be fed per-child.
-   - WinUI: the details-view lineage hand-rolled — a header Grid above
-     the rows, star-sized columns shared between header and cells
-     (the Column container is already a Grid there).
+   - macOS: SwiftUI `Table` always (NSTableView's wrapper — the native
+     headers, resize, and sort affordances are the point; no compact
+     mode exists there). iOS/iPadOS (landed 2026-08-21): the native
+     `Table` at REGULAR width and above `TableColumnForEach`'s 17.4
+     floor; kaya's synthesized tier at every compact width and below
+     the floor — size class first, availability second, so an iPad in
+     a compact split-screen window takes the synthesized tier at any
+     OS version. Compact is not a degrade: the declared columns are
+     all drawn; it is the tier that can draw them, since the native
+     Table collapses to a first-column list there.
+   - GTK: PROBED 2026-08-21 and the answer was NO — GtkColumnView's
+     list items own their children, so a stamped widget cannot be fed
+     to one at all (docs/traps.md). Landed as the synthesized header
+     over a per-column GtkSizeGroup with hexpand cells, which the
+     toolkit turns into floor-plus-equal-leftover by itself (measured
+     at two widths, delta constant); GtkGrid does the same arithmetic
+     but cannot host the stamped Row boxes.
+   - WinUI: the details-view lineage hand-rolled — a header Grid and a
+     rule as two more children of the For's own Grid, with MEASURED
+     pixel tracks shared between header and cells (landed 2026-08-21).
+     Not star sizing and not SharedSizeGroup: WinUI's Grid has no
+     SharedSizeGroup (WPF only), so the two surfaces cannot share
+     tracks declaratively, and star-with-MinWidth resolves to equal
+     columns clamped up at content rather than to this decision's
+     floor-plus-distribute.
    - Compose: synthesized header over FLOORED-AND-DISTRIBUTED columns
      — DESIGN.md already files this as lowering tier 3 (Material
      dropped the component). Landed 2026-08-21 as one custom Layout: a
@@ -116,13 +130,15 @@ is a separate admission if a real app ever needs one).
    of the viewport empty: alignment alone cannot see it. macOS native
    columns add user resize on top (the affordance the touch tiers
    lack); its header is NSTableView's own and aligns with its cells by
-   construction, so that path clusters cells alone. All four negatives
-   were WATCHED FAILING 2026-08-21 (cluster + span, native mac +
-   Compose), and the watching earned its keep immediately: on the
-   native path the cell BOXES are Table-placed and cannot drift, so a
-   padding perturbation correctly did not fire — the cluster half's
-   live protection there is the COUNT (a column that never renders),
-   while the synthesized tiers' negatives moved real placement.
+   construction, so that path clusters cells alone. Every backend's
+   negatives were WATCHED FAILING 2026-08-21 (cluster + span on native
+   mac, Compose, GTK, WinUI, and both iOS tiers — one tier perturbed
+   at a time with the other device's leg watched staying green), and
+   the watching earned its keep immediately: on the native path the
+   cell BOXES are Table-placed and cannot drift, so a padding
+   perturbation correctly did not fire — the cluster half's live
+   protection there is the COUNT (a column that never renders), while
+   the synthesized tiers' negatives moved real placement.
 
 7. **Construction surface.** The declaration and the click handler
    ride the For's own construction — Rust's statement form allocates

@@ -76,6 +76,7 @@ for arg in "$@"; do
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
         split_rust|split_python|split_go|split_csharp|split_java) SUITE="$arg" ;;
         panes_rust|panes_python|panes_go|panes_csharp|panes_java) SUITE="$arg" ;;
+        table_rust|table_python|table_go|table_csharp|table_java) SUITE="$arg" ;;
         listdetail_rust|listdetail_python|listdetail_go|listdetail_csharp|listdetail_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
@@ -310,7 +311,7 @@ timing vm-ready
 # because they encode per-language coverage decisions. The class this
 # kills: four hand-maintained lists in this file, where a forgotten
 # entry shipped every artifact except the one a leg needed.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend
 # can be validated before nine guests exist — the deploy-win twin of
@@ -1647,6 +1648,21 @@ case "$SUITE" in
         run_suite reorder_go
         run_suite reorder_csharp
         run_suite reorder_java
+        # The table scene (docs/tables-plan.md): the details-view header
+        # over floored-and-distributed columns, and a header click that
+        # only ASKS. Pooled beside reorder, its nearest sibling — a For
+        # of celled rows whose moves come from the guest: no typed
+        # input, no window close, and `header_click` is an automation
+        # Invoke on the header button rather than an OS-global press.
+        #
+        # The header cells are Buttons, whose default style lives in
+        # XamlControlsResources, so the go and csharp launchers take the
+        # pri-adjacency shape (docs/traps.md).
+        run_suite table_rust
+        run_suite table_python
+        run_suite table_go
+        run_suite table_csharp
+        run_suite table_java
         run_suite feed_rust
         run_suite feed_python
         run_suite feed_go

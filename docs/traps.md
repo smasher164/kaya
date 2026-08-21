@@ -4039,3 +4039,70 @@ visible/active/focus plus X's focus window — added to KAYA_UNDO_TRACE's
 timeout branch, where it stays. If typed keys ever vanish on the x11
 leg again, read that trace FIRST: active=false with the right focus
 widget is this trap; a wrong focus widget is a different one.
+
+
+## GtkColumnView cannot host kaya's stamped children (2026-08-21)
+
+MEASURED in the lane's own container, not reasoned. A `GtkListItem`
+OWNS its child, so handing a `GtkSignalListItemFactory` a widget
+kaya's stamp already parented trips
+
+    Gtk-CRITICAL gtk_widget_set_parent:
+        assertion '_gtk_widget_get_parent (widget) == NULL' failed
+
+and the list item stays empty: the labels keep their kaya parent and
+the ColumnView draws nothing. Two more facts from the same run, each
+fatal alone — `setup` fires once per VISIBLE item, driven by the model
+and the recycler rather than by kaya's stamp (so one widget cannot be
+split across the recycler), and the MODEL is the order authority where
+kaya's core owns order (`collection_move` -> `ApplyOp::MoveChild` ->
+`gtk_box_reorder_child_after`). That is why the GTK table is the
+SYNTHESIZED header of docs/tables-plan.md decision 6 and not the
+native construct. Re-probing costs a session.
+
+BESIDE IT, THE PART WORTH REUSING: GtkBox + one horizontal
+GtkSizeGroup per column + `hexpand` on every cell IS
+floor-plus-equal-leftover, exactly, and the toolkit does the
+arithmetic. Measured at two widths on one tree: the columns' width
+DELTA stayed constant (112px) across a 500px window change while each
+column took +250, and a column's header cell and every row's cell
+shared an x TO THE PIXEL. GtkGrid with hexpand columns does the same
+arithmetic (delta constant at 146) but cannot host kaya's stamped Row
+boxes without dissolving them.
+
+## A thread_local holding a XAML object aborts the process at exit, AFTER the scene has passed (2026-08-21, second bite)
+
+On Windows, Rust TLS destructors still run during `process::exit` (TLS
+callbacks), and by then `Application::Start` has returned and XAML's
+apartment is dead. Releasing a XAML COM reference there is an access
+violation the CRT turns into `0xC0000409` (`FAST_FAIL_FATAL_APP_EXIT`).
+The signature is unmistakable and useless: the guest prints
+`KAYA_SELFTEST: OK`, then `EXIT=-1073740791`, and nothing anywhere says
+why — the leg fails on the exit code alone.
+
+MEASURED TWICE. `APP_ICON_BITMAP` (a `BitmapImage`) on every identity
+leg, 2026-08-18, found by bisecting. `TABLES` (a header Grid, a rule
+and the header cell Buttons) on the first windows table leg,
+2026-08-21 — the comment recording the first incident was three
+screens away from the new thread_local and nobody read it.
+
+THE RULE: any thread_local in the WinUI backend that can hold a XAML
+handle is drained and `std::mem::forget`-ed in `run_core`, beside
+`CORE` and `APP_ICON_BITMAP`. The process reclaims the memory; nothing
+else can reclaim the apartment.
+
+## An observable with no discriminator cannot be asserted onto a device (2026-08-21)
+
+Decision 5 took the size class out of `expect_columns` so the table
+scene would be byte-identical everywhere; the cost, paid on the iOS
+slice, is that the iPad leg cannot say WHICH tier drew it. The two pad
+legs beside it (menus, listdetail) each append a literal naming the
+regular arm; the table pad leg has no such literal available, because
+the design deliberately made the tiers indistinguishable. When a
+design removes the discriminator on purpose, the only remaining proof
+that a device took the arm you think it took is a ONE-ARM PERTURBATION
+with the other device's leg watched staying green — and that has to be
+redone by hand whenever the tier routing changes, because no gate
+holds it. The routing lives in KayaTableSurface; if it moves, redo the
+two perturbations from the iOS slice report before believing the pad
+leg exercises the native Table.

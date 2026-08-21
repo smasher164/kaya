@@ -1,3 +1,13 @@
+# ITS OWN ROOT, SAID OUT LOUD. The repo workspace already `exclude`s
+# this package and it already carries its own Cargo.lock — but exclusion
+# only stops cargo at THAT manifest, and it keeps walking up. From a git
+# worktree nested under the repo (.claude/worktrees/<id>), the next
+# manifest up is the MAIN checkout's, whose exclude list names a path
+# that does not match, so every `cargo run` here dies with "current
+# package believes it's in a workspace when it's not" — taking
+# gen-bindings.sh, gates.sh and deploy-win.sh with it.
+[workspace]
+
 [package]
 name = "kaya-bindgen"
 version = "0.0.0"

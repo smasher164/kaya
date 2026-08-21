@@ -31,7 +31,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests.
 DEPTH_SCENES=""
@@ -998,6 +998,20 @@ for proto in x11 wayland; do
     run "$proto" nav-ocaml env KAYA_SELFTEST=nav KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/nav.exe
     run "$proto" nav-haskell env KAYA_SELFTEST=nav "$(hs_bin nav)"
     run "$proto" nav-java env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The table scene: column headers + click-to-sort on the For
+    # vocabulary (docs/tables-plan.md), every language this lane runs.
+    # The C floor stays out with the other sugar-tier scenes — its
+    # guests document the explicit wire (see the ledger).
+    run "$proto" table-rust env KAYA_SELFTEST=table "$CARGO_TARGET_DIR/debug/examples/table"
+    run "$proto" table-python env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
+        python3 guests/python/table.py
+    run "$proto" table-go env KAYA_SELFTEST=table /tmp/go-guests/kaya-go
+    run "$proto" table-csharp env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" table-ocaml env KAYA_SELFTEST=table KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/table.exe
+    run "$proto" table-haskell env KAYA_SELFTEST=table "$(hs_bin table)"
+    run "$proto" table-java env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \

@@ -29,7 +29,8 @@ use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandl
 // halves of one band are reconciled here or nowhere.
 use bindings::Microsoft::UI::Windowing::TitleBarHeightOption;
 use bindings::Microsoft::UI::Xaml::Controls::{
-    AppBarButton, Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, CommandBar,
+    AppBarButton, Button, CheckBox, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
+    ComboBoxItem, CommandBar,
     ContentDialog,
     ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
     ICommandBarElement, IconElement, Image, MenuBar,
@@ -1245,6 +1246,10 @@ fn drain_transactions() {
                 .store(false, std::sync::atomic::Ordering::Relaxed);
             rebuilt.expect("kaya: rebuilding the menu chrome failed");
         }
+        // ONE coalesced table pass per drain, same shape: a table's row
+        // set, its cells' texts and its declared titles can all have
+        // moved, and the column tracks are computed from all three.
+        sync_tables(core);
     });
 }
 
@@ -1723,10 +1728,24 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     };
     let empty = Vec::new();
     let order = core.child_order.get(&parent).unwrap_or(&empty);
+    // A DECLARED TABLE OWNS THE FIRST TWO TRACKS — the header row and the
+    // rule under it — and every stamped row shifts down by them. This is
+    // the only place a Column's children are placed, so it is the only
+    // place that can know (docs/tables-plan.md).
+    let head = if vertical && TABLES.with_borrow(|t| t.contains_key(&parent.0)) {
+        2
+    } else {
+        0
+    };
 
     if vertical {
         let defs = grid.RowDefinitions()?;
         defs.Clear()?;
+        for _ in 0..head {
+            let def = RowDefinition::new()?;
+            def.SetHeight(track(0.0))?;
+            defs.Append(&def)?;
+        }
         for child in order {
             let def = RowDefinition::new()?;
             def.SetHeight(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
@@ -1753,7 +1772,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         let element: FrameworkElement = widget.element()?.cast()?;
         let index = index as i32;
         if vertical {
-            Grid::SetRow(&element, index)?;
+            Grid::SetRow(&element, index + head)?;
         } else {
             Grid::SetColumn(&element, index)?;
         }
@@ -1898,6 +1917,409 @@ fn track(weight: f64) -> GridLength {
             GridUnitType: GridUnitType::Auto,
         }
     }
+}
+
+// ---------------------------------------------------------------------
+// TABLES: the details-view lowering (docs/tables-plan.md decision 6).
+//
+// The For's container is already a Grid here, so the header is two more
+// children of it — a header Grid in row 0, a rule in row 1 — and the
+// stamped rows shift down two tracks (`reindex`, which is the only thing
+// that places a Column's children).
+//
+// THE COLUMN WIDTHS ARE COMPUTED, NOT DECLARED, and that is forced:
+// WinUI's Grid has no SharedSizeGroup (a WPF-only feature), so the header
+// and the row Grids cannot share tracks, and star sizing with per-column
+// MinWidth resolves to EQUAL columns clamped up at content — not to the
+// plan's content-floor-plus-equal-leftover. So each column's floor is
+// measured off the real elements and the leftover is divided here, and
+// header and rows get the same explicit pixel tracks.
+// ---------------------------------------------------------------------
+
+/// The gap between adjacent columns, the rule's number on every
+/// synthesized tier.
+const TABLE_COL_GAP: f64 = 24.0;
+
+/// A header cell. PARSED RATHER THAN CONSTRUCTED because `FontWeight` and
+/// the flat chrome are vtable pads in the generated bindings — the
+/// `caption_title_text` precedent, and the same flag: the cleaner home is
+/// three members in tools/winui-bindgen.
+///
+/// A Button and not a TextBlock so the header has a real activation path:
+/// its Click is what emits, and `header_click` drives it through the
+/// button's own automation peer (the alert's press precedent).
+const TABLE_HEADER_CELL_XAML: &str = concat!(
+    "<Button xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Background=\"Transparent\" BorderThickness=\"0\" Padding=\"0,2,0,2\" ",
+    "FontWeight=\"SemiBold\" HorizontalAlignment=\"Stretch\" ",
+    "HorizontalContentAlignment=\"Left\"/>"
+);
+
+/// The rule under the header row. A Grid with a Background rather than a
+/// Border: `Border` is not in the bindgen filter, and the brush comes out
+/// of the markup so no `SolidColorBrush` projection is needed either.
+const TABLE_RULE_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Height=\"1\" Background=\"#40808080\" HorizontalAlignment=\"Stretch\"/>"
+);
+
+/// The ascending / descending indicator, appended to the sorted column's
+/// title. The GLYPHS the other synthesized tiers use; `columns_presented`
+/// reads them back off the control and turns them into the `^N`/`vN` the
+/// scene compares.
+const TABLE_ASC: &str = " \u{25B2}";
+const TABLE_DESC: &str = " \u{25BC}";
+
+/// One declared table's native side.
+///
+/// OUTSIDE `CoreState` FOR THE REASON HIGHLIGHT_TEXT IS (see that
+/// thread_local): the redistribution pass runs from a LayoutUpdated
+/// handler, and a handler that touched `CORE` would be one synchronous
+/// layout away from aborting the process. Everything the geometry pass
+/// needs is here, so that path never asks the core anything.
+struct WinTable {
+    titles: Vec<String>,
+    sorted: u32,
+    direction: u32,
+    /// The click tag, handed back verbatim with the column index.
+    tag: Vec<u8>,
+    /// The For's own container.
+    grid: Grid,
+    header: Grid,
+    rule: Grid,
+    /// The header cells, one per title, in visual order.
+    cells: Vec<Button>,
+    /// The stamped row containers, refreshed from the core each drain.
+    rows: Vec<Grid>,
+    /// The container's Padding, which the track arithmetic sits inside.
+    pad: f64,
+    /// Each column's MEASURED content width — the floor.
+    floors: Vec<f64>,
+    /// The widths last written, so the layout pass can tell a real change
+    /// from a no-op and stop invalidating layout.
+    applied: Vec<f64>,
+    /// WHICH ROWS THOSE WIDTHS WERE WRITTEN TO. Without it the no-op
+    /// early-out above swallows a row ARRIVING at unchanged widths — the
+    /// new row would keep its container default (8dip gaps, Auto tracks)
+    /// while every older row carried the table's, and no width has moved
+    /// to say so.
+    stamped: Vec<Grid>,
+    /// The floors need re-measuring: set by every drain that could have
+    /// moved content, cleared by the first layout pass that gets a real
+    /// answer out of the controls.
+    dirty: bool,
+    /// Measures spent waiting for that real answer. A measure taken
+    /// before the tree is live reads ZEROS — the baseline-compensation
+    /// lesson — and zero floors would leave the columns evenly split with
+    /// no content floor at all, passing every observable. So a zero
+    /// keeps the request open; this bounds how many layout passes that
+    /// may cost, because each measure invalidates layout and asks for
+    /// another one.
+    probes: u32,
+}
+
+/// How many layout passes a table may spend trying to measure real
+/// content before it settles for what it has.
+const TABLE_PROBE_LIMIT: u32 = 8;
+
+thread_local! {
+    static TABLES: RefCell<HashMap<u64, WinTable>> = RefCell::new(HashMap::new());
+}
+
+/// The header cell's presented text: the title, plus the indicator when
+/// this column is the sorted one.
+fn table_cell_text(titles: &[String], sorted: u32, direction: u32, column: usize) -> String {
+    let mut text = titles[column].clone();
+    if sorted as usize == column && sorted != crate::wire::SORT_NONE {
+        text.push_str(if direction == 0 { TABLE_ASC } else { TABLE_DESC });
+    }
+    text
+}
+
+/// Mint (or re-mint) a table's header chrome and record the declaration.
+/// The rows and the tracks are not touched here — `reindex` places the
+/// children and `table_pass` sizes the columns.
+fn declare_table(
+    core: &CoreState,
+    id: WidgetId,
+    sorted: u32,
+    direction: u32,
+    titles: Vec<String>,
+    tag: Vec<u8>,
+) -> windows_core::Result<()> {
+    let Some(NativeWidget::Column(grid)) = core.widgets.get(&id) else {
+        return Ok(());
+    };
+    let grid = grid.clone();
+    let mut minted: Option<(Grid, Grid, Vec<Button>)> = None;
+    let remint = TABLES.with_borrow(|tables| match tables.get(&id.0) {
+        Some(live) => live.titles.len() != titles.len(),
+        None => true,
+    });
+    if remint {
+        let header = Grid::new()?;
+        header.SetColumnSpacing(TABLE_COL_GAP)?;
+        header.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        let rule: Grid = XamlReader::Load(&HSTRING::from(TABLE_RULE_XAML))?.cast()?;
+        let mut cells = Vec::new();
+        for (column, _) in titles.iter().enumerate() {
+            let cell: Button = XamlReader::Load(&HSTRING::from(TABLE_HEADER_CELL_XAML))?.cast()?;
+            let def = ColumnDefinition::new()?;
+            def.SetWidth(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
+            header.ColumnDefinitions()?.Append(&def)?;
+            Grid::SetColumn(&cell.cast::<FrameworkElement>()?, column as i32)?;
+            header.Children()?.Append(&cell)?;
+            // THE HEADER'S OWN ACTIVATION PATH. A click is a REQUEST: the
+            // tag goes back verbatim with the column index and nothing on
+            // screen moves — the indicator arrives with the guest's
+            // re-declaration or not at all.
+            let sink = core.occurrences.clone();
+            let owner = id.0;
+            let handler = RoutedEventHandler::new(move |_, _| {
+                TABLES.with(|tables| {
+                    if let Ok(tables) = tables.try_borrow() {
+                        if let Some(table) = tables.get(&owner) {
+                            sink.send_sort_tag(&table.tag, column as u32);
+                        }
+                    }
+                });
+                Ok(())
+            });
+            cell.Click(&handler)?;
+            cells.push(cell);
+        }
+        minted = Some((header, rule, cells));
+    }
+    let fresh = minted.is_some();
+    TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
+        if let Some((header, rule, cells)) = minted {
+            tables.insert(
+                id.0,
+                WinTable {
+                    titles: titles.clone(),
+                    sorted,
+                    direction,
+                    tag,
+                    grid: grid.clone(),
+                    header,
+                    rule,
+                    cells,
+                    rows: Vec::new(),
+                    pad: 0.0,
+                    floors: Vec::new(),
+                    applied: Vec::new(),
+                    stamped: Vec::new(),
+                    dirty: true,
+                    probes: 0,
+                },
+            );
+        } else if let Some(table) = tables.get_mut(&id.0) {
+            table.titles = titles.clone();
+            table.sorted = sorted;
+            table.direction = direction;
+            table.tag = tag;
+            table.dirty = true;
+            table.probes = 0;
+        }
+        let table = tables.get_mut(&id.0).expect("just inserted or updated");
+        for (column, cell) in table.cells.iter().enumerate() {
+            let text = table_cell_text(&table.titles, table.sorted, table.direction, column);
+            cell.SetContent(&PropertyValue::CreateString(&HSTRING::from(text))?)?;
+        }
+        Ok(())
+    })?;
+    if fresh {
+        let children = grid.Children()?;
+        let (header, rule) = TABLES.with_borrow(|tables| {
+            let table = &tables[&id.0];
+            (table.header.clone(), table.rule.clone())
+        });
+        Grid::SetRow(&header.cast::<FrameworkElement>()?, 0)?;
+        Grid::SetRow(&rule.cast::<FrameworkElement>()?, 1)?;
+        children.Append(&header)?;
+        children.Append(&rule)?;
+        // The first real layout is where a measure stops reading zeros
+        // (the baseline-compensation lesson), and LayoutUpdated is where
+        // a later resize is seen — this backend projects no SizeChanged.
+        let loaded_id = id.0;
+        let loaded = RoutedEventHandler::new(move |_, _| {
+            table_pass(loaded_id);
+            Ok(())
+        });
+        grid.Loaded(&loaded)?;
+        let laid_id = id.0;
+        let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            table_pass(laid_id);
+            Ok(())
+        });
+        grid.LayoutUpdated(&laid)?;
+    }
+    reindex(core, id)
+}
+
+/// Refresh what the geometry pass needs from the core — the live row
+/// containers in track order and the container's padding — and mark the
+/// floors stale. Called once per drain, the `menus_touched` shape.
+fn sync_tables(core: &CoreState) {
+    let ids: Vec<u64> = TABLES.with_borrow(|tables| tables.keys().copied().collect());
+    for id in ids {
+        let mut rows = Vec::new();
+        if let Some(order) = core.child_order.get(&WidgetId(id)) {
+            for child in order {
+                if let Some(NativeWidget::Row(grid)) = core.widgets.get(child) {
+                    rows.push(grid.clone());
+                }
+            }
+        }
+        let pad = container_padding(core, WidgetId(id));
+        TABLES.with_borrow_mut(|tables| {
+            if let Some(table) = tables.get_mut(&id) {
+                table.rows = rows;
+                table.pad = pad;
+                table.dirty = true;
+                table.probes = 0;
+            }
+        });
+        table_pass(id);
+    }
+}
+
+/// Measure each column's content width — the widest of the header cell
+/// and that column's body cells, at their natural size.
+fn table_measure(table: &WinTable) -> windows_core::Result<Vec<f64>> {
+    let unbounded = bindings::Windows::Foundation::Size {
+        Width: f32::INFINITY,
+        Height: f32::INFINITY,
+    };
+    let mut floors = vec![0.0f64; table.titles.len()];
+    for (column, cell) in table.cells.iter().enumerate() {
+        cell.Measure(unbounded)?;
+        floors[column] = floors[column].max(f64::from(cell.DesiredSize()?.Width));
+    }
+    for row in &table.rows {
+        let children = row.Children()?;
+        for at in 0..children.Size()? {
+            let cell = children.GetAt(at)?;
+            let column = Grid::GetColumn(&cell.cast::<FrameworkElement>()?)? as usize;
+            if column >= floors.len() {
+                continue;
+            }
+            cell.Measure(unbounded)?;
+            floors[column] = floors[column].max(f64::from(cell.DesiredSize()?.Width));
+        }
+    }
+    Ok(floors)
+}
+
+/// THE GEOMETRY RULE, this backend's spelling: content is each column's
+/// FLOOR, the leftover track width divides equally across the columns,
+/// and header and rows take the same explicit tracks — so the cells share
+/// leading edges by construction and the table spans what it was given
+/// (docs/tables-plan.md decision 6; `column_edges` reads both halves back
+/// out of real layout).
+fn table_widths(table: &WinTable, track: f64) -> Vec<f64> {
+    let cols = table.floors.len();
+    let mut widths = table.floors.clone();
+    if cols == 0 {
+        return widths;
+    }
+    let content: f64 = widths.iter().sum();
+    let leftover = track - content - TABLE_COL_GAP * (cols as f64 - 1.0);
+    if leftover > 0.0 {
+        let per = leftover / cols as f64;
+        for w in &mut widths {
+            *w += per;
+        }
+    }
+    widths
+}
+
+/// Write one table's tracks onto the header and every row, if they moved.
+/// Idempotent BY DESIGN, because it runs from a layout callback: a write
+/// invalidates layout, and a pass that wrote unconditionally would never
+/// let the tree settle.
+fn table_stamp(table: &mut WinTable) -> windows_core::Result<()> {
+    let inner = table.grid.ActualWidth()? - 2.0 * table.pad;
+    if inner <= 0.0 {
+        // No track to divide — before the first layout, and again while
+        // the window is closing. Neither is a table to size.
+        return Ok(());
+    }
+    let widths = table_widths(table, inner);
+    if table.stamped == table.rows
+        && widths.len() == table.applied.len()
+        && widths
+            .iter()
+            .zip(&table.applied)
+            .all(|(a, b)| (a - b).abs() < 0.5)
+    {
+        return Ok(());
+    }
+    let stamp = |defs: &ColumnDefinitionCollection| -> windows_core::Result<()> {
+        defs.Clear()?;
+        for width in &widths {
+            let def = ColumnDefinition::new()?;
+            def.SetWidth(GridLength {
+                Value: *width,
+                GridUnitType: GridUnitType::Pixel,
+            })?;
+            defs.Append(&def)?;
+        }
+        Ok(())
+    };
+    stamp(&table.header.ColumnDefinitions()?)?;
+    for row in &table.rows {
+        row.SetColumnSpacing(TABLE_COL_GAP)?;
+        stamp(&row.ColumnDefinitions()?)?;
+    }
+    if trace_enabled() {
+        // FLOOR VERSUS SIZE, on the guest. `column_edges` proves the
+        // clusters and the span; only this says whether the floors were
+        // ever REAL — zero floors evenly split satisfy both halves while
+        // clipping any content wider than its share.
+        eprintln!(
+            "kaya: winui table {:?} floors {:?} widths {:?} inner {inner:.1} rows {}",
+            table.titles,
+            table.floors.iter().map(|w| w.round() as i64).collect::<Vec<_>>(),
+            widths.iter().map(|w| w.round() as i64).collect::<Vec<_>>(),
+            table.rows.len()
+        );
+    }
+    table.applied = widths;
+    table.stamped = table.rows.clone();
+    Ok(())
+}
+
+/// One table's measure-and-stamp. Reached from three places — the drain,
+/// the container's first layout, and every layout after it — so it is
+/// tolerant of a borrow it cannot take (the pass it skipped is the pass
+/// the next layout runs) and of a control that cannot be measured yet.
+fn table_pass(id: u64) {
+    TABLES.with(|tables| {
+        let Ok(mut tables) = tables.try_borrow_mut() else {
+            return;
+        };
+        let Some(table) = tables.get_mut(&id) else {
+            return;
+        };
+        if table.dirty {
+            match table_measure(table) {
+                Ok(floors) => {
+                    table.probes += 1;
+                    // A zero is "not measurable yet", never a real width:
+                    // the core refuses an empty title, so every column
+                    // has a header cell with ink in it.
+                    let real = floors.iter().all(|w| *w > 0.0);
+                    if real || table.floors.is_empty() {
+                        table.floors = floors;
+                    }
+                    table.dirty = !real && table.probes < TABLE_PROBE_LIMIT;
+                }
+                Err(_) => return,
+            }
+        }
+        let _ = table_stamp(table);
+    });
 }
 
 /// A user-driven back on the window's top entry: an intercept_back-armed
@@ -9524,6 +9946,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             core.grow.remove(&id);
             core.child_order.remove(&id);
+            // A destroyed table takes its header chrome with it: the
+            // entry holds XAML handles and a layout callback keyed on
+            // this id, and both outlive the container otherwise.
+            TABLES.with_borrow_mut(|tables| tables.remove(&id.0));
             if let Some(panel) = core.parents.remove(&id) {
                 let children = panel.Children()?;
                 let mut index = 0u32;
@@ -10023,12 +10449,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
         }
-        ApplyOp::SetColumnHeaders { .. } => {
-            // STORED NOWHERE, DRAWN NOWHERE — YET: the details-view
-            // header lowering is this backend's breadth slice
-            // (docs/tables-plan.md; the table depth stub in the Stage
-            // impl below is the loud half). Consuming the record keeps
-            // the apply match total over the vocabulary.
+        ApplyOp::SetColumnHeaders {
+            id,
+            sorted,
+            direction,
+            titles,
+            tag,
+        } => {
+            declare_table(core, id, sorted, direction, titles, tag)?;
         }
         ApplyOp::SetAppIdentity(identity) => {
             // TWO SINKS FROM ONE DECLARATION, which is this platform's
@@ -10998,6 +11426,16 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     APP_ICON_BITMAP.with_borrow_mut(|slot| {
         if let Some(bitmap) = slot.take() {
             std::mem::forget(bitmap);
+        }
+    });
+    // THE THIRD THREAD-LOCAL UNDER THAT RULE, and it walked into the trap
+    // above verbatim: a declared table's header Grid, rule and cell
+    // Buttons live in `TABLES`, and the first windows table leg printed
+    // `KAYA_SELFTEST: OK` and then died `0xc0000409` on the exit code
+    // alone (2026-08-21). Same remedy, same reason.
+    TABLES.with_borrow_mut(|tables| {
+        for (_, table) in tables.drain() {
+            std::mem::forget(table);
         }
     });
     // Unwind the App Runtime while the process is still healthy; leaving
@@ -12309,6 +12747,80 @@ impl WinUiStage {
     }
 }
 
+/// The declared table a `column#N` target names, or `None` when that
+/// container declared no columns — which is what the empty
+/// `columns_presented` answer means.
+#[cfg(feature = "harness")]
+fn table_of<T>(
+    core: &CoreState,
+    t: crate::harness::Target,
+    f: impl FnOnce(&WinTable) -> T,
+) -> Option<T> {
+    if !matches!(t.kind, crate::harness::TargetKind::Column) {
+        return None;
+    }
+    let i = crate::harness::try_resolve(t.index, core.columns.len())?;
+    let grid = core.columns[i].clone();
+    TABLES.with_borrow(|tables| tables.values().find(|table| table.grid == grid).map(f))
+}
+
+/// A table's stamped rows in the order the TOOLKIT places them — by
+/// attached track, never by the registry, because a sort is a MOVE and a
+/// creation-order registry cannot see one (expect_order's whole reason,
+/// one level up).
+#[cfg(feature = "harness")]
+fn table_rows_in_track_order(
+    core: &CoreState,
+    t: crate::harness::Target,
+) -> windows_core::Result<Option<Vec<Grid>>> {
+    let Some(grid) = table_of(core, t, |table| table.grid.clone()) else {
+        return Ok(None);
+    };
+    let children = grid.Children()?;
+    let mut rows: Vec<(i32, Grid)> = Vec::new();
+    for at in 0..children.Size()? {
+        if let Ok(row) = children.GetAt(at)?.cast::<Grid>() {
+            if core.rows.iter().any(|r| r == &row) {
+                let track = Grid::GetRow(&row.cast::<FrameworkElement>()?)?;
+                rows.push((track, row));
+            }
+        }
+    }
+    rows.sort_by_key(|(track, _)| *track);
+    Ok(Some(rows.into_iter().map(|(_, row)| row).collect()))
+}
+
+/// A control's string content, as the header cells carry it.
+#[cfg(feature = "harness")]
+fn content_string(content: &windows_core::IInspectable) -> windows_core::Result<String> {
+    let value: IReference<HSTRING> = content.cast()?;
+    Ok(value.Value()?.to_string())
+}
+
+/// The flex track a container's parent GAVE it — `widget_fills`' read,
+/// which is the half of the geometry claim a container that hugs its
+/// content would otherwise satisfy by shrinking the question.
+#[cfg(feature = "harness")]
+fn assigned_track(core: &CoreState, grid: &Grid) -> windows_core::Result<f64> {
+    let element: FrameworkElement = grid.cast()?;
+    let Ok(parent) = element.Parent()?.cast::<Grid>() else {
+        return grid.ActualWidth();
+    };
+    if core.columns.iter().any(|g| g == &parent) {
+        // A column stacks: every child is offered its whole width.
+        let padding = parent.Padding()?;
+        return Ok(parent.ActualWidth()? - padding.Left - padding.Right);
+    }
+    if core.rows.iter().any(|g| g == &parent) {
+        let at = Grid::GetColumn(&element)? as u32;
+        let defs = parent.ColumnDefinitions()?;
+        if at < defs.Size()? {
+            return defs.GetAt(at)?.ActualWidth();
+        }
+    }
+    grid.ActualWidth()
+}
+
 /// The element a `kind#index` target names, from the per-kind registry
 /// every WinUI verb resolves through — creation order, which is what
 /// `kind#index` means. `None` is "no such target", never a panic.
@@ -13579,20 +14091,177 @@ impl crate::harness::Stage for WinUiStage {
     }
 
 
-    // The table verbs (docs/tables-plan.md): the synthesized-header
-    // lowering is this backend's breadth slice; until it lands the
-    // scene is a depth stub, ledgered open in docs/deferred.md.
-    fn columns_presented(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("table")
+    // The table verbs (docs/tables-plan.md): the details-view lowering
+    // is `declare_table` and the pass around it; everything below reads
+    // what those actually built.
+
+    fn columns_presented(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            // THE HEADER'S OWN TEXT, never the declaration: the titles
+            // come back off the real controls and the indicator is
+            // recovered from the GLYPH one of them is carrying, so a
+            // header that never rendered reads empty rather than
+            // agreeing with the record that arrived.
+            let Some(cells) = table_of(core, t, |table| table.cells.clone()) else {
+                return Ok(String::new());
+            };
+            let mut titles = Vec::new();
+            let mut indicator = String::new();
+            for (column, cell) in cells.iter().enumerate() {
+                let shown = content_string(&cell.Content()?)?;
+                let title = if let Some(stem) = shown.strip_suffix(TABLE_ASC) {
+                    indicator = format!(" ^{column}");
+                    stem.to_string()
+                } else if let Some(stem) = shown.strip_suffix(TABLE_DESC) {
+                    indicator = format!(" v{column}");
+                    stem.to_string()
+                } else {
+                    shown
+                };
+                titles.push(title);
+            }
+            Ok(format!("{}{indicator}", titles.join("|")))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn row_cells(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("table")
+
+    fn row_cells(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            // The TOOLKIT's order on both levels — the tracks the rows
+            // and cells are actually placed in — because a sort is a
+            // MOVE and a creation-order registry cannot see one.
+            let Some(rows) = table_rows_in_track_order(core, t)? else {
+                return Ok("<no such target>".to_string());
+            };
+            let mut out = Vec::new();
+            for row in rows {
+                let children = row.Children()?;
+                let mut cells: Vec<(i32, String)> = Vec::new();
+                for at in 0..children.Size()? {
+                    let child = children.GetAt(at)?;
+                    if let Ok(block) = child.cast::<TextBlock>() {
+                        if core.labels.iter().any(|l| l == &block) {
+                            let column = Grid::GetColumn(&block.cast::<FrameworkElement>()?)?;
+                            cells.push((column, block.Text()?.to_string()));
+                        }
+                    }
+                }
+                cells.sort_by_key(|(column, _)| *column);
+                out.push(
+                    cells
+                        .into_iter()
+                        .map(|(_, text)| text)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
+            Ok(out.join("|"))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn column_edges(&self, _: crate::harness::Target, _: usize) -> String {
-        crate::depth_stub("table")
+
+    fn column_edges(&self, t: crate::harness::Target, want: usize) -> String {
+        Self::on_ui_read(move |core| {
+            let Some((grid, header, pad)) =
+                table_of(core, t, |table| (table.grid.clone(), table.header.clone(), table.pad))
+            else {
+                return Ok("<no such target>".to_string());
+            };
+            // Measure/arrange are lazy; force them or the first read
+            // after mount sees zeros (the child_shares precedent).
+            grid.UpdateLayout()?;
+            // CLUSTERS, from REAL placement: every cell's leading edge in
+            // the table's own space — kaya's header cells included, since
+            // this backend composes the header — through the transform,
+            // never through the tracks that were asked for.
+            let surface: UIElement = grid.cast()?;
+            let mut edges: Vec<f64> = Vec::new();
+            let mut push = |cell: &UIElement| -> windows_core::Result<()> {
+                let at = cell
+                    .TransformToVisual(&surface)?
+                    .TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+                edges.push(f64::from(at.X));
+                Ok(())
+            };
+            let header_cells = header.Children()?;
+            for at in 0..header_cells.Size()? {
+                push(&header_cells.GetAt(at)?)?;
+            }
+            let Some(rows) = table_rows_in_track_order(core, t)? else {
+                return Ok("<no such target>".to_string());
+            };
+            for row in &rows {
+                let children = row.Children()?;
+                for at in 0..children.Size()? {
+                    push(&children.GetAt(at)?)?;
+                }
+            }
+            if edges.is_empty() {
+                return Ok("no cells".to_string());
+            }
+            edges.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mut clusters: Vec<f64> = Vec::new();
+            for x in edges {
+                if clusters.last().is_none_or(|last| x - last > 2.0) {
+                    clusters.push(x);
+                }
+            }
+            if clusters.len() != want {
+                let seen: Vec<String> =
+                    clusters.iter().map(|x| format!("{}", x.round() as i64)).collect();
+                return Ok(format!(
+                    "cell edges cluster at [{}], wanted {want} columns",
+                    seen.join(",")
+                ));
+            }
+            // THE SPAN HALF, which alignment alone cannot see: a
+            // content-hugging table keeps every cluster exactly right
+            // while drawing in a corner of its viewport. The track is
+            // what the parent flex container GAVE this container; the
+            // drawn width is what the tracks actually resolved to.
+            let defs = header.ColumnDefinitions()?;
+            let mut drawn = header.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1));
+            for at in 0..defs.Size()? {
+                drawn += defs.GetAt(at)?.ActualWidth()?;
+            }
+            drawn += 2.0 * pad;
+            let track = assigned_track(core, &grid)?;
+            Ok(if track <= 0.0 || drawn >= track - 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "draws {}dip of a {}dip track",
+                    drawn.round() as i64,
+                    track.round() as i64
+                )
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn header_click(&self, _: crate::harness::Target, _: u32) {
-        crate::depth_stub("table")
+
+    fn header_click(&self, t: crate::harness::Target, column: u32) {
+        // THE HEADER BUTTON'S OWN INVOKE, so the emission comes out of
+        // the Click handler a user would have run — the flyout and
+        // alert presses' route. The handle is read out and the borrow
+        // dropped before the invoke, because the handler it runs reads
+        // the same table (the on_ui_bare lesson, one RefCell over).
+        let cell = Self::on_ui_read(move |core| {
+            Ok(table_of(core, t, |table| {
+                table.cells.get(column as usize).cloned()
+            })
+            .flatten())
+        });
+        let Ok(Some(cell)) = cell else {
+            panic!("kaya: header_click has no column {column} on {t:?}");
+        };
+        let _ = Self::on_ui_bare(move || {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::{
+                ButtonAutomationPeer, FrameworkElementAutomationPeer,
+            };
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&cell)?;
+            let peer: ButtonAutomationPeer = peer.cast()?;
+            peer.Invoke()
+        });
     }
 
     fn child_texts(&self, t: crate::harness::Target) -> String {

@@ -3202,9 +3202,13 @@ component, and Compose's implementation was removed pre-1.0, so the
 community libraries are re-derived from the deleted code; a Compose
 lowering is lowering tier 3, which kaya already ships in. So Table is
 not a separate widget admission: it is column props on the existing list
-vocabulary, lowered richly where the size class and the platform have
-the idiom and degraded to a plain list where they do not. Cost is a
-couple of props, not a milestone.
+vocabulary, lowered richly where the platform has the idiom and
+synthesized from kaya's own header where it does not — the columns are
+drawn at every width on every platform (the degrade half of this
+sentence died 2026-08-21, docs/tables-plan.md decision 5: Apple's
+compact collapse became the reason kaya does NOT use Apple's Table at
+compact width, rather than a rule to generalize). Cost is a couple of
+props, not a milestone.
 
 The first-admissions queue, post-v1 and in rough order: Grid (forms will
 demand cross-row alignment), TextArea, Canvas (with the surface-handle

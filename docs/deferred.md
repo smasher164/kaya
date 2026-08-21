@@ -4341,7 +4341,7 @@ with atomic lines it reads truth, and its refusal sentence is what
 cracked the case.
 
 ## Tables — the depth slice landed on mac; the fan-out is open (2026-08-20)
-KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows, expect_column_edges, column_edges, KayaSynthesizedTable
+KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows, expect_column_edges, column_edges, KayaSynthesizedTable, KayaTableSurface, GtkColumnView, SizeGroup, TABLES thread_local
 
 The plan is docs/tables-plan.md (DESIGN.md's ratified column-props
 shape); the wire (TX 45 set_column_headers, APPLY 35, occurrence 19
@@ -4375,19 +4375,75 @@ remembering. Open, per backend and surface:
   geometry rule precisely because its first draft (clusters alone)
   passed the content-hug cut. docs/tables-plan.md decisions 5 and 6
   carry the rulings.)
-- **DEPTH STUB: table on swiftui/ios** — wiring the iOS legs, where
-  compact widths take the SYNTHESIZED tier (decision 5 revised: the
-  native Table's first-column collapse hides declared columns, so
-  compact hosts get kaya's own header — KayaSynthesizedTable already
-  compiles for iOS) and regular iPads take the native Table; closes
-  when the iOS legs wire.
-- **DEPTH STUB: table on gtk** — GtkColumnView wants a model/factory
-  architecture the stamped-children pipeline does not have; probe
-  live first (the GTK panes precedent), likely landing the
-  synthesized header with SizeGroups; closes with the linux legs.
-- **DEPTH STUB: table on winui** — the details-view header Grid with
-  star-sized columns shared between header and cells; closes with
-  the windows legs.
+- ~~DEPTH STUB: table on swiftui/ios~~ (LANDED 2026-08-21: the tier
+  switch is KayaTableSurface reading horizontalSizeClass under
+  #if !os(macOS) — compact takes KayaSynthesizedTable (decision 5
+  revised: the native Table's first-column collapse hides declared
+  columns), regular takes the native Table where TableColumnForEach's
+  iOS 17.4 floor allows. The four verb arms lost their stubs and
+  changed nothing else: every read they make was already
+  cross-platform. tools/ios/run-sim.sh wires table in
+  IOS_SWIFT_SCENES and IOS_GO_SCENES plus a rust table-swiftui phone
+  leg and a table-swiftui-pad leg, the only leg in any lane that runs
+  the native Table. THE PAD LEG APPENDS NO EXTRA STEP, unlike the
+  menus and listdetail pad legs beside it, and that is decision 5's
+  revision showing through: with the size class gone from every table
+  observable both tiers present identical bytes, so no assertion
+  could name the tier. Which device took which tier was measured
+  instead — one tier perturbed at a time, only that device's leg
+  reddening; that method note is a docs/traps.md entry, because no
+  gate holds the routing.)
+- ~~DEPTH STUB: table on gtk~~ (LANDED 2026-08-21: GtkColumnView was
+  PROBED and refused — a GtkListItem owns its child, so an
+  already-parented stamped widget fails gtk_widget_set_parent's
+  parent==NULL assertion, and the factory is driven by the model and
+  the recycler rather than by kaya's stamp (docs/traps.md). The
+  landing is the synthesized header decision 6 predicted: kaya's own
+  header row of flat GtkButtons plus a separator at the head of the
+  For's container, one horizontal GtkSizeGroup per column, and
+  hexpand on every cell — which the toolkit turns into
+  floor-plus-equal-leftover by itself, measured at two widths with
+  header and cells sharing an x to the pixel. All four verbs are
+  TREE READS: the header's own label text carries the ▲/▼ the
+  indicator is read back out of, and column_edges measures
+  gtk_widget_compute_bounds against the container's flex track. A
+  header click is emit_clicked on a real button, the route press
+  already uses. Both halves of expect_column_edges were watched
+  failing here — the span sentence "draws 105px of a 498px track"
+  with the CLUSTER half staying green through it — plus a third
+  negative for the CSS class the header cells share. Seven languages
+  x two display protocols on the byte-shared scene.)
+- ~~DEPTH STUB: table on winui~~ (LANDED 2026-08-21: the details-view
+  lowering — a header Grid of SemiBold Buttons and a 1dip rule as two
+  more children of the For's own Grid, the stamped rows shifted down
+  two tracks by reindex, which is the only thing that places a
+  Column's children. STAR SIZING WAS THE WRONG GUESS and this bullet
+  carried it: WinUI's Grid has no SharedSizeGroup — that is WPF only —
+  so header and rows cannot share tracks declaratively at all, and
+  star-with-MinWidth resolves to EQUAL columns clamped up at content
+  rather than to the plan's content-floor-plus-equal-leftover. So each
+  column's floor is MEASURED off the real controls and the leftover
+  divided here, and both surfaces take the same explicit pixel tracks.
+  Two bindgen holes shaped the chrome: FontWeight is a vtable pad and
+  Border is not in the filter, so the header cell and the rule are
+  parsed with XamlReader (the caption_title_text precedent; the
+  cleaner home is three members in tools/winui-bindgen). The four
+  verbs read the toolkit: columns_presented takes the header Buttons'
+  own Content and recovers the indicator from the ▲/▼ one of them
+  carries, row_cells walks Grid.Row/Grid.Column on both levels,
+  column_edges clusters TransformToVisual leading edges and compares
+  the resolved tracks against the flex track the parent gave the
+  container, and header_click invokes the header Button's automation
+  peer. Both negatives watched failing on a windows leg — a 30dip
+  header skew read "cell edges cluster at [0,30,274,304], wanted 2
+  columns", and the distribution switched off read "draws 86dip of a
+  508dip track" WITH THE CLUSTERS STILL EXACTLY RIGHT. The trap it
+  walked into was already written in the file it was editing: TABLES
+  is the third thread_local of XAML handles, its TLS destructor
+  released them into the dead apartment, and the first leg printed
+  KAYA_SELFTEST: OK and then died 0xC0000409 on the exit code alone —
+  now leaked at shutdown beside CORE and APP_ICON_BITMAP, and the
+  class is a docs/traps.md entry because it has bitten twice.)
 - ~~The seven-language guest fan-out~~ (CLOSED 2026-08-21: all eight
   bindings carry columns/on_sort in their idiom and all eight guests
   pass the byte-shared scene on mac. The fan-out's own generator
@@ -4401,6 +4457,22 @@ remembering. Open, per backend and surface:
   caught the missing template-node dispatch sibling — OnSortNode
   exists so a stamped copy's sort cannot drop silently even while the
   core refuses nested headers.)
+- Residuals from the 2026-08-21 breadth fan-out, none load-bearing
+  today: GTK's column_edges reads header LABELS but cell WIDGETS, an
+  asymmetry a future non-label cell would meet first; the WinUI
+  resize hook is LayoutUpdated (SizeChanged is a vtable pad in the
+  generated bindings), made idempotent by a width stamp; the iOS tier
+  routing (KayaTableSurface) is held by no gate — docs/traps.md's
+  no-discriminator entry says what to redo if it moves; and a lane
+  run from a NESTED WORKTREE has two bring-up hazards the slice
+  agents worked around rather than fixed — deploy-win.sh's SSH mux
+  ControlPath under $ROOT/target exceeds the 104-byte AF_UNIX limit
+  (fix wants a design choice: key a short path under TMPDIR on a hash
+  of $ROOT), and third_party/winappsdk is gitignored so a fresh
+  worktree has no SDK. The kaya-bindgen upward-walk hazard from the
+  same runs IS fixed: its Cargo.toml now carries an empty [workspace]
+  table.
+  KEY: column_edges label asymmetry, LayoutUpdated, ControlPath, winappsdk worktree
   ~~the statement form's missing For handle~~ (CLOSED same day: rows()
   allocates the For id eagerly and the chain reads
   `items.rows(tx).columns(...).on_sort(&msgs, Msg::Sort)` with `.id()`

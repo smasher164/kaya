@@ -5281,9 +5281,6 @@ private func kayaRunScript(_ script: String) {
                     failures.append("no such target \(parts[1])")
                 }
             case "expect_columns":
-                #if !os(macOS)
-                    kayaDepthStub("table", on: "ios")
-                #endif
                 // The header bar as the TABLE PATH presented it — the
                 // render's own record (the scroll-geometry precedent),
                 // never the model echo: a wire that arrived but a table
@@ -5302,9 +5299,6 @@ private func kayaRunScript(_ script: String) {
                     failures.append("no such target \(parts[1])")
                 }
             case "expect_rows":
-                #if !os(macOS)
-                    kayaDepthStub("table", on: "ios")
-                #endif
                 // Per-row cell label texts: rows in the toolkit's child
                 // order joined with `|`, each row's label cells joined
                 // with `,` — expect_order's read one level deeper, for
@@ -5329,9 +5323,6 @@ private func kayaRunScript(_ script: String) {
                     failures.append("no such target \(parts[1])")
                 }
             case "expect_column_edges":
-                #if !os(macOS)
-                    kayaDepthStub("table", on: "ios")
-                #endif
                 // The uniform GEOMETRY claim, both halves: the cells'
                 // leading edges (recorded in window space by the
                 // render's reporters) form exactly N clusters within
@@ -5382,9 +5373,6 @@ private func kayaRunScript(_ script: String) {
                     failures.append("no such target \(parts[1])")
                 }
             case "header_click":
-                #if !os(macOS)
-                    kayaDepthStub("table", on: "ios")
-                #endif
                 // The user's route: what the Table's sortOrder binding
                 // setter does for a real header click — the sort tag
                 // verbatim plus the column index, and NO model change:
@@ -7347,11 +7335,12 @@ struct KayaCell: Layout {
 /// The declared table's surface (docs/tables-plan.md): SwiftUI Table —
 /// NSTableView's wrapper on macOS, the native headers, resize and
 /// indicator — where the API can spell a DYNAMIC column count
-/// (TableColumnForEach; macOS 14.4 / iOS 17.4), and the plain stack
-/// below that floor. The sortOrder binding is the click path and
-/// nothing else: its getter presents the GUEST's declared indicator,
-/// its setter emits sort_requested and changes nothing — the platform
-/// never sorts the model (one-way flow, the echo doctrine's shape).
+/// (TableColumnForEach; macOS 14.4 / iOS 17.4) AND the host is regular
+/// width, and KayaSynthesizedTable otherwise. The sortOrder binding is
+/// the click path and nothing else: its getter presents the GUEST's
+/// declared indicator, its setter emits sort_requested and changes
+/// nothing — the platform never sorts the model (one-way flow, the echo
+/// doctrine's shape).
 private struct KayaColumnSpec: Identifiable {
     let id: Int
     let title: String
@@ -7368,10 +7357,33 @@ struct KayaColumnComparator: SortComparator {
 
 struct KayaTableSurface: View {
     let node: KayaNode
+    #if !os(macOS)
+        // macOS has no horizontal size class at all — the key does not
+        // exist in that environment — so the read is iOS-only and the
+        // mac path below never consults it.
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    /// Which tier this host takes. macOS: the native Table always (there
+    /// is no compact mode). iOS: REGULAR ONLY (docs/tables-plan.md
+    /// decision 5, revised 2026-08-21) — SwiftUI's Table collapses to a
+    /// first-column list at compact width, which throws away the
+    /// declared columns, so a compact iPhone takes kaya's own header.
+    private var native: Bool {
+        #if os(macOS)
+            return true
+        #else
+            return horizontalSizeClass == .regular
+        #endif
+    }
 
     var body: some View {
         if #available(macOS 14.4, iOS 17.4, *) {
-            KayaNativeTable(node: node)
+            if native {
+                KayaNativeTable(node: node)
+            } else {
+                KayaSynthesizedTable(node: node)
+            }
         } else {
             KayaSynthesizedTable(node: node)
         }
@@ -7556,10 +7568,11 @@ private struct KayaTableLayout: Layout {
 
 /// The synthesized tier (docs/tables-plan.md): kaya's own header over
 /// KayaTableLayout's floored-and-distributed columns, for hosts below
-/// the native Table's dynamic-column floor — and the shape the iOS
-/// compact slice will reuse. Headers render at EVERY width (ratified
-/// 2026-08-21). Sorting stays a request: a header tap emits and the
-/// indicator moves only when the guest re-declares.
+/// the native Table's dynamic-column floor AND for every COMPACT iOS
+/// width, where the native Table would collapse to a first-column list
+/// and hide the declared columns. Headers render at EVERY width
+/// (ratified 2026-08-21). Sorting stays a request: a header tap emits
+/// and the indicator moves only when the guest re-declares.
 private struct KayaSynthesizedTable: View {
     let node: KayaNode
 
@@ -8343,11 +8356,9 @@ struct KayaRender: View {
             // would ever have leftover space to divide.
             Group {
                 if !node.tableColumns.isEmpty {
-                    // The declared table (docs/tables-plan.md): native
-                    // headers where the platform's Table API can spell a
-                    // dynamic column count; the plain stack below that
-                    // availability floor. The row templates were held to
-                    // the declared arity by the core.
+                    // The declared table (docs/tables-plan.md);
+                    // KayaTableSurface picks the tier. The row templates
+                    // were held to the declared arity by the core.
                     KayaTableSurface(node: node)
                 } else if isRoot || node.children.contains(where: { $0.grow > 0 }) {
                     KayaFlex(vertical: true, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
