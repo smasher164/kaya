@@ -2410,14 +2410,28 @@ object KayaCompose {
             return if (svc.dismiss()) null
             else "the picker would not dismiss; windows are ${svc.windowPackages()}"
         }
-        if (!svc.choose(name)) {
-            return "no row named \"$name\"; the picker is showing ${svc.pickerState()?.second}"
+        // ROUNDS, NOT ONE SHOT (2026-08-20, caught by the full-buffer
+        // capture): under a loaded matrix the picker can be UP with its
+        // list still unreadable — DocumentsUI's own log showed its
+        // provider cache lock contended — and the one-shot choose()
+        // missed, instantly, into a failure string nobody prints until
+        // scene end. Six rounds re-walking the tree is simdrive's
+        // choose shape, and the picker being GONE stays the only proof
+        // a click landed.
+        var clicked = false
+        var last: String? = null
+        for (round in 0 until 6) {
+            if (svc.choose(name)) {
+                clicked = true
+                if (svc.waitForPickerGone()) return null
+                last = "the picker was still up after clicking \"$name\" — the click was swallowed"
+            } else {
+                if (clicked && svc.waitForPickerGone()) return null
+                last = "no row named \"$name\"; the picker is showing ${svc.pickerState()?.second}"
+                Thread.sleep(500)
+            }
         }
-        // THE CLICK IS THE ANSWER on this platform, so the picker being
-        // gone is the proof it landed. A click that arrives before the
-        // list is interactive is swallowed with no error anywhere.
-        return if (svc.waitForPickerGone()) null
-        else "the picker was still up after clicking \"$name\" — the click was swallowed"
+        return last
     }
 
     /**
@@ -2440,6 +2454,21 @@ object KayaCompose {
         val activity = mountedActivity ?: error("kaya: a picker with no mounted activity")
         check(kayaLivePickerDialog == null) {
             "kaya: a second file dialog while $kayaLivePickerDialog is still up"
+        }
+        // A FINISHING ACTIVITY CAN NEVER RECEIVE THE RESULT — the OS
+        // drops it with no line anywhere (measured 2026-08-20: a stray
+        // BACK finish()ed the activity mid-scene and the next dialog's
+        // result simply vanished; the WATCH entry in docs/deferred.md).
+        // Answered honestly HERE, as a cancel with its cause named,
+        // instead of floating forever.
+        if (activity.isFinishing) {
+            Log.w(
+                "kaya",
+                "KAYA_DIALOG_DOOMED: file dialog $dialog requested from a finishing " +
+                    "activity — a result could never arrive; answering cancelled",
+            )
+            kayaAnswerFileDialog(activity, dialog, null)
+            return
         }
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
@@ -2586,6 +2615,16 @@ object KayaCompose {
             intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri(it))
         }
 
+        // The picker's doomed-dialog guard, same wording and reason.
+        if (activity.isFinishing) {
+            Log.w(
+                "kaya",
+                "KAYA_DIALOG_DOOMED: save dialog $dialog requested from a finishing " +
+                    "activity — a result could never arrive; answering cancelled",
+            )
+            kayaAnswerSaveDialog(activity, dialog, null)
+            return
+        }
         kayaLivePickerDialog = dialog
         kayaLivePickerLauncher = activity.activityResultRegistry.register(
             "kaya-save-dialog-$dialog",
@@ -5173,12 +5212,18 @@ object KayaCompose {
                             // swallowed with no error anywhere, and the
                             // leg then fails three steps later on an
                             // assertion about the GUEST.
-                            !svc.waitForPickerGone() ->
+                            !svc.waitForPickerGone() -> {
                                 failures.add(
                                     "file_save: the panel is still up (naming " +
                                         "\"${kayaSaveDialogState()?.second}\") — the press was " +
                                         "swallowed, which the panel cannot tell you"
                                 )
+                                // Dismissed so the scene's continuation
+                                // cannot trip the one-per-process abort
+                                // and destroy this failure list
+                                // (file_choose's 2026-08-20 lesson).
+                                svc.dismiss()
+                            }
                         }
                     }
                     "clipboard_seed" -> {
@@ -5241,6 +5286,13 @@ object KayaCompose {
                         } else {
                             kayaFileDialogDrive(want)?.let {
                                 failures.add("file_choose $want: $it")
+                                // Dismiss here too, the wrong-name arm's
+                                // rule: a picker left up turns the next
+                                // show into the one-per-process abort,
+                                // which destroys this failure list —
+                                // measured 2026-08-20, filedialog-jvm's
+                                // SIGABRT ate exactly this evidence.
+                                kayaFileDialogDrive("cancel")
                             }
                         }
                     }

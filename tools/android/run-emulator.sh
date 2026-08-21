@@ -412,6 +412,29 @@ for serial in "${SERIALS[@]}"; do
     cliphelper_prepare "$serial" || exit 1
     CLIPHELPER_IME_ON+=("$serial")
     assets_prepare "$serial" || exit 1
+    # BIG LOG BUFFERS, so an on-FAIL dump holds the whole leg PLUS the
+    # system's side: at the stock size a busy leg's window rotates out
+    # of `main` in about a minute (measured 2026-08-20 hunting the
+    # save-jvm WATCH — the sighting's window was gone half an hour
+    # later), and the dump that reads the buffer at fail time is only
+    # as good as what the buffer still holds. Persists until the
+    # emulator reboots, hence per run rather than per boot.
+    adb -s "$serial" logcat -b main -G 16M >/dev/null 2>&1 || true
+    adb -s "$serial" logcat -b system -G 16M >/dev/null 2>&1 || true
+    adb -s "$serial" logcat -b events -G 8M >/dev/null 2>&1 || true
+    # DocumentsUI's own debug logging (gated on Log.isLoggable of these
+    # tags), for the same WATCH: the lost save result is now cornered
+    # between DocumentsUI's finish and the app's ActivityThread, and
+    # only DocumentsUI's lines can say whether setResult ever ran.
+    adb -s "$serial" shell setprop log.tag.Documents DEBUG 2>/dev/null || true
+    adb -s "$serial" shell setprop log.tag.DocumentsUI DEBUG 2>/dev/null || true
+    # WM_DEBUG_STATES logs the resumeTopActivity early return that skips
+    # the pending-results drain — step 4 of the suspected framework race
+    # (the WATCH entry names the chain; scratch research 2026-08-20
+    # traced it to ActivityRecord.finishActivityResults' mH.post on
+    # Android 14+). Text-logged under the WindowManager tag; until the
+    # emulator reboots or a run disables it.
+    adb -s "$serial" shell cmd window logging enable-text WM_DEBUG_STATES >/dev/null 2>&1 || true
 done
 timing cliphelper
 
@@ -715,6 +738,10 @@ run_apk_on() {
         fi
     fi
     if ! grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
+        # The DEVICE, first: the dump below is only chaseable on the
+        # emulator that ran the leg, and nothing else in this log says
+        # which one that was.
+        echo "leg device: $serial"
         # A guest that never printed a verdict crashed before dispatch;
         # the kaya-tag filter above cannot see that, so surface the
         # runtime's own crash log.
@@ -757,6 +784,16 @@ run_apk_on() {
         adb -s "$serial" logcat -d -b events,main 2>/dev/null \
             | grep -iE 'documentsui|has died|am_kill|am_freeze|am_proc_died|ANR in|force.?stop' \
             | tail -60
+        # AND THE WHOLE BUFFER TO A FILE, because the NEXT leg on this
+        # device starts with `logcat -c` — this dump is the only
+        # complete record the sighting will ever have. Kept beside the
+        # lane logs; passing legs write nothing.
+        mkdir -p "$ROOT/target/validate-failures"
+        adb -s "$serial" logcat -d -b all \
+            >"$ROOT/target/validate-failures/android-$name-buffers.log" 2>/dev/null || true
+        adb -s "$serial" shell dumpsys activity activities \
+            >"$ROOT/target/validate-failures/android-$name-activities.txt" 2>/dev/null || true
+        echo "full buffers kept at target/validate-failures/android-$name-buffers.log"
         failed=1
     fi
     [ "$failed" = 0 ]

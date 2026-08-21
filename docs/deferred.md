@@ -4400,6 +4400,19 @@ now log KAYA_SAVE_RESULT / KAYA_PICK_RESULT with the resultCode on
 arrival — in the next sighting's dump, a line with code=0 convicts
 DocumentsUI, no line convicts the delivery path.
 
+A CORRECTION BEFORE THE SIXTH SIGHTING'S RECORD, because two pieces
+of earlier reasoning turned out unsound. First: "the reopen click was
+processed, so the dialog must have been gone" proves nothing — the
+harness clicks by ACTION_CLICK on the app's own node, which is
+dispatched directly to the view and lands fine THROUGH a covering
+window. Second: "am_freeze 10s after the press proves the dialog
+finished" also proves nothing — the freezer's debounce means that
+process went cached minutes earlier, possibly behind a previous
+leg's dialog. What DOES still separate the save sightings from a
+swallowed press: file_save's own postcondition (press lands, panel
+polled gone, 6s) PASSED in every one — no "panel is still up"
+failure in any verdict — so the save panels really closed.
+
 SIXTH AND SEVENTH SIGHTINGS THE SAME DAY (the ghost now fires most
 contended matrices — today's speed work raised peak contention, and
 peak contention raises it), and the seventh carried both instruments:
@@ -4422,6 +4435,65 @@ clean setResult+finish, this is an AMS-side race the harness may need
 to tolerate — a remedy that needs Akhil's ruling, since retrying a
 save leg would launder exactly the class of bug kaya's own users
 would hit.
+
+THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
+(2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in
+hand): the OPEN picker was up with its list unreadable (DocumentsUI's
+own debug log showed its provider cache lock contended for its whole
+life), the one-shot choose() missed instantly, the failure string sat
+unprinted in the scene's list, the scene marched through two more
+failed expects into a SECOND file_dialog open, and the core's
+one-per-process guard — working exactly as designed — aborted the
+process, destroying the failure list. The at-fail activities snapshot
+showed PickActivity still top-resumed with resultTo intact: nothing
+was ever lost in the framework here; nothing was ever produced.
+Fixed in KayaCompose: kayaFileDialogDrive retries choose in six
+rounds (simdrive's shape, re-walking the tree each time), and EVERY
+failure path of file_choose and file_save now dismisses the picker
+before recording its sentence, so the guard can never again eat the
+evidence. THE EIGHTH SIGHTING, SAME DAY, WITH EVERYTHING ARMED — AND THE GHOST
+IS CAUGHT. save-go, full buffers, WM_DEBUG_STATES live, and the
+wm_finish_activity/state log spells the whole chain in four
+timestamps: 39.393 the CANCEL cycle's back lands and PickActivity
+finishes; 39.533 the app's MainActivity resumes and takes input
+focus; 39.949 — one dismiss-loop iteration later — a STRAGGLER BACK
+lands on the resumed app and finish()es it, "reason=app-request,
+result=0", the launcher resuming behind it; 40.7 the THIRD dialog
+(launched from the now-finishing activity, whose process and view
+tree live on) finishes WITH its result, which has no live
+destination and is dropped with no line anywhere. Every stale label
+downstream follows. THE GHOST WAS KAYA'S OWN HARNESS: dismiss()
+pressed back in a check-then-press loop whose gone-check reads the
+a11y window list, and that list LAGS a dismissal — under a loaded
+matrix the lag outgrew the 400ms settle, the stale entry bought one
+extra press, and the back went to the app. Solo runs never fired
+because the lag never outgrew the settle. The suspected framework
+race (Android 14+'s async result post; researched with AOSP line
+numbers, preserved at docs/probes/lost-activity-result-android.md)
+was NOT the cause here — wm_finish_activity for the app at
+"app-request" is the line that separates them, and any future
+sighting bearing the framework fingerprint instead (PickActivity
+finish present, app finish ABSENT, wm_on_activity_result_called
+absent) reopens that file.
+
+THE FIXES, all three on the one mechanism: dismiss() now presses
+back only while the picker window HOLDS INPUT FOCUS — focus moves to
+the app before the stale span begins, so a focused picker is the one
+moment a back cannot miss (KayaHarnessAccessibility.kt, the comment
+carries the story); both dialog-present paths refuse a FINISHING
+activity honestly, answering cancelled with a KAYA_DIALOG_DOOMED log
+line naming the cause, because a result for such a dialog is
+undeliverable by OS contract — the wall for the whole
+straggler-class, at the choke point nobody can avoid; and the
+instruments (KAYA_SAVE_RESULT / KAYA_PICK_RESULT /
+KAYA_ACTIVITY_RESULT, the big buffers, the full-buffer on-FAIL
+capture) STAY, since they are what turned four one-line sightings
+into this paragraph. UNVALIDATED until matrices run clean with the
+focus-guarded dismiss; strike this entry's headline only after the
+ghost stays quiet through enough contended matrices to clear the old
+1-in-3 rate — and the first two sightings (an AccessDeniedException,
+a delivered-NULL NPE) are cousins at best, so a recurrence of THOSE
+shapes is not this ghost returning.
 
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap

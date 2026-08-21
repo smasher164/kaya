@@ -121,6 +121,17 @@ class KayaHarnessAccessibility : AccessibilityService() {
     fun pickerPackage(): String? =
         PICKER_PACKAGES.firstOrNull { pkg -> windowPackages().contains(pkg) }
 
+    /**
+     * The picker's WINDOW, or null — [dismiss] needs the window and not
+     * just the package, because whether it still holds INPUT FOCUS is
+     * what separates a live dialog from a stale entry the a11y window
+     * list has not dropped yet.
+     */
+    private fun pickerWindow(): android.view.accessibility.AccessibilityWindowInfo? =
+        windows.orEmpty().firstOrNull {
+            PICKER_PACKAGES.contains(it.root?.packageName?.toString())
+        }
+
     /** Every package that currently owns a window — what a miss reports. */
     fun windowPackages(): List<String> =
         windows.orEmpty().mapNotNull { it.root?.packageName?.toString() }
@@ -281,11 +292,26 @@ class KayaHarnessAccessibility : AccessibilityService() {
             "kaya: the picker drive must not run on the main thread — getWindows() " +
                 "is refreshed there and would never see the picker leave"
         }
+        // BACK IS PRESSED ONLY WHILE THE PICKER HOLDS INPUT FOCUS. The
+        // window list lags a dismissal, and under a loaded matrix the
+        // lag outgrew the settle: the old present-check saw a stale
+        // entry, pressed a STRAGGLER BACK that landed on the app, and
+        // finish()ed the scene's activity — after which a save dialog's
+        // result has no live destination and vanishes with no line
+        // anywhere (2026-08-20, the save ghost's eighth sighting, the
+        // whole chain in the wm_finish_activity/state log; the WATCH
+        // entry in docs/deferred.md holds the story). Focus moves to
+        // the app BEFORE the stale span begins, so a focused picker is
+        // the one moment a back cannot miss.
         var backs = 0
-        while (backs < MAX_BACKS) {
-            if (pickerPackage() == null) return true
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            backs += 1
+        var waits = 0
+        while (waits < GONE_TRIES * 2) {
+            waits += 1
+            val picker = pickerWindow() ?: return true
+            if (picker.isFocused && backs < MAX_BACKS) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                backs += 1
+            }
             Thread.sleep(BACK_SETTLE_MS)
         }
         return pickerPackage() == null
