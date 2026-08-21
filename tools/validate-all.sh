@@ -90,7 +90,16 @@ if [ "$MODE" = parallel ]; then
     export KAYA_MATRIX_GATES_TOKEN
     run_lane gates tools/gates.sh
     run_lane mac tools/validate-mac.sh
-    run_lane linux tools/validate-linux.sh
+    # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone —
+    # bare KAYA_JOBS would resize the mac pool too. Empty means the
+    # lane's own default (run-suites' ${KAYA_JOBS:-8} treats empty as
+    # unset). Measured under the full matrix 2026-08-20, and 8 stays:
+    # width 6 was 431s (narrower just serializes cheap legs), 8 was
+    # 401s, and 10 was 358s FOR THIS LANE but flaked a stall leg on
+    # android and a picker leg on iOS in the same run — the wall only
+    # moved 403 -> 394 while the extra host share destabilized the
+    # phone lanes, KAYA_WIN_JOBS' contention story one lane over.
+    run_lane linux env KAYA_JOBS="${KAYA_LINUX_JOBS:-}" tools/validate-linux.sh
     run_lane windows tools/deploy-win.sh "$HOST" all
     run_lane ios tools/ios/run-sim.sh
     run_lane android tools/android/run-emulator.sh
