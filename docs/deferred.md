@@ -4341,7 +4341,7 @@ with atomic lines it reads truth, and its refusal sentence is what
 cracked the case.
 
 ## Tables — the depth slice landed on mac; the fan-out is open (2026-08-20)
-KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows
+KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows, expect_column_edges, column_edges, KayaSynthesizedTable
 
 The plan is docs/tables-plan.md (DESIGN.md's ratified column-props
 shape); the wire (TX 45 set_column_headers, APPLY 35, occurrence 19
@@ -4355,14 +4355,32 @@ TxSetColumns), and prop-derived names share one namespace with
 record-derived names in eight generators — a naming wall worth
 remembering. Open, per backend and surface:
 
-- **DEPTH STUB: table on compose** — the synthesized-header lowering
-  (Material has no component; DESIGN.md files it tier 3) plus the
-  three verbs; closes with the Compose breadth slice drawing the
-  header row and wiring the android legs.
-- **DEPTH STUB: table on swiftui/ios** — the size-class degrade
-  (headers hidden on compact, Apple's own Table behavior) and the
-  presented record's real size-class read (the depth slice hardcodes
-  "regular", honest only on macOS); closes when the iOS legs wire.
+- ~~DEPTH STUB: table on compose~~ (LANDED 2026-08-21: the
+  synthesized header over FLOORED-AND-DISTRIBUTED columns — one
+  custom Layout takes each column's widest child (header included) as
+  its width floor, distributes leftover track width equally, and
+  header and cells share the x-positions; the ▲/▼ indicator; taps
+  through the new emitSortRequested JNI door; the four verbs are real
+  and the phone legs run the shared scene in all three suites. The
+  column rule took three cuts in one day, each caught by pixels
+  rather than by any observable: equal weights gave Name half a
+  1280dp tablet, pure content-hug drew the table in a corner of its
+  viewport (Akhil caught it against the mac shots), and
+  floors-plus-distribution keeps both properties. The same first cut
+  hid headers below 600dp behind an ANDROID_TABLET_ONLY_SCENES
+  vocabulary; both died before their first commit when Akhil struck
+  the compact degrade — headers render at every width, the observable
+  lost its size-class prefix, and the phone legs stopped waiting for
+  a panes-style ruling. expect_column_edges holds BOTH halves of the
+  geometry rule precisely because its first draft (clusters alone)
+  passed the content-hug cut. docs/tables-plan.md decisions 5 and 6
+  carry the rulings.)
+- **DEPTH STUB: table on swiftui/ios** — wiring the iOS legs, where
+  compact widths take the SYNTHESIZED tier (decision 5 revised: the
+  native Table's first-column collapse hides declared columns, so
+  compact hosts get kaya's own header — KayaSynthesizedTable already
+  compiles for iOS) and regular iPads take the native Table; closes
+  when the iOS legs wire.
 - **DEPTH STUB: table on gtk** — GtkColumnView wants a model/factory
   architecture the stamped-children pipeline does not have; probe
   live first (the GTK panes precedent), likely landing the

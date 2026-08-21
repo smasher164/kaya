@@ -85,6 +85,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -101,6 +102,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.SideEffect
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -153,10 +155,12 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
@@ -179,6 +183,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -208,6 +213,33 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var tableSorted: Int = -1
     var tableDirection: Int = 0
     var sortTag: ByteArray = ByteArray(0)
+
+    /**
+     * What the TABLE PATH actually presented — written by the render,
+     * never a model echo (the SwiftUI twin's rule), so expect_columns
+     * proves the header rendered rather than that the wire arrived.
+     * Headers render at EVERY width (ratified 2026-08-21,
+     * docs/tables-plan.md), so there is no size-class prefix.
+     */
+    var tablePresented by mutableStateOf("")
+
+    /**
+     * Cell leading edges in dp, window space, keyed "<rowId>/<col>"
+     * ("h/<col>" for kaya's own header cells) — written by the
+     * render's position readers, clustered by expect_column_edges.
+     * Concurrent because the harness thread reads while the UI thread
+     * writes.
+     */
+    val cellEdgeX = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
+    /**
+     * The table's assigned horizontal track and the width it drew, in
+     * dp (-1 before layout; track -1 when unbounded) — the span half of
+     * expect_column_edges' claim. Volatile: written at layout, read by
+     * the harness thread.
+     */
+    @Volatile var tableTrackW = -1f
+    @Volatile var tableDrawnW = -1f
 
     /**
      * KAYA'S MODEL MIRROR of the widget's text — what the app was last
@@ -4987,9 +5019,119 @@ object KayaCompose {
                                 failures.add("${parts[1]} children read \"$got\", wanted \"$want\"")
                         }
                     }
-                    "expect_columns" -> depthStub("table")
-                    "expect_rows" -> depthStub("table")
-                    "header_click" -> depthStub("table")
+                    "expect_columns" -> {
+                        // The header bar as the TABLE PATH presented it
+                        // — the render's own record, never the model
+                        // echo; headers render at every width
+                        // (docs/tables-plan.md).
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)
+                                ?.tablePresented
+                        }
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add(got)
+                            else ->
+                                failures.add(
+                                    "${parts[1]} presents \"$got\", wanted \"$want\""
+                                )
+                        }
+                    }
+                    "expect_rows" -> {
+                        // Per-row cell label texts, rows |-joined in the
+                        // tree's child order, cells ,-joined — the
+                        // two-level expect_order, for the celled shape
+                        // whose moves creation-order registries cannot
+                        // see.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)
+                                ?.children
+                                ?.joinToString("|") { row ->
+                                    row.children
+                                        .filter { it.kind == KIND_LABEL }
+                                        .joinToString(",") { it.text }
+                                }
+                        }
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add(got)
+                            else ->
+                                failures.add(
+                                    "${parts[1]} rows \"$got\", wanted \"$want\""
+                                )
+                        }
+                    }
+                    "expect_column_edges" -> {
+                        // The uniform GEOMETRY claim, both halves: the
+                        // cells' leading edges (recorded in dp, window
+                        // space, by the render's position readers —
+                        // kaya's own header cells included, since this
+                        // backend composes the header) form exactly N
+                        // clusters within two units, AND the table
+                        // spans its assigned track — the regression a
+                        // content-hugging layout slips past every
+                        // model-side observable.
+                        val want = parts.getOrNull(2)?.toIntOrNull() ?: -1
+                        val clusters = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)
+                                ?.cellEdgeX?.values?.sorted()?.let { xs ->
+                                    val reps = mutableListOf<Float>()
+                                    var prev: Float? = null
+                                    for (x in xs) {
+                                        val p = prev
+                                        prev = x
+                                        if (p != null && x - p <= 2f) continue
+                                        reps.add(x)
+                                    }
+                                    reps
+                                }
+                        }
+                        val span = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)?.let {
+                                Pair(it.tableTrackW, it.tableDrawnW)
+                            }
+                        }
+                        when {
+                            clusters == null || span == null ->
+                                failures.add("no such target ${parts[1]}")
+                            clusters.size != want ->
+                                failures.add(
+                                    "${parts[1]} cell edges cluster at " +
+                                        clusters.map { it.toInt() } +
+                                        ", wanted ${parts.getOrNull(2)} columns"
+                                )
+                            span.first >= 0 && span.second < span.first - 2 ->
+                                failures.add(
+                                    "${parts[1]} draws ${span.second.toInt()}dp of a " +
+                                        "${span.first.toInt()}dp track"
+                                )
+                            else -> observed.add("${parts[1]} column edges $want")
+                        }
+                    }
+                    "header_click" -> {
+                        // The user's route: what the header tap's own
+                        // handler does — the sort tag verbatim plus the
+                        // column index, and NO model change: the
+                        // indicator moves when the guest re-declares.
+                        val index = parts.getOrNull(2)?.toIntOrNull() ?: -1
+                        val off = onUi(activity) {
+                            val node = target(parts[1], "column", KayaSceneModel.columns)
+                            when {
+                                node == null -> "no such target ${parts[1]}"
+                                node.tableColumns.isEmpty() ->
+                                    "${parts[1]} declares no columns"
+                                index !in node.tableColumns.indices ->
+                                    "column ${parts.getOrNull(2)} of ${node.tableColumns.size}"
+                                else -> {
+                                    KayaPresent.emitSortRequested(node.sortTag, index)
+                                    null
+                                }
+                            }
+                        }
+                        if (off != null) failures.add("header_click: $off")
+                    }
                     "expect_shares" -> {
                         // Percent of the CHILDREN'S SUM, not of the
                         // container, so spacing and padding (platform
@@ -6325,14 +6467,14 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// A depth stub is a CALL, never a sentence — tools/check-stubs.sh
-// reads it, and its silence is bought by an OPEN entry in
-// docs/deferred.md (tools/lib/stub-ledger.py).
-private fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on android — " +
-            "it is a depth slice; see CLAUDE.md's sequencing",
-    )
+// No `depthStub` helper lives here: this backend has no depth stub,
+// and check-detekt's UnusedPrivateMember would report an unused
+// one. The next depth slice writes it back in EXACTLY this spelling
+// — `depthStub("<scene>")`, which is what check-stubs and
+// check-steps read, never a sentence of its own
+// (tools/lib/hand-rolled-stubs.py fails a hand-rolled refusal) —
+// and buys its silence with an OPEN entry in docs/deferred.md
+// (tools/lib/stub-ledger.py).
 
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
@@ -6775,6 +6917,117 @@ internal fun kayaCoreRedo() {
  * copy's key path as the noun of every emission (the keys ARE the
  * noun).
  */
+/**
+ * The declared table's surface (docs/tables-plan.md): the synthesized
+ * header — Material dropped its data-table component, so this is the
+ * tier-3 lowering DESIGN.md files — over CONTENT-SIZED columns: one
+ * measure pass finds each column's widest cell, and header and cells
+ * share those widths so alignment holds by measurement (the claim
+ * expect_column_edges reads back). Headers render at EVERY width
+ * (ratified 2026-08-21: nothing but an Apple-idiom analogy forced the
+ * compact degrade, and it cost the phones their headers). A header tap
+ * hands the core-minted sort tag back verbatim with the column index —
+ * a REQUEST; the indicator moves only when the guest re-declares.
+ */
+@Composable
+private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
+    // The presented record expect_columns reads — written by THIS path,
+    // so the observation proves the header rendered, never that the
+    // wire arrived.
+    val presented = buildString {
+        append(node.tableColumns.joinToString("|"))
+        if (node.tableSorted >= 0) {
+            append(if (node.tableDirection == 0) " ^" else " v")
+            append(node.tableSorted)
+        }
+    }
+    SideEffect { node.tablePresented = presented }
+    val cols = node.tableColumns.size
+    val density = LocalDensity.current.density
+    val colGapPx = with(LocalDensity.current) { 24.dp.roundToPx() }
+    val rowGapPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() }
+    fun Modifier.edge(key: String): Modifier = onGloballyPositioned {
+        node.cellEdgeX[key] = it.positionInWindow().x / density
+    }
+    Layout(
+        content = {
+            node.tableColumns.forEachIndexed { index, title ->
+                val indicator = when {
+                    node.tableSorted != index -> ""
+                    node.tableDirection == 0 -> " \u25B2"
+                    else -> " \u25BC"
+                }
+                Text(
+                    title + indicator,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clickable {
+                            KayaPresent.emitSortRequested(node.sortTag, index)
+                        }
+                        .edge("h/$index"),
+                )
+            }
+            HorizontalDivider()
+            node.children.forEach { row ->
+                row.children.forEachIndexed { index, cell ->
+                    Box(Modifier.edge("${row.id}/$index")) { KayaRender(cell) }
+                }
+            }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        // Children arrive in content order: cols headers, the divider,
+        // then the stamped cells row-major (the core held every row to
+        // the declared arity, so the % below cannot skew).
+        val headers = measurables.take(cols).map { it.measure(Constraints()) }
+        val cells = measurables.drop(cols + 1).map { it.measure(Constraints()) }
+        val colWidth = IntArray(cols)
+        headers.forEachIndexed { c, p -> colWidth[c] = maxOf(colWidth[c], p.width) }
+        cells.forEachIndexed { i, p ->
+            colWidth[i % cols] = maxOf(colWidth[i % cols], p.width)
+        }
+        // A table spans its viewport: content width is each column's
+        // FLOOR, and leftover track width is distributed across the
+        // columns — the native macOS Table's resting look, stated as a
+        // rule (docs/tables-plan.md decision 6; the span half of
+        // expect_column_edges holds it).
+        if (constraints.hasBoundedWidth) {
+            val leftover =
+                constraints.maxWidth - colWidth.sum() - colGapPx * (cols - 1)
+            if (leftover > 0) {
+                val per = leftover / cols
+                val rem = leftover % cols
+                for (c in 0 until cols) colWidth[c] += per + if (c < rem) 1 else 0
+            }
+        }
+        val colX = IntArray(cols)
+        var acc = 0
+        for (c in 0 until cols) {
+            colX[c] = acc
+            acc += colWidth[c] + if (c < cols - 1) colGapPx else 0
+        }
+        val totalW = acc.coerceIn(constraints.minWidth, constraints.maxWidth)
+        node.tableTrackW =
+            if (constraints.hasBoundedWidth) constraints.maxWidth / density else -1f
+        node.tableDrawnW = totalW / density
+        val divider = measurables[cols].measure(Constraints(minWidth = totalW, maxWidth = totalW))
+        val headerH = headers.maxOfOrNull { it.height } ?: 0
+        val rowHeights = cells.chunked(cols).map { row -> row.maxOfOrNull { it.height } ?: 0 }
+        val totalH = (headerH + rowGapPx + divider.height + rowGapPx +
+            rowHeights.sum() + rowGapPx * (rowHeights.size - 1).coerceAtLeast(0))
+            .coerceIn(constraints.minHeight, constraints.maxHeight)
+        layout(totalW, totalH) {
+            headers.forEachIndexed { c, p -> p.place(colX[c], 0) }
+            divider.place(0, headerH + rowGapPx)
+            var y = headerH + rowGapPx + divider.height + rowGapPx
+            cells.chunked(cols).forEachIndexed { r, row ->
+                row.forEachIndexed { c, p -> p.place(colX[c], y) }
+                y += rowHeights[r] + rowGapPx
+            }
+        }
+    }
+}
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun KayaRender(
@@ -7081,7 +7334,11 @@ private fun KayaRenderCore(
         KayaCompose.KIND_COLUMN ->
             // Normalized default: children packed to the top at natural
             // size, leading-aligned (Alignment.Start), 8 dp between them.
-            Column(
+            // A container with a declared header bar takes the TABLE
+            // surface instead (docs/tables-plan.md).
+            if (node.tableColumns.isNotEmpty()) {
+                KayaTableSurface(node, rootFill.then(a11y))
+            } else Column(
                 // The inset pair brackets the container's own padding:
                 // outer box, then padding, then the content readers, so
                 // the extents shares divide are the CONTENT box.

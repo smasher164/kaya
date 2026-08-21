@@ -39,6 +39,12 @@ object KayaPresent {
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
     @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 
+    /** Emit a column-header click: [tag] is the sort tag delivered
+     * with the container's SET_COLUMN_HEADERS record, verbatim;
+     * [column] the 0-based index. A REQUEST — the guest sorts
+     * (docs/tables-plan.md). kaya_emit_sort_requested's JNI spelling. */
+    @JvmStatic external fun emitSortRequested(tag: ByteArray, column: Int)
+
     /** The alert's one answer: an action index, or the cancel
      * sentinel (Int -1 — the wire u32's java-int spelling) for every
      * native dismissal. kaya_emit_alert_result's JNI spelling. */

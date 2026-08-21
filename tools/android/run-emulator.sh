@@ -1198,6 +1198,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity reorder \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script reorder)'"
+    run_apk table-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity table \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script table)'"
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \
@@ -1619,6 +1623,10 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity filedialog \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script filedialog)'"
+    run_apk table-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity table \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script table)'"
     run_apk save-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity save \
@@ -1775,6 +1783,10 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity reorder \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script reorder)'"
+    run_apk table-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity table \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script table)'"
     run_apk feed-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity feed \

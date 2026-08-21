@@ -203,15 +203,24 @@ pub enum Step {
     /// verified by (creation-order registries cannot see a move).
     ExpectOrder(Target, String),
     /// Expect a table container's header bar as the TABLE PATH
-    /// presented it — "<size class>/<titles|joined> [^N|vN]" — read
-    /// from the render's own record, never the model echo
-    /// (docs/tables-plan.md).
+    /// presented it — "<titles|joined> [^N|vN]" — read from the
+    /// render's own record, never the model echo. Headers render at
+    /// EVERY width (ratified 2026-08-21, docs/tables-plan.md), which
+    /// is what keeps this byte-comparable on the phones.
     ExpectColumns(Target, String),
     /// Expect a table's rows as per-row cell label texts: rows
     /// pipe-joined in the toolkit's child order, each row's cells
     /// comma-joined — expect_order one level deeper, for the celled
     /// shape whose moves creation-order registries cannot see.
     ExpectRows(Target, String),
+    /// Expect the table's cells to form exactly N leading-edge
+    /// clusters AND the table to span its assigned track — the
+    /// GEOMETRY claim every backend makes uniformly
+    /// (docs/tables-plan.md decision 6): columns never clip their
+    /// widest cell, leftover width distributes, the table fills its
+    /// viewport. A misaligned column splits its cluster and the count
+    /// moves; a content-hugging layout comes up short of its track.
+    ExpectColumnEdges(Target, usize),
     /// Click the table's column header at the 0-based index through
     /// the platform's real header path, so it emits sort_requested
     /// (select_section's drive-and-emit precedent).
@@ -615,6 +624,7 @@ impl Step {
             Step::ExpectOrder { .. } => true,
             Step::ExpectColumns { .. } => true,
             Step::ExpectRows { .. } => true,
+            Step::ExpectColumnEdges { .. } => true,
             Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
@@ -737,13 +747,24 @@ pub trait Stage: Send + 'static {
     /// with `|` — the observation expect_order verifies.
     fn child_texts(&self, target: Target) -> String;
     /// The table's header bar as the TABLE PATH presented it —
-    /// "<size class>/<titles|joined> [^N|vN]", empty when no table
-    /// rendered — read from the toolkit's own presentation, never the
-    /// model (docs/tables-plan.md).
+    /// "<titles|joined> [^N|vN]", empty when no table rendered — read
+    /// from the toolkit's own presentation, never the model
+    /// (docs/tables-plan.md; headers render at every width).
     fn columns_presented(&self, target: Target) -> String;
     /// The table's rows as per-row cell label texts: rows `|`-joined in
     /// the toolkit's child order, cells `,`-joined within a row.
     fn row_cells(&self, target: Target) -> String;
+    /// The table observation expect_column_edges verifies: empty when
+    /// the table's cells (header cells included where this backend
+    /// composes the header) form exactly `want` leading-edge clusters
+    /// within two device units AND the table spans the flex track it
+    /// was assigned; otherwise the toolkit's own description of what
+    /// was measured, for the failure text. Geometry, never a model
+    /// copy — grid_columns one shape over, for the celled tree, plus
+    /// widget_fills' span read, because a content-hugging table keeps
+    /// every cluster exactly right while drawing in a corner of its
+    /// viewport.
+    fn column_edges(&self, target: Target, want: usize) -> String;
     /// Click the column header at `column` through the platform's real
     /// header path, so it emits sort_requested.
     fn header_click(&self, target: Target, column: u32);
@@ -1273,6 +1294,17 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_rows wants a target and a string: {line:?}")
                 })?;
                 Step::ExpectRows(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_column_edges" => {
+                let (target, count) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_column_edges wants a target and a count: {line:?}")
+                })?;
+                Step::ExpectColumnEdges(
+                    parse_target(target)?,
+                    count.trim().parse().map_err(|_| {
+                        format!("expect_column_edges wants a cluster count: {line:?}")
+                    })?,
+                )
             }
             "header_click" => {
                 let (target, index) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -2796,6 +2828,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
+            Step::ExpectColumnEdges(t, want) => {
+                if !matches!(t.kind, TargetKind::Column) {
+                    Some(Err(format!("{t:?} is not a table container target")))
+                } else {
+                    Some(poll(|| {
+                        let off = stage.column_edges(*t, *want);
+                        if off.is_empty() {
+                            Ok(format!("{} column edges {want}", target_spec(t)))
+                        } else {
+                            Err(format!("{} misaligned ({off})", target_spec(t)))
+                        }
+                    }))
+                }
+            }
             Step::HeaderClick(t, column) => {
                 stage.header_click(*t, *column);
                 None
@@ -3871,6 +3917,9 @@ mod tests {
         fn row_cells(&self, _: Target) -> String {
             String::new()
         }
+        fn column_edges(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
         fn header_click(&self, _: Target, _: u32) {}
         fn child_shares(&self, _: Target) -> String {
             "25,75".into()
@@ -4208,6 +4257,9 @@ mod tests {
             fn row_cells(&self, _: Target) -> String {
                 String::new()
             }
+            fn column_edges(&self, _: Target, _: usize) -> String {
+                String::new()
+            }
             fn header_click(&self, _: Target, _: u32) {}
             fn child_shares(&self, _: Target) -> String {
                 String::new()
@@ -4419,6 +4471,9 @@ mod tests {
                 String::new()
             }
             fn row_cells(&self, _: Target) -> String {
+                String::new()
+            }
+            fn column_edges(&self, _: Target, _: usize) -> String {
                 String::new()
             }
             fn header_click(&self, _: Target, _: u32) {}

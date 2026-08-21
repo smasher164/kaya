@@ -13588,6 +13588,9 @@ impl crate::harness::Stage for WinUiStage {
     fn row_cells(&self, _: crate::harness::Target) -> String {
         crate::depth_stub("table")
     }
+    fn column_edges(&self, _: crate::harness::Target, _: usize) -> String {
+        crate::depth_stub("table")
+    }
     fn header_click(&self, _: crate::harness::Target, _: u32) {
         crate::depth_stub("table")
     }

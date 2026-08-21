@@ -93,6 +93,9 @@ mod toolbar;
 #[path = "typeface.rs"]
 mod typeface;
 
+#[path = "table.rs"]
+mod table;
+
 #[path = "identity.rs"]
 mod identity;
 
@@ -141,6 +144,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("ranges") => ranges::app(ctx),
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),
+        Ok("table") => table::app(ctx),
         // The typeface scene asks for the vendored font BY ASSET NAME
         // and does not read a path or an environment variable at all
         // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE

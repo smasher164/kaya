@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
             // through the Os.setenv loop above.
             "typeface" -> Typeface::app
             "toolbar" -> Toolbar::app
+            "table" -> Table::app
             // NOTHING IS LOWERED AT RUNTIME on this host: the launcher
             // icon and the app's name are the INSTALLED PACKAGE's,
             // compiled by android/build.gradle.kts

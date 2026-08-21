@@ -290,6 +290,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_value_changed as *mut _,
             },
             NativeMethod {
+                name: "emitSortRequested".into(),
+                sig: "([BI)V".into(),
+                fn_ptr: present_emit_sort_requested as *mut _,
+            },
+            NativeMethod {
                 name: "emitAlertResult".into(),
                 sig: "(JI)V".into(),
                 fn_ptr: present_emit_alert_result as *mut _,
@@ -898,6 +903,20 @@ extern "system" fn present_emit_toggled(
         .convert_byte_array(&tag)
         .expect("kaya: reading the checkbox tag failed");
     unsafe { crate::capi::kaya_emit_toggled(bytes.as_ptr(), bytes.len(), checked) };
+}
+
+extern "system" fn present_emit_sort_requested(
+    env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    column: jni::sys::jint,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the sort tag failed");
+    unsafe {
+        crate::capi::kaya_emit_sort_requested(bytes.as_ptr(), bytes.len(), column as u32)
+    };
 }
 
 /// KayaPresent.blobData: a blob's bytes by the handle an apply record

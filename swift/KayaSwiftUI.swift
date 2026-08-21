@@ -371,6 +371,12 @@ final class KayaNode: Identifiable {
     /// expect_columns proves the table rendered rather than that the
     /// wire arrived.
     var tablePresented = ""
+    /// Cell leading edges in window space, keyed "<rowId>/<col>" (and
+    /// "h/<col>" where kaya composes the header) — written by the
+    /// render's edge reporters, clustered by expect_column_edges. The
+    /// native macOS header is NSTableView's own and aligns with its
+    /// cells by construction, so that path records cells alone.
+    var cellEdgeX: [String: Double] = [:]
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
         self.id = id
@@ -5282,7 +5288,8 @@ private func kayaRunScript(_ script: String) {
                 // render's own record (the scroll-geometry precedent),
                 // never the model echo: a wire that arrived but a table
                 // that never rendered reads as "", loudly. Spelling:
-                // "<size class>/<titles|joined> [^N|vN]".
+                // "<titles|joined> [^N|vN]" — no size-class prefix,
+                // headers render at every width (docs/tables-plan.md).
                 let want = kayaQuoted(Array(parts[2...]))
                 let got = DispatchQueue.main.sync { () -> String? in
                     kayaTarget(parts[1], "column", kayaScene.columns)?.tablePresented
@@ -5318,6 +5325,59 @@ private func kayaRunScript(_ script: String) {
                     observed.append(got)
                 } else if let got {
                     failures.append("\(parts[1]) rows \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "expect_column_edges":
+                #if !os(macOS)
+                    kayaDepthStub("table", on: "ios")
+                #endif
+                // The uniform GEOMETRY claim, both halves: the cells'
+                // leading edges (recorded in window space by the
+                // render's reporters) form exactly N clusters within
+                // two units, AND the table spans the flex track it was
+                // assigned — the regression a content-hugging layout
+                // slips past every model-side observable. On the
+                // NATIVE path both header and cell BOXES are
+                // Table-placed, so intra-box content offsets are
+                // invisible here (measured 2026-08-21: a padding
+                // perturbation correctly did not fire) and the cluster
+                // half's live protection is the COUNT — a column that
+                // never renders reads 1 of 2. The synthesized tiers
+                // place cells themselves, and their negatives moved
+                // real placement.
+                let want = Int(parts[2]) ?? -1
+                let got = DispatchQueue.main.sync {
+                    () -> (clusters: [Double], track: Double, drawn: Double)? in
+                    guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
+                        return nil
+                    }
+                    var clusters: [Double] = []
+                    var prev: Double?
+                    for x in node.cellEdgeX.values.sorted() {
+                        if let p = prev, x - p <= 2 {
+                            prev = x
+                            continue
+                        }
+                        clusters.append(x)
+                        prev = x
+                    }
+                    return (
+                        clusters, kayaMainExtents[node.id] ?? -1,
+                        kayaDrawnExtents[node.id] ?? -1
+                    )
+                }
+                if let got, got.clusters.count == want, got.track <= 0 || got.drawn >= got.track - 2 {
+                    observed.append("\(parts[1]) column edges \(want)")
+                } else if let got, got.clusters.count != want {
+                    let seen = got.clusters.map { String(Int($0.rounded())) }
+                        .joined(separator: ",")
+                    failures.append(
+                        "\(parts[1]) cell edges cluster at [\(seen)], wanted \(parts[2]) columns")
+                } else if let got {
+                    failures.append(
+                        "\(parts[1]) draws \(Int(got.drawn.rounded()))pt of a "
+                            + "\(Int(got.track.rounded()))pt track")
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
@@ -7313,15 +7373,7 @@ struct KayaTableSurface: View {
         if #available(macOS 14.4, iOS 17.4, *) {
             KayaNativeTable(node: node)
         } else {
-            // Below the dynamic-column floor: the stack, headerless —
-            // presentation degrades, the declaration does not. The
-            // presented record stays empty, which is what
-            // expect_columns reports on such a host.
-            VStack(alignment: .leading, spacing: node.spacing) {
-                ForEach(node.children) { child in
-                    KayaRender(node: child, flexVertical: true, flexStretch: false)
-                }
-            }
+            KayaSynthesizedTable(node: node)
         }
     }
 }
@@ -7370,7 +7422,10 @@ private struct KayaNativeTable: View {
                     if spec.id < row.children.count {
                         KayaRender(
                             node: row.children[spec.id], flexVertical: false,
-                            flexStretch: false)
+                            flexStretch: false
+                        )
+                        .background(
+                            KayaEdgeReporter(node: node, key: "\(row.id)/\(spec.id)"))
                     }
                 }
             }
@@ -7382,17 +7437,167 @@ private struct KayaNativeTable: View {
     }
 
     /// The presented record expect_columns reads — written by THIS
-    /// path only, so the observation proves the table rendered. The
-    /// spelling is expect_panes' size-class prefix plus the titles in
-    /// visual order and the indicator (^N asc / vN desc) when shown.
+    /// path only, so the observation proves the table rendered: the
+    /// titles in visual order and the indicator (^N asc / vN desc)
+    /// when shown. No size-class prefix — headers render at every
+    /// width (ratified 2026-08-21, docs/tables-plan.md).
     private func record() {
-        var presented = "regular/" + node.tableColumns.joined(separator: "|")
+        var presented = node.tableColumns.joined(separator: "|")
         if node.tableSorted != kayaSortNone {
             presented += node.tableDirection == 0 ? " ^" : " v"
             presented += String(node.tableSorted)
         }
         let target = node
         DispatchQueue.main.async { target.tablePresented = presented }
+    }
+}
+
+/// Records one cell's leading edge into the table node's cluster
+/// store, in window space — expect_column_edges' raw material.
+private struct KayaEdgeReporter: View {
+    let node: KayaNode
+    let key: String
+    var body: some View {
+        GeometryReader { geo in
+            let x = Double(geo.frame(in: .global).minX)
+            Color.clear.task(id: x) { node.cellEdgeX[key] = x }
+        }
+    }
+}
+
+/// The synthesized tiers' shared geometry rule (docs/tables-plan.md
+/// decision 6): a column's content width is its FLOOR, never its
+/// size — leftover track width distributes across the columns, so
+/// the table spans its viewport (the native Table's resting look,
+/// stated as a rule; the span half of expect_column_edges holds it).
+/// Subviews arrive in content order: cols headers, the divider, then
+/// the stamped cells row-major.
+private struct KayaTableLayout: Layout {
+    let cols: Int
+    let colGap: CGFloat
+    let rowGap: CGFloat
+
+    private func columnWidths(
+        _ subviews: Subviews, _ proposal: ProposedViewSize
+    ) -> ([CGFloat], CGFloat) {
+        var widths = [CGFloat](repeating: 0, count: cols)
+        for (i, v) in subviews.prefix(cols).enumerated() {
+            widths[i] = max(widths[i], v.sizeThatFits(.unspecified).width)
+        }
+        for (i, v) in subviews.dropFirst(cols + 1).enumerated() {
+            widths[i % cols] = max(widths[i % cols], v.sizeThatFits(.unspecified).width)
+        }
+        var total = widths.reduce(0, +) + colGap * CGFloat(cols - 1)
+        if let bound = proposal.width, bound > total {
+            let per = (bound - total) / CGFloat(cols)
+            for c in 0..<cols { widths[c] += per }
+            total = bound
+        }
+        return (widths, total)
+    }
+
+    private func rowHeights(_ subviews: Subviews) -> (CGFloat, CGFloat, [CGFloat]) {
+        let headerH = subviews.prefix(cols)
+            .map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        let dividerH = subviews[cols].sizeThatFits(.unspecified).height
+        var rows: [CGFloat] = []
+        let cells = Array(subviews.dropFirst(cols + 1))
+        for start in stride(from: 0, to: cells.count, by: cols) {
+            rows.append(
+                cells[start..<min(start + cols, cells.count)]
+                    .map { $0.sizeThatFits(.unspecified).height }.max() ?? 0)
+        }
+        return (headerH, dividerH, rows)
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let (_, total) = columnWidths(subviews, proposal)
+        let (headerH, dividerH, rows) = rowHeights(subviews)
+        let height =
+            headerH + rowGap + dividerH + rowGap + rows.reduce(0, +)
+            + rowGap * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: total, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let (widths, _) = columnWidths(subviews, proposal)
+        let (headerH, dividerH, rows) = rowHeights(subviews)
+        var colX = [CGFloat](repeating: 0, count: cols)
+        var acc = bounds.minX
+        for c in 0..<cols {
+            colX[c] = acc
+            acc += widths[c] + colGap
+        }
+        for (i, v) in subviews.prefix(cols).enumerated() {
+            v.place(
+                at: CGPoint(x: colX[i], y: bounds.minY), anchor: .topLeading,
+                proposal: .unspecified)
+        }
+        let dividerY = bounds.minY + headerH + rowGap
+        subviews[cols].place(
+            at: CGPoint(x: bounds.minX, y: dividerY), anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: dividerH))
+        var y = dividerY + dividerH + rowGap
+        let cells = Array(subviews.dropFirst(cols + 1))
+        for (r, rowH) in rows.enumerated() {
+            for c in 0..<cols where r * cols + c < cells.count {
+                cells[r * cols + c].place(
+                    at: CGPoint(x: colX[c], y: y), anchor: .topLeading,
+                    proposal: .unspecified)
+            }
+            y += rowH + rowGap
+        }
+    }
+}
+
+/// The synthesized tier (docs/tables-plan.md): kaya's own header over
+/// KayaTableLayout's floored-and-distributed columns, for hosts below
+/// the native Table's dynamic-column floor — and the shape the iOS
+/// compact slice will reuse. Headers render at EVERY width (ratified
+/// 2026-08-21). Sorting stays a request: a header tap emits and the
+/// indicator moves only when the guest re-declares.
+private struct KayaSynthesizedTable: View {
+    let node: KayaNode
+
+    private var presented: String {
+        var p = node.tableColumns.joined(separator: "|")
+        if node.tableSorted != kayaSortNone {
+            p += node.tableDirection == 0 ? " ^" : " v"
+            p += String(node.tableSorted)
+        }
+        return p
+    }
+
+    private func headerText(_ col: Int, _ title: String) -> String {
+        guard node.tableSorted != kayaSortNone, Int(node.tableSorted) == col else { return title }
+        return title + (node.tableDirection == 0 ? " ▲" : " ▼")
+    }
+
+    var body: some View {
+        KayaTableLayout(cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing) {
+            ForEach(Array(node.tableColumns.enumerated()), id: \.offset) { col, title in
+                Text(headerText(col, title))
+                    .fontWeight(.semibold)
+                    .background(KayaEdgeReporter(node: node, key: "h/\(col)"))
+                    .onTapGesture {
+                        KayaHost.emitSortRequested(node.sortTag, UInt32(col))
+                    }
+            }
+            Divider()
+            ForEach(node.children) { row in
+                ForEach(Array(row.children.enumerated()), id: \.offset) { col, cell in
+                    KayaRender(node: cell, flexVertical: false, flexStretch: false)
+                        .background(KayaEdgeReporter(node: node, key: "\(row.id)/\(col)"))
+                }
+            }
+        }
+        // task(id:), not onChange: this tier compiles at the macOS 13 /
+        // iOS 16 floor, below the zero-parameter onChange.
+        .task(id: presented) { node.tablePresented = presented }
     }
 }
 

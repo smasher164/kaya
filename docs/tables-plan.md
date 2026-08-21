@@ -2,12 +2,18 @@
 
 STATUS: plan drafted 2026-08-20; the mac depth slice LANDED the same
 day (wire + walls + Rust surface + SwiftUI Table + the three verbs +
-the scene; validate-mac and the full matrix ALL PASS). The breadth
-slices are held open by the ledger's DEPTH STUB entries. DESIGN.md's
-2026-07-24 survey ratified the shape this plan implements: "Table is
-not a separate widget admission: it is column props on the existing
-list vocabulary, lowered richly where the size class and the platform
-have the idiom and degraded to a plain list where they do not."
+the scene; validate-mac and the full matrix ALL PASS). 2026-08-21:
+decision 5 REVISED (headers at every width — the degrade died before
+its first commit), the Compose lowering rebuilt content-sized, the
+expect_column_edges observable added, and the android phone legs
+wired. The GTK and WinUI breadth slices are held open by the ledger's
+DEPTH STUB entries. DESIGN.md's 2026-07-24 survey ratified the shape
+this plan implements: "Table is not a separate widget admission: it
+is column props on the existing list vocabulary, lowered richly where
+the size class and the platform have the idiom and degraded to a
+plain list where they do not." — the second half of that sentence is
+what decision 5's revision struck: the lowering TIER still varies by
+platform, but nothing degrades to a plain list anymore.
 
 ## What a table is here
 
@@ -57,14 +63,19 @@ is a separate admission if a real app ever needs one).
    and not others. (A bare-label row template is the N=0 undeclared
    case — columns simply not declared — never a 1-column table.)
 
-5. **Presentation degrades; the declaration does not.** Headers are a
-   regular-size-class affordance (DESIGN.md: Apple's own Table hides
-   them on compact). The lowering keys on the window's size class,
-   never the OS. Rich tier where the idiom exists; a synthesized
-   header row above the existing stack where it does not; headers
-   hidden on compact everywhere. The observable spells the size class
-   the way expect_panes does, so a compact leg asserts the degrade
-   rather than skipping.
+5. ~~**Presentation degrades; the declaration does not.**~~ REVISED
+   2026-08-21 (Akhil): **headers render at every width.** The compact
+   degrade was an Apple-idiom analogy — SwiftUI's Table collapses to a
+   first-column list on compact — generalized to the synthesized tiers,
+   where nothing forces it and it threw away declared columns for no
+   platform reason. The ruling: kaya's synthesized tier draws the
+   header at any width, and iOS compact will take the synthesized tier
+   rather than the native collapse (showing the declared columns beats
+   the idiom that hides them). With no degrade there is no size class
+   in the observable — `expect_columns` drops the `regular/` prefix and
+   becomes byte-identical on every platform at every width, which is
+   what let the android phone legs wire (they were waiting on a
+   panes-style size-class ruling that no longer applies to tables).
 
 6. **Per-backend lowerings** (depth first on mac, then breadth):
    - macOS/iPadOS regular: SwiftUI `Table` (NSTableView's wrapper —
@@ -80,12 +91,38 @@ is a separate admission if a real app ever needs one).
    - WinUI: the details-view lineage hand-rolled — a header Grid above
      the rows, star-sized columns shared between header and cells
      (the Column container is already a Grid there).
-   - Compose: synthesized header over the existing Column — DESIGN.md
-     already files this as lowering tier 3 (Material dropped the
-     component).
-   Cross-row cell alignment for the synthesized tiers is each
-   backend's own idiom (SizeGroup / SharedSize / intrinsic
-   measurement) and is the real work of the breadth slices.
+   - Compose: synthesized header over FLOORED-AND-DISTRIBUTED columns
+     — DESIGN.md already files this as lowering tier 3 (Material
+     dropped the component). Landed 2026-08-21 as one custom Layout: a
+     loose measure pass finds each column's widest child (header
+     included) as that column's FLOOR, leftover track width
+     distributes equally across the columns, and header and cells
+     share the x-positions by construction. The column rule went
+     through three cuts in one day, each caught by looking at pixels:
+     equal weights gave Name half a 1280dp tablet; pure content-hug
+     protected content but drew the table in a corner of its viewport,
+     which no platform's table does and which Akhil caught against the
+     mac screenshots; floors-plus-distribution keeps both properties —
+     nothing clips, the table spans, and with modest content it lands
+     on the native Table's resting look.
+   The synthesized geometry rule is ONE rule on every such tier
+   (Compose and Swift's KayaTableLayout spell it identically; GTK and
+   WinUI inherit it with their slices), and it is OBSERVED, not just
+   implemented: `expect_column_edges <target> <n>` asserts BOTH halves
+   — the cells form exactly n leading-edge clusters (within two device
+   units) AND the table spans its assigned track — read from real
+   layout by every backend. The span half exists because the
+   content-hug cut kept every cluster exactly right while leaving 90%
+   of the viewport empty: alignment alone cannot see it. macOS native
+   columns add user resize on top (the affordance the touch tiers
+   lack); its header is NSTableView's own and aligns with its cells by
+   construction, so that path clusters cells alone. All four negatives
+   were WATCHED FAILING 2026-08-21 (cluster + span, native mac +
+   Compose), and the watching earned its keep immediately: on the
+   native path the cell BOXES are Table-placed and cannot drift, so a
+   padding perturbation correctly did not fire — the cluster half's
+   live protection there is the COUNT (a column that never renders),
+   while the synthesized tiers' negatives moved real placement.
 
 7. **Construction surface.** The declaration and the click handler
    ride the For's own construction — Rust's statement form allocates
@@ -131,12 +168,13 @@ is a separate admission if a real app ever needs one).
 
 ## Observables (all three harness implementations)
 
-- `expect_columns <target> "<size class>/Name|Size ^0"` — the header
-  titles in visual order read from the TOOLKIT (never the model), the
-  size class prefixed as expect_panes spells it, the sort indicator
-  as ^N (asc) or vN (desc) appended when one is shown, absent when
-  none. Compact legs assert `"compact/"` — headers hidden IS the
-  observation.
+- `expect_columns <target> "Name|Size ^0"` — the header titles in
+  visual order read from the TOOLKIT (never the model), the sort
+  indicator as ^N (asc) or vN (desc) appended when one is shown,
+  absent when none. NO size-class prefix (revised with decision 5,
+  2026-08-21): headers render at every width, so the spelling is
+  byte-identical on every platform and the phone legs run the shared
+  scene verbatim.
 - `header_click <target> <index>` — an action driving the platform's
   real header path (select_section's shape), so the native handler
   emits sort_requested.
@@ -147,6 +185,14 @@ is a separate admission if a real app ever needs one).
   still serves flat Fors, expect_rows serves celled ones, and sort
   results are asserted here (creation-order registries cannot see a
   move — the reason expect_order exists applies verbatim).
+- `expect_column_edges <target> <n>` — the cells form exactly n
+  leading-edge clusters within two device units AND the table spans
+  its assigned track, measured from real layout (the grid_columns
+  Stage shape, empty-on-success). The uniform geometry claim of
+  decision 6, both halves promised everywhere; the exact column
+  widths stay platform metrics. Added 2026-08-21 with the
+  geometry-rule ratification, so the same scene measures the same
+  claim on every platform.
 
 ## The scene (tools/scenes/table.steps)
 
@@ -155,8 +201,9 @@ indicator; header_click 0 → guest sorts ascending by name, sets the
 indicator → expect_rows sorted + expect_columns shows ^0;
 header_click 0 again → guest flips to descending → expect_rows
 reversed + v0; header_click 1 → sort by the second column →
-expect_rows + ^1. The desktop legs assert regular/; the phone legs
-the compact degrade. The guest's sort handler is the reorder scene's
+expect_rows + ^1. Every leg — desktop, tablet, phone — asserts the
+same bytes; expect_column_edges rides between the first expect_columns
+and expect_rows. The guest's sort handler is the reorder scene's
 move-by-key idiom, never an index.
 
 ## Sequencing (the panes playbook)
