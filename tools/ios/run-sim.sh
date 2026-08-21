@@ -763,10 +763,15 @@ clip_read() { # udid b64-kind -> b64 answer
     # below — a foreground read would deadlock against its own remedy.
     timeout 25 xcrun simctl spawn "$udid" "$CLIPCTL" read "$kind" >"$log" 2>/dev/null &
     local reader=$!
-    while kill -0 "$reader" 2>/dev/null && [ "$tries" -lt 8 ]; do
+    # 0.3s between press rounds, not 1s (2026-08-20): the reader
+    # returns the moment the Allow lands, so the sleep's only job is
+    # pacing the next press attempt — at 1s every prompted read paid
+    # most of a second of pure wait after the press had already
+    # worked, across three ~75s whale legs.
+    while kill -0 "$reader" 2>/dev/null && [ "$tries" -lt 20 ]; do
         clip_press "$udid" >/dev/null || true
         tries=$((tries + 1))
-        sleep 1
+        sleep 0.3
     done
     wait "$reader" 2>/dev/null || true
     if ! grep -q "^S " "$log"; then
@@ -1229,7 +1234,7 @@ $extra"
 # prints in submission order and is the barrier between flavor blocks
 # (their builds overwrite shared scratch files a queued leg reads).
 LEGS_DIR="$(mktemp -d)"
-trap 'rm -rf "$LEGS_DIR"' EXIT
+trap 'rm -rf "$LEGS_DIR" "${PREP_DIR:-}"' EXIT
 leg_names=()
 leg_pids=()
 # The iPad's legs are tracked apart from the phone pool's. If they rode
@@ -1249,9 +1254,30 @@ running_legs() {
     echo "$n"
 }
 
+# Join the backgrounded device preparation (the relay check and the
+# picker warms — see boot below) before ANY leg claims a device. Inside
+# the queue functions rather than at each phase's head so no future
+# phase can forget it; idempotent, so forty calls cost one join.
+prep_join() {
+    [ -n "${PREP_JOINED:-}" ] && return 0
+    PREP_JOINED=1
+    if [ ${#PREP_PIDS[@]} -gt 0 ]; then
+        wait "${PREP_PIDS[@]}" 2>/dev/null || true
+    fi
+    local f rc
+    for f in "$PREP_DIR"/*.rc; do
+        rc=$(cat "$f" 2>/dev/null || echo missing)
+        if [ "$rc" != 0 ]; then
+            echo "run-sim: device preparation failed ($(basename "$f") rc=$rc)" >&2
+            return 1
+        fi
+    done
+}
+
 queue_leg() { # fn name args...
     local fn="$1" name="$2"
     shift 2
+    prep_join || exit 1
     leg_names+=("$name")
     (
         local slot='' i
@@ -1300,6 +1326,7 @@ queue_leg() { # fn name args...
 queue_pad_leg() { # fn name args...
     local fn="$1" name="$2"
     shift 2
+    prep_join || exit 1
     leg_names+=("$name")
     (
         unset KAYA_RECORD
@@ -1348,24 +1375,29 @@ if [ -n "${KAYA_RECORD:-}" ]; then
 fi
 boot_pool
 # BEFORE ANY LEG, and on every run: are these devices' clipboards their
-# own? The clipboard legs are the customers, but the check sits here
-# rather than beside them because a lane that dies at leg 40 after eight
-# minutes teaches nothing a lane that dies in five seconds does not.
-clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1
-# AND ON THE SAME PATH: the first picker a device shows after a boot
-# ignores the directory it was aimed at (see picker_warm). Every phone
-# in the pool, because which one claims the filedialog leg is a race;
-# not the pad, which runs no picker scene.
-warm_pids=()
+# own (clip_relay_check), and has each phone burned the first-picker
+# ignores-its-directory boot quirk (picker_warm)? BACKGROUNDED here and
+# JOINED IN queue_leg (prep_join) since 2026-08-20: both need only
+# booted devices, the build phase that follows needs no devices, and
+# serially they sat ~15s on the lane's critical path. A preparation
+# failure still fails the lane before any leg runs — just at the first
+# queue instead of five seconds in.
+PREP_DIR="$(mktemp -d)"
+PREP_PIDS=()
+(
+    clip_relay_check "${UDIDS[0]}" "$PAD_UDID"
+    prep_rc=$?
+    echo "$prep_rc" >"$PREP_DIR/relay.rc"
+) &
+PREP_PIDS+=($!)
 for udid in "${UDIDS[@]}"; do
-    picker_warm "$udid" &
-    warm_pids+=($!)
+    (
+        picker_warm "$udid"
+        prep_rc=$?
+        echo "$prep_rc" >"$PREP_DIR/warm-$udid.rc"
+    ) &
+    PREP_PIDS+=($!)
 done
-warm_failed=0
-for pid in "${warm_pids[@]}"; do
-    wait "$pid" || warm_failed=1
-done
-[ "$warm_failed" = 0 ] || exit 1
 rec_suite_start
 timing boot
 
@@ -1395,6 +1427,7 @@ EOF
         -emit-library \
         -target "arm64-apple-ios17.0-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
+        -pch-output-dir "$BUNDLES/.pch" \
         swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift "$marker" \
         -framework UIKit -framework Foundation \
         -o "$BUNDLES/libkaya_swiftui_ios.dylib" || return 1
@@ -1452,6 +1485,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
             xcrun -sdk iphonesimulator swiftc \
                 -target "arm64-apple-ios$IOS_MIN-simulator" \
                 -import-objc-header crates/kaya/include/kaya.h \
+                -pch-output-dir "$BUNDLES/.pch" \
                 bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
                 bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
                 "${companions[@]}" "$stage/main.swift" \

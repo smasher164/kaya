@@ -1982,14 +1982,14 @@ ios_selftest "$IOS_T/hostboard.sh" "touches a pasteboard tool" "a live pbcopy in
 # ...and a runner that never asks whether the board is the device's own
 # must fail: with Simulator.app running, it is Simulator.app's too.
 hits="$(ios_perturb tools/ios/run-sim.sh \
-    '(?m)^clip_relay_check .*\n' '' "$IOS_T/norelay.sh")"
+    '(?m)^ *clip_relay_check .*\n' '' "$IOS_T/norelay.sh")"
 ios_applied "$hits" "the relay-check removal"
 ios_selftest "$IOS_T/norelay.sh" "nothing measures the clipboard isolation" \
     "a runner that never measures the isolation"
 
 # ...and one that measures it only after the legs are queued must fail.
 hits="$(ios_perturb tools/ios/run-sim.sh \
-    '(?m)^clip_relay_check (.*)\n' '' "$IOS_T/late.sh")"
+    '(?m)^ *clip_relay_check (.*)\n' '' "$IOS_T/late.sh")"
 ios_applied "$hits" "the late-check removal half"
 hits="$(ios_perturb "$IOS_T/late.sh" \
     '(?m)^        drain\n        timing swiftui-build\+legs' \
@@ -2019,14 +2019,14 @@ picker_selftest() { # copy want-fragment label
 }
 
 hits="$(ios_perturb tools/ios/run-sim.sh \
-    '(?m)^    picker_warm .*\n' '' "$IOS_T/nowarm.sh")"
+    '(?m)^ *picker_warm .*\n' '' "$IOS_T/nowarm.sh")"
 ios_applied "$hits" "the picker-warm removal"
 picker_selftest "$IOS_T/nowarm.sh" "nothing warms the document picker" \
     "a runner that never warms the picker"
 
 # ...and one that warms it only after the legs are queued must fail.
 hits="$(ios_perturb tools/ios/run-sim.sh \
-    '(?m)^    picker_warm (.*)\n' '' "$IOS_T/latewarm.sh")"
+    '(?m)^ *picker_warm (.*)\n' '' "$IOS_T/latewarm.sh")"
 ios_applied "$hits" "the late-warm removal half"
 hits="$(ios_perturb "$IOS_T/latewarm.sh" \
     '(?m)^        drain\n        timing swiftui-build\+legs' \

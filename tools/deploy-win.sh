@@ -799,19 +799,67 @@ if [ "$REMOTE_STAMP" = "$STAMP" ]; then
     echo "== deploy unchanged (stamp $STAMP) =="
 else
     echo "== deploying artifacts =="
-    scp -q \
-        "${SCENE_EXES[@]}" \
-        "$TARGET/kaya.dll" \
-        "$BOOTSTRAP" \
-        "${SCENE_PYS[@]}" \
-        "$ROOT/go.mod" \
-        "$ROOT/crates/kaya/include/kaya.h" \
-        "$ROOT"/tools/guest/*.cmd \
-        "$ROOT"/tools/guest/*.vbs \
-        "$ROOT/tools/guest/shot.ps1" \
-        "$ROOT/tools/guest/desk-warm.ps1" \
-        "$ROOT/tools/guest/wait-exit.ps1" \
-        "$HOST:C:/kaya/" || {
+    # PER-FILE ON THE FLAT ARTIFACT SET ONLY (2026-08-20): the stamp
+    # still decides all-or-nothing whether this block runs, and the
+    # cs/python/java SOURCE TREES below keep their recreate-from-scratch
+    # (that is where the stale-mix class lives — the stamp comment
+    # above). But the ~40 exes and dlls here are flat content-addressed
+    # files, and a binding-source iteration used to re-ship every byte
+    # of them: the manifest names what the VM already holds, byte for
+    # byte, and only the difference rides the wire. Written remotely
+    # ONLY after the whole deploy succeeds, exactly like the stamp, so
+    # a half-shipped set re-diffs honestly next run. kaya.dll's
+    # remote-hash verify below runs either way and would catch a
+    # manifest that lied about the one file that matters most.
+    DEPLOY_ARTIFACTS=(
+        "${SCENE_EXES[@]}"
+        "$TARGET/kaya.dll"
+        "$BOOTSTRAP"
+        "${SCENE_PYS[@]}"
+        "$ROOT/go.mod"
+        "$ROOT/crates/kaya/include/kaya.h"
+        "$ROOT"/tools/guest/*.cmd
+        "$ROOT"/tools/guest/*.vbs
+        "$ROOT/tools/guest/shot.ps1"
+        "$ROOT/tools/guest/desk-warm.ps1"
+        "$ROOT/tools/guest/wait-exit.ps1"
+    )
+    shasum -a 256 "${DEPLOY_ARTIFACTS[@]}" >"$LEGS_DIR/local.sums"
+    run_ssh 'cmd /c type C:\kaya\deploy.manifest' 2>/dev/null \
+        | tr -d '\r' >"$LEGS_DIR/remote.manifest" || true
+    python3 - "$LEGS_DIR/local.sums" "$LEGS_DIR/remote.manifest" \
+        "$LEGS_DIR/deploy.manifest" >"$LEGS_DIR/ship.list" <<'PYEOF'
+import os, sys
+local, remote, manifest = sys.argv[1:4]
+held = {}
+for line in open(remote, errors="replace"):
+    parts = line.split(None, 1)
+    if len(parts) == 2:
+        held[parts[1].strip()] = parts[0]
+want = {}
+for line in open(local):
+    sha, path = line.split(None, 1)
+    path = path.strip()
+    name = os.path.basename(path)
+    if name in want:
+        sys.exit(f"deploy-win: two artifacts share the basename {name!r} — "
+                 f"the manifest cannot key them")
+    want[name] = (sha, path)
+with open(manifest, "w") as out:
+    for name, (sha, path) in sorted(want.items()):
+        out.write(f"{sha} {name}\n")
+for name, (sha, path) in sorted(want.items()):
+    if held.get(name) != sha:
+        print(path)
+PYEOF
+    ship_count=$(grep -c . "$LEGS_DIR/ship.list" || true)
+    echo "artifacts: shipping $ship_count of ${#DEPLOY_ARTIFACTS[@]} (the rest match the VM's manifest)"
+    if [ "$ship_count" -gt 0 ]; then
+        ship_files=()
+        while IFS= read -r ship_f; do
+            [ -n "$ship_f" ] && ship_files+=("$ship_f")
+        done <"$LEGS_DIR/ship.list"
+        scp -q "${ship_files[@]}" "$HOST:C:/kaya/" || {
         # WHAT TO DO NEXT, because scp's own message ("dest open ...:
         # Failure") names neither the cause nor the fix. A copy of
         # kaya.dll fails for exactly one reason in practice: a guest from
@@ -827,7 +875,8 @@ else
         echo "  A process tasklist shows but taskkill cannot kill is wedged;" >&2
         echo "  reboot the VM (ssh $HOST 'shutdown /r /t 0') and re-run." >&2
         exit 1
-    }
+        }
+    fi
     # Recreated from scratch every deploy: dotnet run picks up whatever
     # sources and project files are in the directory, so a leftover from a
     # renamed or removed example would poison the build.
@@ -875,6 +924,10 @@ else
         echo "javac failed on the VM" >&2
         exit 1
     }
+    # The manifest lands WITH the stamp, after everything above held:
+    # a deploy that died mid-way leaves the old manifest, and the next
+    # run re-diffs against what the VM verifiably had.
+    scp -q "$LEGS_DIR/deploy.manifest" "$HOST:C:/kaya/deploy.manifest"
     run_ssh "cmd /c echo $STAMP>C:\\kaya\\deploy.stamp"
 fi
 
