@@ -98,6 +98,16 @@ is a separate admission if a real app ever needs one).
    template-zone census and check-sugar-surface hold the fan-out
    open).
 
+8. **A table is a viewport, and the scene says it fills.** The scroll
+   scene's rule verbatim: kaya's normalized layout gives a child its
+   natural size unless the scene declares grow, and a Table's natural
+   size is NOTHING — measured by a live-window screenshot after the
+   depth slice landed, while every model-side observable passed
+   (expect_columns reads the render's record, which is written on
+   appear even at zero size; only pixels could disagree). Every table
+   guest declares grow(1) on the For, and any future geometry-true
+   table observable starts from this incident.
+
 ## The wire (append-only ids)
 
 - TX 45 `set_column_headers` (renamed from set_columns mid-slice: the

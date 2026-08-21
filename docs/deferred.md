@@ -4370,14 +4370,26 @@ remembering. Open, per backend and surface:
 - **DEPTH STUB: table on winui** — the details-view header Grid with
   star-sized columns shared between header and cells; closes with
   the windows legs.
-- The seven-language guest fan-out (the scene is shared verbatim);
+- ~~The seven-language guest fan-out~~ (CLOSED 2026-08-21: all eight
+  bindings carry columns/on_sort in their idiom and all eight guests
+  pass the byte-shared scene on mac. The fan-out's own generator
+  lesson: the occurrence decoders' generic tag fallthrough SKIPPED the
+  u32 slot the click family pads, so sort_requested's column was
+  silently dropped in every generated parser — now a DERIVED family
+  (u32_slot_occurrence_names, keyed on the third field being named
+  rather than `reserved`), and the click-shaped C-floor classifier
+  tightened to require the pad, so the next such record reaches all
+  nine surfaces with zero emitter edits. Go's tplzone parity test also
+  caught the missing template-node dispatch sibling — OnSortNode
+  exists so a stamped copy's sort cannot drop silently even while the
+  core refuses nested headers.)
   ~~the statement form's missing For handle~~ (CLOSED same day: rows()
   allocates the For id eagerly and the chain reads
   `items.rows(tx).columns(...).on_sort(&msgs, Msg::Sort)` with `.id()`
   for the handler's re-declaration — the guest moved onto it and the
   guest-floor exemption died); and a census clause holding
-  `columns`/`on_sort` present in all eight bindings once the fan-out
-  lands, which no gate demands yet.
+  `columns`/`on_sort` present in all eight bindings, which no gate
+  demands yet.
 
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state
@@ -4474,6 +4486,16 @@ clean setResult+finish, this is an AMS-side race the harness may need
 to tolerate — a remedy that needs Akhil's ruling, since retrying a
 save leg would launder exactly the class of bug kaya's own users
 would hit.
+
+A THIRD FACE OF THE SAME ROOT CAUSE (2026-08-21, filedialog-jvm
+under the fan-out matrix): the choose click landed, waitForPickerGone
+said gone, the result never came — and the at-fail dumpsys showed
+PickActivity STILL TOP-RESUMED: the a11y window list had transiently
+DROPPED a live window mid-relayout, the one absent read declared it
+gone, and the next open died on the one-per-process wall. The window
+list lags in BOTH directions, so every gone/present decision is now
+DEBOUNCED: waitForPickerGone and dismiss() both demand two
+consecutive absences before believing one.
 
 THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
 (2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in

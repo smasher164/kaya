@@ -329,6 +329,25 @@ pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
         .collect()
 }
 
+/// Occurrences whose THIRD field — the u32 at offset 20, where the
+/// click-tag family writes `reserved` — is a NAMED value the handler
+/// needs (today: sort_requested's `column`). The generic tag
+/// fallthrough reads {u64 id, u32 path_len} and skips that slot, so
+/// every parser needs one extra read for these, DERIVED from the field
+/// name rather than listed by hand.
+pub(crate) fn u32_slot_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.fields.len() >= 3
+                && matches!(r.fields[2].ty, kaya::spec::FieldTy::U32)
+                && r.fields[2].name != "reserved"
+                && r.fields[0].name == "id"
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
 /// Occurrences carrying an UNDO DELTA: a window, four u32 run lengths,
 /// the group's `label`, and one flat `delta` Values tail the runs cut up
 /// (docs/undo-plan.md D5, and `wire::undo_body`).
@@ -363,6 +382,11 @@ pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static
                 && r.fields.len() == 3
                 && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
                 && r.fields[1].name == "path_len"
+                // The third slot must be PADDING: a record carrying a
+                // real value there (sort_requested's column) is the
+                // u32-slot family, and a click-shaped parse would drop
+                // the value silently.
+                && r.fields[2].name == "reserved"
         })
         .map(|r| r.name)
         .collect()

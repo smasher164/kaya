@@ -34,7 +34,7 @@ timing() {
 # THE scene list: the mechanical per-scene surfaces below derive from
 # it — one registration per new scene; the leg blocks stay explicit
 # because they encode per-language coverage decisions.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface table"
+DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -870,13 +870,22 @@ run panes-java-swiftui env KAYA_SELFTEST=panes KAYA_LIB="$ROOT/target/debug/libk
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The table scene: column headers + click-to-sort on the For
-# vocabulary (docs/tables-plan.md). THE DEPTH SLICE'S ONE LEG — the
-# rust guest on the SwiftUI Table lowering; the seven-language fan-out
-# and the other backends are the breadth slices, held open by the
-# depth-stub ledger entries.
+# vocabulary (docs/tables-plan.md), all eight languages — the header
+# is declared on the For, the click is a request, and every ordering
+# below is the guest's own policy coming back through the toolkit.
 KAYA_SELFTEST_SCRIPT="$(scene_script table)"
 export KAYA_SELFTEST_SCRIPT
 run table-rust-swiftui env KAYA_SELFTEST=table "$RUST_GUESTS"/table
+run table-python-swiftui env KAYA_SELFTEST=table python3 guests/python/table.py
+run table-go-swiftui env KAYA_SELFTEST=table target/go-guests/kaya-go
+run table-csharp-swiftui env KAYA_SELFTEST=table KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run table-ocaml-swiftui env KAYA_SELFTEST=table KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/table.exe
+run table-haskell-swiftui env KAYA_SELFTEST=table "$(hs_bin table)"
+run table-swift-swiftui env KAYA_SELFTEST=table target/swift-guests/table
+run table-java-swiftui env KAYA_SELFTEST=table KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The listdetail scene: THE SAME GUESTS, asserting list-detail's bare
 # invariant at whatever width the host gives — a scene selects a

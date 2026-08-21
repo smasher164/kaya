@@ -1395,6 +1395,11 @@ parseOccurrence redeem rec = do
                 go next (n - 1 :: Word32) (v : acc)
           (keys, at') <- go (24 :: Int) pathLen []
           payload <-
+            if kind == occKindSortRequested
+              then do
+                col <- peekByteOff rec 20 :: IO Word32
+                return (Just (VI64 (fromIntegral col)))
+              else
             if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged
               then do
                 (v, _) <- parseValue rec at'

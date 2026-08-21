@@ -1063,6 +1063,33 @@ class _Variant:
             raise TypeError(f"kaya: {cls.__name__} has no wire-typed fields")
 
 
+class Sort:
+    """The header bar's sort indicator (docs/tables-plan.md): which
+    column shows it, in which direction — the GUEST's declaration,
+    re-sent with the new state after it handles a sort request. The
+    platform never sorts; a header click only asks."""
+
+    __slots__ = ("sorted", "direction")
+
+    def __init__(self, sorted, direction):
+        self.sorted = sorted
+        self.direction = direction
+
+    @staticmethod
+    def asc(column):
+        """Ascending on `column` (0-based, in the declared order)."""
+        return Sort(column, 0)
+
+    @staticmethod
+    def desc(column):
+        """Descending on `column`."""
+        return Sort(column, 1)
+
+
+# The no-indicator bar (the wire's u32 none-sentinel).
+Sort.NONE = Sort(0xFFFF_FFFF, 0)
+
+
 class Collection(_BoundCollection):
     def __init__(self, id, record_type=None):
         self._id = id
@@ -1108,6 +1135,34 @@ class Collection(_BoundCollection):
                 "`with cases.case(Cls) as el:` per constructor"
             )
         return _ForTrace(self)
+
+    def columns(self, *titles, sort=None, on_sort=None, grow=None):
+        """Declare the column header bar on this collection's For —
+        the table spelling of the same loop
+        (`for item in items.columns("Name", "Size", on_sort=f):`).
+        One title per column; the row template's body must hold a
+        `with kaya.row():` of exactly one cell per column — the core
+        refuses a mismatch loudly. `on_sort` takes the 0-based column
+        index of a header click; re-declare with set_columns() after
+        sorting (docs/tables-plan.md)."""
+        return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow)
+
+    def set_columns(self, *titles, sort=None):
+        """Re-declare the header bar — the sort handler's move, after
+        it reorders the collection by key. Targets the For this
+        collection traced (columns() remembered the handle)."""
+        if getattr(self, "_for_handle", None) is None:
+            raise RuntimeError(
+                "kaya: set_columns before columns() — the header bar "
+                "is declared with the For, then re-declared here"
+            )
+        sort = sort or Sort.NONE
+        _records().append(
+            wire.tx_set_column_headers(
+                self._for_handle, sort.sorted, sort.direction,
+                len(titles), list(titles),
+            )
+        )
 
     def _decode(self, variant, fields, current):
         """Rebuild a model value from an undo delta's wire record.
@@ -1346,6 +1401,44 @@ def show_alert(title="", message="", actions=(), cancel=None,
         int(window), alert_id, len(actions), title, message,
         action0, action1, cancel))
     return alert_id
+
+
+class _ColumnsTrace:
+    """columns()'s wrapper over the for-statement tracer: iterate as
+    usual; when the template closes, emit the header declaration (the
+    core validates the row template against the declared arity, so it
+    must follow the bodies), register the sort handler, and remember
+    the For handle for set_columns()."""
+
+    def __init__(self, coll, titles, sort, on_sort, grow=None):
+        self._coll = coll
+        self._titles = titles
+        self._sort = sort
+        self._on_sort = on_sort
+        self._grow = grow
+        self._trace = None
+
+    def __iter__(self):
+        self._trace = iter(self._coll)
+        return self
+
+    def __next__(self):
+        try:
+            return next(self._trace)
+        except StopIteration:
+            handle = self._trace._template.handle
+            self._coll._for_handle = handle.id
+            _records().append(
+                wire.tx_set_column_headers(
+                    handle.id, self._sort.sorted, self._sort.direction,
+                    len(self._titles), self._titles,
+                )
+            )
+            if self._on_sort is not None:
+                _app._register(handle, wire.OCC_SORT_REQUESTED, self._on_sort)
+            if self._grow is not None:
+                _records().append(wire.tx_set_grow(handle.id, float(self._grow)))
+            raise
 
 
 class PickedFile:

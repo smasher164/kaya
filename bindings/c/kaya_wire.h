@@ -1288,19 +1288,18 @@ static inline int kaya_parse_menu_activated(const uint8_t *rec, uint64_t *id,
     return 1;
 }
 
-/* Decode a sort_requested occurrence: the click identity shape — id plus
- * path_len key-path values (a node-anchored context activation
- * carries the stamped copy's keys; path_len is 0 for a bar or
- * live-widget item). Returns 1 and fills the outputs, or 0 for
- * other kinds. */
+/* Decode a sort_requested occurrence: id plus path_len key-path values,
+ * plus `column` from the slot the click family pads. Returns 1 and
+ * fills the outputs, or 0 for other kinds. */
 static inline int kaya_parse_sort_requested(const uint8_t *rec, uint64_t *id,
                                              KayaVal *keys, uint32_t max_keys,
-                                             uint32_t *n_keys) {
+                                             uint32_t *n_keys, uint32_t *column) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_SORT_REQUESTED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;
+    memcpy(column, rec + 20, sizeof(uint32_t)); /* the click family's pad slot */
     size_t at = sizeof(KayaRecordButtonClicked);
     for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
         at = kaya_parse_value(rec, at, &keys[k]);

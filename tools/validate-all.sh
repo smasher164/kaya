@@ -190,7 +190,15 @@ if [ "$MODE" = parallel ]; then
             # is unchanged — the per-leg median delta against a
             # standalone run is MINUS one second, which is the check that
             # says no work was added to every leg.
-            windows) budget=480 ;;
+            # 520 since 2026-08-21: a run whose commit touches BINDING
+            # sources pays a full manifest re-ship plus the remote
+            # javac and dotnet rebuilds — measured 494s on the tables
+            # fan-out (the first eight-binding commit since the
+            # per-file deploy landed) against the 420-456 incremental
+            # band. The ceiling covers the deploy-heavy mode; an
+            # incremental run drifting past ~460 is still the signal
+            # the old 480 was for.
+            windows) budget=520 ;;
             # 540 since 2026-08-10, raised in the commit that makes the
             # lane slower, as this block asks. The save scene added a leg
             # measured at 21s STANDALONE (the panel is typed into, so it

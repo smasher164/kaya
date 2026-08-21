@@ -394,6 +394,46 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
     }
+    // One parse helper per u32-slot occurrence (sort_requested): the
+    // click identity shape plus the named u32 the tag family's third
+    // slot carries — derived, so a future record of this family
+    // reaches the C floor with zero emitter edits.
+    for r in spec
+        .occurrence
+        .iter()
+        .filter(|r| crate::u32_slot_occurrence_names(spec).contains(&r.name))
+    {
+        let name = r.name;
+        let up = name.to_uppercase();
+        let slot = r.fields[2].name;
+        let pad = " ".repeat(31 + name.len());
+        c.line(&format!(
+            "/* Decode a {name} occurrence: id plus path_len key-path values,"
+        ));
+        c.line(&format!(
+            " * plus `{slot}` from the slot the click family pads. Returns 1 and"
+        ));
+        c.line(" * fills the outputs, or 0 for other kinds. */");
+        c.line(&format!(
+            "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
+        ));
+        c.line(&format!("{pad}KayaVal *keys, uint32_t max_keys,"));
+        c.line(&format!("{pad}uint32_t *n_keys, uint32_t *{slot}) {{"));
+        c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+        c.line(&format!("    if (r->header.kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    *id = r->id;");
+        c.line("    *n_keys = r->path_len;");
+        c.line(&format!(
+            "    memcpy({slot}, rec + 20, sizeof(uint32_t)); /* the click family's pad slot */"
+        ));
+        c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+        c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
+        c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
     // One parse helper per payload-carrying occurrence, from the spec's
     // Record::payload — the kind list derives rather than drifts. The
     // payload lands in a KayaVal, kaya_parse_value's generic decode.

@@ -148,6 +148,9 @@ type app = {
   mutable c_node : int64;
   mutable c_menu_item : int64;
   widget_handlers : (int64, unit -> unit) Hashtbl.t;
+  (* Table sort requests, keyed by the For container's widget id
+     (docs/tables-plan.md): the handler receives the 0-based column. *)
+  sort_handlers : (int64, int -> unit) Hashtbl.t;
   (* Menu dispatch tables, keyed by MENU ITEM id — their own id space,
      separate from every widget/node table ("two tables, always" — now
      N tables, still always). The node flavors receive the stamped
@@ -272,6 +275,7 @@ let create () =
     c_node = 0L;
     c_menu_item = 0L;
     widget_handlers = Hashtbl.create 8;
+    sort_handlers = Hashtbl.create 8;
     menu_activated = Hashtbl.create 8;
     menu_activated_node = Hashtbl.create 8;
     menu_toggled = Hashtbl.create 8;
@@ -1961,6 +1965,29 @@ let for_each c body () =
    common case once handlers co-locate at their constructors. *)
 let each c body () = fst (for_each c body ())
 
+(* The header bar's sort indicator (docs/tables-plan.md): which column
+   shows it, in which direction — the guest's declaration, re-sent
+   with the new state after it handles a sort request. The platform
+   never sorts; a header click only asks. *)
+type sort = { sort_column : int32; sort_direction : int32 }
+
+let sort_none = { sort_column = -1l; sort_direction = 0l }
+let sort_asc column = { sort_column = Int32.of_int column; sort_direction = 0l }
+let sort_desc column = { sort_column = Int32.of_int column; sort_direction = 1l }
+
+(* Declare the column header bar on a For's container — the widget
+   [for_each] returns. One title per column; the row template's root
+   must be a row of exactly one cell per column, refused loudly
+   otherwise. Re-call after sorting to move the indicator. *)
+let columns (Widget id) titles sort =
+  let tx = the_tx () in
+  emit tx
+    (Kaya_wire.tx_set_column_headers id
+       (Int32.to_int sort.sort_column land 0xFFFFFFFF)
+       (Int32.to_int sort.sort_direction)
+       (List.length titles)
+       (List.map (fun t -> Kaya_wire.Str t) titles))
+
 (* Sums: a variant type whose constructors carry inline records. *)
 type 'a sum_type = {
   st_schemas : int list list;
@@ -2680,6 +2707,13 @@ end
 
 (* Register a click handler for a live widget: runs as one
    transaction per click (the ambient tx is set for its extent). *)
+(* Register the table's header-click handler at its For — the handler
+   receives the 0-based column of a sort REQUEST: nothing has changed
+   on screen; reorder the collection by key and re-declare the header
+   with [columns] (docs/tables-plan.md). *)
+let on_sort app (Widget id) (handler : int -> unit) =
+  Hashtbl.replace app.sort_handlers id handler
+
 let on_click app (Widget id) (handler : unit -> unit) =
   Hashtbl.replace app.widget_handlers id handler
 
@@ -2932,7 +2966,15 @@ let dispatch_loop app =
     | None ->
         if Kaya_runtime.wait_occurrences () then loop () else () (* shutdown *)
     | Some (kind, id, keys, payload, clip, undo) ->
-        (if kind = Kaya_wire.occ_kind_text_changed then
+        (if kind = Kaya_wire.occ_kind_sort_requested then
+           (match (payload, keys) with
+           | Some (Kaya_wire.I64 column), [] ->
+               (match Hashtbl.find_opt app.sort_handlers id with
+               | Some handler ->
+                   dispatch app (fun () -> handler (Int64.to_int column))
+               | None -> ())
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with
            | Some (Kaya_wire.Str text), [] ->
                (match Hashtbl.find_opt app.widget_changes id with

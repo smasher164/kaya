@@ -726,6 +726,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\tat += 8 + (vlen+7)&^7");
     c.line("\t}");
+    // The u32 slot the tag family calls `reserved` is a real value on
+    // these (sort_requested's column) — read from its fixed offset.
+    for name in crate::u32_slot_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tpayload = binary.LittleEndian.Uint32(rec[20:])");
+        c.line("\t}");
+    }
     let with_payload = crate::payload_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occ{}", camel(n)))

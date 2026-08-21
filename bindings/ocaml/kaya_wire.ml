@@ -1527,6 +1527,9 @@ let parse_occurrence byte =
       at := next
     done;
     let payload =
+      if kind = occ_kind_sort_requested then
+        Some (I64 (Int64.of_int (u32_at byte 20)))
+      else
       if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed then
         Some (fst (parse_value byte !at))
       else None

@@ -1671,6 +1671,10 @@ static class KayaWire
             }
             at += 8 + ((vlen + 7) & ~7);
         }
+        if (kind == OccKindSortRequested)
+        {
+            payload = BitConverter.ToUInt32(rec, 20);
+        }
         if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged)
         {
             uint ptype = BitConverter.ToUInt32(rec, at);

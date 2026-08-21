@@ -525,6 +525,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        key, at = parse_value(buf, at)");
     c.line("        keys.append(key)");
     c.line("    payload = None");
+    // The u32 slot the tag family calls `reserved` is a real value on
+    // these (sort_requested's column) — read before the generic tail.
+    let u32_slot = crate::u32_slot_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !u32_slot.is_empty() {
+        c.line(&format!("    if kind in ({u32_slot},):"));
+        c.line("        (payload,) = struct.unpack_from(\"<I\", buf, 20)");
+    }
     let with_payload = crate::payload_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))

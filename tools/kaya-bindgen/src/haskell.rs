@@ -477,6 +477,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                go next (n - 1 :: Word32) (v : acc)");
     c.line("          (keys, at') <- go (24 :: Int) pathLen []");
     c.line("          payload <-");
+    // The u32 slot the tag family calls `reserved` is a real value on
+    // these (sort_requested's column) — read from its fixed offset.
+    for name in crate::u32_slot_occurrence_names(spec) {
+        c.line(&format!("            if kind == occKind{}", pascal(name)));
+        c.line("              then do");
+        c.line("                col <- peekByteOff rec 20 :: IO Word32");
+        c.line("                return (Just (VI64 (fromIntegral col)))");
+        c.line("              else");
+    }
     let with_payload = crate::payload_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))

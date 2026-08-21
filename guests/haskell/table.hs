@@ -1,0 +1,67 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeApplications #-}
+
+{- The table scene from Haskell: column headers and click-to-sort on
+   the For vocabulary (docs/tables-plan.md). A header click is a
+   REQUEST — this guest reorders its collection BY KEY (the reorder
+   scene's idiom) and re-declares the header with the new indicator;
+   the platform sorts nothing. The byte-frozen contract is
+   tools/scenes/table.steps. -}
+
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.List (sortBy)
+import Data.Ord (comparing)
+import Data.Proxy (Proxy (..))
+import GHC.Generics (Generic)
+
+import KayaApp
+import KayaWire (Value (..))
+
+data TableItem = TableItem {name :: String, size :: String} deriving (Generic)
+
+instance KayaRecord TableItem
+
+main :: IO ()
+main = kayaMain $ \app -> do
+  -- The guest's sort policy — the platform never has one: clicking
+  -- the sorted column flips it, clicking another starts ascending.
+  sorted <- newIORef (Nothing :: Maybe (Int, Bool))
+  (items, table) <- buildTx app $ do
+    items <- collectionOf (Proxy :: Proxy TableItem)
+    -- The root is a row so the For's container is the scene's only
+    -- column-kind widget (the reorder scene's rule). The table IS the
+    -- For, headers declared on the Widget forEach returns.
+    (table, _) <-
+      forEach (recordHandle items) $
+        rowOf
+          [ label (field @"name" @TableItem),
+            label (field @"size" @TableItem)
+          ]
+    -- A table is a viewport: like the scroll scene, the scene says it
+    -- fills — an ungrown table sizes to nothing (measured by
+    -- screenshot).
+    setGrow table 1
+    columns table ["Name", "Size"] sortNone
+    root <- row [pure table]
+    mount root
+    mapM_
+      (\(k, n, s) -> insertRecord items (VStr k) (TableItem n s))
+      [("b", "banana", "30"), ("a", "apple", "10"), ("c", "cherry", "20")]
+    return (items, table)
+  onSort app table $ \column -> do
+    current <- readIORef sorted
+    let desc = case current of
+          Just (c, d) -> c == column && not d
+          _ -> False
+    writeIORef sorted (Just (column, desc))
+    submitTx app $ do
+      entries <- recordItems items
+      let keyOf (_, item) = if column == 0 then name item else size item
+          ordered0 = sortBy (comparing keyOf) entries
+          ordered = if desc then reverse ordered0 else ordered0
+      -- Keys, never indices: moving each key to the end in the target
+      -- order leaves the collection sorted.
+      mapM_ (\(k, _) -> moveToEnd (recordHandle items) k) ordered
+      columns table ["Name", "Size"] $
+        if desc then sortDesc column else sortAsc column

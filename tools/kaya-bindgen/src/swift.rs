@@ -604,6 +604,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            at += 8 + ((vlen + 7) & ~7)");
     c.line("        }");
     c.line("        var payload: KayaValue? = nil");
+    // The u32 slot the tag family calls `reserved` is a real value on
+    // these (sort_requested's column) — read from its fixed offset.
+    for name in crate::u32_slot_occurrence_names(spec) {
+        c.line(&format!(
+            "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line("            payload = .i64(Int64(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self)))");
+        c.line("        }");
+    }
     let with_payload = crate::payload_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))

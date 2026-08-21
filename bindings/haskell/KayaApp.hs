@@ -53,6 +53,12 @@ module KayaApp
     dispatch,
     onClick,
     onClickNode,
+    onSort,
+    columns,
+    Sort (..),
+    sortNone,
+    sortAsc,
+    sortDesc,
     onChange,
     onChangeNode,
     onToggle,
@@ -2507,6 +2513,44 @@ choiceWith kind options src = do
 each :: Declare m => Collection -> Tpl a -> m (El m)
 each c body = fst <$> forEach c body
 
+-- | The header bar's sort indicator (docs/tables-plan.md): which
+-- column shows it, in which direction — the guest's declaration,
+-- re-sent with the new state after it handles a sort request. The
+-- platform never sorts; a header click only asks.
+data Sort = Sort {sortColumn :: Word32, sortDirection :: Word32}
+
+sortNone :: Sort
+sortNone = Sort 0xFFFFFFFF 0
+
+sortAsc :: Int -> Sort
+sortAsc column = Sort (fromIntegral column) 0
+
+sortDesc :: Int -> Sort
+sortDesc column = Sort (fromIntegral column) 1
+
+-- | Declare the column header bar on a For's container — the Widget
+-- 'forEach' returns. One title per column; the row template's root
+-- must be a row of exactly one cell per column, refused loudly
+-- otherwise. Re-call after sorting to move the indicator
+-- (docs/tables-plan.md).
+columns :: Widget -> [String] -> Sort -> Build ()
+columns (Widget n) titles sort =
+  Build $ \s ->
+    ( (),
+      s
+        { bRecords =
+            bRecords s
+              <> pure
+                ( W.txSetColumnHeaders
+                    n
+                    (sortColumn sort)
+                    (sortDirection sort)
+                    (fromIntegral (length titles))
+                    (map W.VStr titles)
+                )
+        }
+    )
+
 -- Sums: the data declaration is the sum. KayaSum derives everything from the
 -- Generic representation — one schema per constructor (each constructor's
 -- fields walked by the same GRecord machinery records use), the discriminant,
@@ -2939,6 +2983,9 @@ data App = App
     appFresh :: IORef Fresh,
     appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
+    -- Table sort requests, keyed by the For container's widget id
+    -- (docs/tables-plan.md): the handler receives the 0-based column.
+    appSortHandlers :: IORef (Map.Map Word64 (Int -> IO ())),
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
     appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ())),
@@ -3130,6 +3177,14 @@ absorbUndo app delta = modifyIORef' (appModel app) fold
            in i {iEntries = named ++ rest}
       | otherwise = i
 
+-- | Register the table's header-click handler at its For — the handler
+-- receives the 0-based column of a sort REQUEST: nothing has changed
+-- on screen; reorder the collection by key and re-declare the header
+-- with 'columns' (docs/tables-plan.md).
+onSort :: App -> Widget -> (Int -> IO ()) -> IO ()
+onSort app (Widget n) handler =
+  modifyIORef' (appSortHandlers app) (Map.insert n handler)
+
 onClick :: App -> Widget -> IO () -> IO ()
 onClick app (Widget n) handler =
   modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
@@ -3230,6 +3285,7 @@ newApp =
     <*> newIORef Map.empty -- appFresh
     <*> newIORef Map.empty -- appDerived
     <*> newIORef Map.empty -- appWidgetHandlers
+    <*> newIORef Map.empty -- appSortHandlers
     <*> newIORef Map.empty -- appNodeHandlers
     <*> newIORef Map.empty -- appWidgetChanges
     <*> newIORef Map.empty -- appNodeChanges
@@ -3318,6 +3374,14 @@ dispatchLoop app = do
       more <- waitOccurrences
       if more then dispatchLoop app else return () -- shutdown
     Just (kind, ident, keys, payload, clip, undone)
+      | kind == W.occKindSortRequested -> do
+          let column = case payload of Just (W.VI64 n) -> fromIntegral n; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (appSortHandlers app)
+              dispatch (mapM_ ($ column) (Map.lookup ident handlers))
+            _ -> return ()
+          dispatchLoop app
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> s; _ -> ""
           case keys of

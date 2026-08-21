@@ -193,6 +193,9 @@ public final class KayaApp {
 
     private long signals, widgets, collections, nodes, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
+    // Table sort requests, keyed by the For container's widget id
+    // (docs/tables-plan.md): the handler receives the 0-based column.
+    private final Map<Long, BiConsumer<Tx, Integer>> sortHandlers = new HashMap<>();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     // separate from every widget/node table. The node flavors receive
     // the stamped copy's key path.
@@ -1783,6 +1786,37 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * The header bar's sort indicator (docs/tables-plan.md): which
+     * column shows it, in which direction — the GUEST's declaration,
+     * re-sent with the new state after it handles a sort request. The
+     * platform never sorts; a header click only asks.
+     */
+    public static final class Sort {
+        final int sorted;
+        final int direction;
+
+        private Sort(int sorted, int direction) {
+            this.sorted = sorted;
+            this.direction = direction;
+        }
+
+        /** The no-indicator bar. */
+        public static Sort none() {
+            return new Sort(0xFFFFFFFF, 0);
+        }
+
+        /** Ascending on {@code column} (0-based, declared order). */
+        public static Sort asc(int column) {
+            return new Sort(column, 0);
+        }
+
+        /** Descending on {@code column}. */
+        public static Sort desc(int column) {
+            return new Sort(column, 1);
+        }
+    }
+
     public static final class Widget {
         final long id;
         final Tx tx;
@@ -3343,6 +3377,20 @@ public final class KayaApp {
          * A For over {@code c}: the body declares the template; the For
          * itself (a live container) is returned.
          */
+        /**
+         * Declare the column header bar on a For's container — the
+         * Widget forEach returns. One title per column; the row
+         * template's root must be a Row of exactly one cell per
+         * column, refused loudly otherwise. Re-call after sorting to
+         * move the indicator (docs/tables-plan.md).
+         */
+        public void columns(Widget w, String[] titles, Sort sort) {
+            Object[] values = new Object[titles.length];
+            System.arraycopy(titles, 0, values, 0, titles.length);
+            emit(KayaWire.txSetColumnHeaders(
+                w.id, sort.sorted, sort.direction, titles.length, values));
+        }
+
         public Widget forEach(Collection c, Consumer<Tpl> body) {
             return forEach(c, t -> {
                 body.accept(t);
@@ -4941,6 +4989,16 @@ public final class KayaApp {
         return fields.isEmpty() ? null : fields.get(0);
     }
 
+    /**
+     * Register the table's header-click handler at its For — the
+     * handler receives the 0-based column of a sort REQUEST: nothing
+     * has changed on screen; reorder the collection by key and
+     * re-declare the header with columns (docs/tables-plan.md).
+     */
+    public void onSort(Widget w, BiConsumer<Tx, Integer> handler) {
+        sortHandlers.put(w.id, handler);
+    }
+
     public void onClick(Widget w, Consumer<Tx> handler) {
         widgetHandlers.put(w.id, handler);
     }
@@ -5149,7 +5207,15 @@ public final class KayaApp {
             if (occ == null) {
                 continue;
             }
-            if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED && occ.keys.isEmpty()) {
+            if (occ.kind == KayaWire.OCC_KIND_SORT_REQUESTED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Integer> handler = sortHandlers.get(occ.id);
+                if (handler != null) {
+                    int column = occ.payload instanceof Integer i ? i : 0;
+                    dispatch(tx -> {
+                        handler.accept(tx, column);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED && occ.keys.isEmpty()) {
                 Consumer<Tx> handler = widgetHandlers.get(occ.id);
                 if (handler != null) {
                     dispatch(handler);

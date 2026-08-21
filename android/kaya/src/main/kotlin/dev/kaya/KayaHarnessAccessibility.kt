@@ -305,9 +305,19 @@ class KayaHarnessAccessibility : AccessibilityService() {
         // the one moment a back cannot miss.
         var backs = 0
         var waits = 0
+        var absent = 0
         while (waits < GONE_TRIES * 2) {
             waits += 1
-            val picker = pickerWindow() ?: return true
+            val picker = pickerWindow()
+            if (picker == null) {
+                // Same debounce as waitForPickerGone: one absent read
+                // can be a live window's transient drop-out.
+                absent += 1
+                if (absent >= 2) return true
+                Thread.sleep(BACK_SETTLE_MS)
+                continue
+            }
+            absent = 0
             if (picker.isFocused && backs < MAX_BACKS) {
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 backs += 1
@@ -326,8 +336,22 @@ class KayaHarnessAccessibility : AccessibilityService() {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
             "kaya: waiting for the picker must not run on the main thread"
         }
+        // TWO CONSECUTIVE ABSENCES, not one: the window list is a lagging
+        // snapshot in BOTH directions — a dismissed picker lingers in it
+        // (the straggler-back class) and a LIVE one can transiently drop
+        // out mid-relayout under load. One absent read declared a picker
+        // gone whose activity was top-resumed in the at-fail dumpsys, the
+        // choose reported success, the result never came, and the next
+        // open died on the one-per-process wall (2026-08-21, the tables
+        // ledger's ghost family).
+        var absent = 0
         for (i in 0 until GONE_TRIES) {
-            if (pickerPackage() == null) return true
+            if (pickerPackage() == null) {
+                absent += 1
+                if (absent >= 2) return true
+            } else {
+                absent = 0
+            }
             Thread.sleep(BACK_SETTLE_MS)
         }
         return false

@@ -19,6 +19,7 @@ static class Program
             case "gallery": GalleryScene.Run(); break;
             case "todos": TodosScene.Run(); break;
             case "reorder": ReorderScene.Run(); break;
+            case "table": TableScene.Run(); break;
             case "feed": Feed.FeedScene.Run(); break;
             case "align": AlignScene.Run(); break;
             case "window": WindowScene.Run(); break;

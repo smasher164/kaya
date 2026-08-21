@@ -1085,6 +1085,8 @@ def parse_occurrence(buf):
         key, at = parse_value(buf, at)
         keys.append(key)
     payload = None
+    if kind in (OCC_SORT_REQUESTED,):
+        (payload,) = struct.unpack_from("<I", buf, 20)
     if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED,):
         payload, at = parse_value(buf, at)
     if kind in (OCC_PASTED,):

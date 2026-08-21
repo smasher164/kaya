@@ -1936,6 +1936,9 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		}
 		at += 8 + (vlen+7)&^7
 	}
+	if kind == occSortRequested {
+		payload = binary.LittleEndian.Uint32(rec[20:])
+	}
 	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))

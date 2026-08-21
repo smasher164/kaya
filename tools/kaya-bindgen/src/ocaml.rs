@@ -486,6 +486,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("      at := next");
     c.line("    done;");
     c.line("    let payload =");
+    // The u32 slot the tag family calls `reserved` is a real value on
+    // these (sort_requested's column) — read from its fixed offset.
+    let u32_slot = crate::u32_slot_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !u32_slot.is_empty() {
+        c.line(&format!("      if {u32_slot} then"));
+        c.line("        Some (I64 (Int64.of_int (u32_at byte 20)))");
+        c.line("      else");
+    }
     let with_payload = crate::payload_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))

@@ -125,6 +125,11 @@ executable panes
   main-is: panes.hs
   build-depends: kaya-guests
 
+executable table
+  import: shared
+  main-is: table.hs
+  build-depends: kaya-guests
+
 executable scroll
   import: shared
   main-is: scroll.hs

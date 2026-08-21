@@ -1744,6 +1744,9 @@ public final class KayaWire {
             at += 8 + ((vlen + 7) & ~7);
         }
         Object payload = null;
+        if (kind == OCC_KIND_SORT_REQUESTED) {
+            payload = b.getInt(20);
+        }
         if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);

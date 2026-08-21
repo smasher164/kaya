@@ -42,6 +42,9 @@ public final class Main {
             case "reorder":
                 app = Reorder::app;
                 break;
+            case "table":
+                app = Table::app;
+                break;
             case "feed":
                 app = Feed::app;
                 break;

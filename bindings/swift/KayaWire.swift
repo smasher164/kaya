@@ -1652,6 +1652,9 @@ func kayaParseOccurrence(_ rec: [UInt8])
             at += 8 + ((vlen + 7) & ~7)
         }
         var payload: KayaValue? = nil
+        if kind == UInt16(KAYA_OCCURRENCE_SORT_REQUESTED) {
+            payload = .i64(Int64(raw.loadUnaligned(fromByteOffset: 20, as: UInt32.self)))
+        }
         if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)

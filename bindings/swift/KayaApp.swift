@@ -4,6 +4,28 @@
 
 import Foundation
 
+/// The header bar's sort indicator (docs/tables-plan.md): which column
+/// shows it, in which direction — the GUEST's declaration, re-sent
+/// with the new state after it handles a sort request. The platform
+/// never sorts; a header click only asks.
+struct KayaSort {
+    let sorted: UInt32
+    let direction: UInt32
+
+    /// The no-indicator bar.
+    static let none = KayaSort(sorted: 0xFFFF_FFFF, direction: 0)
+
+    /// Ascending on `column` (0-based, in the declared order).
+    static func asc(_ column: UInt32) -> KayaSort {
+        KayaSort(sorted: column, direction: 0)
+    }
+
+    /// Descending on `column`.
+    static func desc(_ column: UInt32) -> KayaSort {
+        KayaSort(sorted: column, direction: 1)
+    }
+}
+
 struct KayaSignal {
     let id: UInt64
 
@@ -872,6 +894,9 @@ final class KayaApp {
     private var nodes: UInt64 = 0
     private var menuItems: UInt64 = 0
     private var widgetHandlers: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    /// Table sort requests, keyed by the For container's widget id
+    /// (docs/tables-plan.md): the handler receives the 0-based column.
+    private var sortHandlers: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
@@ -1213,6 +1238,14 @@ final class KayaApp {
     }
 
     /// Register a click handler for a live widget.
+    /// Register the table's header-click handler at its For — the
+    /// handler receives the 0-based column of a sort REQUEST: nothing
+    /// has changed on screen; reorder the collection by key and
+    /// re-declare the header with columns (docs/tables-plan.md).
+    func onSort(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, UInt32) throws -> Void) {
+        sortHandlers[w.id] = handler
+    }
+
     func onClick(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) throws -> Void) {
         widgetHandlers[w.id] = handler
     }
@@ -1460,6 +1493,12 @@ final class KayaApp {
             default: break
             }
             switch (kind, keys.isEmpty) {
+            case (UInt16(KAYA_OCCURRENCE_SORT_REQUESTED), true):
+                if let handler = sortHandlers[id] {
+                    // The generated parser boxes the column as .i64.
+                    let column = UInt32(truncatingIfNeeded: choice)
+                    dispatch { try build { tx in try handler(tx, column) } }
+                }
             case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), true):
                 if let handler = widgetHandlers[id] {
                     dispatch { try build(handler) }
@@ -1834,6 +1873,17 @@ final class KayaAppTx {
 
     func setText(_ w: KayaWidget, _ text: String) {
         tx.setText(w.id, text)
+    }
+
+    /// Declare the column header bar on a For's container — the widget
+    /// forEach returns. One title per column; the row template's root
+    /// must be a row of exactly one cell per column, refused loudly
+    /// otherwise. Re-call after sorting to move the indicator
+    /// (docs/tables-plan.md).
+    func columns(_ w: KayaWidget, _ titles: [String], _ sort: KayaSort) {
+        tx.setColumnHeaders(
+            w.id, sort.sorted, sort.direction, UInt32(titles.count),
+            titles.map { .str($0) })
     }
 
     func bindText(_ w: KayaWidget, _ s: KayaSignal) {

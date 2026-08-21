@@ -424,6 +424,27 @@ sealed class KayaInstance
 /// systems own surface geometry; there CreateWindow aborts at the root.
 readonly record struct Caps(bool AuxWindows);
 
+/// <summary>The header bar's sort indicator (docs/tables-plan.md):
+/// which column shows it, in which direction — the GUEST's
+/// declaration, re-sent with the new state after it handles a sort
+/// request. The platform never sorts; a header click only asks.</summary>
+readonly struct Sort
+{
+    internal readonly uint Sorted;
+    internal readonly uint Direction;
+
+    Sort(uint sorted, uint direction) { Sorted = sorted; Direction = direction; }
+
+    /// <summary>The no-indicator bar.</summary>
+    public static Sort None => new(0xFFFF_FFFF, 0);
+
+    /// <summary>Ascending on <paramref name="column"/> (0-based).</summary>
+    public static Sort Asc(uint column) => new(column, 0);
+
+    /// <summary>Descending on <paramref name="column"/>.</summary>
+    public static Sort Desc(uint column) => new(column, 1);
+}
+
 sealed class KayaApp
 {
     /// This host's capabilities. Constant for the life of the process,
@@ -444,6 +465,9 @@ sealed class KayaApp
 
     ulong signals, widgets, collections, nodes, menuItems;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
+    // Table sort requests, keyed by the For container's widget id
+    // (docs/tables-plan.md): the handler receives the 0-based column.
+    readonly Dictionary<ulong, Action<Tx, uint>> sortHandlers = new();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     // separate from every widget/node table. The node flavors receive
     // the stamped copy's key path.
@@ -702,6 +726,12 @@ sealed class KayaApp
 
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
 
+    /// <summary>Register the table's header-click handler at its For —
+    /// the handler receives the 0-based column of a sort REQUEST:
+    /// nothing has changed on screen; reorder the collection by key and
+    /// re-declare the header with Columns (docs/tables-plan.md).</summary>
+    public void OnSort(Widget w, Action<Tx, uint> handler) => sortHandlers[w.Id] = handler;
+
     /// Register a click handler for a template node; it also receives
     /// the stamped copy's keys, outermost first.
     public void OnClick(Node n, Action<Tx, List<object>> handler) => nodeHandlers[n.Id] = handler;
@@ -805,7 +835,13 @@ sealed class KayaApp
             }
             string text = payload as string;
             bool isChecked = payload is bool b && b;
-            if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
+            if (kind == KayaWire.OccKindSortRequested && keys.Count == 0)
+            {
+                uint column = payload is uint u ? u : 0;
+                if (sortHandlers.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, column));
+            }
+            else if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
             {
                 if (widgetHandlers.TryGetValue(id, out var fn))
                     Dispatch(fn);
@@ -1626,6 +1662,19 @@ sealed class Tx
 
     /// A For over `c`: the body declares the template; the For itself
     /// (a live container) is returned.
+    /// <summary>Declare the column header bar on a For's container —
+    /// the Widget ForEach returns. One title per column; the row
+    /// template's root must be a Row of exactly one cell per column,
+    /// refused loudly otherwise. Re-call after sorting to move the
+    /// indicator (docs/tables-plan.md).</summary>
+    public void Columns(Widget w, string[] titles, Sort sort)
+    {
+        var values = new object[titles.Length];
+        for (int i = 0; i < titles.Length; i++) values[i] = titles[i];
+        Records.Add(KayaWire.TxSetColumnHeaders(
+            w.Id, sort.Sorted, sort.Direction, (uint)titles.Length, values));
+    }
+
     public Widget ForEach(Collection c, Action<Tpl> body)
     {
         c.AssertRoot();

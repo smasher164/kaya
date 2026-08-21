@@ -115,6 +115,11 @@ func Capabilities() Caps {
 type App struct {
 	c              counters
 	widgetHandlers map[uint64]func(*Tx)
+	// Table sort requests, keyed by the For container's widget id
+	// (docs/tables-plan.md): the handler receives the 0-based column.
+	sortHandlers map[uint64]func(*Tx, uint32)
+	// The stamped-copy twin: a nested For's node id, the copy's keys.
+	nodeSorts map[uint64]func(*Tx, []any, uint32)
 	nodeHandlers   map[uint64]func(*Tx, []any)
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
@@ -187,6 +192,8 @@ func NewApp() *App {
 	Init()
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
+		sortHandlers:   make(map[uint64]func(*Tx, uint32)),
+		nodeSorts:      make(map[uint64]func(*Tx, []any, uint32)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
@@ -921,6 +928,37 @@ func (tx *Tx) Button(text string, onClick func(*Tx)) Widget {
 		tx.app.OnClick(w, onClick)
 	}
 	return w
+}
+
+// Sort is the header bar's indicator (docs/tables-plan.md): which
+// column shows it, in which direction — the GUEST's declaration,
+// re-sent with the new state after it handles a sort request.
+type Sort struct {
+	sorted    uint32
+	direction uint32
+}
+
+// SortNone is the no-indicator bar.
+func SortNone() Sort { return Sort{sorted: 0xFFFF_FFFF} }
+
+// SortAsc puts the ascending indicator on column (0-based).
+func SortAsc(column uint32) Sort { return Sort{sorted: column} }
+
+// SortDesc puts the descending indicator on column.
+func SortDesc(column uint32) Sort { return Sort{sorted: column, direction: 1} }
+
+// Columns declares the column header bar on a For's container — the
+// Widget ForEach returns. One title per column; the row template's
+// root must be a Row of exactly one cell per column, refused loudly
+// otherwise. Re-call after sorting to move the indicator
+// (docs/tables-plan.md).
+func (tx *Tx) Columns(w Widget, titles []string, sort Sort) {
+	values := make([]any, len(titles))
+	for i, title := range titles {
+		values[i] = title
+	}
+	tx.emit(TxSetColumnHeaders(w.id, sort.sorted, sort.direction,
+		uint32(len(titles)), values))
 }
 
 // Textarea creates a multi-line text editor with its change handler
@@ -3499,6 +3537,24 @@ func (a *App) OnClick(w Widget, fn func(*Tx)) {
 	a.widgetHandlers[w.id] = fn
 }
 
+// OnSort registers the table's header-click handler at its For — the
+// handler receives the 0-based column of a sort REQUEST: nothing has
+// changed on screen; reorder the collection by key and re-declare the
+// header with Columns (docs/tables-plan.md).
+func (a *App) OnSort(w Widget, fn func(*Tx, uint32)) {
+	a.sortHandlers[w.id] = fn
+}
+
+// OnSortNode registers a nested table's header-click handler at its
+// For node; the handler also receives the stamped copy's keys,
+// outermost first. (The core refuses a template-zone header today —
+// the tables ledger entry holds nested open — but a dispatch arm
+// without its node sibling drops a stamped occurrence silently, which
+// the tplzone test refuses on principle.)
+func (a *App) OnSortNode(n Node, fn func(*Tx, []any, uint32)) {
+	a.nodeSorts[n.id] = fn
+}
+
 // OnClickNode registers a handler for a template node's clicks; the
 // handler also receives the stamped copy's keys, outermost first.
 func (a *App) OnClickNode(n Node, fn func(*Tx, []any)) {
@@ -3570,6 +3626,7 @@ func (a *App) Serve() {
 		text, _ := payload.(string)
 		checked, _ := payload.(bool)
 		value, _ := payload.(float64)
+		column, _ := payload.(uint32)
 		choice, _ := payload.(uint32)
 		files, _ := payload.([]PickedFile)
 		clipValues, isClip := payload.(ClipValues)
@@ -3606,6 +3663,14 @@ func (a *App) Serve() {
 		case kind == occValueChanged:
 			if fn := a.nodeValues[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, value) })
+			}
+		case kind == occSortRequested && len(keys) == 0:
+			if fn := a.sortHandlers[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, column) })
+			}
+		case kind == occSortRequested:
+			if fn := a.nodeSorts[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, column) })
 			}
 		case kind == occCloseRequested:
 			if fn := a.closeRequested[id]; fn != nil {
