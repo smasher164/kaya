@@ -981,7 +981,18 @@ The known normalization worklist:
   and expect_fills on a container checks the container's OWN box
   against the track its weight earned before asking about its
   children, which is the assertion the photograph had been
-  substituting for.
+  substituting for. The SECOND SLICE, ratified the same day when the
+  maintainer refused to ledger the residue as accepted divergence,
+  unified the whole of it: A GROWER RENDERS AT ITS TRACK, LEAF OR
+  CONTAINER; A NESTED CONTAINER MAXIMIZES ITS OWN MAIN AXIS; ALIGN
+  PLACES CHILDREN AND NEVER SIZES THEM. The field is unanimous on the
+  leaf half (CSS used main size, GTK Fill, XAML Stretch, Flutter's
+  tight Expanded, Compose weight fill) and five-of-seven on the
+  container half (only SwiftUI and Compose hug, and both auto-expand
+  around greedy children — no framework anywhere lets internal growers
+  divide a hug). expect_fills holds all of it: the widget form for
+  leaves, the container form's own-track and breadth clauses for
+  containers, and grow.steps asserts every case.
 - A dressed control floor (ratified 2026-07-21). Every control the
   vocabulary ships renders as a credible native control on every
   backend with zero styling calls — there is no styling API to call.

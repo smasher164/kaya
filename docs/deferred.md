@@ -4735,7 +4735,7 @@ is save-swiftui, the WATCHED iOS dialog flake, its entry carrying
 the sighting). The two divergences the ruling deliberately left open
 are the next entry.
 
-## Two breadth asymmetries the stretch ruling left open (recorded 2026-08-22)
+## ~~Two breadth asymmetries the stretch ruling left open~~ (recorded 2026-08-22)
 KEY: grown leaf control breadth, WinUI crossing carve-out, nested container spans every mode, bezel spans track
 
 Found during the ruling's cross-framework survey and its fan-out; both
@@ -4768,6 +4768,69 @@ starts from them instead of rediscovering them.
    Narrowing the carve-out to grown children would make WinUI match
    the ruling exactly; do it beside a scene that can see it, not
    before.
+
+RESOLVED 2026-08-22, the same day, by the ruling's SECOND SLICE — the
+maintainer refused the parking lot ("is there a reason why you're
+gonna be ledgering another divergent thing between them?") and ratified
+the unified sentence: A GROWER RENDERS AT ITS TRACK, LEAF OR
+CONTAINER; A NESTED CONTAINER MAXIMIZES ITS OWN MAIN AXIS; ALIGN
+PLACES CHILDREN AND NEVER SIZES THEM. Item 1 closed by the leaf half:
+SwiftUI told per kind (the cell's main-axis frame; KayaMacButton
+fillsWidth so the AppKit bezel spans, photographed before and after),
+Compose threads boxFill onto every kind's own modifier, GTK's
+Align::Fill and WinUI's Stretch already did it — held by grow.steps'
+expect_fills label#1 / button#0, watched failing on SwiftUI (23pt of
+109, 66 of 327) and on windows (23 of 124, 57 of 372 — the second red
+convicting BOTH a lying reader and an unstamped main axis) before the
+fixes. Item 2 closed by RATIFICATION rather than narrowing: the
+carve-out IS the rule, every backend spans a crossing container under
+every align mode, and expect_fills' container arm gained the BREADTH
+clause ("spans <n> of its parent's <m> breadth") that says so out
+loud. The divergence was NOT invisible on GTK after all — the clause
+alone, run against the un-fixed lowering on the real linux container,
+caught THREE live legs green before it existed: grow row#0 at 108 of
+498px, grid row#0 at 147 of 498px with its spacer pushing nothing, and
+portfolio column@detail at 145 of 242px. The 31/69 class is dead by
+construction on all four. WinUI's clause is trivially green, which is
+the point: it is the gate that keeps it so. Two findings the slice
+surfaced have their own entries below (the GTK spacing no-op; Compose's
+kayaHugCross pin).
+
+## GAP — a GTK flex container's gap is always 8, and no assertion can see it (found 2026-08-22)
+KEY: ensure_flex spacing, FlexLayout::new, gtk_box_layout_set_spacing, Prop::Spacing GtkBox, container_fills max_end min_start, grow.steps spacing conformance
+
+ensure_flex hard-codes `FlexLayout::new(orientation, 8)` and never
+reads the box's spacing; flex::measure/allocate read only their own
+field; and the Prop::Spacing arm's `GtkBox::set_spacing` hits a
+GTK_IS_BOX_LAYOUT assertion once the manager is ours (two Gtk-CRITICAL
+lines on every grow leg, visible only when the leg fails). So
+`.spacing(12.0)` is a no-op on GTK. grow.steps calls this "the spacing
+prop's conformance exercise" and says expect_fills gates it — but
+GTK's container_fills spans min_start..max_end from real allocations,
+which is gap-agnostic, so the backend is green on the scene written to
+fail it. SwiftUI's arm sums tracks plus declared spacing and would
+catch it. The fix is two lines in the lowering plus a decision about
+whether GTK's observation should sum-and-compare the way SwiftUI's
+does. Found by the breadth slice's GTK agent 2026-08-22, mid-proof;
+deliberately not fixed in that slice, which was holding a
+watch-red/watch-green order it would have broken.
+
+## Compose pins a hugging container to its content before it fills (recorded 2026-08-22)
+KEY: kayaHugCross, IntrinsicSize, crossing container breadth, unpinned parent, fillMaxWidth constraint
+
+Compose's fillMax*() resolve against the CONSTRAINT a parent handed
+down; GTK, WinUI and SwiftUI all fill the size the parent ENDED UP at.
+Where a container's own cross axis is unpinned the two differ by
+everything the grandparent had left, so KayaCompose.kt's kayaHugCross()
+gives such a container width(IntrinsicSize.Max) / height(IntrinsicSize
+.Min) before the crossing fill lands on it. Two scenes reach it today
+(align.steps' row#1, portfolio's accounts For) and neither can tell the
+guard from its absence — the failure it prevents is align.steps'
+expect_fills column@fitcol reading "children span 138px of 900px",
+which IS observable, but only as a red. NOT a per-node cost: the
+intrinsic pass runs only for an unpinned container that actually holds
+a crossing child. It would throw on a SubcomposeLayout-based kind
+(LazyColumn, BoxWithConstraints); the file has none today.
 
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state, straggler
@@ -5026,6 +5089,24 @@ dismiss()'s own refusal says how many backs it pressed and how many the
 gate refused. UNVALIDATED until matrices run clean, as before — and
 neither new line has ever been printed, so the first contended matrix
 is also what makes them believable.
+NINTH SIGHTING (2026-08-22 evening, filedialog-jvm under the breadth
+slice's matrix; buffers kept), and it is the RESIDUAL WINDOW firing
+exactly as written above: KAYA_DIALOG_SEEN 2393ms and 893ms, both
+results delivered clean — then the dispatcher's "no window has focus"
+wait at 29.295, the app's onActivityResult and onResume at 29.296 (ONE
+millisecond later), and the queued straggler finishing the app at
+29.531. The press was injected ~20ms BEFORE both in-process signals
+existed, inside a 65ms picker-finish-to-result gap — the HEAD of the
+window, and the falsification this sighting adds: the
+result-already-arrived clause this entry proposed would NOT have
+refused it either, since the press predates the result. What remains
+is a remedy that needs the maintainer's ruling, because both shapes
+change behavior: either a back-in-flight discipline (never press
+again until the previous press has been OBSERVED to land — which the
+lagging window list cannot attest, so it means a longer settle or an
+event-driven read), or retiring injected backs from the cancel path
+entirely in favor of an in-process cancellation, which is the remedy
+the sixth sighting already flagged as needing that ruling.
 FIRST MATRIX WITH THE GATE AND INSTRUMENTS, same day: ALL PASS (112
 android legs), and KAYA_DIALOG_SEEN was WATCHED PRINTING on the
 device — dialog=1 kind=save ms=719, dialog=2 kind=open ms=671 — so

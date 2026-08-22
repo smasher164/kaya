@@ -1834,15 +1834,30 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // default is Stretch; kaya's normalized default is start, stamped
         // explicitly so the two never drift. Baseline (rows only) stamps
         // Top here and gets its margin compensation after the pass below.
-        // One carve-out, the BREADTH rule: a nested container whose main
-        // axis crosses its parent spans the parent's breadth — the rule
-        // WinUI's Stretch default used to satisfy for free, and the first
-        // stamped run broke (the grow row hugged and split 31/69 of its
-        // own natural width).
+        // THE BREADTH RULE outranks the mode: a nested container whose
+        // main axis crosses its parent's spans the parent's breadth under
+        // every align mode, and align only places what it does not size
+        // (the 2026-08-22 ruling; docs/deferred.md "Two breadth
+        // asymmetries the stretch ruling left open", and container_fills'
+        // breadth clause is what holds it).
         let crossing = matches!(
             (widget, vertical),
             (NativeWidget::Row(_), true) | (NativeWidget::Column(_), false)
         );
+        // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
+        // track renders identically (track = desired), a star track is
+        // the grower's box, and a declared Width/Height still outranks
+        // Stretch by WinUI's own rules (the textarea trade above). Left
+        // unstamped, a Button in a star track drew 57dip of a 372dip
+        // track — measured 2026-08-22 by grow.steps' expect_fills
+        // button#0, red on this lane alone.
+        if vertical {
+            element.SetVerticalAlignment(
+                bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch)?;
+        } else {
+            element.SetHorizontalAlignment(
+                bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch)?;
+        }
         if vertical {
             element.SetHorizontalAlignment(if crossing {
                 bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch
@@ -12870,6 +12885,63 @@ fn assigned_track(core: &CoreState, grid: &Grid) -> windows_core::Result<f64> {
     grid.ActualWidth()
 }
 
+/// The extent a child DRAWS along one axis of its parent — `vertical`
+/// reads height — given the `slot` that parent arranged it in.
+///
+/// `ActualWidth`/`ActualHeight` is the USED size, which for a Control is
+/// its arrange rect and therefore its box. For a content-sized element it
+/// is not: a TextBlock stamped Stretch in a 457dip cell answers 12.5, its
+/// text (docs/traps.md, "A stretched WinUI TextBlock arranges
+/// text-sized"). So under a RESOLVED Stretch the box is the slot — the
+/// same read `cross_mode` makes one axis over, inline there because it
+/// needs the child's origin too.
+///
+/// THE DECLARED SIZE IS WHAT KEEPS THAT LOUD rather than vacuous: an
+/// explicit Width/Height outranks Stretch and IS the box, which is
+/// `expect_fills textarea#0`'s whole subject — 96dip inside a correct
+/// 126dip track — and a Max caps the slot the same way. Only a cap can
+/// leave a Stretch child short, so no Min is read; the test is one-sided.
+#[cfg(feature = "harness")]
+fn drawn_extent(
+    element: &FrameworkElement,
+    slot: f64,
+    vertical: bool,
+) -> windows_core::Result<f64> {
+    let stretches = if vertical {
+        element.VerticalAlignment()? == bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch
+    } else {
+        element.HorizontalAlignment()?
+            == bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch
+    };
+    if !stretches {
+        return if vertical {
+            element.ActualHeight()
+        } else {
+            element.ActualWidth()
+        };
+    }
+    let margin = element.Margin()?;
+    let (declared, cap, gutters) = if vertical {
+        (
+            element.Height()?,
+            element.MaxHeight()?,
+            margin.Top + margin.Bottom,
+        )
+    } else {
+        (
+            element.Width()?,
+            element.MaxWidth()?,
+            margin.Left + margin.Right,
+        )
+    };
+    let want = if declared.is_nan() {
+        (slot - gutters).max(0.0)
+    } else {
+        declared
+    };
+    Ok(want.min(cap))
+}
+
 /// What a flex parent gave one of its children, along the PARENT's main
 /// axis: the track it assigned and the extent the child drew in it.
 ///
@@ -12901,34 +12973,35 @@ fn flex_track(core: &CoreState, element: &FrameworkElement) -> windows_core::Res
     // mount sees zeros (the child_shares precedent).
     grid.UpdateLayout()?;
     // The track is the definition's RESOLVED extent — measured pixels,
-    // never the star weight — and the drawn size is the element's own.
-    // Same distinction child_shares makes when it reads definitions
-    // rather than children, and the gap between them is exactly where a
-    // control with an explicit Height sat: 96dip inside a correct
-    // 126dip star row, every share passing.
-    Ok(if vertical {
+    // never the star weight — and the drawn size is the child's box
+    // (`drawn_extent`, which is NOT ActualWidth for a content-sized
+    // element). Same distinction child_shares makes when it reads
+    // definitions rather than children, and the gap between them is
+    // exactly where a control with an explicit Height sat: 96dip inside
+    // a correct 126dip star row, every share passing.
+    if vertical {
         let at = Grid::GetRow(element)? as u32;
         let defs = grid.RowDefinitions()?;
         if at >= defs.Size()? {
-            FlexTrack::NoTrack
-        } else {
-            FlexTrack::In {
-                track: defs.GetAt(at)?.ActualHeight()?,
-                drawn: element.ActualHeight()?,
-            }
+            return Ok(FlexTrack::NoTrack);
         }
+        let track = defs.GetAt(at)?.ActualHeight()?;
+        Ok(FlexTrack::In {
+            track,
+            drawn: drawn_extent(element, track, true)?,
+        })
     } else {
         let at = Grid::GetColumn(element)? as u32;
         let defs = grid.ColumnDefinitions()?;
         if at >= defs.Size()? {
-            FlexTrack::NoTrack
-        } else {
-            FlexTrack::In {
-                track: defs.GetAt(at)?.ActualWidth()?,
-                drawn: element.ActualWidth()?,
-            }
+            return Ok(FlexTrack::NoTrack);
         }
-    })
+        let track = defs.GetAt(at)?.ActualWidth()?;
+        Ok(FlexTrack::In {
+            track,
+            drawn: drawn_extent(element, track, false)?,
+        })
+    }
 }
 
 /// The element a `kind#index` target names, from the per-kind registry
@@ -14509,15 +14582,47 @@ impl crate::harness::Stage for WinUiStage {
             // ledger entry "a nested SwiftUI container cannot fill its
             // track"). One-sided like the widget read, and silent where
             // no flex parent holds a track.
-            if let FlexTrack::In { track, drawn } =
-                flex_track(core, &grid.cast::<FrameworkElement>()?)?
-            {
+            let element: FrameworkElement = grid.cast()?;
+            if let FlexTrack::In { track, drawn } = flex_track(core, &element)? {
                 if track > 0.0 && drawn < track - 2.0 {
                     return Ok(format!(
                         "draws {}dip of its own {}dip track",
                         drawn.round() as i64,
                         track.round() as i64
                     ));
+                }
+            }
+            // THE BREADTH CLAUSE (the 2026-08-22 ruling): a CROSSING
+            // container — a row in a column, a column in a row — spans its
+            // parent's inner breadth under every align mode. `reindex`'s
+            // crossing stamp is what makes that true here, and this is what
+            // keeps it so: unstamp it and the child hugs, its Grid arranges
+            // at its natural breadth, and this fires. Skipped where no
+            // crossing flex parent holds it (the root, a same-axis parent)
+            // or where that parent has no layout yet — the Grid's own
+            // ActualWidth is honest, a Panel filling its arrange rect.
+            if let Ok(parent) = element.Parent()?.cast::<Grid>() {
+                let crossing = if vertical { &core.rows } else { &core.columns };
+                if crossing.iter().any(|g| g == &parent) {
+                    let pad = parent.Padding()?;
+                    let (breadth, inner) = if vertical {
+                        (
+                            grid.ActualHeight()?,
+                            parent.ActualHeight()? - pad.Top - pad.Bottom,
+                        )
+                    } else {
+                        (
+                            grid.ActualWidth()?,
+                            parent.ActualWidth()? - pad.Left - pad.Right,
+                        )
+                    };
+                    if inner > 0.0 && breadth < inner - 2.0 {
+                        return Ok(format!(
+                            "spans {}dip of its parent's {}dip breadth",
+                            breadth.round() as i64,
+                            inner.round() as i64
+                        ));
+                    }
                 }
             }
             // A Grid places tracks from the padding edge with

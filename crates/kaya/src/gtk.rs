@@ -533,6 +533,31 @@ fn set_container_align(widget: &gtk4::Widget, mode: i64) {
     unsafe { widget.set_data(ALIGN_KEY, mode) }
 }
 
+/// A kaya container's OWN main axis, stamped at creation. Two readings are
+/// unavailable here: `GtkBox::orientation` (ensure_flex replaces the layout
+/// that owns the property — see reconcile_grow_align), and the child's
+/// layout manager (it answers for every GtkBox kaya composes for itself,
+/// and a radio group is a vertical one).
+const AXIS_KEY: &str = "kaya-axis";
+
+fn container_vertical(widget: &gtk4::Widget) -> Option<bool> {
+    // SAFETY: the key is private to this module and only ever set to a
+    // bool by set_container_vertical below.
+    unsafe { widget.data::<bool>(AXIS_KEY).map(|p| *p.as_ref()) }
+}
+
+fn set_container_vertical(widget: &gtk4::Widget, vertical: bool) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(AXIS_KEY, vertical) }
+}
+
+/// A row in a column, or a column in a row — the child's main axis IS the
+/// parent's cross axis, so its own breadth is what the parent's cross box
+/// hands out.
+fn crosses_container(child: &gtk4::Widget, vertical_container: bool) -> bool {
+    container_vertical(child) == Some(!vertical_container)
+}
+
 /// Install the flex layout manager the first time one of a container's
 /// children grows. Lazy: containers that never grow keep GtkBox's own
 /// behaviour, and the manager takes the spacing with it.
@@ -556,13 +581,22 @@ fn ensure_flex(container: &gtk4::Widget) {
 /// maps to GTK's native baseline valign (rows only).
 fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) {
     use gtk4::prelude::WidgetExt;
-    let align = match mode {
+    let mut align = match mode {
         1 => gtk4::Align::Center,
         2 => gtk4::Align::End,
         3 => gtk4::Align::Fill,
         4 => gtk4::Align::Baseline,
         _ => gtk4::Align::Start,
     };
+    // THE BREADTH RULE (the stretch ruling's second slice, 2026-08-22): a
+    // nested CROSSING container spans its parent's inner breadth under every
+    // align mode, so the mode never reaches one. Baseline is the exception
+    // that isn't: GTK spells it BASELINE_FILL and it already spans, AND the
+    // allocated baseline it hands out is the one discriminator cross_mode
+    // has that spanning geometry cannot fake.
+    if align != gtk4::Align::Baseline && crosses_container(child, vertical_container) {
+        align = gtk4::Align::Fill;
+    }
     if vertical_container {
         // A column's cross axis is horizontal.
         child.set_halign(align);
@@ -4989,6 +5023,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
                     column.set_halign(gtk4::Align::Start);
                     column.set_valign(gtk4::Align::Start);
+                    // The axis its PARENT will read to see it crossing.
+                    set_container_vertical(column.upcast_ref::<gtk4::Widget>(), true);
 // No flex manager yet, deliberately: GtkBox's own layout stays
 // until a child actually carries a weight (see ensure_flex).
                     core.columns.push(column.clone());
@@ -4998,6 +5034,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                     row.set_halign(gtk4::Align::Start);
                     row.set_valign(gtk4::Align::Start);
+                    set_container_vertical(row.upcast_ref::<gtk4::Widget>(), false);
                     core.rows.push(row.clone());
                     NativeWidget::Row(row)
                 }
@@ -5048,6 +5085,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 WidgetKind::Label => {
                     let label = gtk4::Label::new(None);
+                    // kaya's normalized start, the leaf half of the breadth
+                    // ruling: GtkLabel's 0.5 default centers the TEXT inside
+                    // any box wider than it, so a grown or stretched label
+                    // reads centered where WinUI, Compose and SwiftUI lead.
+                    // Invisible at natural size — there the box IS the text.
+                    label.set_xalign(0.0);
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
@@ -6737,7 +6780,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             child_widget.set_halign(gtk4::Align::Start);
             child_widget.set_valign(gtk4::Align::Start);
             // ... then the container's align mode overrides the cross
-            // axis for children arriving after the prop did.
+            // axis for children arriving after the prop did — and the
+            // breadth rule overrides the mode in turn for a crossing
+            // container (apply_cross_align).
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(c) => apply_cross_align(
                     &child_widget,
@@ -9189,6 +9234,35 @@ impl crate::harness::Stage for GtkStage {
             // are no unrecorded child tracks to mistake for a leftover).
             if inner <= 0 {
                 return "no container layout recorded".to_owned();
+            }
+            // THE BREADTH CLAUSE (the ruling's second slice, 2026-08-22): a
+            // CROSSING container — a row in a column, a column in a row —
+            // spans its parent's inner breadth under EVERY align mode. Its
+            // own main axis IS the parent's cross axis, so its ALLOCATION is
+            // the breadth (width()/height() would be the content box, and the
+            // parent places the outer one). The parent's axis comes from its
+            // LAYOUT MANAGER, ours or GtkBox's — never GtkBox::orientation,
+            // whose owner ensure_flex replaces, and never the AXIS_KEY the
+            // lowering stamps, which would make this a copy of the model it
+            // is here to check. Skipped honestly when the parent has neither
+            // manager (a viewport, a window shell, a grid) or laid nothing
+            // out.
+            if let Some(parent) = widget.parent() {
+                let parent_vertical = parent.layout_manager().and_then(|m| {
+                    m.downcast_ref::<flex::FlexLayout>()
+                        .map(|f| f.orientation() == gtk4::Orientation::Vertical)
+                        .or_else(|| {
+                            m.downcast_ref::<gtk4::BoxLayout>()
+                                .map(|b| b.orientation() == gtk4::Orientation::Vertical)
+                        })
+                });
+                if parent_vertical == Some(!vertical) {
+                    let breadth = flex::child_extent(&widget, vertical).round() as i32;
+                    let across = if vertical { parent.height() } else { parent.width() };
+                    if across > 0 && breadth < across - 2 {
+                        return format!("spans {breadth}px of its parent's {across}px breadth");
+                    }
+                }
             }
             let mut min_start = i32::MAX;
             let mut max_end = i32::MIN;

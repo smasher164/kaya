@@ -41,12 +41,15 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 // THE SEMANTIC ICON VOCABULARY's glyphs (docs/styling-plan.md D6), one
 // import per concept.
 //
@@ -6143,6 +6146,24 @@ object KayaCompose {
                                 val extent = kayaContainerExtents[container.id] ?: 0.0
                                 val tracks = container.children
                                     .map { kayaMainExtents[it.id] }
+                                // THE BREADTH CLAUSE'S TWO NUMBERS. The
+                                // parent is looked up among the containers of
+                                // the OTHER kind, so a row in a row finds
+                                // nothing and the clause is skipped — only a
+                                // CROSSING container owes its parent's whole
+                                // breadth. The cross rect stays nullable
+                                // because an unrecorded one is not a zero:
+                                // reading it as one would claim "spans 0px"
+                                // about a container nobody measured.
+                                val crossParent =
+                                    (if (isRow) KayaSceneModel.columns
+                                    else KayaSceneModel.rows)
+                                        .firstOrNull { p ->
+                                            p.children.any { it.id == container.id }
+                                        }
+                                val parentInner =
+                                    crossParent?.let { kayaContainerCross[it.id] } ?: 0.0
+                                val ownCross = kayaCrossRects[container.id]?.second
                                 when {
                                     // A grown container is a flex CHILD too:
                                     // its own box must span the track its
@@ -6156,6 +6177,20 @@ object KayaCompose {
                                     ownTrack > 0.0 && ownDrawn < ownTrack - 2.0 ->
                                         "draws ${Math.round(ownDrawn)}px of its own " +
                                             "${Math.round(ownTrack)}px track"
+                                    // THE BREADTH CLAUSE (2026-08-22): a
+                                    // CROSSING container — a row in a column,
+                                    // a column in a row — spans its parent's
+                                    // inner breadth under EVERY align mode.
+                                    // Its cross rect in the parent is already
+                                    // recorded for the classifier; skipped
+                                    // honestly when the parent is not a
+                                    // recorded container of the other kind
+                                    // (the root), or when either number is
+                                    // missing.
+                                    parentInner > 0.0 && ownCross != null &&
+                                        ownCross < parentInner - 2.0 ->
+                                        "spans ${Math.round(ownCross)}px of its parent's " +
+                                            "${Math.round(parentInner)}px breadth"
                                     extent <= 0.0 -> "no container layout recorded"
                                     // Summing unrecorded tracks as zeros
                                     // reports a leftover built from nothing;
@@ -7344,6 +7379,54 @@ fun KayaRender(
     }
 }
 
+/**
+ * A HUGGING CONTAINER PINS ITSELF TO ITS CONTENT before the breadth
+ * ruling's fill resolves against it — the one place Compose needs a
+ * sentence the other three backends get for free.
+ *
+ * `fillMaxWidth()`/`fillMaxHeight()` take the CONSTRAINT a parent handed
+ * down, never the size the parent ended up. GTK's Fill fills the box's
+ * ALLOCATION, XAML's Stretch fills an Auto row, and SwiftUI's KayaFlex
+ * probes each child `.unspecified` first: all three mean "as tall as my
+ * parent ENDED UP", and Compose means "as tall as my parent MAY be".
+ * They agree only where the parent's cross axis is already pinned — by
+ * the window, by a weight on the parent's main axis, or by the
+ * grandparent's stretch.
+ *
+ * Where it is NOT pinned, the raw fill takes everything the grandparent
+ * had left: align.steps' row#1 would have claimed the rest of the window
+ * and expect_fills column@fitcol would have read ~138px of ~900px, and
+ * portfolio's unpinned accounts sidebar would have widened to the window
+ * and left the grow=1 detail column no leftover at all. IntrinsicSize is
+ * Compose's own answer (the same recipe as its full-height divider), and
+ * it reproduces the width a wrap container already had — MAX on width,
+ * because MIN there is the longest-word width; MIN on height, because
+ * that IS the wrapped height.
+ *
+ * Returns an empty modifier for every node that is not a hugging
+ * container with a crossing child, which is all but one container in
+ * today's scenes.
+ */
+private fun kayaHugCross(
+    node: KayaNode,
+    isRoot: Boolean,
+    flexVertical: Boolean?,
+    flexStretch: Boolean,
+): Modifier {
+    val crossVertical = node.kind == KayaCompose.KIND_ROW
+    if (!crossVertical && node.kind != KayaCompose.KIND_COLUMN) return Modifier
+    val pinned =
+        isRoot || if (flexVertical == crossVertical) node.grow > 0 else flexStretch
+    val crossingKind =
+        if (crossVertical) KayaCompose.KIND_COLUMN else KayaCompose.KIND_ROW
+    if (pinned || node.children.none { it.kind == crossingKind }) return Modifier
+    return if (crossVertical) {
+        Modifier.height(IntrinsicSize.Min)
+    } else {
+        Modifier.width(IntrinsicSize.Max)
+    }
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun KayaRenderCore(
@@ -7380,24 +7463,38 @@ private fun KayaRenderCore(
     // 25/75 held over a content-wide strip while every other backend
     // spanned the window.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
-    // AND A NESTED CONTAINER ADOPTS THE BOX IT WAS HANDED (the
-    // 2026-08-22 ruling; docs/deferred.md's nested-container GAP,
-    // tools/scenes/align.steps): a grower spans its track on the
-    // parent's MAIN axis, `stretch` spans the parent's cross axis, and
-    // with neither it still hugs. The CELL carries both already (the
-    // column and row arms below); this is the content inside it, which
-    // Compose otherwise lets hug a cell it was handed.
+    // AND EVERY NODE ADOPTS THE BOX IT WAS HANDED (the 2026-08-22
+    // rulings; docs/deferred.md, tools/scenes/align.steps and
+    // grow.steps): a grower spans its track on the parent's MAIN axis,
+    // `stretch` spans the parent's cross axis, and with neither it still
+    // hugs. The CELL carries both already (the column and row arms
+    // below); this is the CONTENT inside it, which Compose otherwise
+    // lets hug a cell it was handed — and it rides every kind, LEAF AND
+    // CONTAINER ALIKE, because the ruling's leaf half is the same
+    // sentence one tier down (a grown label drew 23 of its 109pt track
+    // on the backend that had only been told about containers).
+    // A cell-level fill would satisfy expect_fills without the control
+    // moving, which is the false green kayaDrawnExtents exists to catch.
+    //
+    // AND A CROSSING CONTAINER MAXIMIZES ITS OWN MAIN AXIS under EVERY
+    // align mode: a row in a column, a column in a row. Its own main
+    // axis IS the parent's cross axis, so it joins the stretch arm
+    // rather than adding a third write.
     var boxFill = rootFill
     if (flexVertical != null) {
+        val crossing =
+            if (flexVertical) node.kind == KayaCompose.KIND_ROW
+            else node.kind == KayaCompose.KIND_COLUMN
         if (node.grow > 0) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxHeight() else boxFill.fillMaxWidth()
         }
-        if (flexStretch) {
+        if (flexStretch || crossing) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
         }
     }
+    val hugCross = kayaHugCross(node, isRoot, flexVertical, flexStretch)
     // THE UNIVERSAL ACCESSIBILITY PROPS, folded into the base modifier
     // every kind already threads.
     //
@@ -7471,7 +7568,10 @@ private fun KayaRenderCore(
                     value = selectedLabel,
                     onValueChange = {},
                     readOnly = true,
-                    modifier = a11y.menuAnchor(),
+                    // The fill rides the FIELD, not the anchor box: a box
+                    // that spans while its control hugs is the false green
+                    // kayaDrawnExtents exists to catch.
+                    modifier = boxFill.then(a11y).menuAnchor(),
                 )
                 ExposedDropdownMenu(
                     expanded = expanded,
@@ -7502,14 +7602,14 @@ private fun KayaRenderCore(
                 content = { node.children.forEach { child -> KayaRender(child) } },
                 // The inset pair brackets the padding (see the column's
                 // note).
-                modifier = a11y.onGloballyPositioned {
+                modifier = boxFill.then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 }.padding(node.inset.dp).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 },
-            ) { measurables, _ ->
+            ) { measurables, constraints ->
                 val placeables = measurables.map {
                     it.measure(androidx.compose.ui.unit.Constraints())
                 }
@@ -7520,8 +7620,16 @@ private fun KayaRenderCore(
                     colW[i % cols] = maxOf(colW[i % cols], p.width)
                     rowH[i / cols] = maxOf(rowH[i / cols], p.height)
                 }
-                val width = colW.sum() + gapPx * (cols - 1).coerceAtLeast(0)
-                val height = rowH.sum() + gapPx * (rows - 1).coerceAtLeast(0)
+                // Coerced into the incoming constraints, so a GROWN grid
+                // takes the track the fill above fixed for it — a Layout
+                // that reports its own size regardless would leave the
+                // fill dead (the 2026-08-22 ruling: a grower renders at
+                // its track, leaf or container). Cells still place from
+                // the leading edge, so the extra is trailing slack.
+                val width = (colW.sum() + gapPx * (cols - 1).coerceAtLeast(0))
+                    .coerceAtLeast(constraints.minWidth)
+                val height = (rowH.sum() + gapPx * (rows - 1).coerceAtLeast(0))
+                    .coerceAtLeast(constraints.minHeight)
                 layout(width, height) {
                     var y = 0
                     for (r in 0 until rows) {
@@ -7543,7 +7651,7 @@ private fun KayaRenderCore(
             // selectable group of RadioButton rows. Every USER pick
             // emits with the group's identity tag — the select's
             // uncontrolled contract.
-            Column(modifier = a11y.selectableGroup()) {
+            Column(modifier = boxFill.then(a11y).selectableGroup()) {
                 node.children.forEachIndexed { i, option ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -7569,10 +7677,11 @@ private fun KayaRenderCore(
             // determinate over the 0..=1 fraction, or the activity
             // flavor while indeterminate is on.
             if (node.indeterminate) {
-                androidx.compose.material3.LinearProgressIndicator(modifier = a11y)
+                androidx.compose.material3.LinearProgressIndicator(
+                    modifier = boxFill.then(a11y))
             } else {
                 androidx.compose.material3.LinearProgressIndicator(
-                    modifier = a11y,
+                    modifier = boxFill.then(a11y),
                     progress = { node.value.toFloat() })
             }
         KayaCompose.KIND_SCROLL ->
@@ -7581,7 +7690,7 @@ private fun KayaRenderCore(
             // node's own ScrollState — the toolkit's real scrolling
             // machinery, which the runner's verbs read and drive.
             Box(
-                rootFill.then(a11y).verticalScroll(node.scrollState)
+                boxFill.then(a11y).verticalScroll(node.scrollState)
             ) {
                 node.children.firstOrNull()?.let { KayaRender(it) }
             }
@@ -7596,7 +7705,7 @@ private fun KayaRenderCore(
                 // The inset pair brackets the container's own padding:
                 // outer box, then padding, then the content readers, so
                 // the extents shares divide are the CONTENT box.
-                modifier = boxFill.then(a11y).onGloballyPositioned {
+                modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 }.padding(node.inset.dp).onGloballyPositioned {
@@ -7626,7 +7735,14 @@ private fun KayaRenderCore(
                         )
                     }
                     if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
-                    if (node.align == KayaCompose.ALIGN_STRETCH) cell = cell.fillMaxWidth()
+                    // The track a crossing ROW spans is the whole breadth,
+                    // under every align mode (the 2026-08-22 breadth
+                    // ruling) — beside stretch, which spans every child's.
+                    if (node.align == KayaCompose.ALIGN_STRETCH ||
+                        child.kind == KayaCompose.KIND_ROW
+                    ) {
+                        cell = cell.fillMaxWidth()
+                    }
                     // BOTH READERS: the one inside the cell sees what
                     // the child drew, the one on the cell sees the
                     // track. Without both, expect_fills on a widget
@@ -7660,7 +7776,10 @@ private fun KayaRenderCore(
             // `Color.Red`: the role, so the platform judges the shade.
             when (node.role) {
                 KayaCompose.ROLE_PROMINENT ->
-                    Button(onClick = { KayaPresent.emitClicked(node.tag) }, modifier = a11y) {
+                    Button(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = boxFill.then(a11y),
+                    ) {
                         // A button's label is Material's OWN rung
                         // (`Button` provides labelLarge internally), so
                         // this samples the ramp route through a
@@ -7670,7 +7789,7 @@ private fun KayaRenderCore(
                 KayaCompose.ROLE_DESTRUCTIVE ->
                     Button(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = a11y,
+                        modifier = boxFill.then(a11y),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -7681,7 +7800,12 @@ private fun KayaRenderCore(
                 else ->
                     OutlinedButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = a11y,
+                        // THE BEZEL IS THE CHILD, not a natural-width
+                        // control inside a grown box: Material takes this
+                        // modifier onto the Surface, so the chrome spans
+                        // the track the way GTK's Fill and XAML's Stretch
+                        // already do (grow.steps' button#0).
+                        modifier = boxFill.then(a11y),
                     ) {
                         Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
@@ -7692,7 +7816,7 @@ private fun KayaRenderCore(
             Row(
                 // The inset pair brackets the padding (see the column's
                 // note).
-                modifier = boxFill.then(a11y).onGloballyPositioned {
+                modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 }.padding(node.inset.dp).onGloballyPositioned {
@@ -7725,7 +7849,13 @@ private fun KayaRenderCore(
                         layout(placeable.width, placeable.height) { placeable.place(0, 0) }
                     }
                     if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
-                    if (node.align == KayaCompose.ALIGN_STRETCH) cell = cell.fillMaxHeight()
+                    // The crossing COLUMN's track — the column arm's
+                    // sibling, one axis over.
+                    if (node.align == KayaCompose.ALIGN_STRETCH ||
+                        child.kind == KayaCompose.KIND_COLUMN
+                    ) {
+                        cell = cell.fillMaxHeight()
+                    }
                     if (node.align == KayaCompose.ALIGN_BASELINE) cell = cell.alignByBaseline()
                     // The drawn-extent reader, the column arm's sibling.
                     Box(cell) {
@@ -7758,7 +7888,7 @@ private fun KayaRenderCore(
                     // it goes on reading the platform face if the
                     // theme's first write is missing.
                     onTextLayout = { kayaTypefaceSites["heading"] = it },
-                    modifier = a11y.semantics { heading() },
+                    modifier = boxFill.then(a11y).semantics { heading() },
                 )
             } else {
                 // And the AMBIENT route's sample: a plain label reads
@@ -7766,7 +7896,7 @@ private fun KayaRenderCore(
                 Text(
                     node.text,
                     onTextLayout = { kayaTypefaceSites["label"] = it },
-                    modifier = a11y,
+                    modifier = boxFill.then(a11y),
                 )
             }
         KayaCompose.KIND_CHECKBOX ->
@@ -7789,7 +7919,7 @@ private fun KayaRenderCore(
             // whole row the hit target, which is what the caption
             // beside a box means everywhere else.
             Row(
-                modifier = a11y
+                modifier = boxFill.then(a11y)
                     .toggleable(
                         value = node.checked,
                         role = Role.Checkbox,
@@ -7810,7 +7940,7 @@ private fun KayaRenderCore(
             // mirrors the slider's position (Compose needs the state),
             // and every move is emitted with the slider's identity tag.
             Slider(
-                modifier = a11y,
+                modifier = boxFill.then(a11y),
                 value = node.value.toFloat(),
                 onValueChange = { newValue ->
                     node.value = newValue.toDouble()
@@ -7842,12 +7972,19 @@ private fun KayaRenderCore(
             // and recorded every later cell's origin against its
             // neighbour. The SwiftUI twin of this line went further and
             // trapped outright (docs/deferred.md).
+            //
+            // The placeholder takes no fill — a decode that produced
+            // nothing has no box to render at its track, and a 0x0 slot
+            // is a smaller lie than a track-wide blank. Its two lines are
+            // also verbatim: tools/check-empty-child.sh perturbs them for
+            // its watched negative and reads an unchanged copy as a
+            // BROKEN self-test.
             val bitmap = node.imageBitmap
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
                     contentDescription = node.a11yLabel.ifEmpty { null },
-                    modifier = a11yTag,
+                    modifier = boxFill.then(a11yTag),
                 )
             } else {
                 Box(modifier = a11yTag)
@@ -7858,15 +7995,8 @@ private fun KayaRenderCore(
         // over a multiline field. One composable serves both kinds —
         // they differed only in two arguments, and a second copy is a
         // second place for the echo guard to be got wrong.
-        KayaCompose.KIND_TEXTAREA ->
-            KayaTextField(
-                node,
-                a11y,
-                singleLine = false,
-                flexVertical = flexVertical,
-                flexStretch = flexStretch,
-            )
-        KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, singleLine = true)
+        KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
+        KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
     }
 }
 
@@ -7908,38 +8038,17 @@ private fun KayaRenderCore(
 fun KayaTextField(
     node: KayaNode,
     a11y: Modifier,
+    /**
+     * [KayaRenderCore]'s `boxFill` — the grow/stretch/crossing fill every
+     * kind rides. THE LINE LIMITS BELOW ARE A FLOOR AND A CEILING IN
+     * LINES, which is what bounds an unweighted field; a grower's size is
+     * the cell its weight earned, and a field that ignored that cell
+     * rendered three lines tall inside a cell expect_shares read as
+     * exactly right.
+     */
+    fill: Modifier,
     singleLine: Boolean,
-    flexVertical: Boolean? = null,
-    flexStretch: Boolean = false,
 ) {
-    // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES IT.
-    //
-    // The line limits below are a FLOOR AND A CEILING in lines, which is
-    // what bounds an unweighted field — but a GROWER's size is the cell
-    // its weight earned, and a field that ignored that cell rendered
-    // three lines tall inside it while the cell (which expect_shares
-    // reads) was exactly right. So a grower fills its cell on the
-    // container's MAIN AXIS, and only there: the cross axis is align's
-    // business, and the other backends give a grown textarea its natural
-    // breadth across a start-aligned container.
-    val grown = when {
-        node.grow <= 0 -> Modifier
-        flexVertical == true -> Modifier.fillMaxHeight()
-        flexVertical == false -> Modifier.fillMaxWidth()
-        else -> Modifier
-    }
-    // AND THE CROSS AXIS IS ALIGN'S, by the same argument one axis over:
-    // `stretch` says every child spans the container's breadth, and a
-    // control with a fixed natural box has to be told, exactly as a
-    // grower does. GTK's size request and WinUI's MinWidth are minima
-    // their FILL/Stretch alignment already grows from; this arm and the
-    // SwiftUI one had to say it.
-    val stretched = when {
-        !flexStretch -> Modifier
-        flexVertical == true -> Modifier.fillMaxWidth()
-        flexVertical == false -> Modifier.fillMaxHeight()
-        else -> Modifier
-    }
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
     // ONE COLLECTOR PER NODE, keyed by the node itself: a destroy and
@@ -7997,8 +8106,7 @@ fun KayaTextField(
         interactionSource = interaction,
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         modifier = a11y
-            .then(grown)
-            .then(stretched)
+            .then(fill)
             .focusRequester(focusRequester)
             // Gain-only back-propagation: onFocusChanged also fires with
             // the initial unfocused state at attach, and a loss branch

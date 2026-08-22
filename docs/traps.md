@@ -4239,3 +4239,15 @@ default is Stretch, which reddens every center/start scene rather than
 passing one. First bitten: the align scene's stretch legs classified
 "start" on windows alone while expect_fills on the same container passed,
 because the container (a Grid) spans for real and its label child does not.
+
+The second reader bitten, same day: expect_fills' WIDGET arm — a
+TextBlock in a 124dip star column reported 13. Both readers now share
+one rule in `drawn_extent` (winui/mod.rs): under a RESOLVED Stretch the
+box is the slot, CAPPED by a declared Width/Height — the cap is what
+keeps the verb falsifiable, since kaya stamps the main axis Stretch on
+every flex child and an uncapped slot-read could never fail, while the
+textarea's 96dip-in-126dip case is the verb's founding subject. And the
+same red's other conviction: nothing had stamped the main axis at all,
+so a Button in a 372dip star track drew 57dip — the reindex stamp now
+writes main-axis Stretch on every flex child (identical for Auto
+tracks, the grower's box for star ones).

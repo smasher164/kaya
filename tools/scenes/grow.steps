@@ -55,5 +55,13 @@ expect_root_fills
 expect_fills column#0
 expect_fills row#0
 expect_fills textarea#0
+# The grown LEAVES, ruled 2026-08-22 with the nested-container breadth
+# rule: a grower renders AT its track, leaf or container — the field is
+# unanimous (CSS used main size, GTK Fill, XAML Stretch, Flutter's
+# tight Expanded constraints, Compose weight fill) and SwiftUI, the one
+# proposal-negotiating backend, must be told per kind. These two were
+# watched failing there before the telling.
+expect_fills label#1
+expect_fills button#0
 expect_shares column#0 "25,50,25"
 expect_shares row#0 "25,75"

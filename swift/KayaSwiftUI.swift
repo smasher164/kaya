@@ -6438,6 +6438,21 @@ private func kayaRunScript(_ script: String) {
                                 "draws \(Int(drawn.rounded()))pt of its own \(Int(track.rounded()))pt track"
                         }
                     }
+                    // THE BREADTH CLAUSE (2026-08-22): a CROSSING container —
+                    // a row in a column, a column in a row — spans its
+                    // parent's inner breadth, under every align mode. Its
+                    // cross-rect in the parent's space is already recorded
+                    // for the classifier; skipped honestly when the parent
+                    // is not a recorded container (the root).
+                    if let parent = (isRow ? kayaScene.columns : kayaScene.rows)
+                        .first(where: { p in p.children.contains(where: { $0.id == container.id }) }),
+                        let parentInner = kayaContainerCross[parent.id], parentInner > 0,
+                        let r = kayaCrossRects[container.id],
+                        r.1 < parentInner - 2
+                    {
+                        return
+                            "spans \(Int(r.1.rounded()))pt of its parent's \(Int(parentInner.rounded()))pt breadth"
+                    }
                     guard let extent = kayaContainerExtents[container.id], extent > 0 else {
                         return "no container layout recorded"
                     }
@@ -8500,6 +8515,14 @@ struct KayaRender: View {
             // nothing below it would ever have leftover space to divide.
             let columnFills =
                 isRoot || flexStretch || (node.grow > 0 && flexVertical == false)
+            // A CROSSING container maximizes its main axis (height, in a
+            // row parent) — the 2026-08-22 breadth ruling, the rule
+            // WinUI's Stretch default carried alone until it was ratified
+            // for all four. It rides a frame around the chosen body, not
+            // the flex path: forcing the flex path was watched breaking
+            // baseline mode (KayaCell places one child; a common baseline
+            // is the stack's native gift).
+            let columnCrosses = flexVertical == false
             Group {
                 if !node.tableColumns.isEmpty {
                     // The declared table (docs/tables-plan.md);
@@ -8522,8 +8545,14 @@ struct KayaRender: View {
                                 KayaRender(
                                     node: child, flexVertical: true,
                                     flexStretch: node.align == alignStretch)
+                                    // maxHeight: a grower renders AT its track,
+                                    // leaf or container (the 2026-08-22 breadth
+                                    // ruling's leaf half; grow.steps' label#1 and
+                                    // button#0 were watched failing 23/109 and
+                                    // 66/327 before this line).
                                     .frame(
                                         maxWidth: node.align == alignStretch ? .infinity : nil,
+                                        maxHeight: child.grow > 0 ? .infinity : nil,
                                         alignment: .topLeading)
                                     .background(
                                         KayaCellReader(id: child.id, parent: node.id, vertical: true)
@@ -8553,6 +8582,7 @@ struct KayaRender: View {
                     }
                 }
             }
+            .frame(maxHeight: columnCrosses ? .infinity : nil, alignment: .topLeading)
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: true))
             .background(KayaInsetReader(id: node.id, outer: false))
@@ -8567,7 +8597,10 @@ struct KayaRender: View {
             // vendor-hosted runtimes sit on such stamps permanently. iOS keeps
             // SwiftUI's Button: it measures what it draws.
             #if os(macOS)
-                KayaMacButton(title: node.text, tag: node.tag, role: node.role)
+                KayaMacButton(
+                    title: node.text, tag: node.tag, role: node.role,
+                    fillsWidth: node.grow > 0 && flexVertical == false
+                )
                     .alignmentGuide(.top) { d in
                         kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                         return d[.top]
@@ -8595,6 +8628,8 @@ struct KayaRender: View {
             // see the column arm.
             let rowFills =
                 isRoot || flexStretch || (node.grow > 0 && flexVertical == true)
+            // Crossing rows maximize their width — see the column arm.
+            let rowCrosses = flexVertical == true
             Group {
                 if rowFills || node.children.contains(where: { $0.grow > 0 }) {
                     KayaFlex(
@@ -8606,7 +8641,10 @@ struct KayaRender: View {
                                 KayaRender(
                                     node: child, flexVertical: false,
                                     flexStretch: node.align == alignStretch)
+                                    // maxWidth: the leaf half of the breadth
+                                    // ruling — see the column arm.
                                     .frame(
+                                        maxWidth: child.grow > 0 ? .infinity : nil,
                                         maxHeight: node.align == alignStretch ? .infinity : nil,
                                         alignment: .topLeading)
                                     .background(
@@ -8635,6 +8673,7 @@ struct KayaRender: View {
                     }
                 }
             }
+            .frame(maxWidth: rowCrosses ? .infinity : nil, alignment: .topLeading)
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: false))
             .background(KayaInsetReader(id: node.id, outer: false))
@@ -8893,6 +8932,11 @@ struct KayaRender: View {
         let title: String
         let tag: [UInt8]
         var role: Int64 = 0
+        /// A grower's bezel spans its track (the 2026-08-22 breadth
+        /// ruling's leaf half): true fills the width proposal, an
+        /// NSButton draws its bezel across whatever frame it is given,
+        /// and GTK/WinUI/Compose already render exactly that.
+        var fillsWidth = false
 
         final class Coordinator: NSObject {
             var tag: [UInt8] = []
@@ -8957,7 +9001,11 @@ struct KayaRender: View {
         func sizeThatFits(
             _ proposal: ProposedViewSize, nsView: NSButton, context: Context
         ) -> CGSize? {
-            nsView.fittingSize
+            let fit = nsView.fittingSize
+            if fillsWidth, let width = proposal.width, width > fit.width {
+                return CGSize(width: width, height: fit.height)
+            }
+            return fit
         }
     }
 #endif
