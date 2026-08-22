@@ -45,6 +45,20 @@ class KayaHarnessAccessibility : AccessibilityService() {
             private set
 
         /**
+         * Is the app's OWN activity resumed? Written on the main thread
+         * from the mounted activity's lifecycle (KayaCompose.mount),
+         * read by [dismiss] from the harness thread.
+         *
+         * IN-PROCESS AND SO LAG-FREE, which is the whole reason it
+         * exists: every other signal [dismiss] has comes out of the
+         * accessibility window list, and that list is a snapshot that
+         * lags reality in both directions (docs/deferred.md's WATCH
+         * entry on the dialog family).
+         */
+        @Volatile
+        internal var appResumed: Boolean = false
+
+        /**
          * DocumentsUI's package, BOTH SPELLINGS: AOSP images carry
          * `com.android.documentsui`, google_apis images (what
          * run-emulator.sh creates) carry the google one
@@ -132,9 +146,47 @@ class KayaHarnessAccessibility : AccessibilityService() {
             PICKER_PACKAGES.contains(it.root?.packageName?.toString())
         }
 
-    /** Every package that currently owns a window — what a miss reports. */
-    fun windowPackages(): List<String> =
+    /**
+     * Every package that currently owns a window WHOSE ROOT ANSWERED.
+     *
+     * PRIVATE, because as a failure string it lies: a window whose root
+     * read returns null contributes nothing here and is invisible to
+     * every reader built on this one. [windowCensus] is what a failure
+     * prints.
+     */
+    private fun windowPackages(): List<String> =
         windows.orEmpty().mapNotNull { it.root?.packageName?.toString() }
+
+    /**
+     * WHAT THE SERVICE CAN SEE AND WHAT IT COULD READ: every window,
+     * with its package when the root answered and `root-unreadable`
+     * plus the window's title when it did not.
+     *
+     * An unreadable root is not the same failure as a missing window
+     * and wants the opposite fix, and no reader above can tell them
+     * apart — [pickerPackage], [pickerWindow] and [nodesIn] all drop a
+     * null-rooted window silently, which is how a save leg printed
+     * "DocumentsUI is showing []" about a list it never read
+     * (docs/deferred.md's WATCH entry, 2026-08-21 matrix6).
+     *
+     * THE A11Y ID IS PRINTED because system_server names windows by it
+     * in its own complaint — `AccessibilityManagerService: wait for
+     * adding window timeout: <id>` — so the two logs can be joined.
+     */
+    fun windowCensus(): String {
+        val entries = ArrayList<String>()
+        var unreadable = 0
+        for (window in windows.orEmpty()) {
+            val pkg = window.root?.packageName?.toString()
+            if (pkg == null) {
+                unreadable += 1
+                entries.add("id=${window.id} root-unreadable title=\"${window.title ?: ""}\"")
+            } else {
+                entries.add("id=${window.id} $pkg")
+            }
+        }
+        return "${entries.size} windows, $unreadable with an unreadable root: $entries"
+    }
 
     /**
      * What the picker is REALLY showing: the directory it is in, and the
@@ -200,12 +252,25 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * WHAT DOCUMENTSUI IS SHOWING, for a failure to say out loud: the
-     * distinct view ids in its tree, shortest form, sorted. A read that
-     * finds no save panel is otherwise indistinguishable from a save
-     * panel that never presented, and the two want opposite fixes.
+     * WHAT DOCUMENTSUI IS SHOWING, for a failure to say out loud, AND
+     * WHETHER ITS TREE WAS READ AT ALL. [dialogShape] answers about a
+     * tree it found; with no readable picker window there is no tree,
+     * and its empty list read as "DocumentsUI is showing nothing" about
+     * something nobody measured (docs/deferred.md's WATCH entry).
      */
-    fun dialogShape(): List<String> {
+    fun dialogReport(): String {
+        val pkg = pickerPackage()
+            ?: return "no DocumentsUI window with a readable root; ${windowCensus()}"
+        return "$pkg publishes ${dialogShape()}"
+    }
+
+    /**
+     * The distinct view ids in DocumentsUI's tree, shortest form,
+     * sorted. Private: a caller that has not asked whether the tree
+     * could be read at all prints [dialogReport]'s question as an
+     * answer.
+     */
+    private fun dialogShape(): List<String> {
         val pkg = pickerPackage() ?: return emptyList()
         return nodesIn(pkg)
             .mapNotNull { node ->
@@ -286,26 +351,36 @@ class KayaHarnessAccessibility : AccessibilityService() {
      * MUST NOT RUN ON THE MAIN THREAD — getWindows() is refreshed on
      * this service's main looper, which is the app's (docs/traps.md).
      * Asserted below rather than commented.
+     *
+     * Null when the picker went; a measured sentence when it did not,
+     * because "would not dismiss" has two causes the caller cannot
+     * otherwise tell apart — a picker that ate its backs, and a gate
+     * that never let one through.
      */
-    fun dismiss(): Boolean {
+    fun dismiss(): String? {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
             "kaya: the picker drive must not run on the main thread — getWindows() " +
                 "is refreshed there and would never see the picker leave"
         }
-        // BACK IS PRESSED ONLY WHILE THE PICKER HOLDS INPUT FOCUS. The
-        // window list lags a dismissal, and under a loaded matrix the
-        // lag outgrew the settle: the old present-check saw a stale
-        // entry, pressed a STRAGGLER BACK that landed on the app, and
-        // finish()ed the scene's activity — after which a save dialog's
+        // BACK IS PRESSED ONLY WHILE THE PICKER HOLDS INPUT FOCUS AND
+        // THE APP'S OWN ACTIVITY IS NOT RESUMED. Both halves guard one
+        // failure: the window list LAGS a dismissal, a stale entry buys
+        // one extra press, and that STRAGGLER BACK lands on the app and
+        // finish()es the scene's activity — after which a dialog's
         // result has no live destination and vanishes with no line
-        // anywhere (2026-08-20, the save ghost's eighth sighting, the
-        // whole chain in the wm_finish_activity/state log; the WATCH
-        // entry in docs/deferred.md holds the story). Focus moves to
-        // the app BEFORE the stale span begins, so a focused picker is
-        // the one moment a back cannot miss.
+        // anywhere. Focus is read from the lagging snapshot and cannot
+        // see the app take over; [appResumed] is in-process and lags
+        // nothing, and in both 2026-08-21 traces the straggler was
+        // injected ~130ms AFTER the app's own onResume. The WATCH entry
+        // in docs/deferred.md holds the timestamps.
+        //
+        // THE RESUMED READ COMES LAST, after the window read that can
+        // itself cost hundreds of milliseconds under load: hoisting it
+        // hands the press a value measured before the wait.
         var backs = 0
         var waits = 0
         var absent = 0
+        var refused = 0
         while (waits < GONE_TRIES * 2) {
             waits += 1
             val picker = pickerWindow()
@@ -313,18 +388,24 @@ class KayaHarnessAccessibility : AccessibilityService() {
                 // Same debounce as waitForPickerGone: one absent read
                 // can be a live window's transient drop-out.
                 absent += 1
-                if (absent >= 2) return true
+                if (absent >= 2) return null
                 Thread.sleep(BACK_SETTLE_MS)
                 continue
             }
             absent = 0
             if (picker.isFocused && backs < MAX_BACKS) {
-                performGlobalAction(GLOBAL_ACTION_BACK)
-                backs += 1
+                if (appResumed) {
+                    refused += 1
+                } else {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    backs += 1
+                }
             }
             Thread.sleep(BACK_SETTLE_MS)
         }
-        return pickerPackage() == null
+        if (pickerPackage() == null) return null
+        return "the picker would not dismiss after $backs backs in $waits looks " +
+            "($refused refused while the app's own activity was resumed); ${windowCensus()}"
     }
 
     /**

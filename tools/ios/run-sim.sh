@@ -75,6 +75,31 @@ tools/gen-bindings.sh --check
 # a break in it fails at the top rather than inside one leg's watcher,
 # where the symptom would be a scene timing out with no reason.
 SIMDRIVE=$(tools/ios/simdrive/build.sh)
+# WHERE EACH DIALOG LEG'S SIMDRIVE TIMING LANDS, and deliberately NOT in
+# LEGS_DIR: that directory is deleted on exit, and a GREEN run's numbers
+# are the healthy baseline a starved run is read against
+# (docs/deferred.md's WATCH entry "the iOS sheets shrug off single taps
+# under a concurrent matrix"). Cleared per run so a leg that no longer
+# exists cannot leave last week's numbers behind.
+SIMDRIVE_LOG_DIR="$ROOT/target/ios-simdrive-logs"
+rm -rf "$SIMDRIVE_LOG_DIR"
+mkdir -p "$SIMDRIVE_LOG_DIR"
+
+# Wall clock in MILLISECONDS since the epoch. EPOCHREALTIME is bash 5's
+# (the dev shell ships 5.3) — BSD date has no %N, and a python3 per
+# request would cost more than the thing being measured. Digits only,
+# because the radix character belongs to the locale. The fallback is a
+# different epoch, which is why the log says which clock it is on.
+now_ms() {
+    local raw="${EPOCHREALTIME:-}"
+    raw="${raw//[!0-9]/}"
+    if [ "${#raw}" -lt 13 ]; then
+        echo $((SECONDS * 1000))
+        return
+    fi
+    echo $((10#${raw:0:16} / 1000))
+}
+
 # The lane's foreign clipboard reader, built once for the same reason.
 # It is a separate binary rather than a verb of simdrive because it runs
 # INSIDE the simulator, under `simctl spawn`, against the same UIKit the
@@ -973,11 +998,29 @@ clip_verb() { # udid verb args...
 # The app's pid is resolved per request rather than once: simdrive needs
 # it to tell the picker's process from the app's, and the app is
 # launched after this starts. The clipboard verbs need no pid.
-simdrive_watch() { # udid bundle_id documents_dir
-    local udid="$1" bundle_id="$2" dir="$3"
+#
+# THE TIMING SIDE CHANNEL, and why it is a FILE: this captures
+# simdrive's whole output — stdout and stderr — and hands it to the
+# guest as the response it parses, so simdrive may not print one extra
+# byte on a success path. It writes its phase timings to the file
+# KAYA_SIMDRIVE_LOG names instead, and this adds the half simdrive
+# cannot see: the pid resolution and the process start the guest also
+# waited for (docs/deferred.md's iOS-sheets WATCH entry).
+simdrive_watch() { # udid bundle_id documents_dir log
+    local udid="$1" bundle_id="$2" dir="$3" log="$4"
     local request="$dir/kaya-simdrive-request" response="$dir/kaya-simdrive-response"
     mkdir -p "$dir"
     rm -f "$request" "$response"
+    export KAYA_SIMDRIVE_LOG="$log"
+    # WHICH CLOCK THE at= VALUES ARE ON. now_ms falls back to a
+    # different epoch when EPOCHREALTIME is missing, and a reader lining
+    # these up against simdrive's own at= has to be told which they got.
+    local clock=seconds
+    if [ -n "${EPOCHREALTIME:-}" ]; then
+        clock=epochrealtime
+    fi
+    printf 'KAYA_SIMDRIVE: at=%s src=watch ev=watch_start clock=%s app=%s\n' \
+        "$(now_ms)" "$clock" "$bundle_id" >>"$log"
     while :; do
         if [ -f "$request" ]; then
             local verb
@@ -987,19 +1030,30 @@ simdrive_watch() { # udid bundle_id documents_dir
             # under `set -e` a failing command substitution kills the
             # watcher before the next line runs, which made the err
             # branch below unreachable.
-            local pid body rc=0
+            # `pid=""` and `pid_ms=none` EXPLICITLY: a bare `local pid`
+            # inside this loop keeps the PREVIOUS request's value (bash
+            # only clears a local on a fresh call), and a clipboard verb
+            # resolves no pid at all — so the line below would have
+            # printed a number nothing measured (CLAUDE.md invariant 3).
+            local pid="" body rc=0 started pid_ms=none pid_started
+            started=$(now_ms)
             case "$verb" in
                 clip_*)
                     # shellcheck disable=SC2086
                     body=$(clip_verb "$udid" $verb 2>&1) || rc=$?
                     ;;
                 *)
+                    pid_started=$(now_ms)
                     pid=$(xcrun simctl spawn "$udid" launchctl list 2>/dev/null \
                         | grep -F "$bundle_id" | head -1 | cut -f1)
+                    pid_ms=$(($(now_ms) - pid_started))
                     # shellcheck disable=SC2086
                     body=$("$SIMDRIVE" "$udid" "${pid:-0}" $verb 2>&1) || rc=$?
                     ;;
             esac
+            printf 'KAYA_SIMDRIVE: at=%s src=watch ev=request verb=%s rc=%s ms=%s pid_ms=%s pid=%s\n' \
+                "$(now_ms)" "${verb%% *}" "$rc" "$(($(now_ms) - started))" \
+                "$pid_ms" "${pid:-none}" >>"$log"
             # Written aside and RENAMED: rename is atomic, so the
             # guest either sees no response or a whole one. Polling a
             # file being written is exactly how a harness reads half an
@@ -1185,12 +1239,14 @@ $extra"
     #
     # `editor` joins the picker half: it opens BOTH pickers, so it needs
     # the same eyes and hands the save leg does, typing verbs included.
-    local watcher_pid=""
+    local watcher_pid="" simdrive_log=""
     if [ "$scene" = filedialog ] || [ "$scene" = clipboard ] || [ "$scene" = save ] \
         || [ "$scene" = editor ]; then
         local data_container
         data_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
-        simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
+        simdrive_log="$SIMDRIVE_LOG_DIR/$name.log"
+        : >"$simdrive_log"
+        simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" "$simdrive_log" &
         watcher_pid=$!
     fi
     # NO MARK IS STAGED FOR THE GUEST: the identity guest names the mark
@@ -1226,7 +1282,33 @@ $extra"
     # teardown and photographs the home screen. `KAYA_RECORD=1` is the
     # visual record — a still at EVERY step, anchored to the harness
     # transcript rather than to a guessed delay.)
-    grep -q "KAYA_SELFTEST: OK" <<<"$out"
+    local ok=0
+    grep -q "KAYA_SELFTEST: OK" <<<"$out" || ok=$?
+    if [ -n "$simdrive_log" ]; then
+        # THE NUMBERS GO WHERE THE LANE'S OTHER FAILURE EVIDENCE GOES,
+        # because target/ios-simdrive-logs is cleared by the NEXT run and
+        # the sighting this family needs is a rerun away
+        # (tools/android/run-emulator.sh keeps its buffers the same way).
+        local lines=0
+        if [ -f "$simdrive_log" ]; then
+            lines=$(wc -l <"$simdrive_log" | tr -d ' ')
+        fi
+        if [ "$lines" -lt 1 ]; then
+            echo "run-sim: $name wrote nothing to $simdrive_log — the watcher never" \
+                "reached its first line, so this leg has no dialog timing at all"
+        elif [ "$lines" -lt 2 ]; then
+            echo "run-sim: $name made no simdrive request (only the watcher's own" \
+                "line is in $simdrive_log): either the scene never reached a dialog" \
+                "verb, or the requests never arrived"
+        elif [ "$ok" -ne 0 ]; then
+            mkdir -p "$ROOT/target/validate-failures"
+            cp "$simdrive_log" "$ROOT/target/validate-failures/ios-$name-simdrive.log"
+            echo "== simdrive timing, last 40 of $lines lines =="
+            tail -40 "$simdrive_log"
+            echo "whole simdrive timing log kept at target/validate-failures/ios-$name-simdrive.log"
+        fi
+    fi
+    return "$ok"
 }
 
 # Legs run in a pool as wide as the simulator pool: each claims a

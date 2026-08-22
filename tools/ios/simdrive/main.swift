@@ -5,17 +5,89 @@
 // like failure and are not, are in docs/traps.md ("The iOS picker is
 // another app too" and the three sections after it).
 import CoreGraphics
+import Darwin
 import Foundation
 import ObjectiveC
 
+// MARK: - the side channel
+//
+// EVERY MEASUREMENT GOES TO A FILE, NEVER TO stdout OR stderr:
+// run-sim.sh's simdrive_watch captures this process's whole output and
+// hands it to the guest as the response it parses, so one extra byte on
+// either stream on a success path breaks the protocol. The file is the
+// one KAYA_SIMDRIVE_LOG names (docs/deferred.md's WATCH entry "the iOS
+// sheets shrug off single taps under a concurrent matrix"); unset means
+// no instrument, which is how this tool stays usable by hand.
+
+let environment = ProcessInfo.processInfo.environment
+let processStart = DispatchTime.now().uptimeNanoseconds
+let logFD: Int32 = {
+    guard let path = environment["KAYA_SIMDRIVE_LOG"], !path.isEmpty else { return -1 }
+    return open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+}()
+
+var currentVerb = "-"
+var bridgeReads = 0
+var bridgeSlowLines = 0
+var bridgeTimeouts = 0
+var bridgeMaxMs: UInt64 = 0
+var tapsSent = 0
+
+func mark() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
+func sinceMs(_ from: UInt64) -> UInt64 { (mark() - from) / 1_000_000 }
+func nowMs() -> UInt64 { sinceMs(processStart) }
+
+/// One event, one line, ONE write: O_APPEND plus a single write keeps a
+/// line whole against any other writer of the same file — the shell's
+/// watcher writes its own lines to it.
+///
+/// `at` is epoch MILLISECONDS, an integer, in both writers: run-sim.sh's
+/// clock is EPOCHREALTIME, whose radix character belongs to the locale.
+/// `t` is monotonic, from this process's start.
+func note(_ event: String, _ fields: String = "") {
+    guard logFD >= 0 else { return }
+    let line = "KAYA_SIMDRIVE: at=\(UInt64(Date().timeIntervalSince1970 * 1000))"
+        + " t=\(nowMs()) verb=\(currentVerb) ev=\(event)"
+        + (fields.isEmpty ? "" : " " + fields) + "\n"
+    _ = line.withCString { write(logFD, $0, strlen($0)) }
+}
+
+/// A value with spaces, as one field a key=value reader can take.
+func quoted(_ s: String) -> String {
+    "\"" + s.replacingOccurrences(of: "\"", with: "'")
+        .replacingOccurrences(of: "\n", with: " ") + "\""
+}
+
+func xy(_ p: CGPoint) -> String { String(format: "x=%.1f y=%.1f", p.x, p.y) }
+
+func noteSummary() {
+    note(
+        "end",
+        "ms=\(nowMs()) reads=\(bridgeReads) read_max_ms=\(bridgeMaxMs) "
+            + "read_timeouts=\(bridgeTimeouts) taps=\(tapsSent)")
+}
+atexit { noteSummary() }
+
 // MARK: - plumbing
 
+/// EVERY failure sentence carries the bridge's own numbers, because a
+/// starved simulator and a healthy one fail in identical words otherwise
+/// — a read that timed out at 20s returns nil, which reads here as "not
+/// there" (docs/deferred.md's iOS-sheets WATCH entry). Appended here
+/// rather than at each call site so a new one cannot be written without
+/// them.
 func fail(_ s: String) -> Never {
-    FileHandle.standardError.write(Data(("simdrive: " + s + "\n").utf8))
+    var sentence = s
+    if bridgeReads > 0 {
+        sentence += " (measured in this verb: \(bridgeReads) accessibility reads, "
+            + "slowest \(bridgeMaxMs)ms, \(bridgeTimeouts) timed out at 20s; "
+            + "\(tapsSent) taps sent; \(nowMs())ms since simdrive started)"
+    }
+    note("fail", "msg=\(quoted(sentence))")
+    FileHandle.standardError.write(Data(("simdrive: " + sentence + "\n").utf8))
     exit(1)
 }
 
-let environment = ProcessInfo.processInfo.environment
 let developerDir = environment["KAYA_SIMDRIVE_DEVELOPER_DIR"]
     ?? environment["DEVELOPER_DIR"] ?? ""
 guard !developerDir.isEmpty else {
@@ -72,11 +144,28 @@ final class Bridge: NSObject {
         { [device, weak self] request in
             let sema = DispatchSemaphore(value: 0)
             var out: AnyObject?
+            let started = mark()
             unsafeBitCast(device, to: SimDeviceAccessibility.self)
                 .sendAccessibilityRequestAsync(
                     request, completionQueue: DispatchQueue.global(),
                     completionHandler: { out = $0; sema.signal() })
-            _ = sema.wait(timeout: .now() + 20)
+            let waited = sema.wait(timeout: .now() + 20)
+            // WHAT EVERY READ COST. A request served by a starved
+            // process comes back late or not at all, and a timed-out one
+            // returns nil — which every caller above reads as "nothing
+            // is there". That is the one measurement that separates a
+            // simulator that cannot answer from a gesture that was
+            // dropped (docs/deferred.md's iOS-sheets WATCH entry).
+            let ms = sinceMs(started)
+            bridgeReads += 1
+            if ms > bridgeMaxMs { bridgeMaxMs = ms }
+            if waited == .timedOut {
+                bridgeTimeouts += 1
+                note("bridge_timeout", "ms=\(ms)")
+            } else if ms >= 250 {
+                bridgeSlowLines += 1
+                if bridgeSlowLines <= 20 { note("bridge_slow", "ms=\(ms)") }
+            }
             // Every response must be retired or the next TAP is silently
             // ignored while the reads keep working (docs/traps.md).
             if let out, let translator = self?.translator {
@@ -226,10 +315,30 @@ func flatten(_ element: NSObject, _ depth: Int = 0, into out: inout [Node]) {
 
 // MARK: - the picker
 
+/// What answered the presence probe: the readable root AND THE PID.
+///
+/// The pid is carried out because a hit test answers with whatever owns
+/// the point, across processes (docs/traps.md), so this is evidence
+/// about the picker only while the pid says so — and a sentence that
+/// cannot name the process cannot tell a live sheet from SpringBoard
+/// answering the same point.
+struct PickerHit {
+    let root: NSObject
+    let pid: Int32
+}
+
+/// The host process behind a pid the hit test answered with. Simulator
+/// apps are host processes, so this costs no bridge round trip.
+func processName(_ pid: Int32) -> String {
+    var buffer = [CChar](repeating: 0, count: 128)
+    return proc_name(pid, &buffer, UInt32(buffer.count)) > 0
+        ? String(cString: buffer) : "unnamed"
+}
+
 /// The picker's process, found by hit-testing the middle of the screen:
 /// anything there belonging to a pid OTHER than the app under test is
 /// the picker on top of it. Nil reads as "no picker is up".
-func pickerRoot(_ sim: Simulator, appPid: Int32, screen: CGSize) -> NSObject? {
+func pickerRoot(_ sim: Simulator, appPid: Int32, screen: CGSize) -> PickerHit? {
     let probes = [
         CGPoint(x: screen.width / 2, y: screen.height / 2),
         CGPoint(x: screen.width / 2, y: screen.height / 3),
@@ -242,7 +351,7 @@ func pickerRoot(_ sim: Simulator, appPid: Int32, screen: CGSize) -> NSObject? {
         guard let appObject = sim.applicationObject(forPid: pid),
             let root = sim.element(for: appObject)
         else { continue }
-        return root
+        return PickerHit(root: root, pid: pid)
     }
     return nil
 }
@@ -279,6 +388,10 @@ func stem(_ name: String) -> String {
 /// (docs/traps.md), and across x as well as y because its controls sit
 /// at both edges.
 func navigationStrip(_ sim: Simulator, screen: CGSize) -> [(String, CGPoint)] {
+    // The sweep is a FIXED number of hit tests, so its wall time is the
+    // one direct reading of what the bridge is managing right now.
+    let started = mark()
+    var probes = 0
     var found: [(String, CGPoint)] = []
     var seen = Set<String>()
     let xs = stride(from: 12.0, through: screen.width - 12, by: 20.0)
@@ -288,6 +401,7 @@ func navigationStrip(_ sim: Simulator, screen: CGSize) -> [(String, CGPoint)] {
     for x in xs {
         for y in stride(from: 40.0, through: 170.0, by: 14.0) {
             let point = CGPoint(x: x, y: y)
+            probes += 1
             guard let hit = sim.objectAtPoint(point), let element = sim.element(for: hit)
             else { continue }
             let description = text(element, "AXDescription")
@@ -298,6 +412,7 @@ func navigationStrip(_ sim: Simulator, screen: CGSize) -> [(String, CGPoint)] {
             found.append((description, centre))
         }
     }
+    note("strip", "ms=\(sinceMs(started)) probes=\(probes) controls=\(found.count)")
     return found
 }
 
@@ -383,19 +498,34 @@ final class Tapper {
         return destination
     }
 
-    private func send(_ message: UnsafeMutableRawPointer) {
+    /// WHAT THE SEND ANSWERED, rather than nothing: the completion
+    /// carries an error and the wait can expire, and both used to be
+    /// discarded — so "the tap was dropped" was a story no measurement
+    /// here could contradict (docs/deferred.md's iOS-sheets WATCH entry).
+    private func send(_ message: UnsafeMutableRawPointer) -> String {
         let sema = DispatchSemaphore(value: 0)
+        var failure: Error? = nil
         unsafeBitCast(client, to: HIDClient.self).send(
             withMessage: message, freeWhenDone: true,
-            completionQueue: DispatchQueue.global(), completion: { _ in sema.signal() })
-        _ = sema.wait(timeout: .now() + 10)
+            completionQueue: DispatchQueue.global(), completion: { failure = $0; sema.signal() })
+        if sema.wait(timeout: .now() + 10) == .timedOut { return "timeout" }
+        if let failure { return "error:\(failure)" }
+        return "ok"
     }
 
     func tap(at point: CGPoint, screen: CGSize) {
         let ratio = CGPoint(x: point.x / screen.width, y: point.y / screen.height)
-        send(message(ratio: ratio, down: true))
+        let started = mark()
+        let down = send(message(ratio: ratio, down: true))
+        let downMs = sinceMs(started)
         usleep(120_000)
-        send(message(ratio: ratio, down: false))
+        let upAt = mark()
+        let up = send(message(ratio: ratio, down: false))
+        tapsSent += 1
+        note(
+            "tap",
+            "\(xy(point)) down=\(quoted(down)) down_ms=\(downMs) "
+                + "up=\(quoted(up)) up_ms=\(sinceMs(upAt))")
     }
 }
 
@@ -410,24 +540,44 @@ guard arguments.count >= 4 else {
 let udid = arguments[1]
 guard let appPid = Int32(arguments[2]) else { fail("app pid must be a number") }
 let verb = arguments[3]
+currentVerb = verb
 
+// The fixed cost of getting ready — the translator singletons, the
+// device lookup, and one bridge round trip for the screen size. It is
+// paid once per harness verb and it grows first when the host is busy.
+let attachAt = mark()
 let sim = Simulator(udid: udid)
+let attachMs = sinceMs(attachAt)
+let screenAt = mark()
 let screen = screenSize(sim)
+note(
+    "start",
+    "app_pid=\(appPid) app_proc=\(processName(appPid)) attach_ms=\(attachMs) "
+        + "screen_ms=\(sinceMs(screenAt)) "
+        + "screen=\(String(format: "%.0fx%.0f", screen.width, screen.height))")
 
-func pickerNodes() -> [Node]? {
-    guard let root = pickerRoot(sim, appPid: appPid, screen: screen) else { return nil }
+func pickerNodes() -> (pid: Int32, nodes: [Node])? {
+    guard let hit = pickerRoot(sim, appPid: appPid, screen: screen) else { return nil }
     var nodes: [Node] = []
-    flatten(root, 0, into: &nodes)
-    return nodes
+    flatten(hit.root, 0, into: &nodes)
+    return (hit.pid, nodes)
 }
 
 /// Bounded: a read that arrives early reports "no dialog" for a dialog
 /// that is on its way.
 func waitForPicker(_ tries: Int = 20) -> [Node]? {
-    for _ in 0..<tries {
-        if let nodes = pickerNodes(), nodes.count > 1 { return nodes }
+    let started = mark()
+    for n in 0..<tries {
+        if let found = pickerNodes(), found.nodes.count > 1 {
+            note(
+                "wait_picker",
+                "ok=yes ms=\(sinceMs(started)) tries=\(n + 1) nodes=\(found.nodes.count) "
+                    + "pid=\(found.pid) proc=\(processName(found.pid))")
+            return found.nodes
+        }
         usleep(300_000)
     }
+    note("wait_picker", "ok=no ms=\(sinceMs(started)) tries=\(tries)")
     return nil
 }
 
@@ -449,22 +599,75 @@ func waitForPicker(_ tries: Int = 20) -> [Node]? {
 /// full budget and then answers honestly; every real one answers as
 /// soon as the rows arrive.
 func waitForRows(_ tries: Int = 20) -> [Node]? {
+    let started = mark()
     var last: [Node]? = nil
-    for _ in 0..<tries {
-        guard let nodes = waitForPicker() else { return last }
+    var chrome = "none"
+    for n in 0..<tries {
+        guard let nodes = waitForPicker() else {
+            // The two ways this answers "no rows" are different states,
+            // and only one of them is a race: nothing presented at all,
+            // against a picker whose chrome is up and whose rows are not.
+            note(
+                "wait_rows",
+                "ok=no why=no-picker ms=\(sinceMs(started)) tries=\(n + 1) "
+                    + "chrome_ms=\(chrome) rows=\(last?.compactMap { rowName($0) }.count ?? 0)")
+            return last
+        }
+        if chrome == "none" { chrome = "\(sinceMs(started))" }
         last = nodes
-        if nodes.contains(where: { rowName($0) != nil }) { return nodes }
+        let rows = nodes.compactMap { rowName($0) }.count
+        if rows > 0 {
+            note(
+                "wait_rows",
+                "ok=yes ms=\(sinceMs(started)) tries=\(n + 1) chrome_ms=\(chrome) rows=\(rows)")
+            return nodes
+        }
         usleep(300_000)
     }
+    note(
+        "wait_rows",
+        "ok=no why=no-rows ms=\(sinceMs(started)) tries=\(tries) chrome_ms=\(chrome) rows=0")
     return last
 }
 
 func waitForPickerGone(_ tries: Int = 20) -> Bool {
-    for _ in 0..<tries {
-        if pickerRoot(sim, appPid: appPid, screen: screen) == nil { return true }
+    let started = mark()
+    let timeoutsBefore = bridgeTimeouts
+    var held: PickerHit? = nil
+    for n in 0..<tries {
+        let probe = mark()
+        let hit = pickerRoot(sim, appPid: appPid, screen: screen)
+        let probeMs = sinceMs(probe)
+        if hit == nil {
+            note(
+                "wait_gone",
+                "ok=yes ms=\(sinceMs(started)) tries=\(n + 1) probe_ms=\(probeMs) "
+                    + "read_timeouts=\(bridgeTimeouts - timeoutsBefore)")
+            return true
+        }
+        held = hit
         usleep(300_000)
     }
+    note(
+        "wait_gone",
+        "ok=no ms=\(sinceMs(started)) tries=\(tries) "
+            + "held_pid=\(held.map { "\($0.pid)" } ?? "none") "
+            + "held_proc=\(held.map { processName($0.pid) } ?? "none") "
+            + "read_timeouts=\(bridgeTimeouts - timeoutsBefore)")
     return false
+}
+
+/// WHO IS HOLDING THE SCREEN, for a failure sentence: the pid, the host
+/// process behind it, and what that root says it is. Read only on a
+/// failure path — each attribute is a bridge round trip.
+func whoHoldsTheScreen() -> String {
+    guard let hit = pickerRoot(sim, appPid: appPid, screen: screen) else {
+        return "nothing but the app answers the centre hit test now"
+    }
+    let role = text(hit.root, "AXRole"), described = text(hit.root, "AXDescription")
+    return "the centre hit test is answered by pid \(hit.pid) (\(processName(hit.pid)))"
+        + ", whose root reads \(role.isEmpty ? "no role" : role)"
+        + "/\(described.isEmpty ? "no description" : described)"
 }
 
 // MARK: - the save sheet
@@ -481,13 +684,31 @@ func nameFields(_ nodes: [Node]) -> [Node] {
 /// chrome-before-content race waitForRows spells out, and the same cost
 /// if it is skipped.
 func waitForSaveSheet(_ tries: Int = 20) -> [Node]? {
+    let started = mark()
     var last: [Node]? = nil
-    for _ in 0..<tries {
-        guard let nodes = waitForPicker() else { return last }
+    var chrome = "none"
+    for n in 0..<tries {
+        guard let nodes = waitForPicker() else {
+            note(
+                "wait_save_sheet",
+                "ok=no why=no-picker ms=\(sinceMs(started)) tries=\(n + 1) "
+                    + "chrome_ms=\(chrome) fields=\(last.map { nameFields($0).count } ?? 0)")
+            return last
+        }
+        if chrome == "none" { chrome = "\(sinceMs(started))" }
         last = nodes
-        if !nameFields(nodes).isEmpty { return nodes }
+        let fields = nameFields(nodes).count
+        if fields > 0 {
+            note(
+                "wait_save_sheet",
+                "ok=yes ms=\(sinceMs(started)) tries=\(n + 1) chrome_ms=\(chrome) fields=\(fields)")
+            return nodes
+        }
         usleep(300_000)
     }
+    note(
+        "wait_save_sheet",
+        "ok=no why=no-field ms=\(sinceMs(started)) tries=\(tries) chrome_ms=\(chrome) fields=0")
     return last
 }
 
@@ -508,25 +729,39 @@ func theNameField(_ nodes: [Node], _ doing: String) -> Node {
 /// back until one exists; the back control is identified by POSITION,
 /// because its label is the presenting app's name (docs/traps.md).
 func cancelSheet(_ what: String) {
+    let started = mark()
     let tapper = Tapper(device: sim.device)
     var cancelled = false
+    var rounds = 0
     for _ in 0..<5 {
+        rounds += 1
         let strip = navigationStrip(sim, screen: screen)
         if let (_, centre) = strip.first(where: { $0.0.hasPrefix("Cancel") }) {
+            note("cancel_round", "n=\(rounds) found=cancel \(xy(centre))")
             tapper.tap(at: centre, screen: screen)
             cancelled = true
             break
         }
         guard let back = strip.filter({ $0.1.y < 120 }).min(by: { $0.1.x < $1.1.x })
-        else { break }
+        else {
+            note("cancel_round", "n=\(rounds) found=nothing controls=\(strip.count)")
+            break
+        }
+        note("cancel_round", "n=\(rounds) found=back \(xy(back.1))")
         tapper.tap(at: back.1, screen: screen)
         usleep(600_000)
     }
     if !cancelled {
         let strip = navigationStrip(sim, screen: screen).map { $0.0 }
-        fail("no Cancel reachable from the \(what); it offers \(strip)")
+        fail(
+            "no Cancel reachable from the \(what) after \(rounds) rounds across "
+                + "\(sinceMs(started))ms; it offers \(strip)")
     }
-    if !waitForPickerGone() { fail("the \(what) was still up after cancelling") }
+    if !waitForPickerGone() {
+        fail(
+            "the \(what) was still up \(sinceMs(started))ms after cancelling it in round "
+                + "\(rounds): \(whoHoldsTheScreen())")
+    }
 }
 
 switch verb {
@@ -569,39 +804,62 @@ case "choose":
     // answers on the row, multi-selection needs the strip's confirm
     // (docs/traps.md), and the rounds converge for both — a re-tap
     // that deselects a landed selection is corrected one round later.
+    let chooseStarted = mark()
     let tapper = Tapper(device: sim.device)
     var lastCentre = CGPoint(x: row.frame.midX, y: row.frame.midY)
     var pickerDismissed = false
     var rounds = 0
+    var rowOffered = 0
+    var rowCentres = Set<String>()
     // Six rounds, savepress's 2026-08-20 raise: the stalled-runloop
     // class holds a sheet through ~18s of taps and polling.
     while rounds < 6 && !pickerDismissed {
         rounds += 1
-        if let fresh = pickerNodes()?
+        let roundAt = mark()
+        let walkAt = mark()
+        let fresh = pickerNodes()?.nodes
             .first(where: { rowName($0).map { stem($0) == wanted } ?? false })
-        {
+        let walkMs = sinceMs(walkAt)
+        if let fresh {
+            rowOffered += 1
             lastCentre = CGPoint(x: fresh.frame.midX, y: fresh.frame.midY)
+            rowCentres.insert(String(format: "%.0f,%.0f", lastCentre.x, lastCentre.y))
             tapper.tap(at: lastCentre, screen: screen)
         }
+        var confirmed = "not-needed"
         if !waitForPickerGone(6) {
             let strip = navigationStrip(sim, screen: screen)
             if let (_, confirm) = strip.first(where: {
                 $0.0.hasPrefix("Open") || $0.0.hasPrefix("Done")
             }) {
+                confirmed = "tapped"
                 tapper.tap(at: confirm, screen: screen)
+            } else {
+                confirmed = "absent"
             }
         }
         pickerDismissed = waitForPickerGone()
+        // THIS ROUND'S centre, as in savepress: a round whose re-walk
+        // found no row tapped nowhere.
+        note(
+            "choose_round",
+            "n=\(rounds) walk_ms=\(walkMs) row=\(fresh == nil ? "absent" : "offered") "
+                + "\(fresh.map { xy(CGPoint(x: $0.frame.midX, y: $0.frame.midY)) } ?? "x=none y=none") "
+                + "confirm=\(confirmed) "
+                + "gone=\(pickerDismissed ? "yes" : "no") round_ms=\(sinceMs(roundAt))")
     }
 
     // The failure carries the numbers because a miss and a swallowed
     // press look identical from here.
     if !pickerDismissed {
-        let after = pickerNodes()?.compactMap { rowName($0) } ?? []
+        let held = whoHoldsTheScreen()
+        let after = pickerNodes()?.nodes.compactMap { rowName($0) } ?? []
         let strip = navigationStrip(sim, screen: screen).map { $0.0 }
         fail(
-            "the picker was still up after \(rounds) rounds of choosing \(wanted): "
-                + "last tapped \(lastCentre) of a \(screen) screen; it now lists \(after) "
+            "the picker was still up after \(rounds) rounds of choosing \(wanted) across "
+                + "\(sinceMs(chooseStarted))ms: the row was offered in \(rowOffered) of them, "
+                + "at \(rowCentres.count == 1 ? "one fixed centre" : "\(rowCentres.count) centres") "
+                + "\(rowCentres.sorted()) of a \(screen) screen; \(held); it now lists \(after) "
                 + "and offers \(strip)")
     }
 
@@ -636,6 +894,7 @@ case "savename":
     // a matrix is not.
     guard arguments.count >= 5 else { fail("savename needs a name") }
     let wanted = arguments[4...].joined(separator: " ")
+    let nameStarted = mark()
     var settled = ""
     var attempts = 0
     while attempts < 5 && settled != wanted {
@@ -647,16 +906,23 @@ case "savename":
         guard setAttribute(field.element, "AXValue", wanted) else {
             fail("the save dialog's name field does not answer the accessibility setter")
         }
+        let settleAt = mark()
+        var reads = 0
         for _ in 0..<20 {
+            reads += 1
             settled = text(field.element, "AXValue")
             if settled == wanted { break }
             usleep(150_000)
         }
+        note(
+            "savename_try",
+            "n=\(attempts) took=\(settled == wanted ? "yes" : "no") reads=\(reads) "
+                + "settle_ms=\(sinceMs(settleAt))")
     }
     guard settled == wanted else {
         fail(
             "the save dialog's name field reads \"\(settled)\" after \(attempts) attempts "
-                + "to set it to \"\(wanted)\"")
+                + "to set it to \"\(wanted)\" across \(sinceMs(nameStarted))ms")
     }
 
 case "savepress":
@@ -682,27 +948,47 @@ case "savepress":
     // healthy (the first exits as soon as the sheet goes) and give a
     // stalled runloop ~36s to catch up.
     guard waitForSaveSheet() != nil else { fail("no save dialog is up to save") }
-    var pressedAt: CGPoint? = nil
+    let pressStarted = mark()
     var presses = 0
+    var saveOffered = 0
+    var saveCentres = Set<String>()
     var sheetGone = false
     while presses < 6 && !sheetGone {
         presses += 1
+        let roundAt = mark()
+        let stripAt = mark()
         let strip = navigationStrip(sim, screen: screen)
+        let stripMs = sinceMs(stripAt)
+        var tapped = "no-save-in-strip"
+        // THIS ROUND'S centre, not the last one seen: a round that found
+        // no Save tapped nowhere, and printing the previous round's
+        // coordinate is a claim nothing measured.
+        var roundCentre: CGPoint? = nil
         if let (_, saveCentre) = strip.first(where: { $0.0 == "Save" }) {
-            pressedAt = saveCentre
+            roundCentre = saveCentre
+            saveOffered += 1
+            saveCentres.insert(String(format: "%.0f,%.0f", saveCentre.x, saveCentre.y))
+            tapped = "tapped"
             Tapper(device: sim.device).tap(at: saveCentre, screen: screen)
         } else if presses == 1 {
             fail("no Save in the navigation strip; it offers \(strip.map { $0.0 })")
         }
         // The sheet being gone is the proof, as in `choose`.
         sheetGone = waitForPickerGone()
+        note(
+            "save_round",
+            "n=\(presses) strip_ms=\(stripMs) controls=\(strip.count) save=\(tapped) "
+                + "\(roundCentre.map { xy($0) } ?? "x=none y=none") "
+                + "gone=\(sheetGone ? "yes" : "no") round_ms=\(sinceMs(roundAt))")
     }
     if !sheetGone {
+        let held = whoHoldsTheScreen()
         let after = navigationStrip(sim, screen: screen).map { $0.0 }
         fail(
-            "the save dialog was still up after \(presses) presses of Save: last tapped "
-                + "\(pressedAt.map(String.init(describing:)) ?? "nowhere") "
-                + "of a \(screen) screen; it now offers \(after)")
+            "the save dialog was still up after \(presses) presses of Save across "
+                + "\(sinceMs(pressStarted))ms: Save was in the strip for \(saveOffered) of them, "
+                + "at \(saveCentres.count == 1 ? "one fixed centre" : "\(saveCentres.count) centres") "
+                + "\(saveCentres.sorted()) of a \(screen) screen; \(held); it now offers \(after)")
     }
 
 case "savecancel":
@@ -721,8 +1007,8 @@ case "press":
         // answers in (docs/clipboard-plan.md §2).
         var nodes: [Node] = []
         var home = "overlay"
-        if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
-            flatten(root, 0, into: &nodes)
+        if let overlay = pickerRoot(sim, appPid: appPid, screen: screen) {
+            flatten(overlay.root, 0, into: &nodes)
         }
         if !nodes.contains(where: { $0.description.contains(label) }),
             let appObject = sim.applicationObject(forPid: appPid),
@@ -744,8 +1030,8 @@ case "press":
             // (docs/clipboard-plan.md §2).
             usleep(300_000)
             var settledNodes: [Node] = []
-            if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
-                flatten(root, 0, into: &settledNodes)
+            if let overlay = pickerRoot(sim, appPid: appPid, screen: screen) {
+                flatten(overlay.root, 0, into: &settledNodes)
             }
             if !settledNodes.contains(where: { $0.description.contains(label) }),
                 let appObject = sim.applicationObject(forPid: appPid),
@@ -768,8 +1054,8 @@ case "press":
     }
     if !pressed {
         var nodes: [Node] = []
-        if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
-            flatten(root, 0, into: &nodes)
+        if let overlay = pickerRoot(sim, appPid: appPid, screen: screen) {
+            flatten(overlay.root, 0, into: &nodes)
         }
         let listed = nodes.map { $0.description }.filter { !$0.isEmpty }
         fail("nothing labeled \(label) to press; the overlay offers \(listed)")

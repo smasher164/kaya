@@ -4837,8 +4837,85 @@ threshold is crossed: DIALOG PRESENTATION LATENCY INSTRUMENTATION is
 the named next investigation, before any more matrix reruns are spent
 on this family.
 
+THE THREE FACES ARE READ (2026-08-22, from the preserved buffers), and
+two of them convict the harness again. matrix7's filedialog-go and
+matrix4's save-compose are the eighth sighting's STRAGGLER BACK with
+the whole chain in the log: the cancel was delivered cleanly
+(KAYA_PICK_RESULT dialog=2 code=0 at 19:16:54.774, KAYA_SAVE_RESULT
+dialog=2 code=0 at 17:19:15.619), the app resumed milliseconds later,
+and a back injected into the NO-FOCUS GAP between the picker's window
+leaving and the app's arriving was QUEUED by InputDispatcher
+("Waiting because no window has focus ... Will wait for 5000ms") and
+delivered the moment the app's window became focusable, finishing it
+at 19:16:55.027 and 17:19:16.514. save-compose's verdict "no save
+dialog live; DocumentsUI is showing []" is DOWNSTREAM of that: dialog
+3 met KAYA_DIALOG_DOOMED, so nothing was ever requested of the OS and
+the census five seconds later was about a dialog that never was. The
+focus guard could not see any of it — it reads isFocused off the same
+lagging window list, whose stale span was 1.65s in matrix4 against a
+400ms settle.
+
+THE GATE IS THE APP'S OWN LIFECYCLE, which lags nothing: a dialog
+activity on top means kaya's activity is PAUSED, and it is resumed
+again only after the dialog is done AND its result delivered
+(wm_on_activity_result_called precedes wm_on_resume_called in every
+trace here). So dismiss() presses back only while the picker is in the
+window list AND holds focus AND KayaHarnessAccessibility.appResumed is
+false — a @Volatile written on the main thread from the mounted
+activity's lifecycle, in the service's own process, read last of the
+three because the window read before it costs an IPC per window. Both
+measured injections land 126ms and ~140ms AFTER the app's onResume, so
+both are refused. WHAT IT DOES NOT CLOSE, said out loud: the window
+between the picker's finish and the app's resume, where kaya has no
+lag-free signal at all — 13ms in matrix7 but 1.53s in matrix4, where
+the result itself took 1.36s to arrive. A back injected THERE still
+queues onto the app. If the class returns with the gate in place, that
+is where it lives, and the clause available then is refusing the press
+once the live dialog's result has already arrived, which covers the
+last 275ms of it.
+
+matrix6's save-jvm is NOT that ghost: the OS Displayed PickActivity in
+1s57ms at 19:08:19.587 and the picker held input focus, while
+pickerState() answered null for the next 7.4 seconds. The dialog
+presented; the READER was blind. system_server said so itself in the
+same seconds — "AccessibilityManagerService: wait for adding window
+timeout: 1791" and "1793", its own complaint that a window was added
+and the accessibility bookkeeping never caught up — and every one of
+the six preserved failure buffers carries at least one of those lines.
+What kaya printed instead was "the picker is showing null" and
+"DocumentsUI is showing []", which read as measurements of an empty
+screen and were nothing of the kind: windowPackages() maps
+root?.packageName, so a window whose ROOT read returns null is
+invisible to every reader built on it, and dialogShape() answers []
+when no picker window is found at all.
+
+SO THE INSTRUMENTS THIS ENTRY ASKED FOR ARE IN, permanent like
+KAYA_PICK_RESULT. Every present records the moment it launch()es; the
+first a11y read that sees that dialog logs KAYA_DIALOG_SEEN: dialog=N
+kind=open|save ms=<elapsed>, and a reader's budget running out without
+one logs KAYA_DIALOG_UNSEEN with the same elapsed AND A WINDOW CENSUS
+— every window the service can see, with its a11y id, its package when
+the root answered, and root-unreadable plus the window's title when it
+did not. The id is there so the census joins to system_server's own
+"wait for adding window timeout: <id>". Next sighting settles matrix6's
+remaining question in one line: a picker window in the census with an
+unreadable root means the read was blind, and no DocumentsUI window at
+all means the window list never carried it. Every failure sentence
+built on those readers now says which of the two it measured, and
+dismiss()'s own refusal says how many backs it pressed and how many the
+gate refused. UNVALIDATED until matrices run clean, as before — and
+neither new line has ever been printed, so the first contended matrix
+is also what makes them believable.
+FIRST MATRIX WITH THE GATE AND INSTRUMENTS, same day: ALL PASS (112
+android legs), and KAYA_DIALOG_SEEN was WATCHED PRINTING on the
+device — dialog=1 kind=save ms=719, dialog=2 kind=open ms=671 — so
+the healthy presentation baseline is ~700ms and the SEEN branch is
+believed. KAYA_DIALOG_UNSEEN and the census have still never printed;
+the next failure is what makes those branches evidence.
+
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
-KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
+KEY: ios save sheet, presses of Save, rounds of choosing, simdrive
+retap, KAYA_SIMDRIVE_LOG, ios-simdrive-logs
 
 Three matrices in a row, a different leg each time, every one 100%
 green solo: save-go's Save tap dropped twice (the sheet stayed up and
@@ -4883,6 +4960,88 @@ step-failed line carried the driver's full self-diagnosis into the log
 — coordinates tapped, what the sheet offered — which is exactly the
 evidence the first sighting lacked. Still consistent with
 contention-starved sheet animation; still no code suspect.
+
+INSTRUMENTED 2026-08-22, because a fourth rerun would have bought
+another one-line sighting. simdrive now writes phase timings to a SIDE
+CHANNEL — never to stdout or stderr, which simdrive_watch hands to the
+guest as the response it parses — at the file KAYA_SIMDRIVE_LOG names,
+one `KAYA_SIMDRIVE: at=<epoch ms> t=<ms> verb= ev=<event>` line per
+event. Every wait loop reports its elapsed ms and the phase it reached
+(wait_picker, wait_rows and wait_save_sheet split CHROME-SEEN from
+ROWS/FIELD-SEEN, the two-phase race waitForRows describes; wait_gone
+reports the probe cost and any bridge read that expired during it),
+savepress, choose, cancelSheet and savename log every round with what
+was tapped or that the strip no longer offered it, and the
+navigation-strip sweep reports its wall time against a FIXED hit-test
+count, which is a direct reading of what the simulator's accessibility
+bridge is managing. Two silences ended: the HID send's completion
+Error and its 10s wait were discarded, so a dropped tap could never be
+observed from this side, and every accessibility round trip is now
+counted and timed — a request that expires at 20s returns nil, which
+every caller reads as "nothing is there". run-sim.sh's watcher adds
+the half simdrive cannot see, one line per request with rc, total ms
+and the pid-resolution ms.
+
+Every failure sentence now ends with that verb's own numbers (reads,
+slowest read, timeouts, taps, elapsed), and the sheet sentences say
+whether the control sat at ONE FIXED CENTRE across the rounds — this
+entry's own question — and WHO holds the screen: pid and host process
+name. That last one is a FOURTH CANDIDATE this entry never carried.
+pickerRoot calls any non-app pid at the centre probes "the picker",
+and the second sighting's own sentence listed "7:18 PM / Cellular /
+100% battery power", which is SpringBoard's status bar and not
+DocumentsUI's chrome — so a sheet reported "still up" may have been
+gone, with a hit test answered by another process (docs/traps.md's
+fourth item in "Three ways the iOS picker is not the picker you
+measured" is the same trap, one caller over). The next sighting names
+the process. Its mirror is a false DISMISSAL: one timed-out read makes
+waitForPickerGone say "gone", and a leg whose sheet never really left
+is exactly the third sighting's shape (editor-go, the title never
+became "draft"). Android's sibling ghost was closed by DEBOUNCING the
+same kind of decision — two consecutive absences before believing one
+— and if the log shows a wait_gone ok=yes with read_timeouts=1, that
+is the fix here too, and NOT another round-cap raise.
+
+A green run's log is the baseline: target/ios-simdrive-logs/<leg>.log
+for each of the four dialog scenes, cleared per run; a failing leg's
+copy is kept at target/validate-failures/ios-<leg>-simdrive.log with
+its last 40 lines in the lane log. Healthy-versus-starved is a diff of
+those two, which is what the next sighting is for. NOT YET WATCHED
+PRINTING: every branch that needs a live simulator (this work booted
+none). The first iOS lane run after this should confirm the green
+baseline is there and the protocol intact — a dialog leg that goes
+green with a non-empty log proves both at once.
+IT DID, same day: the full matrix ran ALL PASS (106 iOS legs, lane
+contended at 401s) with ten non-empty leg logs in
+target/ios-simdrive-logs/, so the protocol survived and the baseline
+exists. First numbers worth keeping: a green contended save-go leg
+shows wait_picker ok=yes ms=3232 tries=4 with bridge_slow lines up to
+857ms, and the presence probe now names its answerer
+(proc=com.apple.DocumentManager...), which is the fourth candidate's
+discriminator doing its job on a healthy run.
+
+FOURTH SIGHTING, THE FIRST WITH THE NUMBERS (2026-08-22 late,
+save-swiftui under the geometry slice's contended matrix; evidence
+kept at target/validate-failures/ios-save-swiftui-simdrive.log). The
+label read "save cancelled" where "saved third draft" was wanted —
+the family's exact signature — and the log kills two of the four
+candidates outright and wounds a third: every tap was DELIVERED
+(down="ok" up="ok" on all of them, so not (A)); the runloop was
+ALIVE (1621 reads served in the cancel verb alone, read_max_ms 442,
+read_timeouts=0 everywhere, so not (B)); and the dismissals were
+HONEST (every wait_gone ok=yes carried read_timeouts=0, so not the
+false-gone half of (D)). What the numbers ADD: the cancel cycle took
+FOUR delivered taps at (38,92) across 6.2s, the strip still offering
+Cancel each round (controls=8,8,8 then 7 — the sheet was changing
+under the last one), and the FINAL save press then landed cleanly
+(round 1, sheet gone in 859ms) with the result never reaching the
+guest. Three extra taps delivered into a sheet whose dismissal lags
+its chrome is the android straggler class in this platform's
+spelling — the back that pressed once too often because the
+affordance was still published. Next instrument if it recurs: log
+which PROCESS consumed taps 2-4 (the sheet going, or the app behind
+it), the who-holds-the-screen read taken AT TAP TIME rather than at
+failure. The leg passes solo; the family's no-rerun rule stands.
 
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons

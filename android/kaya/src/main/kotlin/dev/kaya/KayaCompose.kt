@@ -185,6 +185,8 @@ import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.concurrent.thread
@@ -1186,6 +1188,23 @@ object KayaCompose {
 
     fun mount(activity: ComponentActivity) {
         mountedActivity = activity
+        // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
+        // (KayaHarnessAccessibility.dismiss): a dialog activity on top
+        // means this one is PAUSED, and it is resumed again only once
+        // the dialog is done and its result already delivered —
+        // onActivityResult precedes onResume by OS contract. Read from
+        // the lifecycle in this process rather than from the
+        // accessibility window list, which lags in both directions
+        // (docs/deferred.md's WATCH entry on the dialog family).
+        activity.lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> KayaHarnessAccessibility.appResumed = true
+                    Lifecycle.Event.ON_PAUSE -> KayaHarnessAccessibility.appResumed = false
+                    else -> Unit
+                }
+            },
+        )
         KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
         val host = KayaPresent.specHash()
         check(host.toULong() == SPEC_HASH) {
@@ -2400,14 +2419,18 @@ object KayaCompose {
     /// Null when the service is not enabled, which FAILS every
     /// expect_file_dialog rather than passing quietly.
     private fun kayaFileDialogState(): Pair<String, List<String>>? =
-        KayaHarnessAccessibility.live?.pickerState()
+        KayaHarnessAccessibility.live?.pickerState()?.also {
+            kayaNoteDialogSeen(DIALOG_KIND_OPEN)
+        }
 
     /// What the live SAVE panel is really showing: its directory and the
     /// name in its name field, null when none is up. The picker's reader
     /// one dialog over — and the service is what keeps the two from
     /// seeing each other's panel, since DocumentsUI serves both.
     private fun kayaSaveDialogState(): Pair<String, String>? =
-        KayaHarnessAccessibility.live?.saveState()
+        KayaHarnessAccessibility.live?.saveState()?.also {
+            kayaNoteDialogSeen(DIALOG_KIND_SAVE)
+        }
 
     /// The save panel's state, WAITED FOR. `expect_save_dialog` gets the
     /// generic retry every expect gets, but the two ACTIONS do not —
@@ -2419,7 +2442,77 @@ object KayaCompose {
             kayaSaveDialogState()?.let { return it }
             Thread.sleep(SAVE_PANEL_SETTLE_MS)
         }
-        return kayaSaveDialogState()
+        val last = kayaSaveDialogState()
+        if (last == null) kayaNoteDialogUnseen(DIALOG_KIND_SAVE)
+        return last
+    }
+
+    /// THE PRESENTATION INSTRUMENTS, the dialog family's named next move
+    /// (docs/deferred.md's WATCH entry). Two of that family's faces are
+    /// told apart by nothing else: a dialog that presented LATE, and one
+    /// that presented on time and could not be READ — matrix6's picker
+    /// was Displayed in 1.06s and answered null reads for the next 7.4s.
+    ///
+    /// One line each way, at most once per presentation, permanent like
+    /// KAYA_PICK_RESULT: KAYA_DIALOG_SEEN the first time an a11y read
+    /// sees the dialog this process launched, KAYA_DIALOG_UNSEEN when a
+    /// reader's budget runs out without one.
+    private class KayaDialogPresentation(val dialog: Long, val kind: String) {
+        val atMs: Long = android.os.SystemClock.elapsedRealtime()
+
+        @Volatile
+        var seen = false
+
+        @Volatile
+        var unseenLogged = false
+    }
+
+    @Volatile
+    private var kayaDialogPresented: KayaDialogPresentation? = null
+
+    private const val DIALOG_KIND_OPEN = "open"
+    private const val DIALOG_KIND_SAVE = "save"
+
+    /// What DocumentsUI is showing — or, when no window of its could be
+    /// read, that and the window census. The service's own sentence,
+    /// with the no-service case spelled here because a missing service
+    /// is a runner fault and not a dialog fault.
+    private fun kayaDialogReport(): String =
+        KayaHarnessAccessibility.live?.dialogReport()
+            ?: "no harness accessibility service — the runner did not enable it"
+
+    /// Armed at launch(), so the elapsed milliseconds are measured from
+    /// the moment the OS was asked for the dialog.
+    private fun kayaNoteDialogPresented(dialog: Long, kind: String) {
+        kayaDialogPresented = KayaDialogPresentation(dialog, kind)
+    }
+
+    private fun kayaNoteDialogSeen(kind: String) {
+        val presented = kayaDialogPresented ?: return
+        if (presented.kind != kind || presented.seen) return
+        presented.seen = true
+        Log.i(
+            "kaya",
+            "KAYA_DIALOG_SEEN: dialog=${presented.dialog} kind=${presented.kind} " +
+                "ms=${android.os.SystemClock.elapsedRealtime() - presented.atMs}",
+        )
+    }
+
+    /// THE CENSUS IS THE POINT OF THIS ONE: unseen has two causes, a
+    /// dialog that never presented and one nobody could read, and only
+    /// the window list can say which — with the ids system_server's own
+    /// `wait for adding window timeout` names.
+    private fun kayaNoteDialogUnseen(kind: String) {
+        val presented = kayaDialogPresented ?: return
+        if (presented.kind != kind || presented.seen || presented.unseenLogged) return
+        presented.unseenLogged = true
+        val census = KayaHarnessAccessibility.live?.windowCensus()
+            ?: "no harness accessibility service — the runner did not enable it"
+        Log.w(
+            "kaya",
+            "KAYA_DIALOG_UNSEEN: dialog=${presented.dialog} kind=${presented.kind} " +
+                "ms=${android.os.SystemClock.elapsedRealtime() - presented.atMs} $census",
+        )
     }
 
     /// How long a save panel is given to present, and how long each look
@@ -2497,10 +2590,7 @@ object KayaCompose {
     private fun kayaFileDialogDrive(name: String): String? {
         val svc = KayaHarnessAccessibility.live
             ?: return "no harness accessibility service — the runner did not enable it"
-        if (name == "cancel") {
-            return if (svc.dismiss()) null
-            else "the picker would not dismiss; windows are ${svc.windowPackages()}"
-        }
+        if (name == "cancel") return svc.dismiss()
         // ROUNDS, NOT ONE SHOT (2026-08-20, caught by the full-buffer
         // capture): under a loaded matrix the picker can be UP with its
         // list still unreadable — DocumentsUI's own log showed its
@@ -2514,14 +2604,25 @@ object KayaCompose {
         for (round in 0 until 6) {
             if (svc.choose(name)) {
                 clicked = true
+                kayaNoteDialogSeen(DIALOG_KIND_OPEN)
                 if (svc.waitForPickerGone()) return null
                 last = "the picker was still up after clicking \"$name\" — the click was swallowed"
             } else {
                 if (clicked && svc.waitForPickerGone()) return null
-                last = "no row named \"$name\"; the picker is showing ${svc.pickerState()?.second}"
+                // WHICH NULL IT WAS: a list that came back empty and a
+                // tree nobody could read used to print the same
+                // "showing null" (docs/deferred.md's WATCH entry,
+                // 2026-08-21 matrix6).
+                val listed = kayaFileDialogState()?.second
+                last = if (listed != null) {
+                    "no row named \"$name\"; the picker lists $listed"
+                } else {
+                    "no row named \"$name\"; ${svc.dialogReport()}"
+                }
                 Thread.sleep(500)
             }
         }
+        kayaNoteDialogUnseen(DIALOG_KIND_OPEN)
         return last
     }
 
@@ -2608,6 +2709,7 @@ object KayaCompose {
             kayaLivePickerLauncher = null
             kayaAnswerFileDialog(activity, dialog, result.data)
         }
+        kayaNoteDialogPresented(dialog, DIALOG_KIND_OPEN)
         kayaLivePickerLauncher?.launch(intent)
     }
 
@@ -2737,6 +2839,7 @@ object KayaCompose {
             kayaLivePickerLauncher = null
             kayaAnswerSaveDialog(activity, dialog, result.data)
         }
+        kayaNoteDialogPresented(dialog, DIALOG_KIND_SAVE)
         kayaLivePickerLauncher?.launch(intent)
     }
 
@@ -4722,6 +4825,13 @@ object KayaCompose {
         return out
     }
 
+    /// How long the bounded-retry wrapper below waits between looks.
+    /// Named because an arm has to know it: one that pays for an
+    /// expensive diagnosis only on the final look needs the period to
+    /// tell which look that is.
+    private const val RETRY_PERIOD_MS = 20L
+    private const val RETRY_PERIOD_NS = RETRY_PERIOD_MS * 1_000_000
+
     private fun runScript(activity: ComponentActivity, script: String) {
         // Watched, before any step (crates/kaya/src/fault.rs; the fault
         // census holds all three runners to this call).
@@ -5296,7 +5406,22 @@ object KayaCompose {
                         // and is useless.
                         val state = kayaFileDialogState()
                         if (state == null) {
-                            failures.add("no file dialog live, wanted \"$wantDir\"")
+                            // THE CENSUS ONLY ON THE LAST LOOKS. This arm
+                            // re-runs until the deadline and the wrapper
+                            // RETRACTS every earlier failure, so an
+                            // UNSEEN logged on the first look would be
+                            // about a dialog still coming up and a census
+                            // built on it would be an IPC per window
+                            // nobody ever reads. The margin is the
+                            // wrapper's own retry period, so the look
+                            // whose sentence is PRINTED always carries
+                            // one.
+                            val lastLook = System.nanoTime() + RETRY_PERIOD_NS >= stepDeadline
+                            if (lastLook) kayaNoteDialogUnseen(DIALOG_KIND_OPEN)
+                            failures.add(
+                                "no file dialog live, wanted \"$wantDir\"" +
+                                    (if (lastLook) "; ${kayaDialogReport()}" else "")
+                            )
                         } else {
                             val (where, rows) = state
                             val missing = wantNames.firstOrNull { !rows.contains(it) }
@@ -5346,9 +5471,13 @@ object KayaCompose {
                                 // a panel that never presented and for
                                 // a reader that cannot see the one that
                                 // did, and those want opposite fixes.
+                                // The census only on the last looks, for
+                                // expect_file_dialog's reason above.
+                                val lastLook = System.nanoTime() + RETRY_PERIOD_NS >= stepDeadline
+                                if (lastLook) kayaNoteDialogUnseen(DIALOG_KIND_SAVE)
                                 failures.add(
-                                    "no save dialog live; DocumentsUI is showing " +
-                                        "${KayaHarnessAccessibility.live?.dialogShape()}"
+                                    "no save dialog live" +
+                                        (if (lastLook) "; ${kayaDialogReport()}" else "")
                                 )
                             } else {
                                 val (where, name) = saveState
@@ -5412,12 +5541,7 @@ object KayaCompose {
                             // CANCEL IS BACK on this platform — there is
                             // no Cancel button in either dialog.
                             saveArg == "cancel" ->
-                                if (!svc.dismiss()) {
-                                    failures.add(
-                                        "file_save cancel: the panel would not dismiss; " +
-                                            "windows are ${svc.windowPackages()}"
-                                    )
-                                }
+                                svc.dismiss()?.let { failures.add("file_save cancel: $it") }
                             !svc.confirmSave() ->
                                 failures.add("file_save: the panel's SAVE button refused the press")
                             // AND THE PANEL MUST BE GONE: a press that
@@ -5426,10 +5550,17 @@ object KayaCompose {
                             // leg then fails three steps later on an
                             // assertion about the GUEST.
                             !svc.waitForPickerGone() -> {
+                                // A null name here is not an empty name
+                                // field: it is a panel nobody could read,
+                                // and printing it as `naming "null"` sends
+                                // the next reader after the wrong thing.
+                                val naming = kayaSaveDialogState()?.second
                                 failures.add(
-                                    "file_save: the panel is still up (naming " +
-                                        "\"${kayaSaveDialogState()?.second}\") — the press was " +
-                                        "swallowed, which the panel cannot tell you"
+                                    "file_save: the panel is still up " +
+                                        (if (naming != null) "(naming \"$naming\")"
+                                        else "(${kayaDialogReport()})") +
+                                        " — the press was swallowed, which the panel " +
+                                        "cannot tell you"
                                 )
                                 // Dismissed so the scene's continuation
                                 // cannot trip the one-per-process abort
@@ -6457,7 +6588,7 @@ object KayaCompose {
                     System.nanoTime() < stepDeadline
                 ) {
                     while (failures.size > failuresBefore) failures.removeAt(failures.size - 1)
-                    Thread.sleep(20)
+                    Thread.sleep(RETRY_PERIOD_MS)
                     retryStep = true
                 } else if (failures.size > failuresBefore) {
                     // THE EVIDENCE MUST OUTLIVE THE PROCESS. `failures` is
