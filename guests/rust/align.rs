@@ -1,10 +1,11 @@
 //! The align conformance scene: the cross-axis contract as an
-//! assertion. Why exactly these two modes carry the gate is
+//! assertion. Why exactly these modes carry the gate is
 //! tools/scenes/align.steps.
 //!
-//! The children's natural widths must all DIFFER, or the classifier
-//! cannot read CENTER; and the two text children's baselines must
-//! coincide while their tops do not.
+//! The center trio's natural widths must all DIFFER, or the classifier
+//! cannot read CENTER; the two text children's baselines must coincide
+//! while their tops do not; and the stretch pair must hug far short of
+//! its track when the mode is absent.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::Align;
@@ -12,19 +13,41 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     ctx.apply(|tx| {
         let probe = tx.signal("align probe");
         let base = tx.signal("base");
+        let anchor = tx.signal("anchor");
+        let fit = tx.signal("fit");
 
         let root = tx
             .column(|tx| {
-                tx.label(probe); // label#0
-                tx.button("mid");
-                tx.row(|tx| {
-                    tx.label(base); // label#1
-                    tx.button("tick");
-                    tx.image(&TALL_PNG[..]);
+                tx.column(|tx| {
+                    // column#1: the center trio
+                    tx.label(probe); // label#0
+                    tx.button("mid");
+                    tx.row(|tx| {
+                        // row#0: the baseline trio
+                        tx.label(base); // label#1
+                        tx.button("tick");
+                        tx.image(&TALL_PNG[..]);
+                    })
+                    .align(Align::Baseline);
                 })
-                .align(Align::Baseline);
+                .align(Align::Center)
+                .a11y_id("centered");
+                tx.row(|tx| {
+                    // row#1: the stretch pair's host
+                    tx.label(anchor); // label#2
+                    tx.column(|tx| {
+                        // column#2: grown into the row's leftover,
+                        // stretched across its own breadth
+                        tx.label(fit); // label#3
+                        tx.button("wide");
+                    })
+                    .grow(1.0)
+                    .align(Align::Stretch)
+                    .a11y_id("fitcol");
+                });
             })
-            .align(Align::Center)
+            .align(Align::Stretch)
+            .a11y_id("root")
             .id();
         tx.mount(root);
     });

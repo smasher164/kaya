@@ -1,9 +1,12 @@
 (* The align conformance scene, OCaml port — see guests/rust/align.rs
-   and tools/scenes/align.steps for the full rationale. The root column
-   centers children of three different natural widths; the row aligns
-   baselines across a label, a checkbox, and a tall no-baseline image
-   whose bottom sits ON the baseline (the CSS replaced-element rule),
-   which is what separates the modes on every platform's metrics. *)
+   and tools/scenes/align.steps for the full rationale. The stretched
+   root spans its two container children across the window; the center
+   column's children have three different natural widths; the row
+   aligns baselines across a label, a button, and a tall no-baseline
+   image whose bottom sits ON the baseline (the CSS replaced-element
+   rule), which is what separates the modes on every platform's
+   metrics; and row#1 hosts the grown, stretched nested column the
+   ruling pins (docs/deferred.md, the nested-container GAP). *)
 
 open Kaya_wire
 open Kaya_app
@@ -24,17 +27,33 @@ let () =
   build app (fun () ->
      let probe = signal (Str "align probe") in
      let base = signal (Str "base") in
+     let anchor = signal (Str "anchor") in
+     let fit = signal (Str "fit") in
 
      let root =
-       column ~align:Center
+       column ~a11y_id:"root" ~align:Stretch
          [
-           label ~bind:probe (* label#0 *);
-           button ~text:"mid";
-           row ~align:Baseline
+           (* column#1: the center trio *)
+           column ~a11y_id:"centered" ~align:Center
              [
-               label ~bind:base (* label#1 *);
-               button ~text:"tick";
-               image ~source:tall_png;
+               label ~bind:probe (* label#0 *);
+               button ~text:"mid";
+               (* row#0: the baseline trio *)
+               row ~align:Baseline
+                 [
+                   label ~bind:base (* label#1 *);
+                   button ~text:"tick";
+                   image ~source:tall_png;
+                 ];
+             ];
+           (* row#1: the stretch pair's host *)
+           row
+             [
+               label ~bind:anchor (* label#2 *);
+               (* column#2: grown into the row's leftover, stretched
+                  across its own breadth *)
+               column ~grow:1.0 ~a11y_id:"fitcol" ~align:Stretch
+                 [ label ~bind:fit (* label#3 *); button ~text:"wide" ];
              ];
          ]
          ()

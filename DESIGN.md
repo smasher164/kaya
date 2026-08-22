@@ -957,12 +957,31 @@ The known normalization worklist:
   allocated baselines are not comparable across widget kinds, so the
   observation is PARTICIPATION (baselines allocated only under
   baseline mode; agreement is GTK's own, the root_fills precedent of
-  per-platform notions). The scene asserts center and baseline —
-  the two modes whose separability it constructs (a tall no-baseline
-  image whose bottom sits on the baseline); start rides every other
-  scene's geometry, and end/stretch have live classification arms
-  with the recordings as their visual record until a scene earns
-  them.
+  per-platform notions). The scene asserts stretch, center and
+  baseline — the modes whose separability it constructs (a tall
+  no-baseline image whose bottom sits on the baseline; a grown,
+  stretched nested column beside a hugging label); start rides every
+  other scene's geometry, and end keeps a live classification arm
+  with the recordings as its visual record until a scene earns it.
+  Stretch earned its scene 2026-08-22, the day the portfolio
+  dashboard's first photograph caught the mode inexpressible on the
+  two interpreter backends while every model observable stayed green,
+  and the ruling that came with it closed three gaps at once: a
+  nested container ADOPTS the box its parent hands it (the root's
+  window, a stretch cell, a cross-oriented grow track — GTK and WinUI
+  impose this by allocation, and the SwiftUI KayaFlex and Compose
+  cell-content arms now say it explicitly, since a proposal-
+  negotiating child and a minimum-free Box both let the content hug
+  inside a correctly sized cell); expect_aligned answers spanning
+  geometry as "stretch" FIRST, because a child at (0, inner)
+  satisfies the start/center/end predicates too and a true stretch
+  could never classify by elimination (GTK alone keeps baseline
+  before stretch — its BASELINE_FILL children also span, and the
+  allocated baseline is the one discriminator stretch cannot fake);
+  and expect_fills on a container checks the container's OWN box
+  against the track its weight earned before asking about its
+  children, which is the assertion the photograph had been
+  substituting for.
 - A dressed control floor (ratified 2026-07-21). Every control the
   vocabulary ships renders as a credible native control on every
   backend with zero styling calls — there is no styling API to call.

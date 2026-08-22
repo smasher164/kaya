@@ -1,7 +1,9 @@
 // The align conformance scene, Swift port. See guests/rust/align.rs and
 // tools/scenes/align.steps. The row's tall no-baseline image sits ON the
 // baseline (the CSS replaced-element rule) — the construction that
-// separates the alignment modes on every platform's control metrics.
+// separates the alignment modes on every platform's control metrics; the
+// grown, stretched nested column under row#1 is the ruling's own shape
+// (docs/deferred.md, the nested-container GAP).
 
 import Foundation
 
@@ -21,17 +23,33 @@ let app = KayaApp()
 app.build { tx in
     let probe = tx.signal(.str("align probe"))
     let base = tx.signal(.str("base"))
+    let anchor = tx.signal(.str("anchor"))
+    let fit = tx.signal(.str("fit"))
 
-    tx.mount(
-        tx.column(align: .center) {
-            tx.label(bind: probe)  // label#0
-            tx.button("mid")
-            tx.row(align: .baseline) {
-                tx.label(bind: base)  // label#1
-                tx.button("tick")
-                tx.image(tallPNG)
+    let root = tx.column(align: .stretch) {
+            let centered = tx.column(align: .center) {  // column#1: the center trio
+                tx.label(bind: probe)  // label#0
+                tx.button("mid")
+                tx.row(align: .baseline) {  // row#0: the baseline trio
+                    tx.label(bind: base)  // label#1
+                    tx.button("tick")
+                    tx.image(tallPNG)
+                }
             }
-        })
+            tx.setA11yId(centered, "centered")
+            tx.row {  // row#1: the stretch pair's host
+                tx.label(bind: anchor)  // label#2
+                // column#2: grown into the row's leftover, stretched
+                // across its own breadth.
+                let fitcol = tx.column(grow: 1, align: .stretch) {
+                    tx.label(bind: fit)  // label#3
+                    tx.button("wide")
+                }
+                tx.setA11yId(fitcol, "fitcol")
+            }
+        }
+    tx.setA11yId(root, "root")
+    tx.mount(root)
 }
 
 app.run()

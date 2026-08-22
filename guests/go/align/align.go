@@ -22,16 +22,29 @@ func App() *kaya.App {
 	app.Build(func(tx *kaya.Tx) {
 		probe := tx.Signal("align probe")
 		base := tx.Signal("base")
+		anchor := tx.Signal("anchor")
+		fit := tx.Signal("fit")
 
 		tx.Mount(tx.Column(func() {
-			tx.Label(probe) // label#0
-			tx.Button("mid", nil)
-			tx.Row(func() {
-				tx.Label(base) // label#1
-				tx.Button("tick", nil)
-				tx.Image(tallPNG)
-			}).Align(kaya.AlignBaseline)
-		}).Align(kaya.AlignCenter))
+			tx.Column(func() { // the center trio
+				tx.Label(probe) // label#0
+				tx.Button("mid", nil)
+				tx.Row(func() { // row#0: the baseline trio
+					tx.Label(base) // label#1
+					tx.Button("tick", nil)
+					tx.Image(tallPNG)
+				}).Align(kaya.AlignBaseline)
+			}).Align(kaya.AlignCenter).A11yID("centered")
+			tx.Row(func() { // row#1: the stretch pair's host
+				tx.Label(anchor) // label#2
+				tx.Column(func() {
+					// grown into the row's leftover, stretched
+					// across its own breadth
+					tx.Label(fit) // label#3
+					tx.Button("wide", nil)
+				}).Grow(1).Align(kaya.AlignStretch).A11yID("fitcol")
+			})
+		}).Align(kaya.AlignStretch).A11yID("root"))
 	})
 
 	return app

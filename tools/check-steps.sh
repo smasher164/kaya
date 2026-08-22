@@ -33,19 +33,42 @@ import sys
 path = sys.argv[1]
 text = sys.stdin.read() if path == "-" else open(path).read()
 bad = []
+zero_at = {}
+kinds_seen = {}
 for lineno, line in enumerate(text.splitlines(), 1):
     if line.lstrip().startswith("#"):
         continue
+    for kind, key in re.findall(r"\b(row|column|scroll|grid)@([\w-]+)\b", line):
+        kinds_seen.setdefault(kind, set()).add("@" + key)
     for kind, index in re.findall(r"\b(row|column|scroll|grid)#(\d+)\b", line):
         # Index 0 of a container kind is the blessed pattern, on one
-        # convention: the scene keeps exactly one widget of that
+        # convention: the scene ADDRESSES exactly one widget of that
         # kind, so creation order cannot enter. column#0 is the For
         # container in milestone2 (root-is-a-row keeps it unique);
         # row#0 carries the horizontal grow contract in the grow
         # scene; scroll#0 the one scroll viewport in the scroll scene.
+        # The convention is CHECKED, not assumed, below: a scene that
+        # also addresses a SECOND container of the kind has lost the
+        # uniqueness that made #0 stable — Haskell builds children
+        # first, so an outer container of a kind indexes AFTER the
+        # inner ones (measured 2026-08-22: the align scene put three
+        # columns on screen and column#0 was the root everywhere but
+        # Haskell, where it was the innermost).
         if index == "0":
+            zero_at.setdefault(kind, []).append(lineno)
+            kinds_seen.setdefault(kind, set()).add("#0")
             continue
+        kinds_seen.setdefault(kind, set()).add("#" + index)
         bad.append(f"{path}:{lineno}: {kind}#{index}")
+for kind, lines in zero_at.items():
+    if len(kinds_seen.get(kind, set())) > 1:
+        others = "/".join(sorted(t for t in kinds_seen[kind] if t != "#0"))
+        for lineno in lines:
+            bad.append(
+                f"{path}:{lineno}: {kind}#0 beside {kind}{others} — "
+                f"the scene addresses more than one {kind}, so index 0 is "
+                f"no longer creation-order stable; author a key"
+            )
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 ' "$1"
@@ -55,6 +78,17 @@ sys.exit(1 if bad else 0)
 # is a false green.
 if printf 'click row#1\nexpect column#2 "x"\n' | lint - >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (bad sample passed)" >&2
+    exit 1
+fi
+# The uniqueness clause too: #0 beside an authored key of the same kind
+# is the exact shape that broke on Haskell (children-first creation).
+if printf 'expect_aligned column#0 "stretch"\nexpect_aligned column@x "center"\n' | lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (column#0 beside column@x passed)" >&2
+    exit 1
+fi
+# And the blessed lone #0 still passes, or every legacy scene reddens.
+if ! printf 'expect_fills column#0\nexpect_fills row#0\n' | lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (lone column#0/row#0 refused)" >&2
     exit 1
 fi
 

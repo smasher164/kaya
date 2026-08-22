@@ -1,10 +1,11 @@
 """The align conformance scene, Python port — see
 guests/rust/align.rs and tools/scenes/align.steps for the full
-rationale. The root column centers children of three different natural
-widths; the row aligns baselines across a label, a checkbox, and a
-tall no-baseline image whose bottom sits ON the baseline (the CSS
-replaced-element rule) — the construction that separates the modes on
-every platform's control metrics.
+rationale. The stretched root spans two container children across the
+window; column#1 centers children of three different natural widths;
+the row aligns baselines across a label, a button, and a tall
+no-baseline image whose bottom sits ON the baseline (the CSS
+replaced-element rule); and row#1 hosts the grown, stretched nested
+column the ruling's own construction pins.
 """
 
 import sys
@@ -22,13 +23,24 @@ app = kaya.App()
 with app.window():
     probe = kaya.signal("align probe")
     base = kaya.signal("base")
+    anchor = kaya.signal("anchor")
+    fit = kaya.signal("fit")
 
-    with kaya.column(align="center"):
-        kaya.label(bind=probe)  # label#0
-        kaya.button("mid")
-        with kaya.row(align="baseline"):
-            kaya.label(bind=base)  # label#1
-            kaya.button("tick")
-            kaya.image(TALL_PNG)
+    with kaya.column(align="stretch") as root:
+        root.a11y_id("root")
+        with kaya.column(align="center") as centered:  # the center trio
+            centered.a11y_id("centered")
+            kaya.label(bind=probe)  # label#0
+            kaya.button("mid")
+            with kaya.row(align="baseline"):  # row#0: the baseline trio
+                kaya.label(bind=base)  # label#1
+                kaya.button("tick")
+                kaya.image(TALL_PNG)
+        with kaya.row():  # row#1: the stretch pair's host
+            kaya.label(bind=anchor)  # label#2
+            with kaya.column(grow=1, align="stretch") as fitcol:
+                fitcol.a11y_id("fitcol")
+                kaya.label(bind=fit)  # label#3
+                kaya.button("wide")
 
 sys.exit(app.run())

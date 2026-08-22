@@ -4217,3 +4217,25 @@ EVERY read of a windows-lane log is `LC_ALL=C grep -a`. Measured 2026-08-21,
 when a watched negative's own verdict logic printed "DID NOT FIRE" twice for a
 negative that had fired perfectly — the "a guard you have never seen fail"
 failure arriving from the checking side.
+
+## A stretched WinUI TextBlock arranges text-sized — its box does not exist
+
+Stamp `HorizontalAlignment::Stretch` on a TextBlock in a 457dip Grid cell
+and its `ActualWidth` answers 12.5 — the text — while the Button beside it,
+same stamp, same cell, answers 457. Measured 2026-08-22 on the windows
+guest (the probe printed `ha=HorizontalAlignment(3) desired=13x19
+actual=12.5x18.6` for the label and `desired=54x32 actual=457x32` for the
+button): a Control's template fills its arrange rect, but a content-sized
+element like TextBlock returns its used size from ArrangeOverride, so
+RenderSize — which ActualWidth reads — is the text whatever the slot was.
+The pixels are IDENTICAL to a start-aligned label (text at the slot's
+start), so no screenshot separates them either.
+
+Consequence: any measurement that means "the child's box" cannot read
+ActualWidth for such elements. The stretch classifier (winui/mod.rs
+cross_mode) reads the RESOLVED alignment for the box under Stretch — the
+lowering's own output, loud on regression because the un-stamped WinUI
+default is Stretch, which reddens every center/start scene rather than
+passing one. First bitten: the align scene's stretch legs classified
+"start" on windows alone while expect_fills on the same container passed,
+because the container (a Grid) spans for real and its label child does not.

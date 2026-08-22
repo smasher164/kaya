@@ -1,26 +1,47 @@
 # The align conformance scene: the cross-axis contract as an
-# assertion, in the two modes the classification cannot confuse with
+# assertion, in the modes the classification cannot confuse with
 # geometry luck.
 #
-# column#0 (the root, the scene's only column) carries align=center:
-# its children have deliberately different natural widths (a label, a
-# button, and the row), so centers coinciding is CENTER and nothing
-# else — starts differ, ends differ, extents differ from the content
-# box. row#0 (the only row) carries align=baseline with a label, a
-# button, and a TALL image (2x64): the image has no text baseline,
-# so its bottom sits ON the baseline (the CSS replaced-element rule),
-# stretching the row's cross axis far past the text children — that
-# construction is what separates the modes, because kaya's text
-# controls alone share similar baseline-to-height ratios and a
-# hug-height row collapses start/center/end/baseline inside the
-# classification tolerance (measured on macOS: baseline placement
-# equaled center exactly with a label beside an entry). The two text
-# children's baselines must coincide at the image's bottom edge.
+# column@root (the root) carries align=stretch, ratified 2026-08-22: its
+# two container children span the window's width, which no other mode
+# produces from children whose naturals differ. Stretch geometry is
+# DEGENERATE — a spanning child satisfies the start/center/end
+# predicates too — so every classifier answers stretch first when all
+# children span, and the positional modes classify only a container
+# with at least one non-spanning child. The separability burden is the
+# scene's, as always: these children hug far short of the window when
+# the mode is absent.
+#
+# column@centered carries align=center: its children have deliberately
+# different natural widths (a label, a button, and the row), so
+# centers coinciding is CENTER and nothing else — starts differ, ends
+# differ, extents differ from the content box. row#0 carries
+# align=baseline with a label, a button, and a TALL image (2x64): the
+# image has no text baseline, so its bottom sits ON the baseline (the
+# CSS replaced-element rule), stretching the row's cross axis far past
+# the text children — that construction is what separates the modes,
+# because kaya's text controls alone share similar baseline-to-height
+# ratios and a hug-height row collapses start/center/end/baseline
+# inside the classification tolerance (measured on macOS: baseline
+# placement equaled center exactly with a label beside an entry).
+#
+# row#1 hosts the ruling's own construction: column@fitcol is a NESTED
+# container with grow=1 and align=stretch — the shape the portfolio
+# dashboard's first photograph caught drawing a third of itself on
+# macOS while every model observable stayed green (the GAP entry
+# beside the dynamic-tables milestone). expect_fills column@fitcol holds
+# the grow half (the container's box spans the track its weight
+# earned) and expect_aligned holds the stretch half (its children span
+# the box). Both were watched failing against the pre-ruling SwiftUI
+# interpreter.
 #
 # start needs no scene: every other scene's geometry rides the
-# normalized start default. end and stretch have classification arms
-# on every backend; the recordings are their visual record until a
-# scene earns them.
+# normalized start default. end has a classification arm on every
+# backend; the recordings are its visual record until a scene earns
+# it.
 expect label#0 "align probe"
-expect_aligned column#0 "center"
+expect_aligned column@root "stretch"
+expect_aligned column@centered "center"
 expect_aligned row#0 "baseline"
+expect_aligned column@fitcol "stretch"
+expect_fills column@fitcol

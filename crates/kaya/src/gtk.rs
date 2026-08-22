@@ -9139,7 +9139,7 @@ impl crate::harness::Stage for GtkStage {
 
     fn container_fills(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            use gtk4::prelude::WidgetExt;
+            use gtk4::prelude::{Cast, WidgetExt};
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
@@ -9147,6 +9147,31 @@ impl crate::harness::Stage for GtkStage {
             };
             let container = &registry[i];
             while glib::MainContext::default().iteration(false) {}
+            // A GROWN CONTAINER IS A FLEX CHILD TOO: its own box spans the
+            // track its weight earned before its children can span anything
+            // (the ruling of 2026-08-22; docs/deferred.md's nested-container
+            // GAP, tools/scenes/align.steps). widget_fills' reading, one level
+            // up — one-sided, and skipped when the flex manager recorded no
+            // track (a root, or a child of a plain GtkBox).
+            let widget = container.clone().upcast::<gtk4::Widget>();
+            let own = widget
+                .parent()
+                .and_then(|p| p.layout_manager())
+                .and_then(|m| m.downcast::<flex::FlexLayout>().ok())
+                .and_then(|manager| {
+                    let main_vertical = manager.orientation() == gtk4::Orientation::Vertical;
+                    child_track(&widget).map(|track| (track, main_vertical))
+                });
+            if let Some((track, main_vertical)) = own {
+                let drawn = flex::child_extent(&widget, main_vertical);
+                if drawn < track - 2.0 {
+                    return format!(
+                        "draws {}px of its own {}px track",
+                        drawn.round(),
+                        track.round()
+                    );
+                }
+            }
             // width()/height() are ALREADY the content box on GTK4 — CSS
             // padding lives outside the widget's own coordinate space, unlike
             // every other backend here. Subtracting the .kaya-root padding on
@@ -9157,11 +9182,25 @@ impl crate::harness::Stage for GtkStage {
             } else {
                 container.width()
             };
+            // A verdict is never built from geometry nobody laid out: an
+            // unallocated container reads 0 against 0-extent children and the
+            // slack test passes on zeros (the ruling's clause 4b in this
+            // backend's spelling — GTK has real allocations to sum, so there
+            // are no unrecorded child tracks to mistake for a leftover).
+            if inner <= 0 {
+                return "no container layout recorded".to_owned();
+            }
             let mut min_start = i32::MAX;
             let mut max_end = i32::MIN;
             let mut child = container.first_child();
-            while let Some(widget) = child {
-                let alloc = widget.allocation();
+            while let Some(w) = child {
+                child = w.next_sibling();
+                // Invisible children are the ones flex::allocate skips; their
+                // stale 0x0 allocation is not a measurement of this layout.
+                if !w.is_visible() {
+                    continue;
+                }
+                let alloc = w.allocation();
                 let (start, extent) = if vertical {
                     (alloc.y(), alloc.height())
                 } else {
@@ -9169,7 +9208,6 @@ impl crate::harness::Stage for GtkStage {
                 };
                 min_start = min_start.min(start);
                 max_end = max_end.max(start + extent);
-                child = widget.next_sibling();
             }
             if max_end < min_start {
                 return "no children".to_owned();
@@ -9240,10 +9278,21 @@ impl crate::harness::Stage for GtkStage {
             // width()/height() are the content box and child allocations are
             // content-relative, so the cross box is 0..inner.
             let inner = if vertical { container.width() } else { container.height() };
+            // Zeros classify as stretch (every child spans a 0px box), so an
+            // unallocated container must be said, never classified.
+            if inner <= 0 {
+                return "no container layout recorded".to_owned();
+            }
             let mut rects: Vec<(i32, i32)> = Vec::new();
             let mut baselines: Vec<i32> = Vec::new();
             let mut child = container.first_child();
             while let Some(widget) = child {
+                child = widget.next_sibling();
+                // As in container_fills: the layout skips invisible children,
+                // so their stale 0x0 allocation is not geometry to classify.
+                if !widget.is_visible() {
+                    continue;
+                }
                 let alloc = widget.allocation();
                 let (start, extent) = if vertical {
                     (alloc.x(), alloc.width())
@@ -9257,7 +9306,6 @@ impl crate::harness::Stage for GtkStage {
                         baselines.push(alloc.y() + b);
                     }
                 }
-                child = widget.next_sibling();
             }
             if rects.is_empty() {
                 return "no children".to_owned();
@@ -9274,13 +9322,23 @@ impl crate::harness::Stage for GtkStage {
             if !vertical && baselines.len() >= 2 {
                 return "baseline".to_owned();
             }
-            // Every geometric mode is tested; more than one match means the
+            // THEN STRETCH, before the positional modes and alone: spanning
+            // geometry is DEGENERATE — a child at (0, inner) satisfies start,
+            // center and end too, so this arm answered
+            // "ambiguous (stretch|start|center|end)" for every true stretch
+            // and could not reach the word at all (the ruling of 2026-08-22;
+            // tools/scenes/align.steps carries the separability burden).
+            // BASELINE STILL OUTRANKS IT HERE, unlike the other backends:
+            // GTK 4.12's BASELINE_FILL spans the row as well, and the
+            // allocated baseline above is the one signal stretch cannot fake.
+            if all(&|r| r.0.abs() <= 2 && (r.1 - inner).abs() <= 2) {
+                return "stretch".to_owned();
+            }
+            // A container with at least one non-spanning child is what the
+            // positional modes classify; more than one match means the
             // scene's geometry cannot distinguish them, and a first-match
             // answer would let such a scene pass while proving nothing.
             let mut matches = Vec::new();
-            if all(&|r| (r.1 - inner).abs() <= 2) {
-                matches.push("stretch");
-            }
             if all(&|r| r.0.abs() <= 2) {
                 matches.push("start");
             }

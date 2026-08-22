@@ -6,7 +6,8 @@ import dev.kaya.KayaApp;
  * The align conformance scene from the JVM — see guests/rust/align.rs
  * and tools/scenes/align.steps. The tall no-baseline image in the
  * baseline row is the construction that separates the modes on every
- * platform's control metrics.
+ * platform's control metrics; the grown, stretched nested column under
+ * row#1 is the ruling's own.
  */
 final class Align {
     // A 2x64 PNG: the tall no-baseline child.
@@ -26,16 +27,29 @@ final class Align {
         app.build(tx -> {
             KayaApp.Signal<String> probe = tx.signal("align probe");
             KayaApp.Signal<String> base = tx.signal("base");
+            KayaApp.Signal<String> anchor = tx.signal("anchor");
+            KayaApp.Signal<String> fit = tx.signal("fit");
 
             tx.mount(tx.column(() -> {
-                tx.label(probe); // label#0
-                tx.button("mid");
-                tx.row(() -> {
-                    tx.label(base); // label#1
-                    tx.button("tick");
-                    tx.image(TALL_PNG);
-                }).align(KayaApp.Align.BASELINE);
-            }).align(KayaApp.Align.CENTER));
+                tx.column(() -> { // the center trio
+                    tx.label(probe); // label#0
+                    tx.button("mid");
+                    tx.row(() -> { // row#0: the baseline trio
+                        tx.label(base); // label#1
+                        tx.button("tick");
+                        tx.image(TALL_PNG);
+                    }).align(KayaApp.Align.BASELINE);
+                }).align(KayaApp.Align.CENTER).a11yId("centered");
+                tx.row(() -> { // row#1: the stretch pair's host
+                    tx.label(anchor); // label#2
+                    tx.column(() -> {
+                        // grown into the row's leftover, stretched
+                        // across its own breadth
+                        tx.label(fit); // label#3
+                        tx.button("wide");
+                    }).grow(1.0).align(KayaApp.Align.STRETCH).a11yId("fitcol");
+                });
+            }).align(KayaApp.Align.STRETCH).a11yId("root"));
             return null;
         });
 

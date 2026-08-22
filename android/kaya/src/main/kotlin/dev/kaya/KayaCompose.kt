@@ -6041,6 +6041,20 @@ object KayaCompose {
                                     }
                                     if (rects.isEmpty()) {
                                         "no children"
+                                    } else if (rects.all {
+                                        kotlin.math.abs(it.first) <= 2.0 &&
+                                            kotlin.math.abs(it.second - inner) <= 2.0
+                                    }) {
+                                        // STRETCH FIRST, and alone: spanning
+                                        // geometry is DEGENERATE — a child at
+                                        // (0, inner) satisfies start, center
+                                        // and end too, so a stretched
+                                        // container can never classify by
+                                        // elimination. The positional modes
+                                        // classify only a container with a
+                                        // non-spanning child
+                                        // (tools/scenes/align.steps).
+                                        "stretch"
                                     } else {
                                         // Multi-match is ambiguity, and
                                         // ambiguity fails loudly — a
@@ -6048,9 +6062,6 @@ object KayaCompose {
                                         // unseparated scene pass while
                                         // proving nothing.
                                         val matches = mutableListOf<String>()
-                                        if (rects.all {
-                                            kotlin.math.abs(it.second - inner) <= 2.0
-                                        }) matches.add("stretch")
                                         if (rects.all {
                                             kotlin.math.abs(it.first) <= 2.0
                                         }) matches.add("start")
@@ -6127,20 +6138,42 @@ object KayaCompose {
                                 parts[1], if (isRow) "row" else "column",
                                 if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
                             )?.let { container ->
+                                val ownTrack = kayaMainExtents[container.id] ?: 0.0
+                                val ownDrawn = kayaDrawnExtents[container.id] ?: 0.0
                                 val extent = kayaContainerExtents[container.id] ?: 0.0
-                                if (extent <= 0.0) {
-                                    "no container layout recorded"
-                                } else {
-                                    val tracks = container.children
-                                        .map { kayaMainExtents[it.id] ?: 0.0 }
-                                    val span = tracks.sum() +
-                                        container.spacing * kayaDensity *
-                                        maxOf(0, tracks.size - 1)
-                                    if (kotlin.math.abs(span - extent) <= 2.0) {
-                                        ""
-                                    } else {
-                                        "children span ${Math.round(span)}px " +
-                                            "of ${Math.round(extent)}px"
+                                val tracks = container.children
+                                    .map { kayaMainExtents[it.id] }
+                                when {
+                                    // A grown container is a flex CHILD too:
+                                    // its own box must span the track its
+                                    // weight earned before its children can
+                                    // span anything (docs/deferred.md's
+                                    // nested-container GAP,
+                                    // tools/scenes/align.steps). One-sided
+                                    // like the widget clause, and skipped
+                                    // where no track was recorded — the root,
+                                    // or a non-flex parent.
+                                    ownTrack > 0.0 && ownDrawn < ownTrack - 2.0 ->
+                                        "draws ${Math.round(ownDrawn)}px of its own " +
+                                            "${Math.round(ownTrack)}px track"
+                                    extent <= 0.0 -> "no container layout recorded"
+                                    // Summing unrecorded tracks as zeros
+                                    // reports a leftover built from nothing;
+                                    // a verdict may only claim what it
+                                    // measured (CLAUDE.md invariant 3).
+                                    container.children.isNotEmpty() &&
+                                        tracks.any { it == null } ->
+                                        "no child tracks recorded — not a flex container"
+                                    else -> {
+                                        val span = tracks.filterNotNull().sum() +
+                                            container.spacing * kayaDensity *
+                                            maxOf(0, tracks.size - 1)
+                                        if (kotlin.math.abs(span - extent) <= 2.0) {
+                                            ""
+                                        } else {
+                                            "children span ${Math.round(span)}px " +
+                                                "of ${Math.round(extent)}px"
+                                        }
                                     }
                                 }
                             }
@@ -7321,10 +7354,11 @@ private fun KayaRenderCore(
      * true inside a column, false inside a row — and null wherever grow
      * has no meaning: a grid cell, a scroll's content, the mounted root.
      *
-     * A control whose natural size is a fixed box needs this to honour
-     * grow: a grower's extent is the cell its weight earned on THIS
-     * axis, and the control can only fill the right dimension if it
-     * knows which one that is. Filling both would take the cross axis
+     * A control whose natural size is a fixed box — or a nested
+     * CONTAINER, which hugs whatever it is offered — needs this to
+     * honour grow: a grower's extent is the cell its weight earned on
+     * THIS axis, and it can only fill the right dimension if it knows
+     * which one that is. Filling both would take the cross axis
      * too, which is align's business — GTK gives a grown textarea its
      * natural 240 across a start-aligned column, and this backend must
      * not disagree.
@@ -7333,8 +7367,10 @@ private fun KayaRenderCore(
     /**
      * Whether that container aligns its children `stretch` — the CROSS
      * axis's half of the same question [flexVertical] answers for the
-     * main one. Only controls whose natural size is a fixed box need it;
-     * everything else already fills the cell it is given.
+     * main one. A control whose natural size is a fixed box needs it,
+     * and so does a NESTED CONTAINER: both hug a box they were handed
+     * unless told (the 2026-08-22 ruling; docs/deferred.md's
+     * nested-container GAP).
      */
     flexStretch: Boolean = false,
 ) {
@@ -7342,9 +7378,26 @@ private fun KayaRenderCore(
     // and UIKit needed. A Compose Column wraps its width even when
     // weighted children have forced its height, so the grow scene's
     // 25/75 held over a content-wide strip while every other backend
-    // spanned the window; nested containers keep wrapping, exactly as
-    // everywhere else.
+    // spanned the window.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
+    // AND A NESTED CONTAINER ADOPTS THE BOX IT WAS HANDED (the
+    // 2026-08-22 ruling; docs/deferred.md's nested-container GAP,
+    // tools/scenes/align.steps): a grower spans its track on the
+    // parent's MAIN axis, `stretch` spans the parent's cross axis, and
+    // with neither it still hugs. The CELL carries both already (the
+    // column and row arms below); this is the content inside it, which
+    // Compose otherwise lets hug a cell it was handed.
+    var boxFill = rootFill
+    if (flexVertical != null) {
+        if (node.grow > 0) {
+            boxFill =
+                if (flexVertical) boxFill.fillMaxHeight() else boxFill.fillMaxWidth()
+        }
+        if (flexStretch) {
+            boxFill =
+                if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
+        }
+    }
     // THE UNIVERSAL ACCESSIBILITY PROPS, folded into the base modifier
     // every kind already threads.
     //
@@ -7538,12 +7591,12 @@ private fun KayaRenderCore(
             // A container with a declared header bar takes the TABLE
             // surface instead (docs/tables-plan.md).
             if (node.tableColumns.isNotEmpty()) {
-                KayaTableSurface(node, rootFill.then(a11y))
+                KayaTableSurface(node, boxFill.then(a11y))
             } else Column(
                 // The inset pair brackets the container's own padding:
                 // outer box, then padding, then the content readers, so
                 // the extents shares divide are the CONTENT box.
-                modifier = rootFill.then(a11y).onGloballyPositioned {
+                modifier = boxFill.then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 }.padding(node.inset.dp).onGloballyPositioned {
@@ -7639,7 +7692,7 @@ private fun KayaRenderCore(
             Row(
                 // The inset pair brackets the padding (see the column's
                 // note).
-                modifier = rootFill.then(a11y).onGloballyPositioned {
+                modifier = boxFill.then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 }.padding(node.inset.dp).onGloballyPositioned {

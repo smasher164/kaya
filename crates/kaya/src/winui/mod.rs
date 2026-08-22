@@ -12844,9 +12844,11 @@ fn content_string(content: &windows_core::IInspectable) -> windows_core::Result<
     Ok(value.Value()?.to_string())
 }
 
-/// The flex track a container's parent GAVE it — `widget_fills`' read,
-/// which is the half of the geometry claim a container that hugs its
-/// content would otherwise satisfy by shrinking the question.
+/// The WIDTH a container's parent GAVE it — `column_edges`' read, since
+/// a table clips across whatever its parent's main axis is. NOT
+/// `flex_track` below, which answers along the PARENT's main axis: a
+/// column parent's answer here is its own breadth, that one's is a row
+/// track's height.
 #[cfg(feature = "harness")]
 fn assigned_track(core: &CoreState, grid: &Grid) -> windows_core::Result<f64> {
     let element: FrameworkElement = grid.cast()?;
@@ -12866,6 +12868,67 @@ fn assigned_track(core: &CoreState, grid: &Grid) -> windows_core::Result<f64> {
         }
     }
     grid.ActualWidth()
+}
+
+/// What a flex parent gave one of its children, along the PARENT's main
+/// axis: the track it assigned and the extent the child drew in it.
+///
+/// `expect_fills` reads it for a WIDGET target, and — since the
+/// 2026-08-22 geometry ruling — for a grown CONTAINER before its own
+/// children are asked anything (tools/scenes/align.steps; the ledger's
+/// "a nested SwiftUI container cannot fill its track").
+#[cfg(feature = "harness")]
+enum FlexTrack {
+    In { track: f64, drawn: f64 },
+    /// The parent is not one of kaya's flex containers.
+    NoParent,
+    /// A flex parent, but no track definition holds this child.
+    NoTrack,
+}
+
+#[cfg(feature = "harness")]
+fn flex_track(core: &CoreState, element: &FrameworkElement) -> windows_core::Result<FlexTrack> {
+    let Ok(grid) = element.Parent()?.cast::<Grid>() else {
+        return Ok(FlexTrack::NoParent);
+    };
+    // The container's own registry decides the axis, the way reindex
+    // decided it when it built the tracks — never the element's shape.
+    let vertical = core.columns.iter().any(|g| g == &grid);
+    if !vertical && !core.rows.iter().any(|g| g == &grid) {
+        return Ok(FlexTrack::NoParent);
+    }
+    // Measure/arrange are lazy; force them or the first read after
+    // mount sees zeros (the child_shares precedent).
+    grid.UpdateLayout()?;
+    // The track is the definition's RESOLVED extent — measured pixels,
+    // never the star weight — and the drawn size is the element's own.
+    // Same distinction child_shares makes when it reads definitions
+    // rather than children, and the gap between them is exactly where a
+    // control with an explicit Height sat: 96dip inside a correct
+    // 126dip star row, every share passing.
+    Ok(if vertical {
+        let at = Grid::GetRow(element)? as u32;
+        let defs = grid.RowDefinitions()?;
+        if at >= defs.Size()? {
+            FlexTrack::NoTrack
+        } else {
+            FlexTrack::In {
+                track: defs.GetAt(at)?.ActualHeight()?,
+                drawn: element.ActualHeight()?,
+            }
+        }
+    } else {
+        let at = Grid::GetColumn(element)? as u32;
+        let defs = grid.ColumnDefinitions()?;
+        if at >= defs.Size()? {
+            FlexTrack::NoTrack
+        } else {
+            FlexTrack::In {
+                track: defs.GetAt(at)?.ActualWidth()?,
+                drawn: element.ActualWidth()?,
+            }
+        }
+    })
 }
 
 /// The element a `kind#index` target names, from the per-kind registry
@@ -14439,13 +14502,32 @@ impl crate::harness::Stage for WinUiStage {
             };
             let grid = &registry[i];
             grid.UpdateLayout()?;
+            // A GROWN CONTAINER IS A FLEX CHILD TOO, and this clause
+            // comes first: its own box must span the track its weight
+            // earned before its children can span anything (the
+            // 2026-08-22 ruling; tools/scenes/align.steps, and the
+            // ledger entry "a nested SwiftUI container cannot fill its
+            // track"). One-sided like the widget read, and silent where
+            // no flex parent holds a track.
+            if let FlexTrack::In { track, drawn } =
+                flex_track(core, &grid.cast::<FrameworkElement>()?)?
+            {
+                if track > 0.0 && drawn < track - 2.0 {
+                    return Ok(format!(
+                        "draws {}dip of its own {}dip track",
+                        drawn.round() as i64,
+                        track.round() as i64
+                    ));
+                }
+            }
             // A Grid places tracks from the padding edge with
             // RowSpacing-sized gaps between adjacent ones and no slack
             // anywhere else, so the consumed span is the tracks' sum
             // plus the gaps, and slack shows up as the difference to
             // the content box (ActualSize minus Padding).
             let padding = grid.Padding()?;
-            let (inner, sum, gaps) = if vertical {
+            let kids = grid.Children()?.Size()?;
+            let (inner, sum, gaps, tracks) = if vertical {
                 let defs = grid.RowDefinitions()?;
                 let mut sum = 0.0;
                 for at in 0..defs.Size()? {
@@ -14455,6 +14537,7 @@ impl crate::harness::Stage for WinUiStage {
                     grid.ActualHeight()? - padding.Top - padding.Bottom,
                     sum,
                     grid.RowSpacing()? * f64::from(defs.Size()?.saturating_sub(1)),
+                    defs.Size()?,
                 )
             } else {
                 let defs = grid.ColumnDefinitions()?;
@@ -14466,8 +14549,22 @@ impl crate::harness::Stage for WinUiStage {
                     grid.ActualWidth()? - padding.Left - padding.Right,
                     sum,
                     grid.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1)),
+                    defs.Size()?,
                 )
             };
+            // NO VERDICT OUT OF ZEROS (the ruling's second clause): a
+            // container the toolkit has not laid out yet would answer
+            // "fills" from 0 against 0, and tracks nobody defined would
+            // read as a leftover the size of the box. Both are failures
+            // here, so the poll retries a transient zero and only a
+            // lasting one is reported — and neither sentence claims
+            // more than it counted.
+            if inner <= 0.0 {
+                return Ok("no container layout recorded".to_owned());
+            }
+            if tracks == 0 && kids > 0 {
+                return Ok(format!("no child tracks recorded ({kids} children, 0 tracks)"));
+            }
             let span = sum + gaps;
             Ok(if (span - inner).abs() <= 2.0 {
                 String::new()
@@ -14488,49 +14585,16 @@ impl crate::harness::Stage for WinUiStage {
                 Some(e) => e.cast()?,
                 None => return Ok("<no such target>".to_owned()),
             };
-            // The container's own registry decides the axis, the way
-            // reindex decided it when it built the tracks — never the
-            // element's shape.
-            let Ok(grid) = element.Parent()?.cast::<Grid>() else {
-                return Ok("parent is not a flex container".to_owned());
-            };
-            let vertical = core.columns.iter().any(|g| g == &grid);
-            if !vertical && !core.rows.iter().any(|g| g == &grid) {
-                return Ok("parent is not a flex container".to_owned());
-            }
-            // Measure/arrange are lazy; force them or the first read
-            // after mount sees zeros (the child_shares precedent).
-            grid.UpdateLayout()?;
-            let (track, drawn) = if vertical {
-                let at = Grid::GetRow(&element)? as u32;
-                let defs = grid.RowDefinitions()?;
-                if at >= defs.Size()? {
-                    return Ok("no track recorded — not a flex child".to_owned());
-                }
-                (defs.GetAt(at)?.ActualHeight()?, element.ActualHeight()?)
-            } else {
-                let at = Grid::GetColumn(&element)? as u32;
-                let defs = grid.ColumnDefinitions()?;
-                if at >= defs.Size()? {
-                    return Ok("no track recorded — not a flex child".to_owned());
-                }
-                (defs.GetAt(at)?.ActualWidth()?, element.ActualWidth()?)
-            };
-            // The track is the definition's resolved extent and the
-            // drawn size is the control's own — the same distinction
-            // child_shares makes when it reads definitions rather than
-            // children, and the gap between them is exactly where a
-            // control with an explicit Height sat: 96dip inside a
-            // correct 126dip star row, every share passing. An overflow
-            // is not a leftover, so the test is one-sided.
-            Ok(if drawn >= track - 2.0 {
-                String::new()
-            } else {
-                format!(
+            // An overflow is not a leftover, so the test is one-sided.
+            Ok(match flex_track(core, &element)? {
+                FlexTrack::NoParent => "parent is not a flex container".to_owned(),
+                FlexTrack::NoTrack => "no track recorded — not a flex child".to_owned(),
+                FlexTrack::In { track, drawn } if drawn >= track - 2.0 => String::new(),
+                FlexTrack::In { track, drawn } => format!(
                     "draws {}dip of a {}dip track",
                     drawn.round() as i64,
                     track.round() as i64
-                )
+                ),
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -14574,10 +14638,32 @@ impl crate::harness::Stage for WinUiStage {
                 let at = element
                     .TransformToVisual(&grid)?
                     .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                // A content-sized element ARRANGES TEXT-SIZED UNDER STRETCH:
+                // measured 2026-08-22, a TextBlock stamped Stretch in a 457dip
+                // cell reported ActualWidth 12.5 (its text) while the Button
+                // beside it reported 457 — TextBlock has no box to fill, so
+                // its RenderSize is the text whatever the arrange slot was.
+                // The child's BOX under resolved Stretch is therefore the
+                // slot, read here from the RESOLVED alignment — which is the
+                // lowering's own output, and loud on regression: an
+                // un-stamped tree keeps WinUI's Stretch default, which
+                // reddens every center/start scene rather than passing one.
                 let (start, extent) = if vertical {
-                    (f64::from(at.X) - origin, element.ActualWidth()?)
+                    if element.HorizontalAlignment()?
+                        == bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch
+                    {
+                        (0.0, inner)
+                    } else {
+                        (f64::from(at.X) - origin, element.ActualWidth()?)
+                    }
                 } else {
-                    (f64::from(at.Y) - origin, element.ActualHeight()?)
+                    if element.VerticalAlignment()?
+                        == bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch
+                    {
+                        (0.0, inner)
+                    } else {
+                        (f64::from(at.Y) - origin, element.ActualHeight()?)
+                    }
                 };
                 rects.push((start, extent));
                 if !vertical {
@@ -14603,14 +14689,22 @@ impl crate::harness::Stage for WinUiStage {
             if rects.is_empty() {
                 return Ok("no children".to_owned());
             }
+            // STRETCH FIRST, and alone: spanning geometry is DEGENERATE
+            // — a child at (0, inner) satisfies start, center AND end —
+            // so a stretched container could never classify by
+            // elimination (SwiftUI measured "ambiguous(4)" for every
+            // true stretch). All children spanning IS stretch; the
+            // positional modes classify only a container with a
+            // non-spanning child, and the separability burden stays the
+            // scene's (the 2026-08-22 ruling; tools/scenes/align.steps).
+            if rects.iter().all(|r| r.0.abs() <= 2.0 && (r.1 - inner).abs() <= 2.0) {
+                return Ok("stretch".to_owned());
+            }
             // Multi-match is ambiguity, and ambiguity fails loudly
             // — a first-match answer lets an unseparated scene pass
             // while proving nothing (the separability lesson, made
             // structural).
             let mut matches = Vec::new();
-            if rects.iter().all(|r| (r.1 - inner).abs() <= 2.0) {
-                matches.push("stretch");
-            }
             if rects.iter().all(|r| r.0.abs() <= 2.0) {
                 matches.push("start");
             }

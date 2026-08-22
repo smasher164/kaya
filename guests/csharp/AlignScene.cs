@@ -1,7 +1,9 @@
 // The align conformance scene, C# port — see guests/rust/align.rs and
 // tools/scenes/align.steps. The tall no-baseline image matters: its
 // bottom sits ON the baseline (the CSS replaced-element rule), which is
-// what separates the modes on every platform's control metrics.
+// what separates the modes on every platform's control metrics; the
+// grown, stretched nested column under row#1 is the ruling's own
+// construction.
 
 static class AlignScene
 {
@@ -13,18 +15,38 @@ static class AlignScene
         {
             var probe = tx.Signal("align probe");
             var @base = tx.Signal("base");
+            var anchor = tx.Signal("anchor");
+            var fit = tx.Signal("fit");
 
-            tx.Mount(tx.Column(() =>
+            var root = tx.Column(() =>
             {
-                tx.Label(bind: probe); // label#0
-                tx.Button("mid");
-                tx.Row(() =>
+                var centered = tx.Column(() =>
                 {
-                    tx.Label(bind: @base); // label#1
-                    tx.Button("tick");
-                    tx.Image(TallPng);
-                }, align: Align.Baseline);
-            }, align: Align.Center));
+                    tx.Label(bind: probe); // label#0
+                    tx.Button("mid");
+                    tx.Row(() =>
+                    {
+                        tx.Label(bind: @base); // label#1
+                        tx.Button("tick");
+                        tx.Image(TallPng);
+                    }, align: Align.Baseline); // row#0: the baseline trio
+                }, align: Align.Center); // the center trio
+                tx.SetA11yId(centered, "centered");
+                tx.Row(() => // row#1: the stretch pair's host
+                {
+                    tx.Label(bind: anchor); // label#2
+                    // Grown into the row's leftover, stretched across
+                    // its own breadth.
+                    var fitcol = tx.Column(() =>
+                    {
+                        tx.Label(bind: fit); // label#3
+                        tx.Button("wide");
+                    }, grow: 1, align: Align.Stretch);
+                    tx.SetA11yId(fitcol, "fitcol");
+                });
+            }, align: Align.Stretch);
+            tx.SetA11yId(root, "root");
+            tx.Mount(root);
         });
 
         System.Environment.Exit(app.Run());

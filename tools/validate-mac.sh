@@ -790,8 +790,8 @@ run grow-swift-swiftui env KAYA_SELFTEST=grow target/swift-guests/grow
 run grow-java-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
-# The align scene: the cross-axis contract (center + baseline), every
-# language.
+# The align scene: the cross-axis contract (stretch + center +
+# baseline), every language.
 # The window scene: the primary surface's props — the title
 # materialized in the real title bar, the advisory 640x400 honored.
 # Desktop-only by design (phones reject the size request by physics).

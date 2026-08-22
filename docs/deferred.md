@@ -4651,8 +4651,128 @@ all three today, so the dashboard can start there while packaging
 lands. Still open: the app's name, and the build order across the
 three features it forces.
 
+## ~~GAP — a nested SwiftUI container cannot fill its track, so the mac dashboard clips its table (found 2026-08-22, by the first capture)~~
+KEY: KayaFlex fillCross, align stretch scene, nested container hugs cross, portfolio table clips, flexStretch textarea-only
+
+Found the day after the dashboard shipped, by pointing a camera at it —
+the capture the handoff asked for was the first time anybody SAW the
+mac rendering, and every model observable was green while the table
+drew a third of itself (tables-plan §8's class, second instance).
+
+Measured, all on the mac leg of the portfolio guest:
+- The window is 480pt wide; with `grow=1` declared on the detail
+  column, `expect_shares row#0` answers "28,72" — the column's TRACK
+  takes the leftover, as the control-in-track ruling says it must.
+- The rendered column content stays ~148pt (the widest label),
+  leading-aligned inside its 346pt track, and the table renders at
+  148pt while its own cell edges reach 257pt — the columns clip AT ANY
+  WINDOW SIZE, because a SwiftUI table's natural breadth is NOTHING
+  (tables-plan §8) and the hug width is set by the labels beside it.
+- Declaring `align="stretch"` on the column changes nothing:
+  `expect_aligned column#2` classifies "start" with stretch on the
+  wire (the align scene's center mode proves the wire path).
+- The mechanism is one line: KayaFlex.sizeThatFits hugs its cross
+  axis for every container but the root (`fillCross: isRoot` — the
+  comment defends the DEFAULT hug, "a row is as tall as its tallest
+  child"). KayaCell proposes the full track and the nested flex
+  refuses it. KayaRender already threads a `flexStretch` flag, but
+  only the textarea consumes it — the container arms never look.
+
+So on this backend `stretch` is INEXPRESSIBLE for nested containers,
+and a grown container's content cannot reach its own track breadth,
+while GTK and WinUI impose allocations natively (DESIGN's
+control-in-track ruling: "already do this natively"). The same bytes
+render differently per backend, and nothing can see it: DESIGN
+recorded that end/stretch "have live classification arms ... until a
+scene earns them" — no scene ever earned stretch, which is how the
+divergence stayed invisible from the align ratification to the first
+capture. The app-side declarations (`grow=1, align="stretch"` on the
+detail column, guests/python/portfolio.py) are committed as the
+CORRECT authoring and currently change nothing on mac.
+
+Needs the maintainer's ruling before code moves, since it is settled
+geometry semantics: (a) does a nested container in a stretch cell —
+or in any grow track — fill the proposed breadth (wire flexStretch
+through to fillCross), or does stretch stay container-local some other
+way; (b) does stretch now earn its scene (the gate that keeps four
+backends honest about it); (c) is the table's natural breadth still
+NOTHING once (a) gives it a track to fill. The dynamic-tables
+milestone lands against this same dashboard, so the ruling shapes it.
+
+RESOLVED 2026-08-22, same day, maintainer-ratified on all three: (a)
+YES — a container ADOPTS the box its parent hands it. SwiftUI's
+KayaFlex fills its cross axis for the root, a stretch cell, or a
+cross-oriented grow track (flexStretch wired through at last, plus
+the per-axis unspecified fallback that kept natural measurement
+honest), and the reader records the stretch frame's box instead of
+the hugged content centered inside it, which was the second half of
+why stretch classified center. The fan-out found the audit HALF
+wrong: Compose had the same defect in its own spelling (Box
+propagates no minimum, so content wrapped inside a correctly sized
+cell — fixed with boxFill at the column, row and table arms), so the
+scene caught two interpreters, not one; GTK and WinUI needed no
+lowering change, and WinUI's classifier needed the TextBlock reading
+(docs/traps.md, "A stretched WinUI TextBlock arranges text-sized").
+(b) YES — align.steps grew the stretch construction (a grown,
+stretched nested column beside a hugging label, authored keys
+column@root/@centered/@fitcol after Haskell's children-first creation
+order proved bare column#0 unstable in a three-column scene;
+check-steps' container lint now refuses #0 beside any second
+container of the kind, self-tested both directions), portfolio.steps
+pins column@detail with the same pair, every classifier answers
+spanning geometry "stretch" FIRST (degenerate against the positional
+predicates; GTK alone keeps baseline before stretch — BASELINE_FILL
+children span too, and the allocated baseline is the discriminator
+stretch cannot fake), and expect_fills on a container checks its OWN
+box against the track its weight earned, with no verdict ever built
+from unrecorded zeros. Every new assertion was watched failing
+against the pre-ruling interpreter before it was touched. (c) NO
+CHANGE — a table's natural breadth stays NOTHING; the declared
+grow+stretch now reaches it. Proven the whole way up the ladder:
+42/42 gates, check-gtk, validate-mac ALL PASS, and the five-lane
+matrix green on every geometry leg (the one red in the closing run
+is save-swiftui, the WATCHED iOS dialog flake, its entry carrying
+the sighting). The two divergences the ruling deliberately left open
+are the next entry.
+
+## Two breadth asymmetries the stretch ruling left open (recorded 2026-08-22)
+KEY: grown leaf control breadth, WinUI crossing carve-out, nested container spans every mode, bezel spans track
+
+Found during the ruling's cross-framework survey and its fan-out; both
+are real cross-backend divergences, both currently invisible to every
+scene, neither blocks anything. Recorded so the next geometry slice
+starts from them instead of rediscovering them.
+
+1. A grown LEAF CONTROL's breadth. GTK stamps Align::Fill on any
+   grower and WinUI's un-stamped main axis is Stretch, so a button
+   with grow=1 draws its BEZEL across the whole track there — while
+   SwiftUI's KayaCell places the natural-width control at the track's
+   start, and Compose's boxFill (added with the ruling) spans the
+   cell, whose content control still measures natural. Same class as
+   the container gap the ruling closed, one tier down. No scene grows
+   a bare control today, so nothing observes it; the stretch scene's
+   construction deliberately used containers and labels. If a scene
+   ever grows a control directly, decide then whether the box or the
+   bezel is the child.
+
+2. WinUI's crossing carve-out (winui/mod.rs, the BREADTH rule): a
+   nested cross-oriented container spans its parent's breadth under
+   EVERY align mode there, because the first start-stamped run broke
+   a grow row that hugged its own natural width (31/69). The other
+   three backends span it only under stretch or a crossing grow
+   track. The divergence is masked by classification degeneracy — a
+   spanning child still satisfies center/start/end — and becomes
+   VISIBLE only in a container whose children are ALL cross-oriented
+   containers under a non-stretch mode: WinUI would classify it
+   "stretch", the rest the declared mode. No scene has that shape.
+   Narrowing the carve-out to grown children would make WinUI match
+   the ruling exactly; do it beside a scene that can see it, not
+   before.
+
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
-KEY: save-jvm AccessDenied, sdcard Documents, storage state
+KEY: save-jvm AccessDenied, sdcard Documents, storage state, straggler
+back, appResumed, KAYA_DIALOG_SEEN, KAYA_DIALOG_UNSEEN, windowCensus,
+dialogReport, wait for adding window timeout
 
 One pool device, one matrix run, 4s-green solo on either side. The
 validation apps hold NO storage permission BY MEASUREMENT

@@ -2,7 +2,9 @@
    and tools/scenes/align.steps for the full rationale. The row's tall
    no-baseline image has its BOTTOM on the baseline (the CSS
    replaced-element rule); that construction is what separates the modes
-   on every platform's control metrics. -}
+   on every platform's control metrics. row#1 hosts the grown, stretched
+   nested column the ruling pins (docs/deferred.md, the nested-container
+   GAP). -}
 
 import qualified Data.ByteString as BS
 import KayaApp
@@ -26,17 +28,36 @@ main = kayaMain $ \app -> do
   buildTx app $ do
     probe <- signal (VStr "align probe")
     base <- signal (VStr "base")
+    anchor <- signal (VStr "anchor")
+    fit <- signal (VStr "fit")
 
     root <-
       column
-        [Align AlignCenter]
-        [ labelBound probe, -- label#0
-          buttonOn "mid" (return ()),
+        [Align AlignStretch, A11yId "root"]
+        [ -- the center trio
+          column
+            [Align AlignCenter, A11yId "centered"]
+            [ labelBound probe, -- label#0
+              buttonOn "mid" (return ()),
+              -- row#0: the baseline trio
+              row
+                [Align AlignBaseline]
+                [ labelBound base, -- label#1
+                  buttonOn "tick" (return ()),
+                  imageBytes tallPng
+                ]
+            ],
+          -- row#1: the stretch pair's host
           row
-            [Align AlignBaseline]
-            [ labelBound base, -- label#1
-              buttonOn "tick" (return ()),
-              imageBytes tallPng
+            []
+            [ labelBound anchor, -- label#2
+              -- grown into the row's leftover, stretched across its
+              -- own breadth
+              column
+                [Grow 1, Align AlignStretch, A11yId "fitcol"]
+                [ labelBound fit, -- label#3
+                  buttonOn "wide" (return ())
+                ]
             ]
         ]
     mount root

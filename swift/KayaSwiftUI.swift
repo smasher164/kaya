@@ -6351,11 +6351,23 @@ private func kayaRunScript(_ script: String) {
                         }
                     }
                     if rects.isEmpty { return "no children" }
+                    // STRETCH FIRST, and alone: spanning geometry is
+                    // DEGENERATE — a child at (0, inner) satisfies the
+                    // start/center/end predicates too, so a stretched
+                    // container could never classify by elimination
+                    // (measured: the multi-match rule answered
+                    // "ambiguous(4)" for every true stretch). All children
+                    // spanning IS stretch; the positional modes classify
+                    // only a container with a non-spanning child, and the
+                    // scene's separability burden (differing naturals)
+                    // keeps luck out, exactly as with center.
+                    if rects.allSatisfy({ abs($0.0) <= 2 && abs($0.1 - inner) <= 2 }) {
+                        return "stretch"
+                    }
                     // Multi-match is ambiguity, and ambiguity fails
                     // loudly — a first-match answer lets an
                     // unseparated scene pass while proving nothing.
                     var matches: [String] = []
-                    if rects.allSatisfy({ abs($0.1 - inner) <= 2 }) { matches.append("stretch") }
                     if rects.allSatisfy({ abs($0.0) <= 2 }) { matches.append("start") }
                     if rects.allSatisfy({ abs((2 * $0.0 + $0.1) - inner) <= 4 }) {
                         matches.append("center")
@@ -6412,12 +6424,34 @@ private func kayaRunScript(_ script: String) {
                             parts[1], isRow ? "row" : "column",
                             isRow ? kayaScene.rows : kayaScene.columns)
                     else { return nil }
+                    // A grown container is a flex CHILD too: its box must span
+                    // the track its weight earned before its children can span
+                    // anything — the dashboard's first photograph caught it
+                    // drawing 148pt of a 346pt track with every model
+                    // observable green (the GAP entry beside dynamic-tables).
+                    // One-sided like the rest, and skipped when no track was
+                    // recorded (the root, or a non-flex parent).
+                    if let track = kayaMainExtents[container.id], track > 0 {
+                        let drawn = kayaDrawnExtents[container.id] ?? 0
+                        if drawn < track - 2 {
+                            return
+                                "draws \(Int(drawn.rounded()))pt of its own \(Int(track.rounded()))pt track"
+                        }
+                    }
                     guard let extent = kayaContainerExtents[container.id], extent > 0 else {
                         return "no container layout recorded"
                     }
-                    let tracks = container.children.map { kayaMainExtents[$0.id] ?? 0 }
+                    let tracks = container.children.map { kayaMainExtents[$0.id] }
+                    // Summing unrecorded tracks as zeros reported "children
+                    // span 8pt of 56pt" about a VStack that recorded nothing
+                    // (watched 2026-08-22) — a sentence may only claim what
+                    // was measured.
+                    if tracks.contains(where: { $0 == nil }), !container.children.isEmpty {
+                        return "no child tracks recorded — not a flex container"
+                    }
                     let span =
-                        tracks.reduce(0, +) + container.spacing * Double(max(0, tracks.count - 1))
+                        tracks.compactMap { $0 }.reduce(0, +)
+                        + container.spacing * Double(max(0, tracks.count - 1))
                     if abs(span - extent) <= 2 { return "" }
                     return "children span \(Int(span.rounded()))pt of \(Int(extent.rounded()))pt"
                 }
@@ -7737,12 +7771,23 @@ struct KayaFlex: Layout {
         let naturalCross = natural.map { cross($0) }.max() ?? 0
         // Fill the MAIN axis from the proposal — that is what creates the free
         // space the growers divide, and what the other backends do — and hug
-        // the cross axis. Filling both made a row claim its column's whole
-        // height, which showed up in the recording as a band of empty space.
-        let mainExtent = proposal.replacingUnspecifiedDimensions(
-            by: CGSize(width: naturalMain, height: naturalMain))
-        let filledMain = vertical ? mainExtent.height : mainExtent.width
-        let filledCross = vertical ? mainExtent.width : mainExtent.height
+        // the cross axis unless [fillCross]: filling it UNCONDITIONALLY made a
+        // row claim its column's whole height (a band of empty space in the
+        // recording), because SwiftUI probes with concrete proposals too.
+        // fillCross is set only where a parent deliberately handed this
+        // container a box — the root, a stretch cell, a cross-oriented grow
+        // track (the 2026-08-22 ruling; the GAP entry beside dynamic-tables).
+        //
+        // THE FALLBACK IS PER-AXIS: an unspecified cross dimension must fall
+        // back to naturalCross, or a fillCross container measured with an
+        // unspecified proposal answers max(naturalCross, naturalMain) and
+        // poisons its parent's natural-size pass.
+        let fallback = vertical
+            ? CGSize(width: naturalCross, height: naturalMain)
+            : CGSize(width: naturalMain, height: naturalCross)
+        let extent = proposal.replacingUnspecifiedDimensions(by: fallback)
+        let filledMain = vertical ? extent.height : extent.width
+        let filledCross = vertical ? extent.width : extent.height
         let crossExtent = fillCross ? max(naturalCross, filledCross) : naturalCross
         return vertical
             ? CGSize(width: crossExtent, height: filledMain)
@@ -8446,30 +8491,40 @@ struct KayaRender: View {
         case kindColumn:
             // Normalized: 8-unit spacing, leading (cross-axis start).
             //
-            // VStack unless a child actually carries a weight. The custom
-            // Layout can express grow and VStack cannot, but it also replaces
-            // SwiftUI's own stack behaviour wholesale — and the point is that
-            // each platform flows like itself. The root always takes the flex
-            // path: it has to FILL its window, and a VStack returns its natural
-            // size however large a frame it is offered, so nothing below it
-            // would ever have leftover space to divide.
+            // VStack unless a child carries a weight OR this column must FILL
+            // the box its parent handed it — the root's window, a stretch
+            // cell, or a cross-oriented grow track (the 2026-08-22 ruling:
+            // three backends impose the box natively and this one must be
+            // told; the GAP entry beside dynamic-tables). A VStack returns
+            // its natural size however large a frame it is offered, so
+            // nothing below it would ever have leftover space to divide.
+            let columnFills =
+                isRoot || flexStretch || (node.grow > 0 && flexVertical == false)
             Group {
                 if !node.tableColumns.isEmpty {
                     // The declared table (docs/tables-plan.md);
                     // KayaTableSurface picks the tier. The row templates
                     // were held to the declared arity by the core.
                     KayaTableSurface(node: node)
-                } else if isRoot || node.children.contains(where: { $0.grow > 0 }) {
-                    KayaFlex(vertical: true, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
+                } else if columnFills || node.children.contains(where: { $0.grow > 0 }) {
+                    KayaFlex(
+                        vertical: true, spacing: node.spacing, nodes: node.children,
+                        fillCross: columnFills
+                    ) {
                         ForEach(node.children) { child in
                             // The cell fills the track KayaFlex proposes; the
-                            // reader on it records the track's geometry. The
-                            // inner frame is the stretch box; every other mode
-                            // places in KayaCell.
+                            // reader records the STRETCH FRAME's box when the
+                            // mode is stretch (child breadth = content
+                            // breadth, content top-leading like GTK's Fill)
+                            // and the content's box otherwise; every other
+                            // mode places in KayaCell.
                             KayaCell(vertical: true, align: node.align) {
                                 KayaRender(
                                     node: child, flexVertical: true,
                                     flexStretch: node.align == alignStretch)
+                                    .frame(
+                                        maxWidth: node.align == alignStretch ? .infinity : nil,
+                                        alignment: .topLeading)
                                     .background(
                                         KayaCellReader(id: child.id, parent: node.id, vertical: true)
                                     )
@@ -8484,10 +8539,16 @@ struct KayaRender: View {
                                 node: child, flexVertical: true,
                                 flexStretch: node.align == alignStretch
                             )
+                            // Frame BEFORE the reader, content top-leading:
+                            // the old order recorded the hugged content
+                            // centered inside the frame, and stretch
+                            // classified center (watched failing 2026-08-22).
+                            .frame(
+                                maxWidth: node.align == alignStretch ? .infinity : nil,
+                                alignment: .topLeading)
                             .background(
                                 KayaCellReader(id: child.id, parent: node.id, vertical: true)
                             )
-                            .frame(maxWidth: node.align == alignStretch ? .infinity : nil)
                         }
                     }
                 }
@@ -8530,15 +8591,24 @@ struct KayaRender: View {
             #endif
         case kindRow:
             // Normalized: 8-unit spacing, top (cross-axis start).
-            // HStack until a weight appears — see the column arm.
+            // HStack until a weight appears or this row must fill its box —
+            // see the column arm.
+            let rowFills =
+                isRoot || flexStretch || (node.grow > 0 && flexVertical == true)
             Group {
-                if isRoot || node.children.contains(where: { $0.grow > 0 }) {
-                    KayaFlex(vertical: false, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
+                if rowFills || node.children.contains(where: { $0.grow > 0 }) {
+                    KayaFlex(
+                        vertical: false, spacing: node.spacing, nodes: node.children,
+                        fillCross: rowFills
+                    ) {
                         ForEach(node.children) { child in
                             KayaCell(vertical: false, align: node.align) {
                                 KayaRender(
                                     node: child, flexVertical: false,
                                     flexStretch: node.align == alignStretch)
+                                    .frame(
+                                        maxHeight: node.align == alignStretch ? .infinity : nil,
+                                        alignment: .topLeading)
                                     .background(
                                         KayaCellReader(id: child.id, parent: node.id, vertical: false)
                                     )
@@ -8553,10 +8623,14 @@ struct KayaRender: View {
                                 node: child, flexVertical: false,
                                 flexStretch: node.align == alignStretch
                             )
+                            // Frame before the reader — the column arm's
+                            // stretch-classified-center fix, one axis over.
+                            .frame(
+                                maxHeight: node.align == alignStretch ? .infinity : nil,
+                                alignment: .topLeading)
                             .background(
                                 KayaCellReader(id: child.id, parent: node.id, vertical: false)
                             )
-                            .frame(maxHeight: node.align == alignStretch ? .infinity : nil)
                         }
                     }
                 }

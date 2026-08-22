@@ -17,6 +17,13 @@
 expect label#0 "Portfolio: $10026.50"
 expect label#1 "Brokerage"
 expect label#2 "Account total: $7163.50"
+# The detail column's geometry, pinned the day the first photograph
+# caught it drawing a third of itself on macOS with every line below
+# green (the GAP entry beside the dynamic-tables milestone): the
+# column spans the track its grow earned, and its children span the
+# column.
+expect_fills column@detail
+expect_aligned column@detail "stretch"
 expect_columns column@positions "Ticker|Qty|Price|Value"
 expect_column_edges column@positions 4
 expect_rows column@positions "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"

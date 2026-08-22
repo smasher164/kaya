@@ -136,7 +136,13 @@ with app.window(title="portfolio"):
                     # A stamped handler's first arguments are the copy's
                     # keys — the keys ARE the noun.
                     kaya.button(bind=row.ticker, on_click=select)
-        with kaya.column():  # column#2 (the detail)
+        # grow: the table's own grow divides THIS column's leftover, and
+        # a hugging column has none; stretch: align defaults to start,
+        # under which the table hugs the widest label's breadth and
+        # clips its columns (tables-plan §8's class: every model
+        # observable green, only pixels disagree).
+        with kaya.column(grow=1, align="stretch") as detail:  # the detail column
+            detail.a11y_id("detail")
             kaya.label(bind=account_name)  # label#1
             positions = kaya.collection(Position)
             # The table IS the For (docs/tables-plan.md); a table is a
