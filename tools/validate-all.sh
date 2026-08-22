@@ -179,7 +179,17 @@ if [ "$MODE" = parallel ]; then
             # The history it extends: 420 since 2026-08-07, when
             # text-ranges added 16 legs (444 -> 460; contended 337s
             # measured thrice against the old 300-at-~240s).
-            linux) budget=450 ;;
+            #
+            # 470 since 2026-08-21, raised in the commit that made the
+            # lane bigger, as this block asks: the tables scene added
+            # 14 legs (seven languages, both protocols), 564 -> 578.
+            # STANDALONE the lane is unchanged in kind — 578 green at
+            # 401s in the first quiet contended matrix after — and the
+            # two busy-host matrices the same day read 452s and 467s
+            # against video decode and a 46% WindowServer, tripping 450
+            # by 2s and 17s with every leg green. 470 keeps the
+            # ~1.25x-over-quiet-contended headroom.
+            linux) budget=470 ;;
             # 480 since 2026-08-03, and the ceiling moved in the commit
             # that made the lane slower, as this block asks. Two
             # measured reasons, neither a change in kind: filedialog_java

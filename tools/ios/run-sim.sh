@@ -1960,10 +1960,11 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # bytes a native tier presents and the bytes a synthesized tier
     # presents are IDENTICAL BY DESIGN, so no assertion this leg could
     # append would name the tier it ran. What it buys is that the native
-    # path executes at all. WHICH TIER EACH DEVICE TOOK IS NOT ASSERTED
-    # ANYWHERE and has to be re-measured by hand whenever the routing
-    # moves: perturb one tier's code, run this suite, and exactly one of
-    # these two legs may redden (measured both ways 2026-08-21).
+    # path executes at all. THE ROUTING is held off-device now by
+    # tools/check-table-tier.sh, so a change to it owes nobody the hand
+    # perturbation. WHAT THIS LEG STILL CANNOT SAY is the device's own
+    # word: that the pad reports .regular here and the phone .compact
+    # above (measured by hand, both ways, 2026-08-21).
     queue_pad_leg run_swiftui_on table-swiftui-pad "$APP" dev.kaya.tableswiftui \
         table-swiftui-pad table table
 

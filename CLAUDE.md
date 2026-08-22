@@ -274,7 +274,15 @@ in docs/deferred.md.
    `KAYA_CAP_AUX_WINDOWS` out of and write the number themselves, which
    is the file-modes trap one surface over, and the three that DO read
    the core's constant (Rust, Go's cgo, Swift's bridging header) are
-   checked for still naming it rather than quietly becoming copiers),
+   checked for still naming it rather than quietly becoming copiers.
+   AND THE TABLE SURFACE SINCE 2026-08-21, `columns` and `on_sort` in
+   all eight: a table is not a KIND but a For with a header, so neither
+   the constructor sweep nor the window-prop sweep can see it while the
+   wire records reach every binding through the generator whether or
+   not a guest can spell either. Python's `on_sort` is a KEYWORD on
+   `columns`, its ambient transaction having no app-level handler
+   surface, which is why the eight patterns are written out rather than
+   derived from one casing rule),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -334,16 +342,48 @@ in docs/deferred.md.
    edge-triggered command rule the sidebar toggle depends on, and the
    REAL NSSplitView walked 1400 -> 700 -> 1400 counting visible
    columns),
+   `tools/check-table-tier.sh` (the table's TIER ROUTING, which no device
+   can assert: decision 5 took the size class out of every table
+   observable, so the native and the synthesized tier present identical
+   bytes and a leg cannot name the one that drew it. The proof used to be
+   a one-arm perturbation with the other device's leg watched staying
+   green, redone by hand whenever the routing moved (docs/traps.md). The
+   rule is a pure function of width and availability now, so the static
+   clause holds KayaTableSurface as the split's ONLY caller and the rule
+   free of `#if` and of the environment — a rule compiled per platform
+   cannot be driven on the mac at all — and reads the two one-line arms of
+   `widthClass`, the environment's single reading, the iOS one most of all
+   because it is the line no host that runs this gate executes. The
+   runtime clause is
+   check-pane-ladder's shape: the interpreter's own source compiled with
+   tools/checks/swiftui-table-tier.swift and run, the whole truth table
+   (mac native, iOS compact synthesized at ANY availability, iOS regular
+   native only at or above TableColumnForEach's floor) plus a REAL
+   KayaTableSurface in an NSWindow with the NSTableView the native tier
+   is made of found in its view tree. What no gate holds is whether a
+   PHYSICAL device reports the size class the simulator did),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the
-   AMBIENT ones check the thread instead, having no handle to
-   invalidate. The failure it guards is SILENT: a write through an
+   AMBIENT ones have no handle to invalidate and check the thread
+   instead. The failure it guards is SILENT: a write through an
    already-submitted transaction vanishes with no error, which Go
    shipped for months because its check lived on two chains and not on
-   the hundred other callsites), `tools/check-verbs.sh` (every harness verb
+   the hundred other callsites.
+   CLOSED WAS NEVER THE WHOLE RULE, and until 2026-08-21 this gate
+   asked the handle bindings for that half alone: a transaction still
+   OPEN, written from a thread the handler spawned, passed every
+   clause, and a background Build opening one of its own reached no
+   chokepoint at all — both race the app thread's model in silence. So
+   Go, Java, C# and Swift now check the thread at that same chokepoint
+   AND at the build entry, in the ambient bindings' own sentence, and
+   the gate's wrong-thread census reads the four bodies rather than
+   grepping the name — `alive()` is also the ASSET handle's liveness
+   check in Java and Swift and comes FIRST in both files. Four
+   self-tests perturb copies, counts printed, red demanded on every
+   run), `tools/check-verbs.sh` (every harness verb
    and wire constant present in BOTH interpreter backends — plus the
    spec hash pinned against bindings/c/kaya_wire.h, the
    byte-compared-verdict rule, the vtable rule, and the

@@ -275,6 +275,16 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_stalled_ms as *mut _,
             },
             NativeMethod {
+                name: "fault".into(),
+                sig: "()[B".into(),
+                fn_ptr: present_fault as *mut _,
+            },
+            NativeMethod {
+                name: "faultWatch".into(),
+                sig: "()V".into(),
+                fn_ptr: present_fault_watch as *mut _,
+            },
+            NativeMethod {
                 name: "emitTextChanged".into(),
                 sig: "([BLjava/lang/String;ZZ)V".into(),
                 fn_ptr: present_emit_text as *mut _,
@@ -483,6 +493,27 @@ extern "system" fn present_stalled_ms(_env: JNIEnv, _class: JClass) -> i64 {
     crate::stall::stalled_for()
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// KayaPresent.fault: the core's latched fault as UTF-8, null for none.
+/// The Compose harness asks once per step, so a transaction that died
+/// inside `Scene::apply` reddens the leg carrying its sentence instead
+/// of aborting the process (crates/kaya/src/fault.rs).
+extern "system" fn present_fault(env: JNIEnv, _class: JClass) -> jni::sys::jbyteArray {
+    let Some(sentence) = crate::fault::latched() else {
+        return std::ptr::null_mut();
+    };
+    match env.byte_array_from_slice(sentence.as_bytes()) {
+        Ok(array) => array.into_raw(),
+        Err(e) => {
+            log::error!("kaya: copying the fault sentence to the JVM failed: {e}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+extern "system" fn present_fault_watch(_env: JNIEnv, _class: JClass) {
+    crate::fault::watch();
 }
 
 extern "system" fn present_emit(env: JNIEnv, _class: JClass, tag: JByteArray) {

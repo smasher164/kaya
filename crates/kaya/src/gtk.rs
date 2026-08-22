@@ -915,16 +915,28 @@ fn table_rows(column: &gtk4::Box) -> Vec<gtk4::Widget> {
 }
 
 /// The label inside a header cell — the widget that actually DRAWS the
-/// title, and the one `column_edges` measures. Reading the button
-/// instead would leave the stylesheet unobserved: with TABLE_CSS lost
-/// the theme's padding puts every title 10px right of its column while
-/// the buttons themselves stay exactly aligned, and no lane could see
-/// it.
+/// title. Reading the button instead would leave the stylesheet
+/// unobserved: with TABLE_CSS lost the theme's padding puts every title
+/// 10px right of its column while the buttons themselves stay exactly
+/// aligned, and no lane could see it.
 fn header_cell_label(cell: &gtk4::Widget) -> Option<gtk4::Label> {
     cell.downcast_ref::<gtk4::Button>()?
         .child()?
         .downcast::<gtk4::Label>()
         .ok()
+}
+
+/// The box `column_edges` measures for ONE cell, header or body: the
+/// widget that draws, unwrapping the button kaya's own header cell wraps
+/// its title in (the measurement above is why the button will not do).
+///
+/// ONE RULE FOR BOTH LINES. The header read the label and the body read
+/// the cell widget, which coincide to the pixel only while every body
+/// cell draws its own content — a table whose cells are buttons would
+/// have compared a button's edge against a header title's, off by the
+/// theme's padding, and the reader would have believed it.
+fn cell_ink(cell: &gtk4::Widget) -> gtk4::Widget {
+    header_cell_label(cell).map_or_else(|| cell.clone(), |l| l.upcast())
 }
 
 /// The title a header cell is DRAWING, and its indicator — read off the
@@ -1317,20 +1329,25 @@ pub(crate) fn ring_doorbell() {
 fn drain_transactions() {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
-        while let Ok(tx) = core.transactions.try_recv() {
-            for op in core.scene.apply(tx) {
-                apply(core, op);
+        // THE UNWIND STOPS HERE: a glib idle source is a C callback, so
+        // a panic out of `Scene::apply`'s app-misuse assertions aborts
+        // rather than reddening the leg (crates/kaya/src/fault.rs).
+        crate::fault::guard("draining a transaction", || {
+            while let Ok(tx) = core.transactions.try_recv() {
+                for op in core.scene.apply(tx) {
+                    apply(core, op);
+                }
             }
-        }
-        // A transaction can be an undo GROUP, and a group is a ledger entry:
-        // Edit>Undo's enablement moved with it.
-        refresh_roles(core);
-        // The rows a declared table is made of arrive, move and leave in
-        // ops of their own, so the table is reconciled once the batch
-        // has landed rather than inside any one of them.
-        for id in core.tables.keys().copied().collect::<Vec<_>>() {
-            reflow_table(core, id);
-        }
+            // A transaction can be an undo GROUP, and a group is a ledger
+            // entry: Edit>Undo's enablement moved with it.
+            refresh_roles(core);
+            // The rows a declared table is made of arrive, move and leave
+            // in ops of their own, so the table is reconciled once the
+            // batch has landed rather than inside any one of them.
+            for id in core.tables.keys().copied().collect::<Vec<_>>() {
+                reflow_table(core, id);
+            }
+        });
     });
 }
 
@@ -8568,17 +8585,28 @@ impl crate::harness::Stage for GtkStage {
         let mut quiet = 0;
         while quiet < 3 && std::time::Instant::now() < settle {
             let applied = Self::on_main_mut(|core| {
-                let mut n = 0usize;
-                while let Ok(tx) = core.transactions.try_recv() {
-                    for op in core.scene.apply(tx) {
-                        apply(core, op);
+                // THE SECOND NOUNWIND BOUNDARY IN THIS FILE, and it is
+                // easy to miss: `on_main_mut` runs this inside
+                // `glib::idle_add`, so it is a C callback exactly like
+                // `drain_transactions`, and this is a SECOND copy of the
+                // drain rather than a call to it (crates/kaya/src/fault.rs).
+                crate::fault::guard("draining a transaction", || {
+                    let mut n = 0usize;
+                    while let Ok(tx) = core.transactions.try_recv() {
+                        for op in core.scene.apply(tx) {
+                            apply(core, op);
+                        }
+                        n += 1;
                     }
-                    n += 1;
-                }
-                if n > 0 {
-                    refresh_roles(core);
-                }
-                n
+                    if n > 0 {
+                        refresh_roles(core);
+                    }
+                    n
+                })
+                // A FAULT IS NOT QUIESCENCE, but it ends the wait the
+                // same way: nothing more will be applied, and the
+                // harness reddens at the next step.
+                .unwrap_or(0)
             });
             quiet = if applied == 0 { quiet + 1 } else { 0 };
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -8947,17 +8975,13 @@ impl crate::harness::Stage for GtkStage {
             };
             // kaya composes this header, so its cells are IN the claim
             // (the native mac path, whose header is NSTableView's own,
-            // clusters cells alone). The header's LABELS, not its
-            // buttons — see header_cell_label.
-            let mut lines = vec![
-                children_of(&header)
-                    .into_iter()
-                    .map(|cell| {
-                        header_cell_label(&cell).map_or(cell, |l| l.upcast())
-                    })
-                    .collect::<Vec<_>>(),
-            ];
-            lines.extend(table_rows(&column).iter().map(children_of));
+            // clusters cells alone). Header and body go through the SAME
+            // unwrap — see cell_ink.
+            let ink = |cells: Vec<gtk4::Widget>| -> Vec<gtk4::Widget> {
+                cells.iter().map(cell_ink).collect()
+            };
+            let mut lines = vec![ink(children_of(&header))];
+            lines.extend(table_rows(&column).iter().map(|row| ink(children_of(row))));
             let target: gtk4::Widget = column.clone().upcast();
             let mut edges: Vec<f64> = Vec::new();
             // The narrowest line decides the span: one line that expands
@@ -9417,7 +9441,8 @@ impl crate::harness::Stage for GtkStage {
         // that callback runs capi::alert_retire. Until it lands the core still
         // holds the alert in its one live slot, so an app that shows its NEXT
         // alert from any other event walks into "alert N is already live" and
-        // the process aborts. Measured 2026-08-10, both protocols: the editor
+        // that alert is never shown — a red leg now, an abort before
+        // (crates/kaya/src/fault.rs). Measured 2026-08-10, both protocols: the editor
         // scene cancels File>New's alert, and 40ms later a close_requested
         // shows the second one. Every other backend's alert_choose is settled
         // when it returns, so the difference is paid here (invariant 1). A

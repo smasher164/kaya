@@ -38,6 +38,17 @@ package kaya
 #cgo linux,!android LDFLAGS: -L${SRCDIR}/../../target-linux/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target-linux/debug
 #cgo android LDFLAGS: -L${SRCDIR}/../../target/aarch64-linux-android/debug -lkaya
 #include <kaya.h>
+#include <stdint.h>
+#ifdef _WIN32
+// Declared rather than included: kernel32 is linked into every process
+// and <windows.h> would pull a world in behind it. DWORD is unsigned
+// long, so this declaration is the one in winbase.h.
+unsigned long __stdcall GetCurrentThreadId(void);
+static uint64_t kaya_go_thread_id(void) { return (uint64_t)GetCurrentThreadId(); }
+#else
+#include <pthread.h>
+static uint64_t kaya_go_thread_id(void) { return (uint64_t)(uintptr_t)pthread_self(); }
+#endif
 */
 import "C"
 
@@ -76,6 +87,28 @@ func init() {
 		runtime.LockOSThread()
 	}
 }
+
+// The app goroutine's OS thread, claimed at Serve and read at every
+// transaction gate (requireAppThread, app.go). Zero until the dispatch
+// loop starts, which is what lets the guest's first Build run on the
+// main goroutine — Python's `_app_thread = None` arm, same rule.
+var appThread atomic.Uint64
+
+// claimAppThread pins the calling goroutine to its OS thread and records
+// that thread as the app's.
+//
+// THE THREAD IS THE GOROUTINE HERE, and only because of the lock: Go
+// exposes no goroutine id, but a locked thread runs no other goroutine,
+// so "same OS thread" answers "same goroutine" exactly. Measured
+// 2026-08-21 against the runtime.Stack spelling of a goroutine id: 1.2us
+// on a shallow stack and 4.0us twelve frames down, against 13ns for this
+// one — and the gate is per RECORD, not per transaction.
+func claimAppThread() {
+	runtime.LockOSThread()
+	appThread.Store(uint64(C.kaya_go_thread_id()))
+}
+
+func threadID() uint64 { return uint64(C.kaya_go_thread_id()) }
 
 var ring C.KayaRingInfo
 

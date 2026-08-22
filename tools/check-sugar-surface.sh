@@ -264,6 +264,79 @@ if [ "$cap_rc" -ne 0 ]; then
     status=1
 fi
 
+# --- THE TABLE SURFACE, in all eight -------------------------------
+#
+# A TABLE IS NOT A KIND — it is a For with a header — so neither the
+# constructor sweep above nor the window-prop sweep below can see it,
+# and the wire records (TX 45 set_column_headers, occurrence 19
+# sort_requested) reach every binding through the GENERATOR whether or
+# not a guest has any way to spell them. That gap is what this clause
+# closes: `columns` declares the header at the For, `on_sort` answers
+# its clicks with the 0-based column (docs/tables-plan.md).
+#
+# PYTHON'S on_sort IS A KEYWORD, not a registration call: its ambient
+# transaction has no app-level handler surface, so `columns(...,
+# on_sort=f)` carries it. Same observable semantics, different spelling
+# — which is why the eight patterns are written out rather than derived
+# from one casing rule.
+want_table() {
+    if ! grep -qE "$4" "$2"; then
+        echo "check-sugar-surface: $1 has no sugar for the table's '$3'" \
+            "(wanted /$4/ in $2)"
+        status=1
+    fi
+}
+
+# check_table_columns <snake_case> <PascalCase> <camelCase>
+check_table_columns() {
+    local snake="$1" pascal="$2" camel="$3"
+    want_table rust    crates/kaya/src/app.rs              "$snake" "pub fn ${snake}\\("
+    want_table python  bindings/python/kaya/__init__.py    "$snake" "def ${snake}\\(self"
+    want_table go      bindings/go/app.go                  "$snake" "func \\(tx \\*Tx\\) ${pascal}\\("
+    want_table csharp  bindings/csharp/KayaApp.cs          "$snake" "public void ${pascal}\\("
+    want_table java    bindings/java/dev/kaya/KayaApp.java "$snake" "public void ${camel}\\("
+    want_table swift   bindings/swift/KayaApp.swift        "$snake" "func ${camel}\\("
+    want_table haskell bindings/haskell/KayaApp.hs         "$snake" "^${camel} ::"
+    want_table ocaml   bindings/ocaml/kaya_app.ml          "$snake" "^let ${snake} "
+}
+check_table_columns columns Columns columns
+
+# check_table_on_sort <snake_case> <PascalCase> <camelCase>
+check_table_on_sort() {
+    local snake="$1" pascal="$2" camel="$3"
+    # Rust's is the For builder's, whose generic parameter sits between
+    # the name and the arguments.
+    want_table rust    crates/kaya/src/app.rs              "$snake" "pub fn ${snake}(<[^>]*>)?\\("
+    want_table python  bindings/python/kaya/__init__.py    "$snake" "def columns\\(self.*${snake}="
+    want_table go      bindings/go/app.go                  "$snake" "func \\(a \\*App\\) ${pascal}\\("
+    want_table csharp  bindings/csharp/KayaApp.cs          "$snake" "public void ${pascal}\\("
+    want_table java    bindings/java/dev/kaya/KayaApp.java "$snake" "public void ${camel}\\("
+    want_table swift   bindings/swift/KayaApp.swift        "$snake" "func ${camel}\\("
+    want_table haskell bindings/haskell/KayaApp.hs         "$snake" "^${camel} ::"
+    want_table ocaml   bindings/ocaml/kaya_app.ml          "$snake" "^let ${snake} "
+}
+check_table_on_sort on_sort OnSort onSort
+
+# THEIR BUILT-IN NEGATIVE TESTS, one per clause and for the reason the
+# range verbs have one: sixteen patterns that can only pass are sixteen
+# patterns nobody will notice have rotted. Each runs in a subshell so
+# its status=1 dies with it.
+table_fake=$(check_table_columns kaya_fake_cols KayaFakeCols kayaFakeCols 2>&1 \
+    | grep -c "has no sugar for the table's")
+if [ "$table_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($table_fake/8 table-columns patterns" \
+        "fired for a declaration that exists nowhere)"
+    exit 1
+fi
+table_fake=$(check_table_on_sort on_kaya_fake OnKayaFake onKayaFake 2>&1 \
+    | grep -c "has no sugar for the table's")
+if [ "$table_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($table_fake/8 table-on_sort patterns" \
+        "fired for a handler that exists nowhere)"
+    exit 1
+fi
+unset table_fake
+
 # The built-in negative test: a kind that exists nowhere must fail in
 # every binding, or the patterns themselves have rotted. The fake runs
 # inside $( ), so its `status=1` dies with that subshell and the real

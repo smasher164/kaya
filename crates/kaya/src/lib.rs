@@ -7,6 +7,10 @@ mod app;
 // compiles on all five targets and every one can be handed a name.
 mod assets;
 mod brand;
+// The nounwind boundaries' one report path (docs/deferred.md, "A GUARD
+// THAT ABORTS THE PROCESS IS THE WRONG SHAPE"). Ungated for the reason
+// assets is: every target has frames that cannot unwind.
+mod fault;
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[cfg(feature = "harness")]
 mod harness;

@@ -259,6 +259,46 @@ for name, text in (
             f"broken picker"
         )
 
+# --- The step-failed line: THREE harnesses, one spelling. ------------
+# `failures` is named only by the verdict, which is printed LAST, so an
+# abort before it takes the whole list — the log shows a crash with no
+# reason. The rule is that a failure is printed the moment it is final,
+# with the TEXT interpolated: a fixed sentence names no cause and is
+# printed for every one. Two of the three carried this for milestones
+# while KayaCompose.kt did not, and only eyes ever compared them
+# (docs/deferred.md).
+for name, text, interp in (
+    ("KayaSwiftUI.swift", swift, r"\\\("),
+    ("KayaCompose.kt", kotlin, r"\$"),
+    ("harness.rs", harness, r"\{"),
+):
+    if not re.search("KAYA_HARNESS: step-failed " + interp, text):
+        fail(
+            f"{name} never prints `KAYA_HARNESS: step-failed <text>` with the "
+            f"failure text interpolated — a step's failure reaches the log only "
+            f"if it is printed when it becomes final, not saved for the verdict"
+        )
+
+# AND IN THE WRAPPER'S FINAL-FAILURE BRANCH, not merely somewhere in the
+# file. The interpreters print this line twice for different reasons —
+# KayaSwiftUI.swift's clip-breach arm is one — so presence alone is
+# satisfied by a copy that runs on another path, and the branch that
+# matters is the one AFTER the retry gives up. harness.rs has no
+# retryStep (its `poll` retries internally) and is held by the clause
+# above alone.
+for name, text in (("KayaSwiftUI.swift", swift), ("KayaCompose.kt", kotlin)):
+    retries = [m.end() for m in re.finditer(r"retryStep = true", text)]
+    prints = [m.start() for m in re.finditer("KAYA_HARNESS: step-failed ", text)]
+    if not retries:
+        fail(f"{name} has no `retryStep = true` — the bounded-retry wrapper this "
+             f"gate reads is gone; re-point the clause at whatever replaced it")
+    elif not any(p > retries[-1] for p in prints):
+        fail(
+            f"{name} prints `KAYA_HARNESS: step-failed` only BEFORE the retry "
+            f"wrapper gives up — the branch that runs when an expect's deadline "
+            f"lands has none, so a failing step's text still dies with an abort"
+        )
+
 # --- Wire constants the interpreters mirror privately. ---------------
 # APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP: all of them. VALUE: only the
 # types reachable through the spec's PROPS PropKinds (the scene's prop

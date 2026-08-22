@@ -1386,71 +1386,117 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
-- **A GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE, and this is the
-  second instance.** Measured 2026-08-10 on mac: under an environmental
-  slowdown the file picker missed the step budget, the scene proceeded
-  and requested a second dialog, and the one-dialog-per-process guard
-  (`file_dialog_shown`, crates/kaya/src/capi.rs:1916 as of 2026-08-19;
-  :1855 as of 2026-08-17; filed as :1732 — the number has now moved
-  twice, so GREP THE FUNCTION NAME rather than trusting it) panicked in
-  a non-unwinding context —
-  so the leg died with `fatal runtime error: failed to initiate panic`
-  and no verdict list, rather than reporting the steps that failed. The
-  Windows IME-refusal abort (recorded above, 2026-08-09) is the same
-  class from a different direction.
-  The rule worth adopting: a guard that catches an APP MISUSE should
-  redden the leg with its sentence intact; only a genuinely
-  unrecoverable state should abort. Both instances converted a legible
-  failure into a bare exit code, and in both the surviving message named
-  a cause three removes from the real one. Fix candidates: make these
-  panics unwind-safe at the FFI boundary so the harness can collect
-  them, or have the harness treat an abort as a leg failure carrying
-  the last steps it saw.
+- ~~**A GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE, and this is the
+  second instance.**~~ — CLOSED 2026-08-21: the rule adopted, both
+  instances converted, and every other guard of the shape with them. Measured 2026-08-10 on mac:
+  under an environmental slowdown the file picker missed the step budget, the
+  scene proceeded and requested a second dialog, and the one-dialog-per-process
+  guard (`file_dialog_shown`, crates/kaya/src/capi.rs — GREP THE FUNCTION NAME,
+  the line number has moved three times) panicked in a non-unwinding context,
+  so the leg died with `fatal runtime error: failed to initiate panic` and no
+  verdict list.
+  THE RULE NOW LIVES IN crates/kaya/src/fault.rs: `report` latches a sentence,
+  `guard` stops an unwind at a nounwind boundary, `latched` is a
+  peek the harnesses poll. `file_dialog_shown` and `alert_shown` answer `false`
+  and scene.rs DROPS the op; the two retire twins report; and `Scene::apply`
+  itself runs under `fault::guard` in capi's `kaya_next_commands`, in winui's
+  and gtk's `drain_transactions`, and in winui's `deliver_undo` — which is what
+  puts scene.rs's ~100 app-misuse assertions on the reddening path, the
+  `destroy_window(0)` arm docs/traps.md records as unreachable-but-fatal in
+  nine guests among them.
+  AND THE OTHER HALF OF THE CONTRACT SURVIVED IT, by the maintainer's
+  ruling the same day: `report` FORKS on `fault::watch()` — each of the
+  three script runners declares itself watched before its first step
+  (`fault::tests::every_harness_runner_watches` holds all three to the
+  call), and an UNWATCHED process — a real app misusing the API, or the
+  bindings' corpse-reading children (bindings/go/internal/rootprobe) —
+  still dies legibly, sentence first, exit 1. Without the fork the five
+  Go wall families hung forever on a pump that reported and kept
+  waiting: measured, three children parked in wait4, one orphaned past
+  its grandparent's death. With it the identity wall passes in 0.6s,
+  children dying in 10ms with their sentences.
+  The sentence reaches the verdict list on all four backends: harness.rs for
+  GTK and WinUI, `kaya_fault` plus a `fault` slot on `KayaHostApi` for SwiftUI
+  mac and iOS, `KayaPresent.fault()` for Compose. All three harnesses also
+  RETRACT the in-flight attempt, because `poll` ends the moment a fault latches
+  and the read it was holding is therefore not final; harness.rs gained that on
+  2026-08-21 after a watched negative showed its verdict leading with
+  `label#0 reads "0 matches", wanted "3 matches"` and naming the real cause
+  second — this entry's own complaint, one layer down.
+  THE WALL IS RUNG 1, not a gate anyone must remember: `fault::tests` is a
+  source census over capi.rs, scene.rs, winui/mod.rs and gtk.rs read through
+  `include_str!` (so it cannot read a stale copy, and it censuses the
+  Windows-only body on every platform), and it runs in
+  `cargo test -p kaya --features harness`.
+  Watched negative, mac: `file_dialog_retire` perturbed to hold the slot, so the
+  filedialog scene's second picker meets a live first one. The leg answers
+  `KAYA_SELFTEST: FAILED (kaya: file dialog 1 is already live — one per
+  process; show the next from the first's result handler)` instead of dying.
+  KEY: fault.rs, fault::guard, fault::watch, nounwind boundary, rootprobe exit
 
+- ~~**DEFECT (rare, Windows) — the IME refusal path can ABORT the process.**~~
+  — FIXED 2026-08-21. Measured 2026-08-09 in the ranges scene on WinUI: the
+  scene starts a composition, asks for a selection, and the core CORRECTLY
+  refuses it (`select_range refused: ime_composition`, the ratified D4 rule) —
+  and then an apply op into the RichEditBox failed with
+  `HRESULT(0x8000FFFF) "Catastrophic failure"`, which panicked at
+  `drain_transactions`' `apply(core, op).expect(…)` inside a function that
+  cannot unwind, so the process aborted (exit 0xC0000409) rather than failing
+  the leg. Its twin on the undo path, `deliver_undo`'s
+  `.expect("kaya: applying an undo op failed")`, had the same shape.
+  BOTH `.expect`s ARE GONE. Each site now names the op and reports through
+  crates/kaya/src/fault.rs — `kaya: applying <op-head> failed: <hresult>` — and
+  each body runs under `fault::guard`, so the leg REDDENS carrying the
+  harness's step list. A third instance in the same function, the menu-chrome
+  rebuild's `.expect`, went with them. Watched negatives on the windows lane
+  force `E_UNEXPECTED` at each site: `ranges_rust` answers
+  `KAYA_SELFTEST: FAILED (kaya: applying HighlightRanges { … } failed: … (0x8000FFFF))`
+  and `undo_rust` answers the same for `applying undo op SetProp { … }`, both
+  with `EXIT=1`.
+  THE FIRST QUESTION THIS ENTRY ASKED IS ANSWERED, AND THE ANSWER IS NO: the
+  refusal does NOT leave the rich edit control in a state the next op cannot
+  survive, so there is nothing for the refusal to restore. 20 unperturbed runs
+  of `ranges_rust` passed with the refusal on every one and zero apply faults;
+  a probe driving the next op (`reveal_range`) into the same control with the
+  composition still live passed 5/5, and a probe adding the heaviest write
+  (`highlight_ranges` — a CharacterFormat pass over the whole story) passed
+  5/5. Reading the scene's own step list says where the failing op could have
+  come from instead: the refused `select_range` is the LAST apply into that
+  control, so the next one can only have arrived from teardown, where the
+  composition's forced finalisation raises TextChanged, the guest folds
+  `Msg::Edited`, and an apply into a XAML tree in rundown answers
+  `E_UNEXPECTED`. That is a race with shutdown, not a poisoned control.
+  HONEST LIMIT: the abort itself did not reproduce in 25 runs, which is not
+  enough to call a 1-in-5 gone. What is true either way is that a recurrence
+  now names the op and the HRESULT instead of destroying the evidence.
 
-- **DEFECT (rare, Windows) — the IME refusal path can ABORT the
-  process.** Measured 2026-08-09 in the ranges scene on WinUI: the
-  scene starts a composition, asks for a selection, and the core
-  CORRECTLY refuses it (`select_range refused: ime_composition`, the
-  ratified D4 rule) — and then the NEXT apply op into the RichEditBox
-  fails with `HRESULT(0x8000FFFF) "Catastrophic failure"`, which
-  panics at `drain_transactions`' `apply(core, op).expect(…)`
-  (crates/kaya/src/winui/mod.rs:1227 as of 2026-08-19; :1318 as of
-  2026-08-17; filed as :830 — moved twice, so grep the `.expect` string
-  rather than trusting the number) inside a function that
-  cannot unwind, so the process aborts (exit 0xC0000409) rather than
-  failing the leg.
-  IT HAS A TWIN, found 2026-08-19 and unmentioned until now:
-  crates/kaya/src/winui/mod.rs:7683 `apply(core, op).expect("kaya:
-  applying an undo op failed")` is the same shape on the undo path, in
-  the same non-unwinding position. Whatever fixes one fixes both, and a
-  fix that moves only the first leaves the abort reachable from undo. Frequency: 1 abort in 5 observed runs of that leg
-  (2 passes before, 2 passes on demand after). Not caused by the Go
-  work — that milestone touches no Rust and no WinUI, and the leg
-  passed on this lane before and after.
-  The refusal is right; what follows it is not safe. Two things to
-  establish when this is picked up: whether the refusal leaves the
-  rich edit control in a state the next op cannot survive (and if so,
-  the refusal should restore it), and whether ANY apply failure on
-  that path should abort — an op that fails should redden a leg, not
-  kill the process, and the non-unwinding panic is what converts one
-  into the other.
-
-
-- **stall-compose is timing-sensitive and fails ~1 run in 11** (measured
-  2026-08-07: 10 passes, 1 failure, then 2 more passes on demand; the
-  failure arrived the same run the android lane grew 55 -> 77 legs with
-  the Go suite). The scene deliberately makes the app thread fall
-  behind and asserts the stall watchdog notices; when the emulator has
-  a fast pass the thread KEEPS UP and the leg fails saying exactly
-  that. So the leg is a race against the machine rather than a check of
-  the code, and it can also PASS for the wrong reason — a genuinely
-  broken watchdog would look identical to a slow pass. Worth reshaping
-  so the stall is forced rather than hoped for (make the guest block
-  deterministically, or assert the watchdog's report rather than its
-  timing), which would also make the failure legible.
-
-
+- ~~**stall-compose is timing-sensitive and fails ~1 run in 11**~~ (measured
+  2026-08-07) — FIXED 2026-08-21 by taking the assertion off the absence
+  that ends. The arithmetic, measured this time rather than guessed: a
+  stall is pending work untouched for KAYA_STALL_MS (1000ms), the pending
+  work is the harness's SECOND click, and so the leg passed only while
+  gap(click#0 -> click#1) + 1000ms stayed under the guests' 2500ms block.
+  That gap is the harness's own two round trips through the UI thread and
+  it grows with the machine: 404-595ms idle, 1823/2542/2840ms under 24
+  burners, and the 2542ms run reproduced the ledger's failure exactly —
+  the ping landing after the block had already ended, so nothing was ever
+  pending while the app thread was away. tools/scenes/stall.steps now
+  asks expect_stall ONCE, of the wedge, whose handler blocks for a day so
+  the click it strands is pending for as long as the assertion needs; the
+  bounded block keeps the two claims that never raced, that it came back
+  with nothing dropped and that the watchdog took its reading back.
+  Verbs unchanged, so no interpreter moved. Reshaped scene under 32
+  burners: 5/5 PASS including gaps of 2751ms and 2889ms, both guaranteed
+  reds before. BOTH directions watched failing with the watchdog
+  perturbed (Verdict::Stalled storing nothing; a pending/claimed pair
+  blind to the consumer), each rebuilt and run as a real leg. Beside it,
+  KayaCompose.kt's kayaAwaitAnswer no longer measures its silent timeout
+  in ITERATIONS — `repeat(60) { Thread.sleep(5) }` is "300ms" that
+  measured 2400ms under load — which was the larger half of that gap.
+  Full account in docs/traps.md, "A scene that asserts a BOUNDED absence
+  is racing the machine".
+  KEY: stall.steps, expect_stall, expect_no_stall, kayaAwaitAnswer,
+  KAYA_STALL_MS, stall-compose, stall-jvm, stall-go
 - ~~**The Swift iOS bundle is not self-contained**~~ (measured 2026-08-07
   while landing Go on iOS, by a negative test aimed at something else)
   — FIXED 2026-08-19, both halves, in tools/ios/run-sim.sh's swift
@@ -1492,17 +1538,32 @@ count, so the saving is measured rather than assumed.
   written.
 
 
-- **DEFECT — the handle bindings' transaction liveness check tests
-  `closed` but not the THREAD** (bindings/go/app.go,
-  bindings/csharp/KayaApp.cs; found 2026-08-07 by the mobile-threading
-  research, not by a gate). tools/check-tx-liveness.sh's own doctrine
-  says the HANDLE bindings refuse a closed transaction at a write
-  chokepoint while the AMBIENT ones check the thread instead — but a
-  handle binding used from the wrong thread with an OPEN transaction
-  passes the check. A C# `async` handler resuming on a pool thread
-  walks straight into it. This is a desktop defect today, not a mobile
-  one. Fix: the handle bindings check both; guard: extend
-  check-tx-liveness with the wrong-thread clause and watch it fail.
+- ~~**DEFECT — the handle bindings' transaction liveness check tests
+  `closed` but not the THREAD**~~ (FIXED 2026-08-21: Go, Java, C# and
+  Swift call a `requireAppThread` at the SAME write chokepoint that
+  tests `closed` AND at the build entry — the second site is not
+  redundant, since a background `Build` whose body writes nothing
+  reaches no chokepoint at all, and that is the shape an async
+  continuation which does not know about `Post` actually takes. The
+  dispatch loop claims the thread on the way in; the claim is LAZY
+  (zero until then), matching python's `_app_thread = None` arm, so
+  the guest's opening build on the main thread is still allowed. All
+  four print the ambient bindings' own sentence, naming the post as
+  the way out. Rust needs nothing: `Tx` is `!Send`/`!Sync` and the
+  compile_fail doctest pins it. GO HAD NO THREAD IDENTITY TO READ and
+  the spelling was decided by measurement — a goroutine id parsed out
+  of `runtime.Stack` costs 1.2us shallow and 4.0us twelve frames
+  down against 13ns for `pthread_self()` through cgo, and the gate is
+  per RECORD — so `App.Serve` now calls `runtime.LockOSThread()` and
+  the OS thread answers for the goroutine exactly. Behaviour pinned in
+  bindings/go/app_test.go's TestATransactionRefusesAnotherGoroutine
+  and guests/csharp/AbortCheck.cs's WrongThread, both watched failing.
+  GUARD: tools/check-tx-liveness.sh's wrong-thread census — five facts
+  per handle binding read out of EXTRACTED BODIES rather than grepped
+  by name, because `alive()` is also the ASSET handle's liveness check
+  in Java and Swift and comes first in both files; it refuses a
+  verdict if the walk and the table disagree, and four self-tests
+  perturb copies with counts printed on every run.)
 - Two smaller findings from the same research: CPython's
   `PyGILState_Ensure`-during-finalization hang would compound the known
   exit hang at crates/kaya/src/harness.rs:1832-1854 if Python ever runs
@@ -1806,29 +1867,24 @@ count, so the saving is measured rather than assumed.
   reproduced 8/10 at 20:00 and 0/10 on the SAME BUILD an hour later.
   It comes back under load.
 
-- **The step-failed line exists in TWO of the three harnesses**
+- ~~**The step-failed line exists in TWO of the three harnesses**~~
   (filed 2026-08-03 when it was one; crates/kaya/src/harness.rs got it
-  2026-08-10 in `47bd2ab`, so KayaCompose.kt is the one still without
-  it and everything below applies to Kotlin alone.) A step's final
-  failure text is now printed the moment
-  it becomes final — `KAYA_HARNESS: step-failed <text>`, in
-  swift/KayaSwiftUI.swift's bounded-retry wrapper — so evidence survives
-  an abort that runs before the verdict line. It was bought by the iOS
-  picker session, where a scene-designed panic
-  (crates/kaya/src/capi.rs's one-dialog-per-process guard) destroyed the
-  failure list carrying the host driver's self-diagnosing sentence, and
-  the log showed only a panic and a timeout.
-  The same wrapper shape, and the same exposure, existed in
-  android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt and in
-  crates/kaya/src/harness.rs (which serves GTK and WinUI): any panic
-  before the verdict loses the list the same way. Mirroring is a
-  four-line edit in each; both were left out of that session only
-  because each carries its own gate to re-run (check-compose +
-  check-detekt for Kotlin, the harness unit tests for Rust) and the lane
-  under repair was iOS. THE RUST HALF WAS DONE 2026-08-10 by the editor
-  slice; KOTLIN IS WHAT IS LEFT. Keep the spelling byte-identical — the
-  three harnesses are compared by eye far more often than by tool.
-
+  2026-08-10 in `47bd2ab`) — FIXED 2026-08-21: KayaCompose.kt's
+  bounded-retry wrapper prints `KAYA_HARNESS: step-failed <text>` on the
+  same `Log.i("kaya", ...)` writer as its step trace, byte-identical to
+  the other two, and the three are no longer compared by eye —
+  tools/check-verbs.sh holds them level in two clauses: the line is
+  present in all three WITH the failure text interpolated (a fixed
+  sentence names no cause), and in the two interpreters at least one such
+  print sits AFTER the last `retryStep = true`, i.e. in the branch that
+  runs when the retry gives up. That second clause is the one with teeth:
+  KayaSwiftUI.swift prints the same line from its clip-breach arm, so
+  presence alone was satisfiable by a copy on a path the wrapper never
+  takes. Four watched negatives, all red (deleting the Kotlin line,
+  replacing its interpolation with a fixed sentence, deleting ONLY the
+  Swift wrapper's copy, deleting the Rust line). Seen firing on a real
+  android leg: the line lands one step before the verdict, carrying the
+  same sentence.
 - **Follow-ups from the WinUI chord-drop fix (2026-08-03).** The race:
   chords were dispatched over TWO routes split by leaf kind (79dcd1d),
   and the XAML-accelerator route PERMANENTLY DROPS a chord arriving
@@ -4458,12 +4514,29 @@ remembering. Open, per backend and surface:
   exists so a stamped copy's sort cannot drop silently even while the
   core refuses nested headers.)
 - Residuals from the 2026-08-21 breadth fan-out, none load-bearing
-  today: GTK's column_edges reads header LABELS but cell WIDGETS, an
-  asymmetry a future non-label cell would meet first; the WinUI
+  today: ~~GTK's column_edges reads header LABELS but cell WIDGETS, an
+  asymmetry a future non-label cell would meet first~~ (FIXED
+  2026-08-21: one `cell_ink` in crates/kaya/src/gtk.rs unwraps a cell
+  that wraps its title in a button, applied to the header line and to
+  every body line, so both sides measure the widget that DRAWS.
+  Reading the BUTTON on both sides was the other way to be uniform
+  and was rejected ON MEASUREMENT: the GTK slice's CSS-class negative
+  puts every title 10px inside its column WHILE THE BUTTONS STAY
+  EXACTLY ALIGNED, so a button read passes straight through that
+  defect. It changes no number today, body cells being labels, which
+  is why the evidence is the two GTK-slice negatives re-run — both
+  printed their recorded sentences to the pixel — followed by a full
+  green lane.); the WinUI
   resize hook is LayoutUpdated (SizeChanged is a vtable pad in the
-  generated bindings), made idempotent by a width stamp; the iOS tier
-  routing (KayaTableSurface) is held by no gate — docs/traps.md's
-  no-discriminator entry says what to redo if it moves; and a lane
+  generated bindings), made idempotent by a width stamp; ~~the iOS tier
+  routing (KayaTableSurface) is held by no gate~~ (GATED 2026-08-21:
+  tools/check-table-tier.sh — the routing extracted to the pure
+  `kayaTableTier(width:dynamicColumns:)`, a static clause holding
+  KayaTableSurface as the only constructor of either tier view, and a
+  runtime probe (tools/checks/swiftui-table-tier.swift, the
+  pane-ladder shape) driving the whole truth table, self-tested red on
+  every run. What remains unheld is only whether a physical device
+  reports the size class the simulator did); and a lane
   run from a NESTED WORKTREE has two bring-up hazards the slice
   agents worked around rather than fixed — deploy-win.sh's SSH mux
   ControlPath under $ROOT/target exceeds the 104-byte AF_UNIX limit
@@ -4477,9 +4550,58 @@ remembering. Open, per backend and surface:
   allocates the For id eagerly and the chain reads
   `items.rows(tx).columns(...).on_sort(&msgs, Msg::Sort)` with `.id()`
   for the handler's re-declaration — the guest moved onto it and the
-  guest-floor exemption died); and a census clause holding
+  guest-floor exemption died); and ~~a census clause holding
   `columns`/`on_sort` present in all eight bindings, which no gate
-  demands yet.
+  demands yet~~ (CLOSED 2026-08-21: it is tools/check-sugar-surface.sh's
+  table clause, beside the range-verb and capability clauses whose shape
+  it copies. A TABLE IS NOT A KIND — a For with a header — so neither
+  the constructor sweep nor the window-prop sweep could ever see it,
+  while the wire records reach every binding through the generator
+  whether or not a guest can spell them. Eight patterns are written out
+  per name rather than derived from one casing rule, because python's
+  `on_sort` is a KEYWORD on `columns` — its ambient transaction has no
+  app-level handler surface — and rust's carries a generic parameter.
+  Two built-in fake-name self-tests must fire 8/8 or the gate exits, and
+  four watched negatives on copies of the real bindings each named the
+  binding that had lost its spelling. The template zone is deliberately
+  out of the claim: the core refuses nested headers, so `columns` is a
+  live-zone declaration and Go's `OnSortNode` has no sibling in the
+  other seven.)
+
+## Dynamically created tables — HIGH PRIORITY (maintainer, 2026-08-21)
+KEY: nested tables, template-zone set_column_headers, per-copy sort, dynamic table instances, forcing app
+
+The maintainer ranked this high the day the tables fan-out closed, in
+plain words: tables whose EXISTENCE is dynamic. A hand-placed table
+with fully dynamic rows works everywhere; what the core fences off —
+loudly, at declaration time (scene.rs's SetColumnHeaders template-zone
+refusal) — is a table created once per data item: "for every account,
+a positions table," where three accounts mean three tables and each
+copy needs its own working sort arrows. Nothing half-works; the shape
+is simply refused until built.
+
+Why it is a milestone and not a fix: the set_column_headers record
+addresses its target by bare widget id — there is no spelling for
+"the table inside copy #2." The occurrence half (sort_requested) was
+built with template-id-plus-key-path addressing from day one, so the
+click-to-guest route exists; the DECLARATION half needs the record to
+grow path addressing, which moves the spec hash and regenerates all
+eight bindings. Then: all four backends render headers per stamped
+copy, the harness verbs learn to target a specific copy, all eight
+languages grow the template-zone columns/on_sort spelling (the
+template-zone census will rightly demand both zones), and a scene
+pins per-copy sort state end to end. Rough size: the Compose slice
+plus its fan-out.
+
+THE TRIGGER IS A FORCING APP, and the maintainer picked it the same
+day: A PORTFOLIO DASHBOARD — an accounts overview where each account
+owns its own sortable positions table (data-driven table instances
+dead center), price-history charts that will force the CANVAS widget,
+and a transactions view that will force ROW VIRTUALIZATION. Data is
+synthetic and deterministic by design, so the scenes stay honest the
+way the editor's did. Still open before the first slice: the app's
+guest language and name (the editor's slot was Go; maintainer's
+call), and the build order across the three features it forces.
 
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state
@@ -4646,6 +4768,14 @@ ghost stays quiet through enough contended matrices to clear the old
 a delivered-NULL NPE) are cousins at best, so a recurrence of THOSE
 shapes is not this ghost returning.
 
+RELATED SIGHTING 2026-08-21, matrix4: save-COMPOSE (not jvm) failed
+with "no save dialog live; DocumentsUI is showing []" — the dialog
+never presented at all, a different face from the AccessDenied one but
+the same scene under the same kind of load (three lane duration
+ceilings tripped the same run; the host was visibly busy). Solo and in
+the next matrix the leg passes. If this face recurs, instrument
+DocumentsUI presentation latency before blaming the scene.
+
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
 
@@ -4679,6 +4809,16 @@ mechanism rather than the gesture: savepress and choose both went 3
 exits as soon as the sheet goes. If a sheet survives SIX rounds, stop
 raising the cap — that sim's runloop is not coming back, and the leg
 should fail into the pool-health question instead.
+SECOND SIGHTING 2026-08-21, matrix4: editor-go's save sheet ate SIX
+presses of Save ("the save dialog was still up after 6 presses"), on a
+host measurably busier than usual (WindowServer 46%, video decode
+active; the same matrix tripped three lane duration ceilings and
+android's save-compose lost its dialog the same run). The new
+step-failed line carried the driver's full self-diagnosis into the log
+— coordinates tapped, what the sheet offered — which is exactly the
+evidence the first sighting lacked. Still consistent with
+contention-starved sheet animation; still no code suspect.
+
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
 

@@ -1228,29 +1228,60 @@ fn defer_role_refresh() {
 fn drain_transactions() {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
-        while let Ok(tx) = core.transactions.try_recv() {
-            for op in core.scene.apply(tx) {
-                apply(core, op).expect("kaya: applying an op failed");
+        // THE UNWIND STOPS HERE. Every route in is a XAML callback —
+        // the DispatcherQueue handler above, the WNDPROC — and none of
+        // them can unwind: a panic out of `Scene::apply`'s app-misuse
+        // assertions, or the `.expect`s this block used to carry,
+        // aborted with exit 0xC0000409 and no verdict list
+        // (crates/kaya/src/fault.rs; docs/deferred.md).
+        crate::fault::guard("draining a transaction", || {
+            while let Ok(tx) = core.transactions.try_recv() {
+                for op in core.scene.apply(tx) {
+                    let what = op_head(&op);
+                    if let Err(e) = apply(core, op) {
+                        crate::fault::report(format!(
+                            "kaya: applying {what} failed: {e}"
+                        ));
+                        return;
+                    }
+                }
             }
-        }
-        // ONE coalesced menu-chrome rebuild per drain, from the
-        // post-user mirror. Quiet-armed as a belt: constructing and
-        // stamping native items must never read as user activation
-        // (the echo doctrine).
-        if core.menus_touched {
-            core.menus_touched = false;
-            core.apply_quiet
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            let rebuilt = rebuild_menus(core);
-            core.apply_quiet
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            rebuilt.expect("kaya: rebuilding the menu chrome failed");
-        }
-        // ONE coalesced table pass per drain, same shape: a table's row
-        // set, its cells' texts and its declared titles can all have
-        // moved, and the column tracks are computed from all three.
-        sync_tables(core);
+            // ONE coalesced menu-chrome rebuild per drain, from the
+            // post-user mirror. Quiet-armed as a belt: constructing and
+            // stamping native items must never read as user activation
+            // (the echo doctrine).
+            if core.menus_touched {
+                core.menus_touched = false;
+                core.apply_quiet
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                let rebuilt = rebuild_menus(core);
+                core.apply_quiet
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Err(e) = rebuilt {
+                    crate::fault::report(format!(
+                        "kaya: rebuilding the menu chrome failed: {e}"
+                    ));
+                    return;
+                }
+            }
+            // ONE coalesced table pass per drain, same shape: a table's
+            // row set, its cells' texts and its declared titles can all
+            // have moved, and the column tracks are computed from all
+            // three.
+            sync_tables(core);
+        });
     });
+}
+
+/// The head of an op's `Debug`, for a fault sentence. TRUNCATED because
+/// a whole one carries the document a `SetText` holds; the variant name
+/// and the ids in front of it are what name the failure.
+fn op_head(op: &ApplyOp) -> String {
+    let text = format!("{op:?}");
+    match text.char_indices().nth(120) {
+        Some((i, _)) => format!("{}…", &text[..i]),
+        None => text,
+    }
 }
 
 /// The minimal TextBox template: text editing needs only the
@@ -5602,8 +5633,8 @@ fn file_dialog_show(
             //
             // Modality is not lost by this. kaya already allows exactly
             // one live file dialog per process (capi::file_dialog_shown
-            // panics on a second), which is the guarantee the vocabulary
-            // actually makes.
+            // refuses a second and the op is dropped), which is the
+            // guarantee the vocabulary actually makes.
             let _ = hwnd;
             dialog.Show(None)?;
 
@@ -8294,8 +8325,24 @@ fn core_walk(core: &mut CoreState, redo: bool) {
 /// overtake the restore. Here the ops are applied outright rather than
 /// queued, because this backend IS the pump and holds the scene.
 fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence) {
-    for op in ops {
-        apply(core, op).expect("kaya: applying an undo op failed");
+    // THE TWIN of drain_transactions' guard, and it needs its own: this
+    // is reached from a menu click and from an accelerator, both XAML
+    // callbacks that cannot unwind. A fix that moved only the drain
+    // would leave the abort reachable from undo (docs/deferred.md).
+    let applied = crate::fault::guard("applying an undo op", || {
+        for op in ops {
+            let what = op_head(&op);
+            if let Err(e) = apply(core, op) {
+                crate::fault::report(format!("kaya: applying undo op {what} failed: {e}"));
+                return false;
+            }
+        }
+        true
+    });
+    if applied != Some(true) {
+        // A HALF-RESTORED WINDOW REPORTS NOTHING: the occurrence would
+        // tell the app its model was put back, which is now untrue.
+        return;
     }
     // The chrome an undo restored may have changed what the roles can do
     // (a restored row, a moved focus), and the item that fired is about
@@ -14704,12 +14751,13 @@ impl crate::harness::Stage for WinUiStage {
         // `Hide()` and `Invoke()` only ASK. `ShowAsync`'s completion is
         // what runs capi::alert_retire, and until it lands the one live
         // slot is still taken — so an app that shows its NEXT alert from
-        // any other path walks into "alert N is already live" and the
-        // process aborts. MEASURED 2026-08-10, the editor leg: File>New's
-        // alert is cancelled and the window's close_requested shows the
-        // second one one millisecond later. That abort took the whole
-        // run's verdict with it, and the scene before it had already
-        // passed `expect_alert` against the FIRST dialog, still up.
+        // any other path walks into "alert N is already live" and that
+        // alert is never shown. MEASURED 2026-08-10, the editor leg:
+        // File>New's alert is cancelled and the window's close_requested
+        // shows the second one one millisecond later; the scene before
+        // it had already passed `expect_alert` against the FIRST dialog,
+        // still up. The guard ABORTED then, taking the run's verdict
+        // with it; it reddens the leg now (crates/kaya/src/fault.rs).
         //
         // THE OBSERVABLE IS capi's SLOT, not this backend's `live_alert`,
         // and the difference is what makes the wait possible at all: the

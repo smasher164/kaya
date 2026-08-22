@@ -120,12 +120,13 @@ GATES = {
                         "guests/swift", "swift"],
     "java-typecheck": ["bindings/java", "bindings/java-desktop",
                        "guests/java", "guests/java-desktop"],
-    # The four ARTIFACT gates (see ARTIFACT_GATES): sources here, the
+    # The five ARTIFACT gates (see ARTIFACT_GATES): sources here, the
     # built bytes below, both in the key.
     "check-abort": ["crates", "bindings", "guests"],
     "check-wheel": ["crates", "bindings/python"],
     "check-empty-child": ["crates", "swift", "android"],
     "check-pane-ladder": ["crates", "swift"],
+    "check-table-tier": ["crates", "swift"],
     # The fixture tools/check-keyed.sh exercises. A REAL entry on
     # purpose: a self-test stamping under a live gate's name would make
     # the next KAYA_FAST run skip that gate.
@@ -149,6 +150,7 @@ ARTIFACT_GATES = {
     "check-wheel": ["target/debug/libkaya.dylib"],
     "check-empty-child": ["target/debug/libkaya.dylib"],
     "check-pane-ladder": ["target/debug/libkaya.dylib"],
+    "check-table-tier": ["target/debug/libkaya.dylib"],
 }
 
 

@@ -1418,6 +1418,43 @@ pub extern "C" fn kaya_stalled_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// The latched fault's sentence — the whole thing, in UTF-8, written
+/// into `out` and truncated to `cap`; the return value is the length the
+/// sentence actually has, so a caller that got a short buffer can size
+/// one and ask again. `kaya_asset_why_not`'s shape exactly.
+///
+/// ZERO MEANS NO FAULT, which is what makes this a poll rather than a
+/// failure path: the interpreter harnesses ask once per step, and a
+/// scene whose transaction died inside `Scene::apply` then reddens
+/// carrying that sentence instead of waiting out every remaining
+/// expect (crates/kaya/src/fault.rs).
+///
+/// A PEEK, NOT A TAKE: a harness asks again after its last step, and a
+/// consuming read would let that second look report a green leg.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fault(out: *mut u8, cap: usize) -> usize {
+    let Some(sentence) = crate::fault::latched() else {
+        return 0;
+    };
+    let bytes = sentence.as_bytes();
+    if !out.is_null() && cap > 0 {
+        let n = bytes.len().min(cap);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
+}
+
+/// The harness's watch declaration (crates/kaya/src/fault.rs): the
+/// SwiftUI and Compose script runners call this before their first
+/// step, so a fault reddens the leg instead of ending the process.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_fault_watch() {
+    crate::fault::watch();
+}
+
 /// Direct-access setup: the occurrence ring's memory layout. Pointers
 /// remain valid for the life of the process.
 #[unsafe(no_mangle)]
@@ -1944,16 +1981,25 @@ static ALERT_LIVE: Mutex<Option<u64>> = Mutex::new(None);
 /// here — the one state both ends share.
 static FILE_DIALOG_LIVE: Mutex<Option<u64>> = Mutex::new(None);
 
-/// Scene side: a show_file_dialog was applied.
-pub(crate) fn file_dialog_shown(dialog: crate::protocol::FileDialogId) {
+/// Scene side: a show_file_dialog was applied. Answers whether the slot
+/// took it — `false` means a second one was asked for while the first
+/// was live, the op is DROPPED, and the fault carries the sentence.
+///
+/// A REPORT AND NOT A PANIC: this runs inside `Scene::apply`, which
+/// every backend drives from a frame that cannot unwind, so the panic
+/// this used to raise aborted the process and took the harness's
+/// failure list with it (crates/kaya/src/fault.rs).
+pub(crate) fn file_dialog_shown(dialog: crate::protocol::FileDialogId) -> bool {
     let mut live = FILE_DIALOG_LIVE.lock().unwrap();
     if let Some(id) = *live {
-        panic!(
+        crate::fault::report(format!(
             "kaya: file dialog {id} is already live — one per process; \
              show the next from the first's result handler"
-        );
+        ));
+        return false;
     }
     *live = Some(dialog.0);
+    true
 }
 
 /// Validate the dialog id against the live slot and free it — the one
@@ -1964,8 +2010,16 @@ pub(crate) fn file_dialog_retire(dialog: u64) {
     let mut live = FILE_DIALOG_LIVE.lock().unwrap();
     match *live {
         Some(id) if id == dialog => *live = None,
-        Some(id) => panic!("kaya: file dialog result for {dialog} but {id} is the live one"),
-        None => panic!("kaya: file dialog result for {dialog} but none is live"),
+        // THE SLOT IS LEFT ALONE on a mismatch: the live dialog is
+        // still live, and freeing it on the strength of a wrong id
+        // would let the next show_file_dialog through as if nothing
+        // had happened.
+        Some(id) => crate::fault::report(format!(
+            "kaya: file dialog result for {dialog} but {id} is the live one"
+        )),
+        None => crate::fault::report(format!(
+            "kaya: file dialog result for {dialog} but none is live"
+        )),
     }
 }
 
@@ -1985,17 +2039,22 @@ pub(crate) fn file_dialog_resolved(dialog: u64, files: Vec<crate::protocol::Pick
     );
 }
 
-/// Scene side: a show_alert was applied. Panics if one is already live —
-/// a guest error (show the next alert from the first's result handler).
-pub(crate) fn alert_shown(alert: crate::protocol::AlertId) {
+/// Scene side: a show_alert was applied. Answers whether the slot took
+/// it — `false` means one was already live, the op is DROPPED, and the
+/// fault carries the sentence (the guest error is: show the next alert
+/// from the first's result handler). The file-dialog twin's note says
+/// why this reports rather than panics.
+pub(crate) fn alert_shown(alert: crate::protocol::AlertId) -> bool {
     let mut live = ALERT_LIVE.lock().unwrap();
     if let Some(id) = *live {
-        panic!(
+        crate::fault::report(format!(
             "kaya: alert {id} is already live — one alert per process; \
              show the next from the first's result handler"
-        );
+        ));
+        return false;
     }
     *live = Some(alert.0);
+    true
 }
 
 /// Whether an alert holds the one live slot RIGHT NOW.
@@ -2027,10 +2086,14 @@ pub(crate) fn alert_retire(alert: u64) {
     let mut live = ALERT_LIVE.lock().unwrap();
     match *live {
         Some(id) if id == alert => *live = None,
-        Some(id) => panic!(
+        // The slot survives a mismatch, exactly as file_dialog_retire's
+        // does and for the same reason.
+        Some(id) => crate::fault::report(format!(
             "kaya: alert result for {alert} but alert {id} is the live one"
-        ),
-        None => panic!("kaya: alert result for {alert} but no alert is live"),
+        )),
+        None => crate::fault::report(format!(
+            "kaya: alert result for {alert} but no alert is live"
+        )),
     }
 }
 
@@ -2836,11 +2899,26 @@ pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
         let Ok(tx) = rx_slot.as_ref().unwrap().recv() else {
             return 0;
         };
-        let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+        // POISON-TOLERANT because the guard below exists: a caught
+        // panic drops this lock while unwinding, and an `unwrap` on
+        // the next call would then panic OUTSIDE the guard — the abort
+        // this whole path removes, one call later.
+        let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
         // The queue leads: those ops were made under this same lock,
         // before this transaction could be resolved.
         let mut ops = std::mem::take(&mut *PRESENTATION_PENDING.lock().unwrap());
-        ops.extend(scene_slot.as_mut().unwrap().apply(tx));
+        // THE UNWIND STOPS HERE. This is an `extern "C"` frame, so a
+        // panic out of Scene::apply — every app-misuse assertion in
+        // scene.rs — is `fatal runtime error: failed to initiate panic`
+        // and the leg dies with no verdict list (crates/kaya/src/fault.rs).
+        // The faulted transaction's ops are dropped and the pump waits
+        // for the next one; the harness reads the latch and reddens.
+        let Some(resolved) = crate::fault::guard("applying a transaction", || {
+            scene_slot.as_mut().unwrap().apply(tx)
+        }) else {
+            continue;
+        };
+        ops.extend(resolved);
         if !ops.is_empty() {
             break ops;
         }

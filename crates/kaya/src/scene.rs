@@ -1519,8 +1519,11 @@ impl Scene {
                     // ContentDialog throws on a second per root), and the
                     // result that frees the slot arrives on the
                     // presentation side, so the slot lives in capi.
-                    crate::capi::alert_shown(spec.alert);
-                    out.push(ApplyOp::PresentAlert(spec));
+                    // Refused means not presented — the picker twin's
+                    // note two arms down says why.
+                    if crate::capi::alert_shown(spec.alert) {
+                        out.push(ApplyOp::PresentAlert(spec));
+                    }
                 }
                 TxOp::ShowFileDialog(spec) => {
                     assert!(
@@ -1541,8 +1544,12 @@ impl Scene {
                     // process-global, freed by a result that arrives on
                     // the presentation side, so the slot lives in capi's
                     // singleton.
-                    crate::capi::file_dialog_shown(spec.dialog);
-                    out.push(ApplyOp::PresentFileDialog(spec));
+                    // REFUSED MEANS NOT PRESENTED: the slot answers, and
+                    // a second picker over a live one never reaches a
+                    // backend that could not stack two modals anyway.
+                    if crate::capi::file_dialog_shown(spec.dialog) {
+                        out.push(ApplyOp::PresentFileDialog(spec));
+                    }
                 }
                 TxOp::SetBrandAccent { seed, light, dark } => {
                     // SET ONCE, BEFORE THE FIRST MOUNT. Brand is
@@ -1731,8 +1738,9 @@ impl Scene {
                     // of either kind per process, so a guest that shows a
                     // save panel over a live picker is refused here rather
                     // than presenting two modals a platform cannot stack.
-                    crate::capi::file_dialog_shown(spec.dialog);
-                    out.push(ApplyOp::PresentSaveDialog(spec));
+                    if crate::capi::file_dialog_shown(spec.dialog) {
+                        out.push(ApplyOp::PresentSaveDialog(spec));
+                    }
                 }
                 TxOp::Copy(clip) => {
                     // AN EMPTY CLIP IS A MISTAKE, not a way to clear:

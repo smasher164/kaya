@@ -6,7 +6,7 @@ package kaya
 // every platform's accent read-back lies (docs/styling-plan.md). Two
 // surfaces answer instead — the WIRE BYTES decoded from the queued
 // record, and THE REAL ROOT, driven end-to-end in a re-exec because a
-// root refusal is an abort that crosses an extern "C" frame and nothing
+// root refusal ends the process (fault.rs's unwatched exit) and nothing
 // in this process can recover it. A headless queue never reaches a
 // declare-time wall.
 

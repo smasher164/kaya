@@ -948,6 +948,32 @@ final class KayaApp {
     // and queues the wire delta in the same call, so reads (items, count) are
     // exactly the writes.
     static var ambient: KayaApp?
+    // The app thread, claimed by dispatchLoop and read at every
+    // transaction gate (requireAppThread). Nil until then, which is what
+    // lets the guest's opening build run on the main thread before run().
+    static var appThread: Thread?
+
+    /// Called by dispatchLoop on the way in: from here on that thread IS
+    /// the app thread.
+    static func claimAppThread() { appThread = Thread.current }
+
+    /// The other half of the rule KayaAppTx.alive states: OPEN is not
+    /// enough, a transaction also belongs to the app thread. `closed`
+    /// cannot see a Task continuation writing through a transaction that
+    /// is still open, nor a background build opening one of its own —
+    /// both race the app thread's mirror.
+    /// tools/check-tx-liveness.sh holds it.
+    static func requireAppThread() {
+        guard let owner = appThread else { return }
+        let here = Thread.current
+        if here !== owner {
+            preconditionFailure(
+                "kaya: a transaction belongs to the app thread — this is thread \(here), "
+                    + "the app thread is \(owner). To mutate from a background thread use "
+                    + "app.post, which runs your function as a transaction over there.")
+        }
+    }
+
     var currentTx: KayaAppTx?
     var signalMirrors: [UInt64: KayaValue] = [:]
     var signalDeps: [UInt64: [(KayaAppTx) -> Void]] = [:]
@@ -1224,6 +1250,7 @@ final class KayaApp {
 
     /// Run `build` with a fresh transaction and submit it atomically.
     func build<R>(_ build: (KayaAppTx) throws -> R) rethrows -> R {
+        KayaApp.requireAppThread()
         let tx = KayaAppTx(app: self)
         do {
             let out = try build(tx)
@@ -1442,6 +1469,9 @@ final class KayaApp {
     }
 
     private func dispatchLoop() {
+        // From here on this thread IS the app thread, and every
+        // transaction gate compares against it.
+        KayaApp.claimAppThread()
         var record: UnsafePointer<UInt8>?
         while true {
             // Posted work first, then the ring. Draining at the TOP is
@@ -1764,6 +1794,7 @@ final class KayaAppTx {
             !closed,
             "kaya: transaction is over — a tx is only usable inside the build or handler "
                 + "that created it; to mutate from a background thread use app.post")
+        KayaApp.requireAppThread()
     }
 
     /// Called by build on the way out, on every path.

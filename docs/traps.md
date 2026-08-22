@@ -2247,7 +2247,9 @@ directory, and then nothing at all — no Show trace, no stage error. A
 call that neither returns nor errors is a block, and the only thing
 Show() waits on is its owner. Passing None fixes it, and modality is not
 lost: kaya already allows exactly one live file dialog per process, and
-capi::file_dialog_shown panics on a second.
+capi::file_dialog_shown refuses a second — it reports through
+crates/kaya/src/fault.rs and the op is dropped, so the leg reddens
+instead of aborting.
 
 TWO MORE THINGS THAT COST A CYCLE EACH. windows-bindgen OMITS A METHOD
 whose parameter types are outside the enabled feature set, so
@@ -3672,7 +3674,11 @@ Measured while writing the text editor, not reasoned about: a perturbed
 run reached that arm and died with the assertion plus `fatal runtime
 error: failed to initiate panic, error 5` — the non-unwinding-context
 abort recorded under "A GUARD THAT ABORTS THE PROCESS IS THE WRONG
-SHAPE" (docs/deferred.md), so the leg has no verdict list either.
+SHAPE" (docs/deferred.md), so the leg has no verdict list either
+— until 2026-08-21, when `Scene::apply` moved under `crate::fault::guard`
+and that arm began reddening the leg instead. The nine guests still carry
+`destroy_window(0)` and no scene still takes the arm, so the exposure is
+unchanged; only the failure mode is.
 
 THE LIVE EXPOSURE IS NINE FILES: every port of the dirty scene — one
 per language, guests/rust/dirty.rs and guests/c/dirty.c among them —
@@ -4101,8 +4107,113 @@ regular arm; the table pad leg has no such literal available, because
 the design deliberately made the tiers indistinguishable. When a
 design removes the discriminator on purpose, the only remaining proof
 that a device took the arm you think it took is a ONE-ARM PERTURBATION
-with the other device's leg watched staying green — and that has to be
-redone by hand whenever the tier routing changes, because no gate
-holds it. The routing lives in KayaTableSurface; if it moves, redo the
-two perturbations from the iOS slice report before believing the pad
-leg exercises the native Table.
+with the other device's leg watched staying green — — GATED SINCE 2026-08-21: tools/check-table-tier.sh compiles the
+interpreter's own source with a probe that drives the extracted
+routing function through its whole truth table, and a static clause
+holds KayaTableSurface as the routing's only caller. What no gate can
+hold is only whether a PHYSICAL device reports the size class the
+simulator did; the one-arm perturbation remains the tool for that
+question alone.
+
+## A scene that asserts a BOUNDED absence is racing the machine, not checking the code (2026-08-21)
+
+`tools/scenes/stall.steps` used to assert `expect_stall` twice: once
+against the guests' 2500ms `block`, and once against the `wedge` that
+never returns. The first one failed about 1 run in 11 on the android
+lane, saying "the app thread is keeping up" — which reads as a broken
+watchdog and is not one.
+
+THE ARITHMETIC. A stall is PENDING WORK the consumer has not touched for
+`KAYA_STALL_MS` (1000ms). The pending work is the harness's second
+click, so the leg passes only while
+
+    gap(click#0 -> click#1) + 1000ms  <  the guest's block
+
+and that gap is the harness's own two round trips through the UI thread.
+IT GROWS WITH THE MACHINE. Measured on the compose leg: 404-595ms idle,
+518-718ms under 6 burners, and 1823/2542/2840ms under 24 — the 2542ms
+run failed, with the ping landing after the block had already ended, so
+no occurrence was ever pending while the app thread was away and there
+was nothing for the watchdog to report.
+
+NO HARNESS-SIDE FIX REACHES IT. Bounding `kayaAwaitAnswer` by wall clock
+(it was `repeat(60) { Thread.sleep(5) }` — "300ms" that measured 2400ms
+under load) moved the mean gap from 2401ms to 1770ms and no further: the
+two UI-thread round trips are what a click genuinely costs. Latching the
+reading on the harness side does not help either, because in the failing
+case the episode NEVER HAPPENS and there is nothing to latch.
+
+THE SHAPE THAT WORKS: assert the report only of an absence that never
+ends. The wedge blocks for a day, so the click it strands stays pending
+for as long as the assertion needs and there is no window to miss. The
+bounded block keeps the two claims that do not race — it came back and
+nothing was dropped (`expect label#0 "pinged"`), and the watchdog took
+its reading back (`expect_no_stall`). Reshaped scene under 32 burners:
+5/5 PASS, including gaps of 2751ms and 2889ms that were guaranteed reds
+before. Both directions watched failing with the watchdog perturbed —
+`Verdict::Stalled` storing nothing gives "the app thread is keeping up",
+and a `pending`/`claimed` pair blind to the consumer gives "the stall
+watchdog reports 7391ms of unclaimed occurrences about an app that is
+answering this scene".
+
+DO NOT PUT `expect_stall` BACK ON THE BLOCK. The only way to make a
+bounded absence assertable is to stop it being a wall-clock sleep — the
+guest would have to end the block on the watchdog's own report, which
+needs a guest-visible stall reading in all 8 bindings (the C floor
+already exports `kaya_stalled_ms`).
+
+## Restoring a perturbed file with its MTIME leaves the perturbation in the artifact (2026-08-21)
+
+The perturb-restore doctrine says restore from a saved copy, never from
+git. `shutil.copy2` is the obvious way to make that copy, and it is the
+wrong one: it carries the metadata, so the restore puts the ORIGINAL
+mtime back, cargo compares it against the fingerprint written by the
+PERTURBED build, decides nothing changed, and skips the rebuild. The
+tree is clean, `git status` is empty, the source hash matches — and the
+binary still holds the perturbation. The next leg then measures the
+perturbed build and is believed.
+
+Caught by `tools/build-id.sh --verify` inside the build step, which is
+the wall nobody can walk around: "STALE — carries 43093e27a31a1da0, but
+core in this tree is b1893d607e72a221". Without it the "restored
+baseline" run would have been the perturbed one.
+
+Restore with `shutil.copyfile` plus `os.utime(path, None)`, and keep the
+verify in every perturb loop that rebuilds anything.
+
+## A deep worktree makes deploy-win.sh unreachable, and the error names ssh
+
+`tools/deploy-win.sh` multiplexes over
+`ControlPath=$ROOT/target/.ssh-mux-%r@%h`, and `$ROOT` comes from `$0`. From
+a `.claude/worktrees/wf_<id>` checkout that socket path is EXACTLY 104 bytes —
+one over the unix-socket limit — and every ssh in the lane refuses with
+`ControlPath too long (… >= 104 bytes)`. The deploy exits 255 immediately after
+`TIMING build`, i.e. after a full cross-compile, having never touched the VM,
+and nothing in the message mentions the worktree.
+
+`$0` decides `$ROOT`, so the fix moves no file: symlink the worktree somewhere
+short and invoke the script through it —
+`ln -s <worktree> /tmp/kw && nix develop -c /tmp/kw/tools/deploy-win.sh …`
+(socket path 42 bytes). `probe=<exe>` confirms the route in seconds.
+Measured 2026-08-21.
+
+## GNU grep in a UTF-8 locale cannot read a windows lane log
+
+A fault or panic sentence that carries a Rust `Debug` dump reaches the windows
+console through a codepage that mangles non-ASCII — kaya's `op_head` truncates
+with `…`, which arrives as an invalid byte. `file` then calls the log
+`Non-ISO extended-ASCII`, and:
+
+  grep -aq "applying .* failed: .*0x8000FFFF" win.log   -> rc=1  (the line IS there)
+  LC_ALL=C grep -aq "applying .* failed: .*0x8000FFFF"  -> rc=0
+
+`.` will not match an invalid byte in a UTF-8 locale, so a pattern SPANNING the
+mangled character misses a line you can read plainly; `-a` does not help,
+because the problem is the locale, not the binary classification. (ugrep, which
+the interactive shell wraps with `-I`, skips such a file outright — so the same
+command can answer differently in a script and at a prompt.)
+
+EVERY read of a windows-lane log is `LC_ALL=C grep -a`. Measured 2026-08-21,
+when a watched negative's own verdict logic printed "DID NOT FIRE" twice for a
+negative that had fired perfectly — the "a guard you have never seen fail"
+failure arriving from the checking side.

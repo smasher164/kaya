@@ -251,7 +251,7 @@ func runIdentityTrap(t *testing.T, trap string) (string, error) {
 	return string(out), err
 }
 
-// Each case runs in a re-exec because a root refusal is an abort, not a
+// Each case runs in a re-exec because a root refusal ends the process, not a
 // Go panic. The ALIVE cases carry as much weight as the dead ones, and
 // `full` more than either: it is the only place that reads the
 // declaration as a LOWERING will get it.

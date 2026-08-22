@@ -20,8 +20,10 @@ import "unsafe"
 // returns the number of command bytes it produced.
 //
 // IT RETURNS ONLY WHEN THE ROOT ALLOWED THE TRANSACTION. A refusal
-// aborts the process with the root's own sentence on stderr and nothing
-// in Go can recover it, so tests that use this run each case in a child
+// ENDS THE PROCESS — exit 1 with the root's own sentence on stderr
+// (crates/kaya/src/fault.rs: unwatched processes die legibly; only a
+// harness's watch turns a fault into a red leg) — and nothing in Go
+// can recover it, so tests that use this run each case in a child
 // process and read the corpse.
 //
 // It BLOCKS until a transaction arrives, and keeps blocking if the one

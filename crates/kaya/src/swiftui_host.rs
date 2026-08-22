@@ -205,6 +205,18 @@ pub struct KayaHostApi {
     /// A column-header click: the sort tag delivered with SET_COLUMNS,
     /// verbatim, plus the 0-based column index (docs/tables-plan.md).
     pub emit_sort_requested: unsafe extern "C" fn(*const u8, usize, u32),
+    /// The latched fault's sentence into a caller buffer, returning its
+    /// true length; 0 for none. A READ, riding the vtable for the
+    /// reason `stalled_ms` does. The harness asks once per step, so a
+    /// transaction that died inside `Scene::apply` reddens the leg
+    /// carrying its sentence instead of aborting the process
+    /// (crates/kaya/src/fault.rs).
+    pub fault: unsafe extern "C" fn(*mut u8, usize) -> usize,
+    /// The harness's watch declaration (crates/kaya/src/fault.rs):
+    /// called once at the top of the script runner, before any step,
+    /// so an unwatched process still dies legibly while a watched leg
+    /// reddens.
+    pub fault_watch: extern "C" fn(),
 }
 
 unsafe extern "C" {
@@ -312,6 +324,8 @@ pub(crate) fn run() -> i32 {
         note_native_undo: crate::capi::kaya_note_native_undo,
         stalled_ms: crate::capi::kaya_stalled_ms,
         emit_sort_requested: crate::capi::kaya_emit_sort_requested,
+        fault: crate::capi::kaya_fault,
+        fault_watch: crate::capi::kaya_fault_watch,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

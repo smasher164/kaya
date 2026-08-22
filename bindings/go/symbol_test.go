@@ -117,7 +117,7 @@ func runSymbolTrap(t *testing.T, trap string) (string, error) {
 	return string(out), err
 }
 
-// Each case runs in a re-exec because a root refusal is an abort, not a
+// Each case runs in a re-exec because a root refusal ends the process, not a
 // Go panic: it crosses an extern "C" frame and nothing here can recover
 // it.
 //

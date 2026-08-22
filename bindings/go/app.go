@@ -465,6 +465,34 @@ func (tx *Tx) alive() {
 	if tx == nil || tx.closed {
 		panic("kaya: transaction is over — a Tx is only usable inside the Build or handler that created it; to mutate from a background thread use App.Post")
 	}
+	requireAppThread()
+}
+
+// requireAppThread is the other half of the rule alive() states: OPEN is
+// not enough, the transaction also belongs to the app thread. A closed
+// flag cannot see a goroutine spawned inside a handler writing through
+// the transaction the handler is still holding, nor a background Build
+// opening one of its own — both race the app goroutine's model.
+//
+// The three ambient bindings check exactly this at their build entry and
+// spell it the same (python's _require_app_thread, ocaml's
+// require_app_thread, haskell's requireAppThread); the handle bindings
+// check it here AND at Build, since a Build with no records reaches no
+// chokepoint. tools/check-tx-liveness.sh holds both halves.
+func requireAppThread() {
+	owner := appThread.Load()
+	if owner == 0 {
+		// The dispatch loop has not claimed it yet: the guest's opening
+		// Build, on the main goroutine, before Run.
+		return
+	}
+	if here := threadID(); here != owner {
+		panic(fmt.Sprintf(
+			"kaya: a transaction belongs to the app thread — this is thread %d, "+
+				"the app thread is %d. To mutate from a background thread use "+
+				"App.Post, which runs your function as a transaction over there.",
+			here, owner))
+	}
 }
 
 // mirror is emit's read-side sibling: the same liveness check plus the
@@ -481,6 +509,7 @@ func (tx *Tx) mirror(c Collection) *instance {
 // restores the mirror — then the panic continues to the caller. The tx
 // boundary rolls back and propagates; surviving is dispatch's job.
 func (a *App) Build(fn func(*Tx)) {
+	requireAppThread()
 	if a.journal != nil {
 		panic("kaya: Build inside Build — one transaction at a time")
 	}
@@ -3606,6 +3635,9 @@ func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
 //
 // A guest never calls this directly on a platform where Run works.
 func (a *App) Serve() {
+	// From here on this goroutine IS the app thread, and every
+	// transaction gate compares against it (requireAppThread).
+	claimAppThread()
 	// The one fact Android's attach cannot learn any other way: this
 	// guest reached its dispatch loop. bindings/go/android.go's app
 	// goroutine is the only reader, telling "the app ended" from "the

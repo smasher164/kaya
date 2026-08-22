@@ -5,7 +5,7 @@ package kaya
 // `go test dev.kaya/bindings/go` on every desktop lane.
 //
 // The re-exec shape is identity_test.go's, for its reason: a root
-// refusal is an abort, not a Go panic — it crosses an extern "C" frame,
+// refusal ends the process, not a Go panic (fault.rs's unwatched exit),
 // so nothing in this process can recover it.
 
 import (

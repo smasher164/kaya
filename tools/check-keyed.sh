@@ -158,7 +158,7 @@ if len(gates) < 10:
 
 status = 0
 artifact_gates = ("check-abort", "check-wheel", "check-empty-child",
-                  "check-pane-ladder")
+                  "check-pane-ladder", "check-table-tier")
 for name in artifact_gates:
     g = gates.get(name)
     if g is None:

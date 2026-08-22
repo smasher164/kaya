@@ -2689,6 +2689,7 @@ public final class KayaApp {
                                 + "handler that created it; to mutate from a background thread "
                                 + "use App.post");
             }
+            requireAppThread();
         }
 
         // How to undo this transaction's model edits: a snapshot per
@@ -4842,6 +4843,7 @@ public final class KayaApp {
      * without static fields.
      */
     public <R> R build(java.util.function.Function<Tx, R> build) {
+        requireAppThread();
         Tx tx = new Tx();
         ambient = this;
         currentTx = tx;
@@ -5095,6 +5097,9 @@ public final class KayaApp {
      * Android, after KayaRing.attach set the core up).
      */
     public void dispatchLoop() {
+        // From here on this thread IS the app thread, and every
+        // transaction gate compares against it.
+        claimAppThread();
         // The stale-artifact guard: this binding was generated from one
         // spec revision; the loaded library must speak the same one.
         if (KayaRing.specHash() != KayaWire.SPEC_HASH) {
@@ -5108,6 +5113,42 @@ public final class KayaApp {
         } catch (Throwable t) {
             // invokeExact declares Throwable; nothing here throws in practice.
             throw new RuntimeException(t);
+        }
+    }
+
+    /**
+     * The app thread, claimed by {@link #dispatchLoop} and read at every
+     * transaction gate. Null until then, which is what lets the guest's
+     * opening build run on the main thread before run().
+     */
+    static volatile Thread appThread;
+
+    /** Called by {@link #dispatchLoop} on the way in: from here on that
+     * thread IS the app thread. */
+    static void claimAppThread() {
+        appThread = Thread.currentThread();
+    }
+
+    /**
+     * The other half of the rule {@code Tx.alive} states: OPEN is not
+     * enough, a transaction also belongs to the app thread. {@code
+     * closed} cannot see a thread spawned inside a handler writing
+     * through the transaction the handler still holds, nor a background
+     * build opening one of its own — both race the app thread's model.
+     * tools/check-tx-liveness.sh holds it.
+     */
+    static void requireAppThread() {
+        Thread owner = appThread;
+        if (owner == null) {
+            return;
+        }
+        Thread here = Thread.currentThread();
+        if (here != owner) {
+            throw new IllegalStateException(String.format(
+                    "kaya: a transaction belongs to the app thread — this is thread %s, "
+                            + "the app thread is %s. To mutate from a background thread use "
+                            + "App.post, which runs your function as a transaction over there.",
+                    here.getName(), owner.getName()));
         }
     }
 

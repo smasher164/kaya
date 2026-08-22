@@ -9,6 +9,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 static class AbortCheck
 {
@@ -64,6 +65,65 @@ static class AbortCheck
                 return true;
         }
         return false;
+    }
+
+    // OPEN IS NOT ENOUGH: a transaction is the app thread's. `closed`
+    // cannot see a Task continuation writing through a transaction that
+    // is still open, nor a background Build opening one of its own —
+    // both race the app thread's model, silently (docs/deferred.md).
+    // The refusal's Go twin is bindings/go/app_test.go's
+    // TestATransactionRefusesAnotherGoroutine.
+    static void WrongThread(KayaApp app)
+    {
+        // DispatchLoop makes this claim in production; the check is
+        // headless, so it claims its own thread here.
+        KayaApp.ClaimAppThread();
+        Signal probe = default;
+        app.Build(tx => probe = tx.Signal("before"));
+
+        string Elsewhere(Action body)
+        {
+            string message = null;
+            var t = new Thread(() =>
+            {
+                try
+                {
+                    body();
+                }
+                catch (Exception e)
+                {
+                    message = e.Message;
+                }
+            });
+            t.Start();
+            t.Join();
+            return message ?? "";
+        }
+
+        // A live transaction, written from a thread the handler spawned:
+        // still OPEN, so only the thread rule can refuse it.
+        string live = "";
+        app.Build(tx => live = Elsewhere(() => tx.Write(probe, "from elsewhere")));
+        Check(live.Contains("belongs to the app thread"),
+            "a write through an OPEN transaction from another thread was answered "
+                + "with \"" + live + "\" — it must name the thread rule");
+        Check(live.Contains("App.Post"),
+            "the wrong-thread refusal must name the way out: \"" + live + "\"");
+
+        // And a background Build, which reaches no chokepoint at all
+        // when its body writes nothing.
+        string empty = Elsewhere(() => app.Build(tx => { }));
+        Check(empty.Contains("belongs to the app thread"),
+            "Build from another thread was answered with \"" + empty + "\" — an "
+                + "empty body writes no record, so only Build's own check sees it");
+
+        // The way out the message names actually works, and the app
+        // thread still builds.
+        bool ran = false;
+        Elsewhere(() => app.Post(tx => { ran = true; tx.Write(probe, "after"); }));
+        app.DrainPosted();
+        Check(ran, "Post from another thread did not reach the app thread");
+        app.Build(tx => tx.Write(probe, "after all"));
     }
 
     public static void Run()
@@ -288,6 +348,8 @@ static class AbortCheck
         }
         Check(propagated, "menu abort: Build must propagate");
         app.Build(tx => tx.Menu(file, items: new[] { tx.Item("Recovered") }));
+
+        WrongThread(app);
 
         Console.WriteLine("csharp abort check: OK");
     }

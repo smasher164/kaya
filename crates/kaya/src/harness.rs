@@ -2350,6 +2350,10 @@ fn record_linger() {
 /// after `finish` in order to leave under its own verdict when nothing
 /// else can end the process (see spawn).
 fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i32 {
+    // Watched, before any step: a fault reddens this leg instead of
+    // ending the process (crates/kaya/src/fault.rs; the fault census
+    // holds all three runners to this call).
+    crate::fault::watch();
     if log.is_some() {
         gate_wait();
     }
@@ -2375,7 +2379,22 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
     }
     let mut observed = Vec::new();
     let mut failures = Vec::new();
+    // A FAULT ENDS THE RUN, carrying its sentence into the verdict list.
+    // Before this the guards that catch it aborted, and the failures
+    // already collected died with the process (docs/deferred.md, "A
+    // GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE").
+    let mut faulted = false;
     for step in &steps {
+        if let Some(sentence) = crate::fault::latched() {
+            if let Some((log, _)) = log {
+                log(&format!("KAYA_HARNESS: step-failed {sentence}"));
+            }
+            failures.push(sentence);
+            faulted = true;
+            break;
+        }
+        // Where this step's failures start, for the retraction below.
+        let failures_before = failures.len();
         if let Some((log, start)) = log {
             log(&format!(
                 "KAYA_HARNESS: +{}ms {:?}",
@@ -3387,6 +3406,38 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             }
             None => {}
         }
+        // AND CHECKED AGAIN HERE, because the check at the top of the
+        // loop races the backend: the fault is raised on the UI thread
+        // while this thread is already inside the next step.
+        //
+        // THE IN-FLIGHT ATTEMPT IS RETRACTED, the rule KayaSwiftUI's
+        // and KayaCompose's harnesses already hold: `poll` above ends
+        // the moment a fault latches, so the failure this step just
+        // recorded is a read taken BEFORE its deadline and is not
+        // final. Measured 2026-08-21 on the windows lane with the drain
+        // forced to fail: the verdict led with `label#0 reads "0
+        // matches", wanted "3 matches"` and named the real cause
+        // second — the "a cause three removes from the real one" shape
+        // docs/deferred.md filed this class under.
+        if let Some(sentence) = crate::fault::latched() {
+            failures.truncate(failures_before);
+            if let Some((log, _)) = log {
+                log(&format!("KAYA_HARNESS: step-failed {sentence}"));
+            }
+            failures.push(sentence);
+            faulted = true;
+            break;
+        }
+    }
+    // The LAST step can fault too, and a fault must never leave a green
+    // verdict behind it.
+    if !faulted {
+        if let Some(sentence) = crate::fault::latched() {
+            if let Some((log, _)) = log {
+                log(&format!("KAYA_HARNESS: step-failed {sentence}"));
+            }
+            failures.push(sentence);
+        }
     }
     record_linger();
     if failures.is_empty() {
@@ -3556,7 +3607,11 @@ fn poll(mut eval: impl FnMut() -> Result<String, String>) -> Result<String, Stri
     let deadline = Instant::now() + POLL_DEADLINE;
     loop {
         let outcome = eval();
-        if outcome.is_ok() || Instant::now() >= deadline {
+        // A LATCHED FAULT ENDS THE WAIT. Nothing more will be applied,
+        // so the rest of POLL_DEADLINE is dead time — and this is
+        // exactly the "six steps took EXACTLY 15.0s" shape the
+        // step-failed note above describes, one layer down.
+        if outcome.is_ok() || Instant::now() >= deadline || crate::fault::latched().is_some() {
             return outcome;
         }
         std::thread::sleep(POLL_INTERVAL);

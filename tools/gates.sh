@@ -103,7 +103,7 @@ GATES = [
     # the declarative backends "render nothing" makes the node LEAVE THE
     # TREE and every positional reader above it reads the wrong child
     # (docs/deferred.md).
-    # The four ARTIFACT gates are keyed since 2026-08-20: their keys mix
+    # The five ARTIFACT gates are keyed since 2026-08-20: their keys mix
     # the built libkaya's REAL BYTES (build-id.sh's ARTIFACT_GATES), so
     # "unchanged sources" alone can no longer hand back a stale PASS —
     # unchanged sources AND unchanged artifact bytes can, and that is an
@@ -113,6 +113,10 @@ GATES = [
     # and the middle rung — which no shared scene may sample — walked
     # for real in an NSWindow (docs/multicolumn-plan.md).
     ("check-pane-ladder", ["tools/check-pane-ladder.sh"], True, ""),
+    # The table tier routing: both tiers present identical bytes, so no
+    # device can name the one that drew it (docs/traps.md). The rule is a
+    # pure function, driven here through its whole truth table.
+    ("check-table-tier", ["tools/check-table-tier.sh"], True, ""),
     ("check-wheel", ["tools/check-wheel.sh"], True, ""),
     ("check-abort", ["tools/check-abort.sh"], True, ""),
     ("check-tx-liveness", ["tools/check-tx-liveness.sh"], False,

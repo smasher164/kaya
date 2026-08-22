@@ -2060,10 +2060,22 @@ object KayaCompose {
      *
      * BOUNDED AND SILENT. Some actions legitimately produce no batch at
      * all, so a timeout here is not a verdict.
+     *
+     * AND THE SILENT BOUND IS A CLOCK, NOT AN ITERATION COUNT. 60 sleeps
+     * of 5ms is 300ms on an idle emulator and however long the scheduler
+     * says on a loaded one: MEASURED 2026-08-21 under load, this wait —
+     * which every action pays after a handler that answers NOTHING —
+     * ran to 2400ms, and it is the larger half of the gap that used to
+     * decide stall-compose (docs/traps.md). A second of wall clock is
+     * far past the 300ms the sleeps cost on an idle device, so nothing
+     * changes there and the ANSWERING path keeps its iteration budget
+     * whole; what changes is that no amount of load makes this wait
+     * unbounded.
      */
     private fun kayaAwaitAnswer(seen: Int) {
         var last = seen
         var quiet = 0
+        val silentUntil = System.nanoTime() + 1_000_000_000L
         repeat(60) {
             val now = kayaBatches
             when {
@@ -2074,6 +2086,8 @@ object KayaCompose {
                 // action's own answer in flight. Wait for the batches to
                 // STOP rather than for one to arrive.
                 now != seen -> { quiet += 1; if (quiet >= 3) return }
+                // Nothing has arrived at all, so nothing is in flight.
+                System.nanoTime() > silentUntil -> return
             }
             Thread.sleep(5)
         }
@@ -4701,11 +4715,20 @@ object KayaCompose {
     }
 
     private fun runScript(activity: ComponentActivity, script: String) {
+        // Watched, before any step (crates/kaya/src/fault.rs; the fault
+        // census holds all three runners to this call).
+        KayaPresent.faultWatch()
         val observed = ArrayList<String>()
         val failures = ArrayList<String>()
         val start = System.nanoTime()
         Log.i("kaya", "KAYA_HARNESS: epoch ${System.currentTimeMillis()}")
-        for (rawLine in script.split('\n')) {
+        // Whether the run already carried the core's fault into
+        // `failures`, so the sweep after the loop cannot report the same
+        // one twice.
+        var reportedFault = false
+        // Labelled for the one thing that ends a script early: the core
+        // latching a fault (KayaPresent.fault).
+        scriptLines@ for (rawLine in script.split('\n')) {
             val trimmedLine = rawLine.trim()
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) continue
             for (raw in kayaSplitStatements(trimmedLine)) {
@@ -6404,14 +6427,53 @@ object KayaCompose {
                     }
                     else -> failures.add("unknown step $line")
                 }
+                val fault = KayaPresent.fault()?.toString(Charsets.UTF_8)
+                if (fault != null) {
+                    // THE CORE FAULTED: a guard caught an app misuse, or a
+                    // transaction died inside Scene::apply. Nothing after
+                    // this is applied, so the retry below is dead time and
+                    // every following step would fail at its own deadline
+                    // for a reason three removes from this one.
+                    //
+                    // The in-flight attempt is RETRACTED: it had not reached
+                    // its deadline, so it was never final, and a non-final
+                    // read printed next to the cause is what sends the next
+                    // reader after the wrong thing.
+                    while (failures.size > failuresBefore) failures.removeAt(failures.size - 1)
+                    failures.add(fault)
+                    Log.e("kaya", "KAYA_HARNESS: step-failed $fault")
+                    reportedFault = true
+                    break@scriptLines
+                }
                 if (failures.size > failuresBefore && parts[0].startsWith("expect") &&
                     System.nanoTime() < stepDeadline
                 ) {
                     while (failures.size > failuresBefore) failures.removeAt(failures.size - 1)
                     Thread.sleep(20)
                     retryStep = true
+                } else if (failures.size > failuresBefore) {
+                    // THE EVIDENCE MUST OUTLIVE THE PROCESS. `failures` is
+                    // named only by the verdict at the bottom, and an abort
+                    // before it — a core refusal, a panic in a later handler —
+                    // takes the whole list with it, leaving a crash with no
+                    // reason. So a failure is printed the moment it is FINAL:
+                    // an expect past its deadline, or any action, which never
+                    // retries. Spelled and placed as in harness.rs and
+                    // KayaSwiftUI.swift; check-verbs.sh holds the three level.
+                    for (i in failuresBefore until failures.size) {
+                        Log.i("kaya", "KAYA_HARNESS: step-failed ${failures[i]}")
+                    }
                 }
                 }
+            }
+        }
+        // THE LAST STEP CAN FAULT TOO, and a fault must never leave a
+        // green verdict behind it.
+        if (!reportedFault) {
+            val late = KayaPresent.fault()?.toString(Charsets.UTF_8)
+            if (late != null) {
+                failures.add(late)
+                Log.e("kaya", "KAYA_HARNESS: step-failed $late")
             }
         }
         if (failures.isEmpty() && observed.isEmpty()) {

@@ -13,13 +13,26 @@
 # click is what makes work PENDING while the app thread is gone, which
 # is both what the watchdog can see and what a person actually reports —
 # they click, and click again, and nothing happens.
+#
+# AND THE REPORT IS ASSERTED ONLY OF AN ABSENCE THAT NEVER ENDS. A
+# BOUNDED absence — the guests' 2500ms `block` — can be caught only
+# while it lasts, so asserting it needs the second click to land at
+# least KAYA_STALL_MS (1000ms) before the handler returns. That margin
+# is the harness's own two round trips through the UI thread, and IT
+# GROWS WITH THE MACHINE: measured 2026-08-21 on a loaded emulator it
+# reached 2542ms, past the whole block, and the leg failed saying the
+# app thread was keeping up — a race against the machine rather than a
+# check of the code, and a red nobody believes (docs/traps.md,
+# docs/deferred.md). The wedge below has no such margin to lose: the
+# click it strands is pending for as long as the assertion needs.
 expect label#0 "ready"
+
+# IT GOES AWAY AND IT COMES BACK. The blocked handler returns, the click
+# that queued behind it is taken, and the app carries on — so the stall
+# the watchdog sees here is a stall and not a death, and nothing was
+# dropped while the thread was gone.
 click button#0
 click button#1
-expect_stall
-# AND IT RECOVERS. The blocked handler returns, the queued click is
-# taken, and the app carries on — proving the watchdog reported a stall
-# rather than a death, and that nothing was dropped while it was gone.
 expect label#0 "pinged"
 
 # AND THE WATCHDOG TAKES IT BACK. This is the half nothing asserted for
@@ -35,16 +48,15 @@ expect label#0 "pinged"
 # the one that fails for a watchdog blind to a transport.
 expect_no_stall
 
-# THEN THE ONE THAT NEVER COMES BACK, which is the shape a real
-# deadlock has: a handler that blocks for 2.5 seconds is a slow handler,
-# and every assertion above would also pass for one. This half proves
-# the report survives an app thread that is simply gone.
+# THEN THE ONE THAT NEVER COMES BACK, which is the shape a real deadlock
+# has: a handler that blocks for a day. This is where the report is
+# asserted, because here the pending click stays pending — the
+# assertion can take as long as it likes and still be asking about an
+# app thread that is gone.
 #
-# THE SETTLE IS LOAD-BEARING, and it is not a lifecycle sleep. The
-# watchdog clears its reading when the queue drains, and it polls at
-# 100ms — so without a pause the assertion below could be satisfied by
-# the reading left over from the FIRST stall, and would pass even if
-# the second wedge did nothing at all.
+# THE PAUSE KEEPS THE TWO HALVES APART, so the reading this half
+# produces is unambiguously its own; expect_no_stall above is what
+# actually proves the first one cleared.
 settle 300
 click button#2
 click button#1

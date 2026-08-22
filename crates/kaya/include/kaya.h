@@ -1589,6 +1589,22 @@ typedef struct KayaHostApi {
    * verbatim, plus the 0-based column index (docs/tables-plan.md).
    */
   void (*emit_sort_requested)(const uint8_t*, uintptr_t, uint32_t);
+  /**
+   * The latched fault's sentence into a caller buffer, returning its
+   * true length; 0 for none. A READ, riding the vtable for the
+   * reason `stalled_ms` does. The harness asks once per step, so a
+   * transaction that died inside `Scene::apply` reddens the leg
+   * carrying its sentence instead of aborting the process
+   * (crates/kaya/src/fault.rs).
+   */
+  uintptr_t (*fault)(uint8_t*, uintptr_t);
+  /**
+   * The harness's watch declaration (crates/kaya/src/fault.rs):
+   * called once at the top of the script runner, before any step,
+   * so an unwatched process still dies legibly while a watched leg
+   * reddens.
+   */
+  void (*fault_watch)(void);
 } KayaHostApi;
 
 
@@ -1784,6 +1800,33 @@ void kaya_wake(void);
  * for anyone outside Rust; see crate::stall for what counts.
  */
 uint64_t kaya_stalled_ms(void);
+
+/**
+ * The latched fault's sentence — the whole thing, in UTF-8, written
+ * into `out` and truncated to `cap`; the return value is the length the
+ * sentence actually has, so a caller that got a short buffer can size
+ * one and ask again. `kaya_asset_why_not`'s shape exactly.
+ *
+ * ZERO MEANS NO FAULT, which is what makes this a poll rather than a
+ * failure path: the interpreter harnesses ask once per step, and a
+ * scene whose transaction died inside `Scene::apply` then reddens
+ * carrying that sentence instead of waiting out every remaining
+ * expect (crates/kaya/src/fault.rs).
+ *
+ * A PEEK, NOT A TAKE: a harness asks again after its last step, and a
+ * consuming read would let that second look report a green leg.
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_fault(uint8_t *out, uintptr_t cap);
+
+/**
+ * The harness's watch declaration (crates/kaya/src/fault.rs): the
+ * SwiftUI and Compose script runners call this before their first
+ * step, so a fault reddens the leg instead of ending the process.
+ */
+void kaya_fault_watch(void);
 
 /**
  * Direct-access setup: the occurrence ring's memory layout. Pointers

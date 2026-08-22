@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -308,6 +309,81 @@ func TestAClosedTransactionRefusesLoudly(t *testing.T) {
 	panics("a model length read", func() { escaped.Len(c) })
 
 	// And the app survives all of it.
+	app.Build(func(tx *Tx) { tx.Write(s, "after all") })
+}
+
+// OPEN IS NOT ENOUGH: a transaction is the app goroutine's. `closed`
+// cannot see a goroutine spawned inside a handler writing through the
+// transaction the handler still holds, nor a background goroutine
+// opening a Build of its own — both race the app goroutine's model and
+// its record list, silently (docs/deferred.md).
+func TestATransactionRefusesAnotherGoroutine(t *testing.T) {
+	app := NewApp()
+	// Serve makes this claim in production. The claim is a package
+	// global, so it is handed back before returning: the package's other
+	// tests build on whatever goroutine `go test` gave them.
+	claimAppThread()
+	defer func() {
+		appThread.Store(0)
+		runtime.UnlockOSThread()
+	}()
+
+	var s Signal[string]
+	app.Build(func(tx *Tx) { s = tx.Signal("before") })
+
+	elsewhere := func(fn func()) string {
+		t.Helper()
+		var got any
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			defer func() { got = recover() }()
+			fn()
+		}()
+		<-done
+		if got == nil {
+			return ""
+		}
+		msg, _ := got.(string)
+		return msg
+	}
+
+	// A live transaction, written from a goroutine the handler spawned:
+	// still OPEN, so only the thread rule can refuse it.
+	var live string
+	app.Build(func(tx *Tx) {
+		live = elsewhere(func() { tx.Write(s, "from elsewhere") })
+	})
+	if !strings.Contains(live, "belongs to the app thread") {
+		t.Fatalf("a write through an OPEN transaction from another goroutine "+
+			"was answered with %q — it must name the thread rule and App.Post, "+
+			"or it lands in tx.records from two goroutines at once", live)
+	}
+	if !strings.Contains(live, "App.Post") {
+		t.Fatalf("the wrong-thread refusal must name the way out: %q", live)
+	}
+
+	// And a background Build, which reaches no chokepoint at all when
+	// its body writes nothing.
+	empty := elsewhere(func() { app.Build(func(*Tx) {}) })
+	if !strings.Contains(empty, "belongs to the app thread") {
+		t.Fatalf("Build from another goroutine was answered with %q — an empty "+
+			"body emits no record, so only Build's own check can see it", empty)
+	}
+
+	// The way out the message names actually works, and the app thread
+	// still builds.
+	ran := ""
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.Post(func(tx *Tx) { ran = "posted"; tx.Write(s, "after") })
+	}()
+	<-done
+	app.drainPosted()
+	if ran != "posted" {
+		t.Fatalf("Post from another goroutine did not reach the app thread: %q", ran)
+	}
 	app.Build(func(tx *Tx) { tx.Write(s, "after all") })
 }
 

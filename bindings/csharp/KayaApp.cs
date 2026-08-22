@@ -704,6 +704,7 @@ sealed class KayaApp
     /// the same writes before the exception continues.
     public void Build(Action<Tx> build)
     {
+        RequireAppThread();
         var tx = new Tx(this);
         CurrentTx = tx;
         try
@@ -807,7 +808,7 @@ sealed class KayaApp
     /// body that posts again lands in the NEXT batch — holding the lock
     /// across the calls would let a self-posting body starve the
     /// occurrence loop.
-    void DrainPosted()
+    internal void DrainPosted()
     {
         List<Action<Tx>> batch;
         lock (postLock)
@@ -819,8 +820,37 @@ sealed class KayaApp
             Dispatch(tx => body(tx));
     }
 
+    // The app thread, claimed by the dispatch loop and read at every
+    // transaction gate (RequireAppThread). 0 until then, which is what
+    // lets the guest's opening Build run on the main thread before Run —
+    // Python's `_app_thread = None` arm, same rule.
+    static int appThread;
+
+    /// Called by the dispatch loop on the way in: from here on that
+    /// thread IS the app thread.
+    internal static void ClaimAppThread() => appThread = Thread.CurrentThread.ManagedThreadId;
+
+    /// The other half of the rule Tx.Alive states: OPEN is not enough, a
+    /// transaction also belongs to the app thread. `closed` cannot see a
+    /// Task continuation writing through a transaction that is still
+    /// open, nor a background Build opening one of its own — both race
+    /// the app thread's model. tools/check-tx-liveness.sh holds it.
+    internal static void RequireAppThread()
+    {
+        int owner = appThread;
+        if (owner == 0)
+            return;
+        int here = Thread.CurrentThread.ManagedThreadId;
+        if (here != owner)
+            throw new InvalidOperationException(
+                $"kaya: a transaction belongs to the app thread — this is thread {here}, "
+                    + $"the app thread is {owner}. To mutate from a background thread use "
+                    + "App.Post, which runs your function as a transaction over there.");
+    }
+
     void DispatchLoop()
     {
+        ClaimAppThread();
         while (true)
         {
             // Posted work first, then the ring, then park. Draining at
@@ -1061,6 +1091,7 @@ sealed class Tx
             throw new InvalidOperationException(
                 "kaya: transaction is over — a Tx is only usable inside the Build or "
                     + "handler that created it; to mutate from a background thread use App.Post");
+        KayaApp.RequireAppThread();
     }
 
     /// Called by Build on the way out, on every path.

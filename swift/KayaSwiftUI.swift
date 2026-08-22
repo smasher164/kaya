@@ -1201,6 +1201,25 @@ func kayaClipBreachNote() -> String? {
     return kayaClipBreach
 }
 
+/// The core's latched fault, for the harness to end a run with. A guard that
+/// caught an app misuse, or a transaction that died inside Scene::apply, used
+/// to ABORT this process — taking the failure list with it — and now reports
+/// through here instead (crates/kaya/src/fault.rs).
+///
+/// SIZED, THEN READ, exactly as Asset.missSentence does it: the host returns
+/// the sentence's TRUE length, and a guessed buffer would cut the half that
+/// names the cause. A PEEK, never a take: the run asks again after its last
+/// step, and a consuming read would let that look report a green leg.
+func kayaCoreFaultNote() -> String? {
+    let len = KayaHost.api.fault(nil, 0)
+    if len == 0 { return nil }
+    var sentence = [UInt8](repeating: 0, count: Int(len))
+    sentence.withUnsafeMutableBufferPointer { out in
+        _ = KayaHost.api.fault(out.baseAddress, len)
+    }
+    return String(decoding: sentence, as: UTF8.self)
+}
+
 /// The walk itself, shared by the privileged read and by a paste landing on a
 /// widget that declared what it accepts — ONE implementation.
 func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
@@ -5016,6 +5035,10 @@ private func kayaSplitStatements(_ line: String) -> [String] {
 }
 
 private func kayaRunScript(_ script: String) {
+    // Watched, before any step: a fault now reddens this leg instead of
+    // ending the process (crates/kaya/src/fault.rs; the fault census
+    // holds all three runners to this call).
+    KayaHost.api.fault_watch()
     var observed: [String] = []
     var failures: [String] = []
     // Recording handshake: when the runner exports KAYA_HARNESS_GATE it is
@@ -5035,9 +5058,12 @@ private func kayaRunScript(_ script: String) {
     setvbuf(stdout, nil, _IOLBF, 0)
     let start = Date()
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
-    // Labelled for the one thing that ends a script early: the
-    // pasteboard witness (kayaClipWitness) finding that this leg no
-    // longer owns the board it staged.
+    // Whether the run already carried the core's fault into `failures`,
+    // so the sweep after the loop cannot report the same one twice.
+    var reportedFault = false
+    // Labelled for the two things that end a script early: the pasteboard
+    // witness (kayaClipWitness) finding that this leg no longer owns the
+    // board it staged, and the core latching a fault (kayaCoreFaultNote).
     scriptLines: for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
         let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
         if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") { continue }
@@ -7023,6 +7049,23 @@ private func kayaRunScript(_ script: String) {
             default:
                 failures.append("unknown step \(line)")
             }
+                if let fault = kayaCoreFaultNote() {
+                    // THE CORE FAULTED: a guard caught an app misuse, or a
+                    // transaction died inside Scene::apply. Nothing after this
+                    // is applied, so the retry the expect was owed is dead
+                    // time and every following step would fail at its own
+                    // deadline for a reason three removes from this one.
+                    //
+                    // The in-flight attempt is RETRACTED for the reason the
+                    // breach's is: it had not reached its deadline, so it was
+                    // never final, and "reads """ printed next to the cause is
+                    // what sends the next reader after the wrong thing.
+                    failures.removeLast(failures.count - failuresBefore)
+                    failures.append(fault)
+                    print("KAYA_HARNESS: step-failed \(fault)")
+                    reportedFault = true
+                    break scriptLines
+                }
                 if let breach = kayaClipBreachNote() {
                     // THE WITNESS FIRED: somebody else's clip is on the board,
                     // so nothing this leg asserts from here is about the clip
@@ -7080,6 +7123,12 @@ private func kayaRunScript(_ script: String) {
             "the textarea's plain-text pins are not in force on the live text view: "
                 + pinBreaches.joined(separator: ", ")
                 + " — restore them in swift/KayaSwiftUI.swift, kayaPinPlainText")
+    }
+    // THE LAST STEP CAN FAULT TOO, and a fault must never leave a green
+    // verdict behind it.
+    if !reportedFault, let fault = kayaCoreFaultNote() {
+        failures.append(fault)
+        print("KAYA_HARNESS: step-failed \(fault)")
     }
     if failures.isEmpty && observed.isEmpty {
         failures.append("script has no expects")
@@ -7332,12 +7381,11 @@ struct KayaCell: Layout {
     }
 }
 
-/// The declared table's surface (docs/tables-plan.md): SwiftUI Table —
-/// NSTableView's wrapper on macOS, the native headers, resize and
-/// indicator — where the API can spell a DYNAMIC column count
-/// (TableColumnForEach; macOS 14.4 / iOS 17.4) AND the host is regular
-/// width, and KayaSynthesizedTable otherwise. The sortOrder binding is
-/// the click path and nothing else: its getter presents the GUEST's
+/// The declared table's surface (docs/tables-plan.md): SwiftUI Table on
+/// the native tier — NSTableView's wrapper on macOS, the native headers,
+/// resize and indicator — and kaya's own header on the other;
+/// kayaTableTier below is the rule between them. The sortOrder binding
+/// is the click path and nothing else: its getter presents the GUEST's
 /// declared indicator, its setter emits sort_requested and changes
 /// nothing — the platform never sorts the model (one-way flow, the echo
 /// doctrine's shape).
@@ -7355,36 +7403,78 @@ struct KayaColumnComparator: SortComparator {
     func compare(_ a: KayaNode, _ b: KayaNode) -> ComparisonResult { .orderedSame }
 }
 
+enum KayaTableTier {
+    case native
+    case synthesized
+}
+
+/// The tier rule's width input. `.noSizeClass` is the mac, which reads
+/// none; `.unknown` is an iOS host that reported none.
+enum KayaTableWidth {
+    case noSizeClass
+    case regular
+    case compact
+    case unknown
+}
+
+/// Which tier a host takes, from its inputs alone — PURE, because the
+/// two tiers present identical bytes and no scene can name the one that
+/// drew it (docs/traps.md, "An observable with no discriminator").
+/// tools/check-table-tier.sh drives this truth table and holds
+/// KayaTableSurface as its only caller.
+///
+/// `dynamicColumns` is TableColumnForEach's floor (macOS 14.4 / iOS
+/// 17.4), below kaya's own. A COMPACT iOS width takes kaya's header at
+/// any availability: SwiftUI's Table collapses to a first-column list
+/// there and throws the declared columns away (docs/tables-plan.md
+/// decision 5, revised 2026-08-21).
+func kayaTableTier(width: KayaTableWidth, dynamicColumns: Bool) -> KayaTableTier {
+    guard dynamicColumns else { return .synthesized }
+    switch width {
+    case .noSizeClass, .regular: return .native
+    case .compact, .unknown: return .synthesized
+    }
+}
+
+/// The environment's size class in the rule's vocabulary. Cross-platform
+/// on purpose — the type compiles at kaya's macOS floor, so the gate's
+/// probe reads the same mapping the phone runs.
+func kayaTableWidth(sizeClass: UserInterfaceSizeClass?) -> KayaTableWidth {
+    switch sizeClass {
+    case .regular: return .regular
+    case .compact: return .compact
+    default: return .unknown
+    }
+}
+
 struct KayaTableSurface: View {
     let node: KayaNode
     #if !os(macOS)
-        // macOS has no horizontal size class at all — the key does not
-        // exist in that environment — so the read is iOS-only and the
-        // mac path below never consults it.
         @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
-    /// Which tier this host takes. macOS: the native Table always (there
-    /// is no compact mode). iOS: REGULAR ONLY (docs/tables-plan.md
-    /// decision 5, revised 2026-08-21) — SwiftUI's Table collapses to a
-    /// first-column list at compact width, which throws away the
-    /// declared columns, so a compact iPhone takes kaya's own header.
-    private var native: Bool {
+    /// Nothing on macOS SETS a horizontal size class (the key and the
+    /// type both compile there — measured at -target macos13.0), and the
+    /// mac Table does not collapse, so the mac reports the absence and
+    /// the rule answers native. Internal, not private: the gate's probe
+    /// reads it to check this host's own branch.
+    var widthClass: KayaTableWidth {
         #if os(macOS)
-            return true
+            return .noSizeClass
         #else
-            return horizontalSizeClass == .regular
+            return kayaTableWidth(sizeClass: horizontalSizeClass)
         #endif
     }
 
     var body: some View {
         if #available(macOS 14.4, iOS 17.4, *) {
-            if native {
-                KayaNativeTable(node: node)
-            } else {
-                KayaSynthesizedTable(node: node)
+            switch kayaTableTier(width: widthClass, dynamicColumns: true) {
+            case .native: KayaNativeTable(node: node)
+            case .synthesized: KayaSynthesizedTable(node: node)
             }
         } else {
+            // dynamicColumns: false, the rule's forced half — and the one
+            // branch where KayaNativeTable does not compile.
             KayaSynthesizedTable(node: node)
         }
     }

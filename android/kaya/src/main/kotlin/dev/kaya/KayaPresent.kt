@@ -19,6 +19,25 @@ object KayaPresent {
     @JvmStatic external fun stalledMs(): Long
 
     /**
+     * The core's latched fault as UTF-8, or null for none — a guard that
+     * caught an app misuse, or a transaction that died inside
+     * Scene::apply. Both used to ABORT this process, taking the harness's
+     * failure list with them (crates/kaya/src/fault.rs).
+     *
+     * A PEEK, never a take: the run asks again after its last step, and a
+     * consuming read would let that look report a green leg.
+     * kaya_fault's JNI spelling.
+     */
+    @JvmStatic external fun fault(): ByteArray?
+
+    /**
+     * The harness's watch declaration: called once at the top of
+     * runScript, before any step, so a fault reddens the leg while an
+     * unwatched process still dies legibly (crates/kaya/src/fault.rs).
+     */
+    @JvmStatic external fun faultWatch()
+
+    /**
      * Emit an entry edit: [tag] is the tag bytes delivered with the
      * entry's CREATE record, [text] the field's current content.
      *
