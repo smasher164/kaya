@@ -1136,7 +1136,7 @@ class Collection(_BoundCollection):
             )
         return _ForTrace(self)
 
-    def columns(self, *titles, sort=None, on_sort=None, grow=None):
+    def columns(self, *titles, sort=None, on_sort=None, grow=None, a11y_id=None):
         """Declare the column header bar on this collection's For —
         the table spelling of the same loop
         (`for item in items.columns("Name", "Size", on_sort=f):`).
@@ -1144,8 +1144,10 @@ class Collection(_BoundCollection):
         `with kaya.row():` of exactly one cell per column — the core
         refuses a mismatch loudly. `on_sort` takes the 0-based column
         index of a header click; re-declare with set_columns() after
-        sorting (docs/tables-plan.md)."""
-        return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow)
+        sorting (docs/tables-plan.md). `a11y_id` authors the table
+        container's automation key — the kind@id harness target and the
+        platform accessibility identifier, one prop."""
+        return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow, a11y_id)
 
     def set_columns(self, *titles, sort=None):
         """Re-declare the header bar — the sort handler's move, after
@@ -1410,12 +1412,13 @@ class _ColumnsTrace:
     must follow the bodies), register the sort handler, and remember
     the For handle for set_columns()."""
 
-    def __init__(self, coll, titles, sort, on_sort, grow=None):
+    def __init__(self, coll, titles, sort, on_sort, grow=None, a11y_id=None):
         self._coll = coll
         self._titles = titles
         self._sort = sort
         self._on_sort = on_sort
         self._grow = grow
+        self._a11y_id = a11y_id
         self._trace = None
 
     def __iter__(self):
@@ -1438,6 +1441,8 @@ class _ColumnsTrace:
                 _app._register(handle, wire.OCC_SORT_REQUESTED, self._on_sort)
             if self._grow is not None:
                 _records().append(wire.tx_set_grow(handle.id, float(self._grow)))
+            if self._a11y_id is not None:
+                _records().append(wire.tx_set_a11y_id(handle.id, self._a11y_id))
             raise
 
 

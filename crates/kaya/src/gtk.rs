@@ -9051,6 +9051,40 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
+    fn resolve_id(&self, kind: crate::harness::TargetKind, id: &str) -> Option<isize> {
+        // The a11y_id arm wrote the authored key onto the WIDGET NAME
+        // (set_widget_name, the AT-SPI accessible-id lowering), so the
+        // records this reads are the backend's own applied prop.
+        let id = id.to_owned();
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            use crate::harness::TargetKind as K;
+            fn find(names: Vec<gtk4::Widget>, id: &str) -> Option<isize> {
+                names
+                    .iter()
+                    .position(|w| w.widget_name() == id)
+                    .map(|i| i as isize)
+            }
+            let widgets: Vec<gtk4::Widget> = match kind {
+                K::Button => core.buttons.iter().map(|w| w.clone().upcast()).collect(),
+                K::Checkbox => core.checkboxes.iter().map(|w| w.clone().upcast()).collect(),
+                K::Slider => core.sliders.iter().map(|w| w.clone().upcast()).collect(),
+                K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
+                K::Label => core.labels.iter().map(|w| w.clone().upcast()).collect(),
+                K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
+                K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
+                K::Image => core.images.iter().map(|w| w.clone().upcast()).collect(),
+                K::Scroll => core.scrolls.iter().map(|w| w.clone().upcast()).collect(),
+                K::Progress => core.progresses.iter().map(|w| w.clone().upcast()).collect(),
+                K::Select => core.selects.iter().map(|w| w.clone().upcast()).collect(),
+                K::Radio => core.radios.iter().map(|w| w.clone().upcast()).collect(),
+                K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
+                K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
+            };
+            find(widgets, &id)
+        })
+    }
+
     fn child_texts(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};

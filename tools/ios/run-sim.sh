@@ -1461,6 +1461,13 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # chrome no phone has; split drives resize_window, rejected above.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
     IOS_DESKTOP_ONLY_SCENES="window panels split panes"
+    # Scenes whose GUEST cannot run here YET — sequencing, not design:
+    # the portfolio dashboard is Python by design
+    # (docs/portfolio-plan.md), and CPython reaches this platform with
+    # the packaging milestone (official upstream support exists,
+    # PEP 730). The legs wire when it lands.
+    # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
+    IOS_UNWIRED_SCENES="portfolio"
     # NOT NARROWER any more, except by design: editor runs from the Go
     # suite alone (the plan chose Go so a binding's awkward corners
     # would show; there is no rust or swift editor guest). Everything

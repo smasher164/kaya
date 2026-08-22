@@ -936,7 +936,7 @@ wired() {
 
     ios_wired="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_SWIFT_SCENES|IOS_GO_SCENES')"
     ios_declared="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_DESKTOP_ONLY_SCENES|IOS_UNWIRED_SCENES')"
-    android_declared="$(runner_list_scenes tools/android/run-emulator.sh 'ANDROID_DESKTOP_ONLY_SCENES')"
+    android_declared="$(runner_list_scenes tools/android/run-emulator.sh 'ANDROID_DESKTOP_ONLY_SCENES|ANDROID_UNWIRED_SCENES')"
     # A reader that reads nothing agrees with everything.
     if [ -z "$ios_wired" ]; then
         echo "check-steps: wired() read NO scenes out of run-sim.sh's IOS_*_SCENES assignments — they moved, and this clause is blind" >&2

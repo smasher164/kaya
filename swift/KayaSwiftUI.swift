@@ -4817,6 +4817,15 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
 /// malformed index, or one out of range is a loud step failure — never a
 /// silently misresolved read (`row#0` once indexed the COLUMNS registry).
 private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode]) -> KayaNode? {
+    // kind@id — the authored a11y_id, creation order never entering
+    // (harness.rs's Target doc; the check-steps container lint's
+    // sanctioned alternative). First match in creation order.
+    if spec.contains("@") {
+        let bits = spec.split(separator: "@", maxSplits: 1)
+        guard bits.count == 2, bits[0] == kind, !bits[1].isEmpty else { return nil }
+        let id = String(bits[1])
+        return registry.first { $0.a11yId == id }
+    }
     let bits = spec.split(separator: "#")
     guard bits.count == 2, bits[0] == kind else { return nil }
     if bits[1] == "last" { return registry.last }

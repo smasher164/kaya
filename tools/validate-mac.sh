@@ -1036,6 +1036,17 @@ drain
 run editor-go-swiftui env KAYA_SELFTEST=editor target/go-guests/kaya-go
 drain
 
+# THE PORTFOLIO DASHBOARD (docs/portfolio-plan.md), the second app on
+# this lane and PYTHON ALONE by design (the flagship slot spent on the
+# ambient-transaction binding), so like the editor it is in neither
+# SCENES nor DEPTH_SCENES — both derive a rust example this app does
+# not have. Pooled, not isolated: it opens no OS chrome and injects no
+# keys.
+KAYA_SELFTEST_SCRIPT="$(scene_script portfolio)"
+export KAYA_SELFTEST_SCRIPT
+run portfolio-python-swiftui env KAYA_SELFTEST=portfolio python3 guests/python/portfolio.py
+drain
+
 # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two
 # entries stamped from one template, each carrying its own row's a11y
 # identity, read back from the platform's real tree. A SEPARATE scene

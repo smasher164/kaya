@@ -1,0 +1,54 @@
+# The portfolio dashboard's scene (docs/portfolio-plan.md §3) — the
+# second forcing app, Python on the desktop lanes; the mobile lanes
+# carry it declared-off until the packaging milestone bootstraps
+# CPython there.
+#
+# Targets: LEAF kinds by creation order (safe cross-language — body
+# order is screen order): label#0 portfolio total, label#1 account
+# name, label#2 account total; button#0 "Day tick", buttons #1..#3 the
+# stamped account rows in ACCOUNT_ORDER. The TABLE by AUTHORED KEY —
+# column@positions, the app's a11y_id — because container creation
+# order is per-language and the container lint forbids indexing it
+# (the kind@id grammar is the sanctioned route; harness.rs Target).
+#
+# Every money string is integer-cents arithmetic from the app's BOOK —
+# dollars dot cents, no thousands separator (plan §1) — so a drifted
+# price table fails here byte-for-byte.
+expect label#0 "Portfolio: $10026.50"
+expect label#1 "Brokerage"
+expect label#2 "Account total: $7163.50"
+expect_columns column@positions "Ticker|Qty|Price|Value"
+expect_column_edges column@positions 4
+expect_rows column@positions "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
+# Selection: a stamped account button's REAL click; the one positions
+# collection repopulates (the dynamic-tables workaround, plan §1) and
+# the detail follows.
+click button#2
+expect label#1 "Retirement"
+expect label#2 "Account total: $2363.00"
+expect_rows column@positions "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
+# Sort is the guest's policy on NUMERIC keys (cents, never the money
+# string): Value ascending, then the same column flips.
+header_click column@positions 3
+expect_columns column@positions "Ticker|Qty|Price|Value ^3"
+expect_rows column@positions "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
+header_click column@positions 3
+expect_columns column@positions "Ticker|Qty|Price|Value v3"
+expect_rows column@positions "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
+# A new column starts ascending — Qty discriminates from the order the
+# value sort left behind.
+header_click column@positions 1
+expect_columns column@positions "Ticker|Qty|Price|Value ^1"
+expect_rows column@positions "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
+# Re-selection resets the indicator with the repopulation (plan §1's
+# recorded decision, not an accident).
+click button#1
+expect label#1 "Brokerage"
+expect_columns column@positions "Ticker|Qty|Price|Value"
+expect_rows column@positions "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
+# One day tick: fixed per-ticker deltas (plan §2), every total moves to
+# its precomputed value.
+click button#0
+expect label#0 "Portfolio: $10023.00"
+expect label#2 "Account total: $7153.00"
+expect_rows column@positions "AAPL,10,$182.50,$1825.00|NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00"

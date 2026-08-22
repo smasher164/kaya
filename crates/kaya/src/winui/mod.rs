@@ -14311,6 +14311,57 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
+    fn resolve_id(&self, kind: crate::harness::TargetKind, id: &str) -> Option<isize> {
+        // The a11y_id arm wrote the authored key through
+        // AutomationProperties::SetAutomationId, so this reads the
+        // backend's own applied prop back off the controls.
+        let id = windows_core::HSTRING::from(id);
+        Self::on_ui_read(move |core| -> windows_core::Result<Option<isize>> {
+            use crate::harness::TargetKind as K;
+            use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
+            use windows_core::Interface;
+            fn find<T: windows_core::Interface>(
+                v: &[T],
+                id: &windows_core::HSTRING,
+            ) -> Option<isize> {
+                use bindings::Microsoft::UI::Xaml::DependencyObject;
+                v.iter()
+                    .position(|w| {
+                        w.cast::<DependencyObject>()
+                            .ok()
+                            .and_then(|d| AutomationProperties::GetAutomationId(&d).ok())
+                            .map(|got| &got == id)
+                            .unwrap_or(false)
+                    })
+                    .map(|i| i as isize)
+            }
+            Ok(match kind {
+                // The buttons registry stores click TAGS by design (the
+                // stage's click path emits them directly), so there is
+                // no control to read an AutomationId off: button@id
+                // resolves None HERE ALONE, the dirty read-table's
+                // documented-divergence shape, until a scene needs it
+                // and the registry grows a controls vec.
+                K::Button => None,
+                K::Checkbox => find(&core.checkboxes, &id),
+                K::Slider => find(&core.sliders, &id),
+                K::Entry => find(&core.entries, &id),
+                K::Label => find(&core.labels, &id),
+                K::Column => find(&core.columns, &id),
+                K::Row => find(&core.rows, &id),
+                K::Image => find(&core.images, &id),
+                K::Scroll => find(&core.scrolls, &id),
+                K::Progress => find(&core.progresses, &id),
+                K::Select => find(&core.selects, &id),
+                K::Radio => find(&core.radios, &id),
+                K::Grid => find(&core.grids, &id),
+                K::Textarea => find(&core.textareas, &id),
+            })
+        })
+        .ok()
+        .flatten()
+    }
+
     fn child_texts(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {

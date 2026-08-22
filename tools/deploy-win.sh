@@ -108,6 +108,7 @@ for arg in "$@"; do
         # sequencing: an editor in Rust would be kaya testing itself
         # (docs/editor-plan.md). There is no editor_rust to add later.
         editor_go) SUITE="$arg" ;;
+        portfolio_python) SUITE="$arg" ;;
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
         stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
         a11yrows_rust|a11yrows_python|a11yrows_go|a11yrows_csharp|a11yrows_java) SUITE="$arg" ;;
@@ -338,6 +339,14 @@ DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 # copy then fails under `set -e` — or worse, a fresh suite runs beside
 # the zombie.
 GO_ONLY_SCENES="editor"
+# PYTHON-ONLY SCENES, the same shape one language over: the portfolio
+# dashboard is Python BY DESIGN (docs/portfolio-plan.md — the second
+# forcing app, spending the flagship slot on the ambient-transaction
+# binding), so there is no rust example to build and no exe families to
+# sweep — python.exe is already in kill_guests' fixed tail. What it
+# must join is SCENE_PYS, so the .py ships and stamps like every other
+# python surface.
+PY_ONLY_SCENES="portfolio"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -346,6 +355,9 @@ for s in $SCENES; do
     SCENE_EXES+=("$TARGET/examples/$s.exe")
     SCENE_PYS+=("$ROOT/guests/python/$s.py")
     BUILD_EXAMPLES+=(--example "$s")
+done
+for s in $PY_ONLY_SCENES; do
+    SCENE_PYS+=("$ROOT/guests/python/$s.py")
 done
 # Depth scenes contribute their EXE only: no .py, no go package, no
 # csharp/java surface — those are exactly the halves that do not exist
@@ -1663,6 +1675,9 @@ case "$SUITE" in
         run_suite table_go
         run_suite table_csharp
         run_suite table_java
+        # The portfolio dashboard (docs/portfolio-plan.md): python by
+        # design, pooled — it opens no OS chrome and injects no keys.
+        run_suite portfolio_python
         run_suite feed_rust
         run_suite feed_python
         run_suite feed_go

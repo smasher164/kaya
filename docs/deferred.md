@@ -1144,8 +1144,34 @@ own the state (see the undo note in this file).
   if the answer is (ii).
 
 
-- **A stable identifier prop (`test_id`, doubling as the accessibility
-  identifier)** — Akhil's instinct, 2026-07-20: harness scripts should
+- ~~**A stable identifier prop (`test_id`, doubling as the accessibility
+  identifier)**~~ (LANDED 2026-08-21 — the ADDRESSING half, pulled
+  forward by the maintainer when the portfolio scene became the
+  entry's named trigger: `kind@id` beside `kind#index` in all three
+  harness implementations, resolved against the authored `a11y_id`.
+  The core's Target carries the id (leaked to 'static, the
+  scene-script precedent, so Target stays Copy); the runner
+  NORMALIZES once per step through the new `Stage::resolve_id` —
+  observations retry the resolution on the poll clock, actions refuse
+  at once — so the dozens of index-shaped Stage reads never learned
+  about ids, and `Step::targets_mut` is the one exhaustive map a new
+  targeted variant must join. The interpreters resolve directly
+  (first node in the kind's registry with the matching a11yId); GTK
+  scans the widget names its a11y arm already writes; WinUI reads
+  AutomationId back off the controls — EXCEPT buttons, whose registry
+  stores click TAGS by design, so button@id resolves None there
+  alone, the dirty read-table's documented-divergence shape, until a
+  scene needs it. Python's `columns()` grew the `a11y_id=` kwarg so a
+  table container can author its key in the sugar. Watched: the
+  refusal was seen live on mac with the app's id renamed away ("no
+  such target column@positions", sixteen times down the scene), and
+  the parse half is unit-pinned. NOT migrated: every existing scene
+  stays positional (leaf kinds are stable by body order); the layout
+  scene's rows can now be asserted whenever someone wants them, and
+  the container lint STAYS for positional targets — @ids are its
+  sanctioned alternative, not its retirement.
+  KEY: kind@id, resolve_id, targets_mut, a11y_id addressing, column@positions)
+  ORIGINAL ENTRY, for the record: harness scripts should
   address widgets by the same authored key on every platform, not by
   `kind#index`. Positional targets exist only because they were free
   (the per-kind driving registries already existed); an authored key
@@ -1386,6 +1412,20 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
+
+- **Go 1.27 STABLE is out; the three 1.27rc2 pins should move to it**
+  (maintainer, 2026-08-21). The rc was adopted 2026-07-16 for generic
+  methods with "swap to stable then" on the record, and stable has now
+  shipped — but nixos-unstable does not carry it yet (nixpkgs has it on
+  master only), so the clean move (flake.nix dropping its hand-pinned
+  tarball for nixpkgs' go_1_27) waits on the channel. The three pins
+  that must move TOGETHER when it lands: flake.nix's fetchurl
+  (go1.27rc2.darwin-arm64, sha256 beside it), tools/linux/Dockerfile's
+  tarball + sha256sum -c, and tools/deploy-win.sh's Invoke-WebRequest
+  to C:\kaya\go127. Interim option if the wait drags: the pins are
+  plain release-binary URLs, so bumping rc2 -> stable tarballs needs no
+  nixpkgs at all — one hash per pin and a matrix run.
+  KEY: go 1.27rc2, go127, pinned binary distro, nixos-unstable channel
 - ~~**A GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE, and this is the
   second instance.**~~ — CLOSED 2026-08-21: the rule adopted, both
   instances converted, and every other guard of the shape with them. Measured 2026-08-10 on mac:
@@ -4599,9 +4639,17 @@ owns its own sortable positions table (data-driven table instances
 dead center), price-history charts that will force the CANVAS widget,
 and a transactions view that will force ROW VIRTUALIZATION. Data is
 synthetic and deterministic by design, so the scenes stay honest the
-way the editor's did. Still open before the first slice: the app's
-guest language and name (the editor's slot was Go; maintainer's
-call), and the build order across the three features it forces.
+way the editor's did. The guest language is RULED (maintainer,
+2026-08-21): PYTHON — "worthwhile to invest in one other language
+just for diversity's sake," which makes the PACKAGING MILESTONE the
+dashboard's prerequisite on the two mobile lanes: CPython 3.13 ships
+official iOS and Android support (PEP 730/738) and the
+briefcase-style bundling is established upstream, so the work is
+kaya's bootstrap (interpreter + binding into the APK and the iOS
+bundle), not pioneering. The desktops need nothing — Python runs on
+all three today, so the dashboard can start there while packaging
+lands. Still open: the app's name, and the build order across the
+three features it forces.
 
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state
@@ -4775,6 +4823,19 @@ the same scene under the same kind of load (three lane duration
 ceilings tripped the same run; the host was visibly busy). Solo and in
 the next matrix the leg passes. If this face recurs, instrument
 DocumentsUI presentation latency before blaming the scene.
+THIRD FACE THE SAME EVENING, matrix6: save-JVM, "the picker is
+showing null" — never presented again — and then the scene's NEXT
+dialog request met the one-per-process guard, whose sentence ("file
+dialog 1 is already live") rode the new step-failed line into the
+verdict list intact: the abort-shape fix's evidence surviving its
+first real flake. Three faces in one evening, all under matrix
+contention, none solo — and matrix7 added a FOURTH the same night
+(filedialog-go, the process dying mid-picker with an input-manager
+disposal warning; full buffers kept at
+target/validate-failures/android-filedialog-go-buffers.log). The
+threshold is crossed: DIALOG PRESENTATION LATENCY INSTRUMENTATION is
+the named next investigation, before any more matrix reruns are spent
+on this family.
 
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive retap
@@ -4809,6 +4870,10 @@ mechanism rather than the gesture: savepress and choose both went 3
 exits as soon as the sheet goes. If a sheet survives SIX rounds, stop
 raising the cap — that sim's runloop is not coming back, and the leg
 should fail into the pool-health question instead.
+THIRD SIGHTING 2026-08-21 evening, matrix7: editor-go again, the
+save sheet holding through the save press so the title never became
+"draft" — same signature, same contended-matrix-only pattern, fourth
+dialog-family failure of the evening across both mobile platforms.
 SECOND SIGHTING 2026-08-21, matrix4: editor-go's save sheet ate SIX
 presses of Save ("the save dialog was still up after 6 presses"), on a
 host measurably busier than usual (WindowServer 46%, video decode

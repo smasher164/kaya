@@ -1706,6 +1706,13 @@ fi
 # design.
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
 ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
+# Scenes whose GUEST cannot run here YET — sequencing, not design: the
+# portfolio dashboard is Python by design (docs/portfolio-plan.md),
+# and CPython reaches this platform with the packaging milestone
+# (official upstream support exists, PEP 738). The legs wire when it
+# lands.
+# shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
+ANDROID_UNWIRED_SCENES="portfolio"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"

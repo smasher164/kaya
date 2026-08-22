@@ -1219,6 +1219,13 @@ for proto in x11 wayland; do
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain
+    # THE PORTFOLIO DASHBOARD (docs/portfolio-plan.md): python alone by
+    # design, the editor's arrangement one language over; pooled — no
+    # OS chrome, no injected keys. The script arrives by scene name
+    # through KAYA_SCENES_DIR like every pooled leg's.
+    run "$proto" portfolio-python env KAYA_SELFTEST=portfolio KAYA_LIB="$LIB" \
+        python3 guests/python/portfolio.py
+    drain
 done
 drain
 timing legs

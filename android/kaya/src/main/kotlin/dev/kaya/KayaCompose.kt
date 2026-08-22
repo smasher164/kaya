@@ -2363,6 +2363,14 @@ object KayaCompose {
     }
 
     private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
+        // kind@id — the authored a11y_id, creation order never entering
+        // (harness.rs's Target doc; the check-steps container lint's
+        // sanctioned alternative). First match in creation order.
+        if (spec.contains('@')) {
+            val bits = spec.split('@', limit = 2)
+            if (bits.size != 2 || bits[0] != kind || bits[1].isEmpty()) return null
+            return registry.firstOrNull { it.a11yId == bits[1] }
+        }
         val bits = spec.split('#')
         if (bits.size != 2 || bits[0] != kind) return null
         if (bits[1] == "last") return registry.lastOrNull()
