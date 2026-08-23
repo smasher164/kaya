@@ -269,6 +269,20 @@ func attribute(_ element: NSObject, _ name: String) -> Any? {
     return element.perform(sel, with: name)?.takeUnretainedValue()
 }
 
+/// The legacy protocol's action half — a DISCRIMINATOR, not a driver:
+/// only savepress's failure path calls it, after six DELIVERED HID taps
+/// were ignored (the tenth sighting's shape: taps down=ok, bridge
+/// serving reads at 31ms, sheet honestly up — docs/deferred.md's iOS
+/// WATCH entry). AX-press landing where HID taps did not convicts the
+/// sheet's INPUT path; both failing convicts the button itself. The
+/// verbs never drive with it — a user cannot AX-press.
+func performAXPress(_ element: NSObject) -> Bool {
+    let sel = NSSelectorFromString("accessibilityPerformAction:")
+    guard element.responds(to: sel) else { return false }
+    _ = element.perform(sel, with: "AXPress")
+    return true
+}
+
 func text(_ element: NSObject, _ name: String) -> String {
     (attribute(element, name) as? String) ?? ""
 }
@@ -983,12 +997,36 @@ case "savepress":
     }
     if !sheetGone {
         let held = whoHoldsTheScreen()
+        // The tenth sighting's discriminator: six delivered-and-ignored
+        // HID taps say nothing about WHY. One AX-press at the same
+        // centre splits the two remaining stories — the leg fails either
+        // way, so nothing is laundered; the sentence just learns which.
+        var axProbe = "ax-press: no element at the Save centre"
+        if let centreString = saveCentres.sorted().first,
+            let comma = centreString.firstIndex(of: ","),
+            let cx = Double(centreString[..<comma]),
+            let cy = Double(centreString[centreString.index(after: comma)...]),
+            let hit = sim.objectAtPoint(CGPoint(x: cx, y: cy)),
+            let element = sim.element(for: hit)
+        {
+            if performAXPress(element) {
+                let goneAfter = waitForPickerGone(6)
+                axProbe =
+                    "ax-press on \(text(element, "AXDescription")) "
+                    + (goneAfter
+                        ? "DISMISSED the sheet the taps could not — the input path is the wedge"
+                        : "was also ignored — the button itself is inert")
+            } else {
+                axProbe = "ax-press: the element takes no actions"
+            }
+        }
         let after = navigationStrip(sim, screen: screen).map { $0.0 }
         fail(
             "the save dialog was still up after \(presses) presses of Save across "
                 + "\(sinceMs(pressStarted))ms: Save was in the strip for \(saveOffered) of them, "
                 + "at \(saveCentres.count == 1 ? "one fixed centre" : "\(saveCentres.count) centres") "
-                + "\(saveCentres.sorted()) of a \(screen) screen; \(held); it now offers \(after)")
+                + "\(saveCentres.sorted()) of a \(screen) screen; \(held); \(axProbe); "
+                + "it now offers \(after)")
     }
 
 case "savecancel":

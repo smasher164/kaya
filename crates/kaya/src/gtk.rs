@@ -533,6 +533,33 @@ fn set_container_align(widget: &gtk4::Widget, mode: i64) {
     unsafe { widget.set_data(ALIGN_KEY, mode) }
 }
 
+/// A container's declared inter-child gap — what kaya believes it set. Both
+/// the layout (ensure_flex) and `expect_fills` read it HERE and not off the
+/// GtkBox: once ensure_flex swaps the layout manager, GtkBox's own spacing
+/// getter and setter both assert GTK_IS_BOX_LAYOUT and the value is lost
+/// (docs/deferred.md's always-8 GAP).
+const SPACING_KEY: &str = "kaya-spacing";
+
+/// The normalized default every Column and Row is created with, and so the
+/// gap a container that never took the prop is laid out with.
+const CONTAINER_SPACING: i32 = 8;
+
+fn container_spacing(widget: &gtk4::Widget) -> i32 {
+    // SAFETY: the key is private to this module and only ever set to an i32
+    // by set_container_spacing below.
+    unsafe {
+        widget
+            .data::<i32>(SPACING_KEY)
+            .map(|p| *p.as_ref())
+            .unwrap_or(CONTAINER_SPACING)
+    }
+}
+
+fn set_container_spacing(widget: &gtk4::Widget, gap: i32) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(SPACING_KEY, gap) }
+}
+
 /// A kaya container's OWN main axis, stamped at creation. Two readings are
 /// unavailable here: `GtkBox::orientation` (ensure_flex replaces the layout
 /// that owns the property — see reconcile_grow_align), and the child's
@@ -560,7 +587,8 @@ fn crosses_container(child: &gtk4::Widget, vertical_container: bool) -> bool {
 
 /// Install the flex layout manager the first time one of a container's
 /// children grows. Lazy: containers that never grow keep GtkBox's own
-/// behaviour, and the manager takes the spacing with it.
+/// behaviour, and the manager takes the DECLARED spacing with it — the
+/// box's own is what the swap makes unreadable (see SPACING_KEY).
 fn ensure_flex(container: &gtk4::Widget) {
     let Some(container_box) = container.downcast_ref::<gtk4::Box>() else {
         return;
@@ -573,7 +601,10 @@ fn ensure_flex(container: &gtk4::Widget) {
         return;
     }
     let orientation = container_box.orientation();
-    container_box.set_layout_manager(Some(flex::FlexLayout::new(orientation, 8)));
+    container_box.set_layout_manager(Some(flex::FlexLayout::new(
+        orientation,
+        container_spacing(container),
+    )));
 }
 
 /// Stamp one child's CROSS-axis alignment from its container's align mode.
@@ -787,6 +818,15 @@ mod flex {
         /// GtkBoxLayout that owned the property has been replaced.
         pub fn orientation(&self) -> gtk4::Orientation {
             self.imp().orientation.get()
+        }
+
+        /// The gap, for a manager already installed. `GtkBox::set_spacing`
+        /// cannot reach it — the box forwards to its layout manager and the
+        /// forward asserts GTK_IS_BOX_LAYOUT.
+        pub fn set_spacing(&self, spacing: i32) {
+            if self.imp().spacing.replace(spacing) != spacing {
+                self.layout_changed();
+            }
         }
     }
 
@@ -5018,9 +5058,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Entry(entry)
                 }
                 WidgetKind::Column => {
-// Normalized layout default (uniform across backends): 8-unit
-// spacing; the box hugs the top-left of its parent.
-                    let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+// Normalized layout default (uniform across backends); the box
+// hugs the top-left of its parent.
+                    let column = gtk4::Box::new(gtk4::Orientation::Vertical, CONTAINER_SPACING);
                     column.set_halign(gtk4::Align::Start);
                     column.set_valign(gtk4::Align::Start);
                     // The axis its PARENT will read to see it crossing.
@@ -5031,7 +5071,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Column(column)
                 }
                 WidgetKind::Row => {
-                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, CONTAINER_SPACING);
                     row.set_halign(gtk4::Align::Start);
                     row.set_valign(gtk4::Align::Start);
                     set_container_vertical(row.upcast_ref::<gtk4::Widget>(), false);
@@ -6630,10 +6670,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Column(container), Prop::Spacing, Value::F64(gap))
                 | (NativeWidget::Row(container), Prop::Spacing, Value::F64(gap)) => {
-                    // The container's own inter-child gap; the flex
-                    // manager reads the Box spacing at allocate time,
-                    // so both layout paths follow it.
-                    container.set_spacing(gap.round() as i32);
+                    use gtk4::prelude::{Cast, WidgetExt};
+                    let gap = gap.round() as i32;
+                    let widget = container.upcast_ref::<gtk4::Widget>();
+                    set_container_spacing(widget, gap);
+                    // TWO LAYOUT PATHS, TWO WRITES, and the write is why the
+                    // stored value exists: GtkBox owns the gap until a child
+                    // grows, and forwarding to it AFTER ensure_flex asserts
+                    // GTK_IS_BOX_LAYOUT and drops the write on the floor. The
+                    // bindings differ on which case a scene hits — python,
+                    // csharp and ocaml emit this prop before the children's
+                    // weights, rust, go, haskell and java after — so both arms
+                    // carry real legs (docs/deferred.md's always-8 GAP).
+                    match widget
+                        .layout_manager()
+                        .and_then(|m| m.downcast::<flex::FlexLayout>().ok())
+                    {
+                        Some(flex) => flex.set_spacing(gap),
+                        None => container.set_spacing(gap),
+                    }
                 }
                 // THE CONTAINER'S OWN PADDING (prop 17), all three kinds the
                 // root allows it on. The CSS box carries it, not the layout:
@@ -9264,29 +9319,36 @@ impl crate::harness::Stage for GtkStage {
                     }
                 }
             }
-            let mut min_start = i32::MAX;
-            let mut max_end = i32::MIN;
+            // THE CHILDREN, in SwiftUI's shape (its expect_fills container
+            // arm): extents SUMMED plus the DECLARED gaps, against the content
+            // box. min_start..max_end could not serve — that span IS
+            // sum(extents) + the gap the layout ACTUALLY used, so the declared
+            // value cancels out and no spacing prop can make it fail
+            // (docs/deferred.md's always-8 GAP; grow.steps calls its 12-unit
+            // gap the spacing prop's conformance exercise).
+            let mut span = 0;
+            let mut count = 0;
             let mut child = container.first_child();
             while let Some(w) = child {
                 child = w.next_sibling();
                 // Invisible children are the ones flex::allocate skips; their
-                // stale 0x0 allocation is not a measurement of this layout.
+                // stale 0x0 allocation is not a measurement of this layout,
+                // and no gap is laid out beside them either.
                 if !w.is_visible() {
                     continue;
                 }
-                let alloc = w.allocation();
-                let (start, extent) = if vertical {
-                    (alloc.y(), alloc.height())
-                } else {
-                    (alloc.x(), alloc.width())
-                };
-                min_start = min_start.min(start);
-                max_end = max_end.max(start + extent);
+                // The ALLOCATION, not TRACK_KEY: only a flex container stamps
+                // a track, and on the main axis the two agree anyway — the
+                // manager hands a grower its whole track and a non-grower
+                // exactly its natural, leaving GTK's align adjustment nothing
+                // to take away.
+                span += flex::child_extent(&w, vertical).round() as i32;
+                count += 1;
             }
-            if max_end < min_start {
+            if count == 0 {
                 return "no children".to_owned();
             }
-            let span = max_end - min_start;
+            span += container_spacing(&widget) * (count - 1);
             if (span - inner).abs() <= 2 {
                 String::new()
             } else {

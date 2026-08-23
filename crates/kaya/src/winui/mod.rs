@@ -357,6 +357,12 @@ struct CoreState {
     /// structural change, so late arrivals are covered by the same
     /// path that keeps Grid indices honest.
     aligns: HashMap<WidgetId, i64>,
+    /// Container spacing as KAYA declared it (default 8) — what
+    /// container_fills sums with, deliberately NOT the Grid's own
+    /// RowSpacing/ColumnSpacing: reading the toolkit back mirrors the
+    /// lowering's write and can never catch it dropped (the GTK
+    /// spacing GAP's sibling, found 2026-08-22).
+    spacings: HashMap<WidgetId, f64>,
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index. Clicks emit the stored tag
     // directly; the other controls fire their real events for the stage's
@@ -10897,7 +10903,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Column(grid), Prop::Spacing, Value::F64(gap)) => {
                     // A column's children stack as rows; the gap is the
-                    // row spacing (expect_fills reads it back live).
+                    // row spacing. The DECLARED value is stored beside
+                    // the write — expect_fills sums with the declaration,
+                    // never the toolkit's read-back.
+                    core.spacings.insert(id, gap);
                     grid.SetRowSpacing(gap)?;
                 }
                 (
@@ -10920,6 +10929,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     reindex(core, id)?;
                 }
                 (NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
+                    core.spacings.insert(id, gap);
                     grid.SetColumnSpacing(gap)?;
                 }
                 (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
@@ -12548,6 +12558,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             child_order: HashMap::new(),
             grow: HashMap::new(),
             aligns: HashMap::new(),
+            spacings: HashMap::new(),
             window,
             aux_windows: HashMap::new(),
             nav_entries: HashMap::new(),
@@ -14574,6 +14585,20 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok("<no such target>".to_string());
             };
             let grid = &registry[i];
+            // The DECLARED gap, recovered by COM identity the way
+            // cross_mode recovers the id: summing with the Grid's own
+            // RowSpacing/ColumnSpacing mirrored the lowering's write and
+            // could never catch it dropped (the GTK spacing GAP's
+            // sibling, 2026-08-22).
+            let declared = core
+                .widgets
+                .iter()
+                .find_map(|(wid, w)| match w {
+                    NativeWidget::Column(g) | NativeWidget::Row(g) if g == grid => Some(*wid),
+                    _ => None,
+                })
+                .and_then(|wid| core.spacings.get(&wid).copied())
+                .unwrap_or(8.0);
             grid.UpdateLayout()?;
             // A GROWN CONTAINER IS A FLEX CHILD TOO, and this clause
             // comes first: its own box must span the track its weight
@@ -14641,7 +14666,7 @@ impl crate::harness::Stage for WinUiStage {
                 (
                     grid.ActualHeight()? - padding.Top - padding.Bottom,
                     sum,
-                    grid.RowSpacing()? * f64::from(defs.Size()?.saturating_sub(1)),
+                    declared * f64::from(defs.Size()?.saturating_sub(1)),
                     defs.Size()?,
                 )
             } else {
@@ -14653,7 +14678,7 @@ impl crate::harness::Stage for WinUiStage {
                 (
                     grid.ActualWidth()? - padding.Left - padding.Right,
                     sum,
-                    grid.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1)),
+                    declared * f64::from(defs.Size()?.saturating_sub(1)),
                     defs.Size()?,
                 )
             };

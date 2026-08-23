@@ -4796,7 +4796,7 @@ the point: it is the gate that keeps it so. Two findings the slice
 surfaced have their own entries below (the GTK spacing no-op; Compose's
 kayaHugCross pin).
 
-## GAP — a GTK flex container's gap is always 8, and no assertion can see it (found 2026-08-22)
+## ~~GAP — a GTK flex container's gap is always 8, and no assertion can see it~~ (found 2026-08-22, FIXED 2026-08-22)
 KEY: ensure_flex spacing, FlexLayout::new, gtk_box_layout_set_spacing, Prop::Spacing GtkBox, container_fills max_end min_start, grow.steps spacing conformance
 
 ensure_flex hard-codes `FlexLayout::new(orientation, 8)` and never
@@ -4814,6 +4814,60 @@ whether GTK's observation should sum-and-compare the way SwiftUI's
 does. Found by the breadth slice's GTK agent 2026-08-22, mid-proof;
 deliberately not fixed in that slice, which was holding a
 watch-red/watch-green order it would have broken.
+
+FIXED 2026-08-22, both halves, crates/kaya/src/gtk.rs.
+THE OBSERVATION FIRST, and it was watched red on its own: container_fills'
+children clause now sums the visible children's main-axis extents and adds
+the DECLARED gap * (n-1) — SwiftUI's and Compose's shape — where it used
+to span min_start..max_end. That span IS sum(extents) + whatever gap the
+layout actually used, so the declared value cancelled and no value of the
+prop could make it fail. With that change ALONE, grow's row#0 (which
+declares spacing(12.0) over two children, so one gap) read
+`row#0 leaves leftover (children span 502px of 498px)` on x11 and
+`512px of 508px` on wayland — the 4px miss tools/scenes/grow.steps
+predicts in writing — in all seven languages the linux lane runs, both
+protocols. grid, align and portfolio stayed green: none of them declares
+a non-default gap, so the arithmetic did not simply start failing.
+THEN THE LOWERING. A SPACING_KEY object-data value records what kaya was
+told (ALIGN_KEY's shape), defaulting to CONTAINER_SPACING = 8 — the value
+every Column/Row is created with and the literal ensure_flex used to
+hard-code, so no box kaya composes for itself moved. ensure_flex installs
+FlexLayout with THAT; FlexLayout gained a set_spacing; and the
+Prop::Spacing arm routes by which manager is installed, GtkBox's setter
+now reserved for the box's own layout, which is what kills the
+GTK_IS_BOX_LAYOUT assertion.
+BOTH ARMS ARE LOAD-BEARING, and the bindings decide which: python, csharp
+and ocaml emit a container's Spacing prop BEFORE its children's weights
+(so ensure_flex must read it), rust, go, haskell and java emit it AFTER
+(so the live update must take it). Perturbing one arm reddens exactly one
+of those two groups and leaves the other green; the two groups partition
+the seven languages with no overlap, and their union is the fourteen legs
+that reverting the whole lowering reddens.
+44 legs green after: grow, grid and align in seven languages, portfolio
+in python, x11 and wayland.
+CORRECTION to this entry as first written: the two Gtk-CRITICAL lines
+were never on EVERY grow leg — only on the four languages that emit the
+prop after the weights. They are gone from a green leg now, measured
+against a positive control (the same one-leg probe run directly in the
+lane's container reads 2 lines with the lowering reverted, 0 with it in).
+STILL OPEN, one backend over: WinUI's own fills clause adds back
+`grid.RowSpacing()`, the toolkit property its lowering writes, so it
+mirrors rather than compares and could not catch a dropped spacing write
+either (crates/kaya/src/winui/mod.rs:14641-14673). Nothing is broken
+there today — that lowering does write it — but the guard is not a guard.
+
+AND THE SIBLING ONE BACKEND OVER, same day: WinUI's container_fills
+summed with grid.RowSpacing()/ColumnSpacing() — the toolkit property
+its own lowering writes — so it MIRRORED rather than compared and
+could not have caught a dropped spacing write either. It now sums
+with the DECLARED value (core.spacings, default 8, stored beside the
+write; the id recovered by COM identity), and the fix was watched
+both ways on the VM: the Row arm's SetColumnSpacing dropped (1
+substitution, build proven fresh by its Compiling line — the mtime
+trap two paragraphs down) read `row#0 leaves leftover (children span
+512dip of 508dip)`, the restore (sha-verified) went green. GTK's
+declared-vs-rendered discipline now holds on both allocation-imposing
+backends; SwiftUI and Compose already summed with the declaration.
 
 ## Compose pins a hugging container to its content before it fills (recorded 2026-08-22)
 KEY: kayaHugCross, IntrinsicSize, crossing container breadth, unpinned parent, fillMaxWidth constraint
@@ -5202,6 +5256,26 @@ became "draft"). Android's sibling ghost was closed by DEBOUNCING the
 same kind of decision — two consecutive absences before believing one
 — and if the log shows a wait_gone ok=yes with read_timeouts=1, that
 is the fix here too, and NOT another round-cap raise.
+
+TENTH SIGHTING (2026-08-22 evening, save-go under the spacing
+slice's matrix), and the DECISIVE COMBINATION fired verbatim: six
+taps delivered (down=ok up=ok) to Save at ONE fixed centre (324,92)
+across 46303ms, the hit test answered by the real picker process
+(pid 76151 com.apple.DocumentManager, root AXApplication/Files), and
+the bridge serving 3245 reads with the SLOWEST AT 31ms and zero
+timeouts. The sheet was honestly up, the runloop was demonstrably
+healthy, and the taps were DELIVERED AND IGNORED — which FALSIFIES
+the second sighting's starved-runloop conviction and moves the
+investigation to the sheet's own input path, exactly as this entry's
+decisive-combination paragraph predicted. The next discriminator is
+armed (2026-08-22): savepress's failure path now hit-tests the Save
+centre once more and performs an AX-press on the element — a
+DISCRIMINATOR, never a driver: the leg fails either way, and the
+sentence learns which story survives (AX-press dismissing what six
+HID taps could not convicts the input path — a wedged gesture
+recognizer or an un-completed presentation transition swallowing
+touches; AX-press also ignored convicts the button itself). Eleventh
+sighting reads that clause first.
 
 A green run's log is the baseline: target/ios-simdrive-logs/<leg>.log
 for each of the four dialog scenes, cleared per run; a failing leg's

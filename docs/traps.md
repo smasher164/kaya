@@ -4251,3 +4251,23 @@ same red's other conviction: nothing had stamped the main axis at all,
 so a Button in a 372dip star track drew 57dip — the reindex stamp now
 writes main-axis Stretch on every flex child (identical for Auto
 tracks, the grower's box for star ones).
+
+## A restored copy that preserves mtime runs the PREVIOUS binary
+
+`shutil.copy2` (and `cp -p`) preserve modification time; cargo's
+rebuild check is mtime-keyed; so a perturb-restore cycle that copies
+the good file back CAN leave the tree textually perturbed-then-restored
+while every subsequent "rebuild" reuses the artifact from BEFORE the
+perturbation. Measured 2026-08-22 during the GTK spacing fix's watched
+negative: the perturbation printed its substitution count correctly,
+the probe ran, and it reported PASS — because the binary under test
+predated the perturbation. The count was right and proved nothing.
+
+The guard, both halves: `touch` the file after EVERY write in a
+perturb-restore cycle (perturbation and restore alike), and refuse any
+watched-negative verdict whose build log does not show the crate
+actually recompiling (`Compiling kaya` for this repo). A watched
+negative is only watched if the thing that ran contains the
+perturbation — the build's freshness is part of the proof, not
+plumbing. The same session's WinUI sibling fix carried the guard from
+the start (the Compiling line is quoted in the ledger's strike note).
