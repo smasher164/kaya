@@ -3,13 +3,18 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # A DEDICATED input for Go alone: the main input's locked rev
+    # carries go_1_27 at 1.27rc1, and bumping it moves every tool in
+    # the shell at once. This one is locked independently, so Go tracks
+    # its stable while everything else holds still.
+    nixpkgs-go.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { self, nixpkgs, nixpkgs-go, rust-overlay }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
@@ -85,27 +90,13 @@
             # wheel builds offline (--no-isolation) from the flake's
             # pinned python, never from whatever pip resolves that day.
             (python3.withPackages (ps: [ ps.hatchling ps.build ]))
-            # Go 1.27rc2, pinned binary distribution: generic methods
-            # (type parameters on methods) are foundational for the Go
-            # binding's typed surface, and 1.27 is pre-release until
-            # August 2026. Swap back to nixpkgs go when it catches up.
-            (pkgs.stdenvNoCC.mkDerivation {
-              pname = "go";
-              version = "1.27rc2";
-              src = pkgs.fetchurl {
-                url = "https://go.dev/dl/go1.27rc2.darwin-arm64.tar.gz";
-                sha256 = "b543bf435ed266d66b275efba433dbe64904be607fe365494cf72f7ad4e91b63";
-              };
-              sourceRoot = "go";
-              dontBuild = true;
-              dontFixup = true;
-              installPhase = ''
-                mkdir -p $out
-                cp -R . $out/
-                mkdir -p $out/bin
-                ln -sf $out/bin/go $out/bin/go || true
-              '';
-            })
+            # Go 1.27 stable, from the dedicated nixpkgs-go input above:
+            # generic methods (type parameters on methods) are
+            # foundational for the Go binding's typed surface. The
+            # Dockerfile's and deploy-win's pins carry the same version
+            # as release tarballs (no nix on those hosts) and move in
+            # lockstep — the ledger's go pin entry.
+            nixpkgs-go.legacyPackages.${pkgs.stdenv.hostPlatform.system}.go_1_27
             dotnet-sdk_10
             # OCaml guest (direct ring over ocaml-ctypes + cursor stubs);
             # findlib's setup hook wires OCAMLPATH for the shell.

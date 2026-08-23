@@ -707,10 +707,12 @@ fi
 # OpenJDK does.
 run_ssh 'cmd /c java -version >nul 2>&1 && echo jdk present || winget install --id Microsoft.OpenJDK.17 --architecture arm64 --silent --accept-package-agreements --accept-source-agreements --scope machine'
 
-# Go 1.27rc2 on the VM (generic methods; pre-release until August
-# 2026): fetched once, idempotently; the go guest scripts prepend
-# C:\kaya\go127\go\bin so it wins over any stable install.
-run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (powershell -Command "Invoke-WebRequest -Uri https://go.dev/dl/go1.27rc2.windows-arm64.zip -OutFile C:\kaya\go127.zip; Expand-Archive -Path C:\kaya\go127.zip -DestinationPath C:\kaya\go127 -Force; Remove-Item C:\kaya\go127.zip")'
+# Go 1.27.0 stable on the VM (generic methods); the go guest scripts
+# prepend C:\kaya\go127\go\bin so it wins over any stable install —
+# the directory names the 1.27 LINE, and the check is VERSION-KEYED,
+# not exists-keyed: an exists check kept the VM on rc2 through a pin
+# bump forever, since the cached tree satisfied it.
+run_ssh 'cmd /c "C:\kaya\go127\go\bin\go.exe version 2>nul | findstr /c:go1.27.0 >nul && echo go127 present || powershell -Command \"Remove-Item -Recurse -Force C:\kaya\go127 -ErrorAction SilentlyContinue; Invoke-WebRequest -Uri https://go.dev/dl/go1.27.0.windows-arm64.zip -OutFile C:\kaya\go127.zip; Expand-Archive -Path C:\kaya\go127.zip -DestinationPath C:\kaya\go127 -Force; Remove-Item C:\kaya\go127.zip\""'
 
 # A hung or leftover guest keeps kaya.dll locked: the next deploy's
 # copy fails under set -e, or a fresh suite runs beside a zombie. This

@@ -1413,18 +1413,22 @@ count, so the saving is measured rather than assumed.
 ## Testing / infrastructure
 
 
-- **Go 1.27 STABLE is out; the three 1.27rc2 pins should move to it**
-  (maintainer, 2026-08-21). The rc was adopted 2026-07-16 for generic
-  methods with "swap to stable then" on the record, and stable has now
-  shipped — but nixos-unstable does not carry it yet (nixpkgs has it on
-  master only), so the clean move (flake.nix dropping its hand-pinned
-  tarball for nixpkgs' go_1_27) waits on the channel. The three pins
-  that must move TOGETHER when it lands: flake.nix's fetchurl
-  (go1.27rc2.darwin-arm64, sha256 beside it), tools/linux/Dockerfile's
-  tarball + sha256sum -c, and tools/deploy-win.sh's Invoke-WebRequest
-  to C:\kaya\go127. Interim option if the wait drags: the pins are
-  plain release-binary URLs, so bumping rc2 -> stable tarballs needs no
-  nixpkgs at all — one hash per pin and a matrix run.
+- ~~**Go 1.27 STABLE is out; the three 1.27rc2 pins should move to it**~~
+  — DONE 2026-08-22, the entry's own interim option: all three pins
+  moved TOGETHER to the 1.27.0 release tarballs with go.dev's published
+  sha256s (flake.nix's fetchurl, tools/linux/Dockerfile's sha256sum -c,
+  tools/deploy-win.sh's Invoke-WebRequest), `nix develop -c go version`
+  answers go1.27.0, and deploy-win's VM check became VERSION-KEYED —
+  the old `if exist` would have kept the VM's cached rc2 through the
+  bump forever. AND the clean move landed the same hour, the
+  maintainer asking the right question at the mkDerivation ("why do
+  you need to mkDerivation?"): flake.nix now takes go_1_27 from a
+  DEDICATED nixpkgs-go input locked independently at nixos-unstable —
+  the main input's locked rev only carries 1.27rc1, and bumping IT
+  moves every tool at once, which a second input avoids. The
+  hand-rolled tarball derivation is gone from the flake; release
+  tarballs remain only where no nix exists (the linux container's
+  Dockerfile, the windows VM), same version, moving in lockstep.
   KEY: go 1.27rc2, go127, pinned binary distro, nixos-unstable channel
 - ~~**A GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE, and this is the
   second instance.**~~ — CLOSED 2026-08-21: the rule adopted, both
@@ -4648,8 +4652,12 @@ briefcase-style bundling is established upstream, so the work is
 kaya's bootstrap (interpreter + binding into the APK and the iOS
 bundle), not pioneering. The desktops need nothing — Python runs on
 all three today, so the dashboard can start there while packaging
-lands. Still open: the app's name, and the build order across the
-three features it forces.
+lands. The two open
+sub-decisions are RULED (maintainer, 2026-08-22): the app's name is
+PORTFOLIO — the working name keeps, and every scene, guest and window
+title already spells it — and the build order is TABLES ->
+VIRTUALIZATION -> CANVAS, both list-shaped features before the
+drawing surface.
 
 ## ~~GAP — a nested SwiftUI container cannot fill its track, so the mac dashboard clips its table (found 2026-08-22, by the first capture)~~
 KEY: KayaFlex fillCross, align stretch scene, nested container hugs cross, portfolio table clips, flexStretch textarea-only

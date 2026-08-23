@@ -70,10 +70,11 @@ ENV PATH=/root/.opam/default/bin:$PATH
 # in the image, not per run.
 RUN cabal update
 
-# Go 1.27rc2 (generic methods; pre-release until August 2026), pinned
-# by hash — swap back to a distro/stable Go when it releases.
-RUN curl -fsSL -o /tmp/go.tgz https://go.dev/dl/go1.27rc2.linux-arm64.tar.gz \
-    && echo "f8ab754593c7ea2f47e31820c0e8839105636c4b38ae174ba107960ea25e9e92  /tmp/go.tgz" | sha256sum -c - \
+# Go 1.27.0 stable (generic methods), pinned by hash; moves in
+# lockstep with flake.nix's and deploy-win's pins (the ledger's go pin
+# entry).
+RUN curl -fsSL -o /tmp/go.tgz https://go.dev/dl/go1.27.0.linux-arm64.tar.gz \
+    && echo "51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda  /tmp/go.tgz" | sha256sum -c - \
     && tar -C /usr/local -xzf /tmp/go.tgz && rm /tmp/go.tgz
 ENV PATH=/usr/local/go/bin:$PATH
 
