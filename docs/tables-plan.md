@@ -298,3 +298,79 @@ SEQUENCING: spec.rs first (the hash moves, everything regenerates),
 core walls + state with unit tests, Rust + SwiftUI + the dashboard
 reworked to the real nested shape on mac, THEN the fan-out (six
 bindings' spellings, the census clauses, the scene on five lanes).
+
+## The second slice, serialized (2026-08-23 — resume here)
+
+b819423 is the protocol root, pushed and green up the whole ladder for
+everything it touches: TX 45 carries copy keys (reserved:U32 became
+path_len:U32; Values = keys then titles), scene.rs's arms cover the
+three addressings (live container / template-scoped-every-copy /
+keyed-one-copy), stamping records bar_instances[(node, PathKey)]
+unconditionally and emits each copy's bar apply with
+click_tag(node, keys) — sort_requested's own identity — teardown
+sweeps the maps, and seven unit tests (fixture dynamic_table_scene,
+scene.rs) were each watched failing first. The APPLY record did NOT
+change: backends receive ordinary per-copy applies and are expected
+to need NOTHING — verify by measuring before touching one. The
+generators read one is_padding predicate now (a spec field dropped
+from signatures can never again be emitted by name); all eight
+bindings pass path_len 0 spelling-neutral; both interpreter hash pins
+moved.
+
+THE WORK OWED, in order (depth then breadth):
+1. Rust nested spelling: Rows::columns() on a nested For already
+   emits the right record (the Row Drop pushes the node id + empty
+   path). Owed: on_sort for the nested case — Rows::id() asserts
+   !nested; register on the Messages NODES table instead (stamped
+   handlers' first args are the copy's keys, the established
+   convention) — and a Rust spelling for the per-copy re-declaration
+   (the sort handler holds the keys; design a tx method taking the
+   For's node handle plus keys).
+2. Python (the dashboard's language): read bindings/python's nested
+   For/collection surface FIRST — it was not examined in slice 1.
+   columns() in the nested zone emits node-id + empty path; on_sort
+   reaches the nodes table; the per-copy re-declare needs a pythonic
+   keyed spelling.
+3. Harness copy-targets: kind@id[key], dot-joined keys for depth
+   (column@positions[brokerage]) is the PROPOSED grammar — it awaits
+   the maintainer's explicit approval; ask before building. One
+   parser serves all three harnesses (crates/kaya/src/harness.rs
+   Target + Stage::resolve_id; SwiftUI's kayaTarget; Compose's
+   resolver), resolving authored id -> template node -> the copy by
+   key.
+4. The dashboard sheds its workaround: guests/python/portfolio.py
+   deletes repopulate() (that deletion is the milestone's acceptance
+   test) for the real shape — every account stamps its own positions
+   table — and portfolio.steps grows the DIVERGENCE assertion the
+   milestone exists for: header_click one copy's table, expect ITS
+   indicator moved and the sibling's unmoved. Desktop lanes only
+   (portfolio is IOS_UNWIRED/ANDROID_UNWIRED until packaging).
+5. Census gates move WITH each spelling, same commit:
+   tools/tpl-surfaces.py (template-zone columns/on_sort),
+   check-sugar-surface's table clause, check-steps if the target
+   grammar grows. No new verbs, so check-verbs should hold green.
+6. Ladder: every new assertion watched failing first, validate-mac,
+   then the five-lane matrix before "landed".
+
+MEASURED IN SLICE 1 — do not rediscover:
+- A nested collection must be declared INSIDE the template scope
+  (bind_collection's own-scope wall).
+- The template-zone set_column_headers arm finds its For in the OPEN
+  parent scope's ops: the nested For folds into the parent at its
+  TemplateEnd before the header op arrives (Row Drop ordering). A
+  grandparent-scope target is not expressible by the builders.
+- A per-copy re-declaration requires the template bar first (walled,
+  tested); a template re-declaration clears per-copy overrides
+  ("replacing whatever was declared before" covers the copies).
+- Types: bodies are Vec<Arc<TplBody>>; map keys are PathKey (Key is
+  the hashable form of Value).
+- In a fixture, dropping a cell's AddChild makes it a second ROOT —
+  the one-root wall fires before the cell-count wall.
+- check-abort's C# arm builds unconditionally since b819423 (its
+  [ -f ] guard ran a stale dll and called it green).
+
+Parked on the dialog-flake entries, not this slice: the iOS aim
+instrumentation (log the goto'd directory beside the picker's
+breadcrumb) and a stale kaya-editor-* litter sweep in the simulator's
+Documents; android's blindness face waits on a non-empty-but-wrong
+window-list sighting.
