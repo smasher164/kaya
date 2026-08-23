@@ -5161,6 +5161,29 @@ lagging window list cannot attest, so it means a longer settle or an
 event-driven read), or retiring injected backs from the cancel path
 entirely in favor of an in-process cancellation, which is the remedy
 the sixth sighting already flagged as needing that ruling.
+
+RULED 2026-08-22 ("yeah let's do A") AND IMPLEMENTED, sharpened past
+the ruling's own sketch because a bare something-changed handshake
+would not have stopped the ninth press (the picker's closing fires
+events too): the service consumes events as FRESHNESS SIGNALS now.
+WINDOWS_CHANGE_REMOVED names the exact window the system removed, and
+dismiss() and waitForPickerGone() treat that announcement as
+outranking the stale list entry (KAYA_DISMISS_REMOVED logs the
+short-circuit); dismiss() additionally presses only after windowEpoch
+has moved since its last press, and its refusal sentence counts the
+withheld presses beside the resumed-gate refusals. removals are
+cleared at each dialog present so a reused id cannot vouch for a live
+window. The service stays driven — nothing initiates from an event.
+Injected backs stay the cancel mechanism, so the leg keeps exercising
+the gesture a user presses; the in-process cancel (option B) is the
+RECORDED ESCALATION if this ever fires again. Residual exposure, said
+out loud: the gap between the window's actual removal and the removal
+event's delivery to the service — system-push rather than
+poll-refresh, so far smaller than the lag that bought the stragglers,
+and not provably zero. An eleventh straggler would carry
+KAYA_DISMISS_REMOVED absent and the withheld count in the refusal
+sentence, which is what would falsify this remedy. UNVALIDATED until
+matrices run clean, per the family's standing rule.
 FIRST MATRIX WITH THE GATE AND INSTRUMENTS, same day: ALL PASS (112
 android legs), and KAYA_DIALOG_SEEN was WATCHED PRINTING on the
 device — dialog=1 kind=save ms=719, dialog=2 kind=open ms=671 — so

@@ -29,8 +29,26 @@ class KayaHarnessAccessibility : AccessibilityService() {
         super.onDestroy()
     }
 
-    // The service is driven, never reactive: the scene says when to look.
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    // The service stays DRIVEN for reads — the scene says when to look —
+    // but events are consumed as FRESHNESS SIGNALS since 2026-08-22:
+    // the window list getWindows() answers is a snapshot that lags
+    // reality in both directions, and the straggler-back family's ninth
+    // sighting measured a press slipping through a 65ms gap no polled
+    // read could see (the WATCH entry in docs/deferred.md). A
+    // WINDOWS_CHANGE_REMOVED event names the window that ACTUALLY left,
+    // straight from the system, and the epoch says the system processed
+    // something since the last press. Neither makes the service
+    // reactive: nothing here initiates.
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        event ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
+            android.os.Build.VERSION.SDK_INT >= 28 &&
+            (event.windowChanges and AccessibilityEvent.WINDOWS_CHANGE_REMOVED) != 0
+        ) {
+            noteRemoved(event.windowId)
+        }
+        windowEpoch += 1
+    }
 
     override fun onInterrupt() = Unit
 
@@ -57,6 +75,43 @@ class KayaHarnessAccessibility : AccessibilityService() {
          */
         @Volatile
         internal var appResumed: Boolean = false
+
+        /**
+         * Bumped on EVERY accessibility event, on the service's main
+         * looper (single writer). [dismiss] presses again only after
+         * this has moved since its last press: a system that has
+         * processed nothing since the previous back cannot have needed
+         * another one yet.
+         */
+        @Volatile
+        internal var windowEpoch: Long = 0
+
+        /**
+         * Window ids the system announced REMOVED (capped; cleared at
+         * each dialog present by [clearRemovals]). Fresh where the
+         * window list is stale: the list held a dismissed picker long
+         * enough to buy a straggler back twice, and this is the signal
+         * that cannot.
+         */
+        private val removedWindows = object : LinkedHashSet<Int>() {}
+        private const val REMOVED_CAP = 64
+
+        internal fun noteRemoved(windowId: Int) {
+            synchronized(removedWindows) {
+                removedWindows.add(windowId)
+                while (removedWindows.size > REMOVED_CAP) {
+                    removedWindows.remove(removedWindows.first())
+                }
+            }
+        }
+
+        internal fun wasRemoved(windowId: Int): Boolean =
+            synchronized(removedWindows) { removedWindows.contains(windowId) }
+
+        /** Called at each dialog present, so a reused id cannot lie. */
+        fun clearRemovals() {
+            synchronized(removedWindows) { removedWindows.clear() }
+        }
 
         /**
          * DocumentsUI's package, BOTH SPELLINGS: AOSP images carry
@@ -381,9 +436,25 @@ class KayaHarnessAccessibility : AccessibilityService() {
         var waits = 0
         var absent = 0
         var refused = 0
+        var withheld = 0
+        // The epoch at the LAST press: pressing again before it moves
+        // would be racing a system that has processed nothing since —
+        // and the ninth sighting's straggler slipped through exactly
+        // such a race (the WATCH entry; ruled 2026-08-22, remedy A).
+        var epochAtPress = -1L
         while (waits < GONE_TRIES * 2) {
             waits += 1
             val picker = pickerWindow()
+            if (picker != null && wasRemoved(picker.id)) {
+                // The system itself announced THIS window removed; the
+                // list entry is the stale copy the stragglers rode.
+                android.util.Log.i(
+                    "kaya",
+                    "KAYA_DISMISS_REMOVED: window ${picker.id} left by the system's " +
+                        "own account; the list still showed it",
+                )
+                return null
+            }
             if (picker == null) {
                 // Same debounce as waitForPickerGone: one absent read
                 // can be a live window's transient drop-out.
@@ -396,7 +467,12 @@ class KayaHarnessAccessibility : AccessibilityService() {
             if (picker.isFocused && backs < MAX_BACKS) {
                 if (appResumed) {
                     refused += 1
+                } else if (windowEpoch == epochAtPress) {
+                    // The handshake: nothing has happened since the last
+                    // press — the previous back is still in flight.
+                    withheld += 1
                 } else {
+                    epochAtPress = windowEpoch
                     performGlobalAction(GLOBAL_ACTION_BACK)
                     backs += 1
                 }
@@ -405,7 +481,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
         }
         if (pickerPackage() == null) return null
         return "the picker would not dismiss after $backs backs in $waits looks " +
-            "($refused refused while the app's own activity was resumed); ${windowCensus()}"
+            "($refused refused while the app's own activity was resumed, " +
+            "$withheld withheld waiting for the previous press to be processed); " +
+            windowCensus()
     }
 
     /**
@@ -426,16 +504,22 @@ class KayaHarnessAccessibility : AccessibilityService() {
         // open died on the one-per-process wall (2026-08-21, the tables
         // ledger's ghost family).
         var absent = 0
+        var seenId: Int? = null
         for (i in 0 until GONE_TRIES) {
-            if (pickerPackage() == null) {
+            val picker = pickerWindow()
+            if (picker == null) {
                 absent += 1
                 if (absent >= 2) return true
             } else {
+                seenId = picker.id
+                // The system's own removal announcement outranks the
+                // stale list entry (the ninth sighting's remedy).
+                if (wasRemoved(picker.id)) return true
                 absent = 0
             }
             Thread.sleep(BACK_SETTLE_MS)
         }
-        return false
+        return seenId?.let { wasRemoved(it) } ?: false
     }
 
     /** (name, row) for every row the picker lists, in its own order. */

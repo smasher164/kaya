@@ -2712,6 +2712,9 @@ object KayaCompose {
             kayaLivePickerLauncher = null
             kayaAnswerFileDialog(activity, dialog, result.data)
         }
+        // A fresh dialog invalidates prior removal announcements, so a
+        // reused window id cannot vouch for a window that is still alive.
+        KayaHarnessAccessibility.clearRemovals()
         kayaNoteDialogPresented(dialog, DIALOG_KIND_OPEN)
         kayaLivePickerLauncher?.launch(intent)
     }
@@ -2842,6 +2845,7 @@ object KayaCompose {
             kayaLivePickerLauncher = null
             kayaAnswerSaveDialog(activity, dialog, result.data)
         }
+        KayaHarnessAccessibility.clearRemovals()
         kayaNoteDialogPresented(dialog, DIALOG_KIND_SAVE)
         kayaLivePickerLauncher?.launch(intent)
     }
