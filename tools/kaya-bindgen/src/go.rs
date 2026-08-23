@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "beginRecord", "endRecord", "ParseOccurrence", "BlobHandle",
@@ -790,7 +790,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
     c.line(&format!("\tb := beginRecord(tx{})", camel(r.name)));
     for f in r.fields {
         c.line(&match f.ty {
-            FieldTy::U32 if f.name == "reserved" => {
+            FieldTy::U32 if is_padding(f) => {
                 "\tb = binary.LittleEndian.AppendUint32(b, 0)".into()
             }
             FieldTy::U32 => format!(

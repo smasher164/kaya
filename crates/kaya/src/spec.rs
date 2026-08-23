@@ -1191,7 +1191,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("sorted", FieldTy::U32),
                 f("direction", FieldTy::U32),
                 f("count", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("path_len", FieldTy::U32),
                 f("titles", FieldTy::Values),
             ],
             payload: None,
@@ -1219,6 +1219,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   not a For container, a `count` of 0, an empty title, a \
                   `sorted` outside 0..count that is not the sentinel, and a \
                   `direction` past 1.\n\n\
+                  PATH ADDRESSING (dynamic tables, docs/tables-plan.md): \
+                  the Values carry `path_len` KEY values FIRST, then the \
+                  `count` titles — sort_requested's identity convention \
+                  pointed the other way. path_len 0 with a live For's \
+                  container id is the flat case above; path_len 0 with a \
+                  nested For's TEMPLATE NODE id declares the bar for EVERY \
+                  copy (stored on the site, applied at each stamp); \
+                  path_len > 0 with the template node id and keys \
+                  outermost-first re-declares ONE stamped copy's bar — the \
+                  per-copy sort indicator. A keyed target that names no \
+                  stamped copy is refused loudly.\n\n\
                   ROWS MUST FIT THE COLUMNS: with N columns declared, every \
                   stamped row's template root must be a Row with exactly N \
                   children, checked at stamp time in the core so every \

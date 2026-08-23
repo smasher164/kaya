@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
@@ -544,7 +544,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
     let mut body: Vec<String> = Vec::new();
     for f in r.fields {
         body.push(match f.ty {
-            FieldTy::U32 if f.name == "reserved" => "word32LE 0".into(),
+            FieldTy::U32 if is_padding(f) => "word32LE 0".into(),
             FieldTy::U32 => format!("word32LE {}", camel(f.name)),
             FieldTy::U64 => format!("word64LE {}", camel(f.name)),
             FieldTy::Value => format!("encodeValue {}", camel(f.name)),

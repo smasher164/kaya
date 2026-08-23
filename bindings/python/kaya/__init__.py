@@ -1159,10 +1159,12 @@ class Collection(_BoundCollection):
                 "is declared with the For, then re-declared here"
             )
         sort = sort or Sort.NONE
+        # path_len 0: no key path, so the values are titles alone
+        # (docs/tables-plan.md, dynamic tables).
         _records().append(
             wire.tx_set_column_headers(
                 self._for_handle, sort.sorted, sort.direction,
-                len(titles), list(titles),
+                len(titles), 0, list(titles),
             )
         )
 
@@ -1431,10 +1433,12 @@ class _ColumnsTrace:
         except StopIteration:
             handle = self._trace._template.handle
             self._coll._for_handle = handle.id
+            # path_len 0: no key path, so the values are titles alone
+            # (docs/tables-plan.md, dynamic tables).
             _records().append(
                 wire.tx_set_column_headers(
                     handle.id, self._sort.sorted, self._sort.direction,
-                    len(self._titles), self._titles,
+                    len(self._titles), 0, self._titles,
                 )
             )
             if self._on_sort is not None:

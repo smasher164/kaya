@@ -232,3 +232,69 @@ move-by-key idiom, never an index.
    mac stage, table.steps, the rust guest; validate-mac green.
 3. Breadth: guests x8, Compose, GTK (probe first), WinUI; each slice
    matrix-validated; DESIGN.md's table paragraphs updated at landing.
+
+## Dynamic tables (the 2026-08-22 design; ledger: "Dynamically created tables — HIGH PRIORITY")
+
+The fenced shape: a table created once per data item — "for every
+account, a positions table" — refused today at declaration because
+set_column_headers addresses a live For container by bare widget id
+and a nested For's rows() carries a template node instead. The
+dashboard works around it with one collection repopulated on
+selection (guests/python/portfolio.py's repopulate()), and deleting
+that workaround is this milestone's acceptance test. Build order
+around it is RULED: tables -> virtualization -> canvas.
+
+WHAT THE STAMPING MACHINERY ALREADY GIVES US, which shrinks the
+milestone: run_body births a nested For's SITE per copy, keyed
+(collection, path), with a PER-COPY internal container widget — and
+click_tag(node, keys) already carries copy identity, which is exactly
+how sort_requested reports "a template node id plus the copy's key
+path". So per-copy headers are per-copy APPLIES against per-copy
+container ids, and the backends' apply arms need NOTHING: a stamped
+container with a SetColumnHeaders apply is just a table container,
+keyed by the id it already receives. The weight is in the core and
+the binding spellings, not the four backends.
+
+THE WIRE: TX 45 grows `path_len: U32` (before `count`); its Values
+carry path_len KEY values first, then count title strings — keys
+first, sort_requested's "path_len key values follow" convention.
+Addressing, three cases:
+- path_len 0, id = a live For's container: today's case, unchanged.
+- path_len 0, id = a nested For's TEMPLATE NODE: the template-scoped
+  declaration — headers for every copy, stored on the site; each
+  stamp emits that copy's apply; a re-declaration updates all copies
+  without a declared per-copy override.
+- path_len > 0, id = the template node, keys outermost first: ONE
+  copy's re-declaration — the per-copy sort indicator, which is the
+  whole point ("each copy needs its own working sort arrows").
+Walls, same order as the live arm's: the template-node target must
+name a nested For; arity checks run against that For's bodies; a
+keyed target must resolve to a stamped copy; count/titles/sorted/
+direction walls verbatim. The apply keeps its shape — id becomes the
+copy's container, tag becomes click_tag(template_node, keys).
+
+CORE STATE: the site stores the template declaration; per-copy
+overrides in a map keyed by the copy (cleared when the copy is
+removed). stamp_entry emits the copy's header apply after run_body,
+override-or-template. A late template declaration (after copies
+exist) re-stamps every live copy's bar.
+
+BINDINGS: Rust's nested rows().columns() ALREADY emits with the
+template node id — the fence is the core's lookup, so the template-
+scoped case may cost Rust nothing but the on_sort registration moving
+to the nodes table (stamped handlers already lead with the copy's
+keys). The per-copy RE-declaration needs a spelling per language —
+the fan-out's real work, censused by tpl-surfaces.py once the first
+two exist. Python is second (the dashboard's language).
+
+HARNESS: a per-copy table target needs a spelling. PROPOSED (open to
+veto before the fan-out): `kind@id[key]`, dot-joined keys for depth
+(`column@positions[brokerage]`), resolved by Stage::resolve_id from
+authored id -> template node -> the stamp keyed by the copy path. The
+scene's forcing assertion is per-copy divergence: click ONE copy's
+header, assert ITS indicator moved and a SIBLING's did not.
+
+SEQUENCING: spec.rs first (the hash moves, everything regenerates),
+core walls + state with unit tests, Rust + SwiftUI + the dashboard
+reworked to the real nested shape on mac, THEN the fan-out (six
+bindings' spellings, the census clauses, the scene on five lanes).

@@ -5198,6 +5198,19 @@ device — dialog=1 kind=save ms=719, dialog=2 kind=open ms=671 — so
 the healthy presentation baseline is ~700ms and the SEEN branch is
 believed. KAYA_DIALOG_UNSEEN and the census have still never printed;
 the next failure is what makes those branches evidence.
+THE CENSUS PRINTED (2026-08-22 late, a filedialog leg under the TX 45
+checkpoint matrix; buffers kept), and its first real sentence settles
+this entry's remaining question in the direction nobody could have
+asserted before: "no DocumentsUI window with a readable root; 0
+windows, 0 with an unreadable root: []" — the window list carried
+NOTHING AT ALL, not a picker with an unreadable root. getWindows()
+answered empty while the dialog was requested, which is the
+AccessibilityManagerService bookkeeping outage (the "wait for adding
+window timeout" witness family), not a root-read failure. The census
+branch is believed now, and the m6 face's mechanism is pinned one
+level deeper: the blindness lives in the window LIST's arrival, so
+any further remedy waits on a sighting where the list is non-empty
+and still wrong.
 
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive
@@ -5307,6 +5320,20 @@ HID taps could not convicts the input path — a wedged gesture
 recognizer or an un-completed presentation transition swallowing
 touches; AX-press also ignored convicts the button itself). Eleventh
 sighting reads that clause first.
+A FIFTH FACE, NOT THE TAPS (2026-08-22 late, editor-go under the TX 45
+checkpoint matrix; the timing log kept): the instruments cleared every
+prior suspect in one screen — wait_picker ok in 89ms, reads at 13ms
+max, zero timeouts, zero taps — and the failure is an AIM MISS:
+choose found "no row named notes; the picker lists ['kaya-editor-1116',
+'kaya-editor-3931', ...]" — the picker sat at the PARENT directory,
+listing THIS run's own kaya-editor-1116 as a row among six stale
+siblings from previous runs. The first-picker-after-boot trap's shape
+(docs/traps.md; run-sim warms the document stack for exactly this),
+recurring mid-run. Two follow-ups when this face returns: instrument
+the AIM (log the directory the goto requested beside the breadcrumb
+the picker answered — currentDirectory already reads it), and sweep
+the simulator's stale kaya-editor-* litter, which makes every parent
+listing noisier each run.
 
 A green run's log is the baseline: target/ios-simdrive-logs/<leg>.log
 for each of the four dialog scenes, cleared per run; a failing leg's

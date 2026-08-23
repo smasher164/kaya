@@ -49,9 +49,12 @@ env -u DEVELOPER_DIR -u SDKROOT "$SWIFTC" "${SDK_ARGS[@]}" -o "$TMP/swift-abort"
     >"$TMP/swift.log" 2>&1 || { cat "$TMP/swift.log"; fail swift-build; }
 "$TMP/swift-abort" >"$TMP/swift.log" 2>&1 || { cat "$TMP/swift.log"; fail swift; }
 
-# C#: the KAYA_CHECK=abort branch of the guest binary.
-[ -f guests/csharp/bin/Debug/net10.0/kaya-guests.dll ] \
-    || dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >"$TMP/cs.log" 2>&1 \
+# C#: the KAYA_CHECK=abort branch of the guest binary. Built
+# UNCONDITIONALLY like every other arm: an [ -f ] guard ran a dll
+# older than the edited binding and called it green (measured
+# 2026-08-22, the TX 45 adaptation — invariant 4's exact shape;
+# dotnet's own incremental build makes the unconditional call cheap).
+dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >"$TMP/cs.log" 2>&1 \
     || { cat "$TMP/cs.log"; fail csharp-build; }
 KAYA_CHECK=abort dotnet exec guests/csharp/bin/Debug/net10.0/kaya-guests.dll \
     >"$TMP/cs.log" 2>&1 || { cat "$TMP/cs.log"; fail csharp; }

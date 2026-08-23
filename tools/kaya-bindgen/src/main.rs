@@ -392,11 +392,22 @@ pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static
         .collect()
 }
 
+/// The only tx field a guest never passes: `reserved` is padding and
+/// always encodes 0. Everything else is a parameter.
+///
+/// ONE PREDICATE FOR THE SIGNATURE AND THE BODY. record_params below
+/// builds the signature from it and all 8 emit_packer()s take their
+/// write-a-zero arm from it, so a field dropped from a signature can
+/// never still be emitted by name. It could: this filter also held
+/// `tag_len` and `path_len`, which no tx record had, and the day TX 45
+/// set_column_headers grew `path_len` every one of the 8 bindings
+/// emitted a reference to an identifier it had just refused to declare.
+pub(crate) fn is_padding(f: &Field) -> bool {
+    f.name == "reserved"
+}
+
 pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
-    rec.fields
-        .iter()
-        .filter(|f| f.name != "reserved" && f.name != "tag_len" && f.name != "path_len")
-        .collect()
+    rec.fields.iter().filter(|f| !is_padding(f)).collect()
 }
 
 #[cfg(test)]

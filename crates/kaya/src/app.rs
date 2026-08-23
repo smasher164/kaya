@@ -2484,6 +2484,7 @@ impl<'a> Tx<'a> {
             widget: w,
             sorted: sort.sorted,
             direction: sort.direction,
+            path: Vec::new(),
             titles: titles.iter().map(|t| (*t).to_owned()).collect(),
         });
     }
@@ -3047,10 +3048,15 @@ impl Drop for Row<'_, '_> {
             // After TemplateEnd, so the core can hold the row template
             // to the declared arity the moment this arrives.
             if let Some((titles, sort)) = self.columns.take() {
+                // Path empty: a live For's flat bar, or a nested For's
+                // TEMPLATE-SCOPED bar (every copy) — the core tells the
+                // two apart by the id's zone (docs/tables-plan.md,
+                // dynamic tables).
                 tx.ops.push(TxOp::SetColumnHeaders {
                     widget: WidgetId(self.for_id),
                     sorted: sort.sorted,
                     direction: sort.direction,
+                    path: Vec::new(),
                     titles,
                 });
             }

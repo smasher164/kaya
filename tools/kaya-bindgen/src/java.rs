@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params, window_prop_variants};
+use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
@@ -858,7 +858,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
     ));
     for f in r.fields {
         c.line(&match f.ty {
-            FieldTy::U32 if f.name == "reserved" => "        b.putInt(0);".into(),
+            FieldTy::U32 if is_padding(f) => "        b.putInt(0);".into(),
             FieldTy::U32 => format!("        b.putInt({});", camel(f.name)),
             FieldTy::U64 => format!("        b.putLong({});", camel(f.name)),
             FieldTy::Value => format!("        encodeValue(b, {});", camel(f.name)),

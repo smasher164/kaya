@@ -1912,8 +1912,10 @@ final class KayaAppTx {
     /// otherwise. Re-call after sorting to move the indicator
     /// (docs/tables-plan.md).
     func columns(_ w: KayaWidget, _ titles: [String], _ sort: KayaSort) {
+        // pathLen 0: no key path, so the values are titles alone
+        // (docs/tables-plan.md, dynamic tables).
         tx.setColumnHeaders(
-            w.id, sort.sorted, sort.direction, UInt32(titles.count),
+            w.id, sort.sorted, sort.direction, UInt32(titles.count), 0,
             titles.map { .str($0) })
     }
 

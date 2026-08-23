@@ -2541,11 +2541,14 @@ columns (Widget n) titles sort =
         { bRecords =
             bRecords s
               <> pure
+                -- pathLen 0: no key path, so the values are titles
+                -- alone (docs/tables-plan.md, dynamic tables).
                 ( W.txSetColumnHeaders
                     n
                     (sortColumn sort)
                     (sortDirection sort)
                     (fromIntegral (length titles))
+                    0
                     (map W.VStr titles)
                 )
         }

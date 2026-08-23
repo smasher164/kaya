@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, prop_variants, record_params};
+use crate::{Ctx, is_padding, prop_variants, record_params};
 
 /// C keywords plus this header's own identifiers.
 pub const RESERVED: &[&str] = &[
@@ -200,7 +200,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         ));
         for f in r.fields {
             c.line(&match f.ty {
-                FieldTy::U32 if f.name == "reserved" => "    kaya_wire_u32(tx, 0);".into(),
+                FieldTy::U32 if is_padding(f) => "    kaya_wire_u32(tx, 0);".into(),
                 FieldTy::U32 => format!("    kaya_wire_u32(tx, {});", f.name),
                 FieldTy::U64 => format!("    kaya_wire_u64(tx, {});", f.name),
                 FieldTy::Value => format!("    kaya_wire_value(tx, {});", f.name),

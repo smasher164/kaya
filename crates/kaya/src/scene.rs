@@ -390,6 +390,15 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
     }
 }
 
+/// One header bar's declared state — titles and indicator together,
+/// the record's own atomicity carried into storage.
+#[derive(Clone)]
+struct HeaderBar {
+    sorted: u32,
+    direction: u32,
+    titles: Vec<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct Scene {
     /// The brand accent, once set — brand is identity, not state, so
@@ -461,6 +470,21 @@ pub(crate) struct Scene {
     coll_instances: HashMap<(CollectionId, PathKey), CollInstance>,
     for_sites: HashMap<(CollectionId, PathKey), ForSite>,
     stamps: HashMap<EntryRef, Stamp>,
+    /// A nested For's TEMPLATE-SCOPED header bar (docs/tables-plan.md,
+    /// dynamic tables), keyed by the For's template node: every stamped
+    /// copy receives it, and stamping records the copy in
+    /// [`Self::bar_instances`].
+    tpl_headers: HashMap<u64, HeaderBar>,
+    /// Per-copy header re-declarations (the per-copy sort indicator),
+    /// keyed (template node, copy keys outermost-first). Cleared with
+    /// the copy, and by a template re-declaration — "replacing whatever
+    /// was declared before" covers the copies.
+    bar_overrides: HashMap<(u64, PathKey), HeaderBar>,
+    /// Every stamped copy of every nested For: (template node, copy
+    /// keys) -> that copy's container. Recorded unconditionally so a
+    /// LATE template declaration can re-stamp bars onto copies that
+    /// already exist.
+    bar_instances: HashMap<(u64, PathKey), WidgetId>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget that
@@ -2166,81 +2190,94 @@ impl Scene {
                     key,
                     before,
                 } => self.move_entry(id, path, key, before, &mut out),
-                TxOp::SetColumnHeaders { widget, sorted, direction, titles } => {
-                    // The header bar on a live For's container
-                    // (docs/tables-plan.md). The walls, in order: the
-                    // target must BE a For's container, the bar must be
-                    // well-formed, and every variant's row template must
-                    // fit the declared arity — checked HERE, once, so a
-                    // mismatched template dies at declaration instead of
-                    // rendering N-1 cells under N headers on some
-                    // platforms and not others.
-                    let site = self
-                        .for_sites
-                        .values()
-                        .find(|s| s.container == widget)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "kaya: set_column_headers targets {widget:?}, which is not a For's \
-                                 container — columns are a declaration on the collection's \
-                                 own container (docs/tables-plan.md)"
-                            )
-                        });
-                    assert!(!titles.is_empty(), "kaya: set_column_headers declares no columns");
-                    for (i, title) in titles.iter().enumerate() {
-                        assert!(
-                            !title.is_empty(),
-                            "kaya: column {i}'s title is empty — a headerless column is \
-                             the undeclared case, not an empty string"
-                        );
-                    }
+                TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
+                    // The header bar's three addressings, spec doc order
+                    // (docs/tables-plan.md, dynamic tables): a live For's
+                    // container, a nested For's template node for every
+                    // copy, or that node plus keys for ONE stamped copy.
+                    // Bar walls first, arity walls per target, all at
+                    // declaration — a mismatched template dies here
+                    // instead of rendering N-1 cells under N headers on
+                    // some platforms and not others.
+                    Self::validate_bar(&titles, sorted, direction);
                     let count = titles.len() as u32;
-                    assert!(
-                        sorted == crate::wire::SORT_NONE || sorted < count,
-                        "kaya: set_column_headers sorts column {sorted} of {count}"
-                    );
-                    assert!(
-                        direction <= crate::wire::SORT_DESC,
-                        "kaya: set_column_headers direction is {direction}, wanted 0 (asc) or 1 \
-                         (desc)"
-                    );
-                    for body in &site.bodies {
-                        let roots = &body.roots;
+                    if let Some(site) = self.for_sites.values().find(|s| s.container == widget) {
                         assert!(
-                            roots.len() == 1,
-                            "kaya: a {count}-column table's row template must have ONE \
-                             root (a Row of cells); a variant here has {}",
-                            roots.len()
+                            path.is_empty(),
+                            "kaya: a live For's container takes no key path — keys address \
+                             a nested table's stamped copy (docs/tables-plan.md)"
                         );
-                        let root = roots[0];
-                        let root_kind = body.ops.iter().find_map(|op| match op {
-                            TplOp::Widget { node, kind } if *node == root => Some(*kind),
-                            _ => None,
+                        Self::validate_row_arity(&site.bodies, count);
+                        out.push(ApplyOp::SetColumnHeaders {
+                            id: widget,
+                            sorted,
+                            direction,
+                            titles,
+                            tag: crate::wire::click_tag(widget.0, &[]),
                         });
-                        assert!(
-                            root_kind == Some(WidgetKind::Row),
-                            "kaya: a {count}-column table's row template root must be a \
-                             Row of cells, not {root_kind:?}"
-                        );
-                        let cells = body
-                            .ops
-                            .iter()
-                            .filter(|op| matches!(op, TplOp::AddChild { parent, .. } if *parent == root))
-                            .count() as u32;
-                        assert!(
-                            cells == count,
-                            "kaya: the table declares {count} columns but a row template \
-                             has {cells} cells — every variant's root Row must hold \
-                             exactly one child per column"
-                        );
+                    } else {
+                        let node = widget.0;
+                        {
+                            let bodies = self.find_tpl_for(node).unwrap_or_else(|| {
+                                panic!(
+                                    "kaya: set_column_headers targets {widget:?}, which is neither \
+                                     a live For's container nor a nested For's template node — \
+                                     columns are a declaration on the collection's own container \
+                                     (docs/tables-plan.md)"
+                                )
+                            });
+                            Self::validate_row_arity(bodies, count);
+                        }
+                        let bar = HeaderBar { sorted, direction, titles };
+                        if path.is_empty() {
+                            // The template re-declaration: every copy's bar,
+                            // per-copy overrides replaced with it.
+                            self.bar_overrides.retain(|(n, _), _| *n != node);
+                            self.tpl_headers.insert(node, bar.clone());
+                            let live: Vec<(PathKey, WidgetId)> = self
+                                .bar_instances
+                                .iter()
+                                .filter(|((n, _), _)| *n == node)
+                                .map(|((_, keys), wid)| (keys.clone(), *wid))
+                                .collect();
+                            for (keys, wid) in live {
+                                out.push(ApplyOp::SetColumnHeaders {
+                                    id: wid,
+                                    sorted: bar.sorted,
+                                    direction: bar.direction,
+                                    titles: bar.titles.clone(),
+                                    tag: crate::wire::click_tag(node, &path_values(&keys)),
+                                });
+                            }
+                        } else {
+                            // ONE copy's re-declaration — the per-copy sort
+                            // indicator, the shape this record grew keys for.
+                            assert!(
+                                self.tpl_headers.contains_key(&node),
+                                "kaya: a per-copy set_column_headers needs the template bar \
+                                 declared first — the copy's call re-declares its indicator \
+                                 (docs/tables-plan.md)"
+                            );
+                            let keypath: PathKey = path.iter().map(Key::from_value).collect();
+                            let wid = *self
+                                .bar_instances
+                                .get(&(node, keypath.clone()))
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "kaya: set_column_headers keys {path:?} name no stamped \
+                                         copy of table node {node}"
+                                    )
+                                });
+                            out.push(ApplyOp::SetColumnHeaders {
+                                id: wid,
+                                sorted: bar.sorted,
+                                direction: bar.direction,
+                                titles: bar.titles.clone(),
+                                tag: crate::wire::click_tag(node, &path),
+                            });
+                            self.bar_overrides.insert((node, keypath), bar);
+                        }
                     }
-                    out.push(ApplyOp::SetColumnHeaders {
-                        id: widget,
-                        sorted,
-                        direction,
-                        titles,
-                        tag: crate::wire::click_tag(widget.0, &[]),
-                    });
                 }
                 TxOp::CreateFor { id, collection } => {
                     // Live For: a real container widget; its template
@@ -4030,6 +4067,38 @@ impl Scene {
                 self.menu_items.get_mut(&item).unwrap().anchor = Some(MenuAnchor::Context);
                 top.current.ops.push(TplOp::ContextAttachNode { node: node.0, item });
             }
+            TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
+                // The nested For's TEMPLATE-SCOPED bar: the rows() chain
+                // closed that For one op ago, so its blueprint is in this
+                // scope's ops — arity dies here, at declaration, exactly
+                // like the live arm's (docs/tables-plan.md, dynamic
+                // tables).
+                assert!(
+                    path.is_empty(),
+                    "kaya: a template-zone set_column_headers takes no key path — the \
+                     per-copy re-declaration is a live call against the stamped copy \
+                     (docs/tables-plan.md)"
+                );
+                Self::validate_bar(&titles, sorted, direction);
+                let bodies = top
+                    .current
+                    .ops
+                    .iter()
+                    .find_map(|op| match op {
+                        TplOp::For { node, bodies, .. } if *node == widget.0 => Some(bodies),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "kaya: set_column_headers targets node {}, which is not a nested \
+                             For closed in this template scope — columns are a declaration \
+                             on the collection's own container (docs/tables-plan.md)",
+                            widget.0
+                        )
+                    });
+                Self::validate_row_arity(bodies, titles.len() as u32);
+                self.tpl_headers.insert(widget.0, HeaderBar { sorted, direction, titles });
+            }
             other => panic!("kaya: {other:?} is not valid inside a template"),
         }
     }
@@ -4592,6 +4661,26 @@ impl Scene {
                         chain.to_vec(),
                         out,
                     );
+                    // The copy's header bar, template-or-override, and the
+                    // instance record a late template declaration re-stamps
+                    // through (docs/tables-plan.md, dynamic tables). The
+                    // tag is sort_requested's identity: the template node
+                    // plus this copy's keys, outermost first.
+                    self.bar_instances.insert((*node, copy_path.clone()), container);
+                    let bar = self
+                        .bar_overrides
+                        .get(&(*node, copy_path.clone()))
+                        .or_else(|| self.tpl_headers.get(node))
+                        .cloned();
+                    if let Some(bar) = bar {
+                        out.push(ApplyOp::SetColumnHeaders {
+                            id: container,
+                            sorted: bar.sorted,
+                            direction: bar.direction,
+                            titles: bar.titles,
+                            tag: crate::wire::click_tag(*node, &path_values(copy_path)),
+                        });
+                    }
                 }
                 TplOp::When { node, signal, body } => {
                     let container = self.alloc_internal();
@@ -4668,7 +4757,103 @@ impl Scene {
     /// bookkeeping and their own stamps), then this copy's bindings,
     /// then Destroys in reverse creation order — children before
     /// parents, so backends never walk anything.
+    /// The bar's own walls, every zone (spec doc order).
+    fn validate_bar(titles: &[String], sorted: u32, direction: u32) {
+        assert!(!titles.is_empty(), "kaya: set_column_headers declares no columns");
+        for (i, title) in titles.iter().enumerate() {
+            assert!(
+                !title.is_empty(),
+                "kaya: column {i}'s title is empty — a headerless column is \
+                 the undeclared case, not an empty string"
+            );
+        }
+        let count = titles.len() as u32;
+        assert!(
+            sorted == crate::wire::SORT_NONE || sorted < count,
+            "kaya: set_column_headers sorts column {sorted} of {count}"
+        );
+        assert!(
+            direction <= crate::wire::SORT_DESC,
+            "kaya: set_column_headers direction is {direction}, wanted 0 (asc) or 1 \
+             (desc)"
+        );
+    }
+
+    /// Every variant's row template fits the declared arity.
+    fn validate_row_arity(bodies: &[std::sync::Arc<TplBody>], count: u32) {
+        for body in bodies {
+            let roots = &body.roots;
+            assert!(
+                roots.len() == 1,
+                "kaya: a {count}-column table's row template must have ONE \
+                 root (a Row of cells); a variant here has {}",
+                roots.len()
+            );
+            let root = roots[0];
+            let root_kind = body.ops.iter().find_map(|op| match op {
+                TplOp::Widget { node, kind } if *node == root => Some(*kind),
+                _ => None,
+            });
+            assert!(
+                root_kind == Some(WidgetKind::Row),
+                "kaya: a {count}-column table's row template root must be a \
+                 Row of cells, not {root_kind:?}"
+            );
+            let cells = body
+                .ops
+                .iter()
+                .filter(|op| matches!(op, TplOp::AddChild { parent, .. } if *parent == root))
+                .count() as u32;
+            assert!(
+                cells == count,
+                "kaya: the table declares {count} columns but a row template \
+                 has {cells} cells — every variant's root Row must hold \
+                 exactly one child per column"
+            );
+        }
+    }
+
+    /// A nested For's bodies for its template node, searched through
+    /// every registered site's blueprint — Fors nest inside When bodies
+    /// and other Fors.
+    fn find_tpl_for(&self, node: u64) -> Option<&Vec<std::sync::Arc<TplBody>>> {
+        fn in_bodies(
+            bodies: &[std::sync::Arc<TplBody>],
+            node: u64,
+        ) -> Option<&Vec<std::sync::Arc<TplBody>>> {
+            for body in bodies {
+                for op in &body.ops {
+                    match op {
+                        TplOp::For { node: n, bodies: inner, .. } => {
+                            if *n == node {
+                                return Some(inner);
+                            }
+                            if let Some(found) = in_bodies(inner, node) {
+                                return Some(found);
+                            }
+                        }
+                        TplOp::When { body: inner, .. } => {
+                            if let Some(found) = in_bodies(std::slice::from_ref(inner), node) {
+                                return Some(found);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None
+        }
+        self.for_sites.values().find_map(|s| in_bodies(&s.bodies, node))
+    }
+
     fn teardown(&mut self, stamp: Stamp, out: &mut Vec<ApplyOp>) {
+        // The copy's header bookkeeping goes with its widgets — an
+        // override outliving its copy would resurrect on a same-key
+        // re-insert (docs/tables-plan.md, dynamic tables).
+        let dead: std::collections::HashSet<WidgetId> = stamp.widgets.iter().copied().collect();
+        self.bar_instances.retain(|_, wid| !dead.contains(wid));
+        let live = &self.bar_instances;
+        self.bar_overrides.retain(|key, _| live.contains_key(key));
         for site_id in &stamp.when_sites {
             if let Some(mut site) = self.when_sites.remove(site_id) {
                 if let Some(bysig) = self.when_by_signal.get_mut(&site.signal) {
@@ -8697,6 +8882,7 @@ mod tests {
             widget: WidgetId(4),
             sorted,
             direction,
+            path: Vec::new(),
             titles: titles.iter().map(|s| (*s).to_string()).collect(),
         }
     }
@@ -8719,7 +8905,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not a For's container")]
+    #[should_panic(expected = "neither a live For's container nor a nested For's template node")]
     fn columns_refuse_a_non_for_target() {
         let mut scene = Scene::new();
         scene.apply(table_scene(2));
@@ -8727,8 +8913,214 @@ mod tests {
             widget: WidgetId(1),
             sorted: crate::wire::SORT_NONE,
             direction: 0,
+            path: Vec::new(),
             titles: vec!["Name".into()],
         }]);
+    }
+
+    /// The dynamic shape (docs/tables-plan.md, dynamic tables): an outer
+    /// For (node 4, collection 1) whose template holds a NESTED For
+    /// (node 20, collection 2) with a two-cell row template (nodes
+    /// 21..23) and a TEMPLATE-SCOPED columns declaration.
+    fn dynamic_table_scene() -> Transaction {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            // The nested collection is the COPY's — declared in the
+            // template scope, an instance born per stamp.
+            TxOp::CreateCollection {
+                id: CollectionId(2),
+                variants: vec![vec![ValueType::Str, ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 20, collection: CollectionId(2) },
+            TxOp::CreateWidget { id: WidgetId(21), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(22), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(22),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::CreateWidget { id: WidgetId(23), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(23),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 1 },
+            },
+            TxOp::AddChild { parent: WidgetId(21), child: WidgetId(22) },
+            TxOp::AddChild { parent: WidgetId(21), child: WidgetId(23) },
+            TxOp::TemplateEnd,
+            TxOp::SetColumnHeaders {
+                widget: WidgetId(20),
+                sorted: crate::wire::SORT_NONE,
+                direction: 0,
+                path: Vec::new(),
+                titles: vec!["Ticker".into(), "Qty".into()],
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    fn insert_account(key: &str) -> TxOp {
+        TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v(key),
+            variant: 0,
+            record: vec![v(key)],
+        }
+    }
+
+    /// Each stamped copy gets ITS OWN bar apply, on its own container,
+    /// tagged with the template node plus that copy's key — the identity
+    /// sort_requested reports back.
+    #[test]
+    fn a_nested_table_stamps_a_bar_per_copy() {
+        let mut scene = Scene::new();
+        scene.apply(dynamic_table_scene());
+        let ops = scene.apply(vec![insert_account("a1"), insert_account("a2")]);
+        let bars: Vec<(WidgetId, Vec<u8>)> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetColumnHeaders { id, titles, tag, .. } => {
+                    assert_eq!(titles, &["Ticker", "Qty"], "the template bar, verbatim");
+                    Some((*id, tag.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bars.len(), 2, "one bar apply per stamped copy");
+        assert_ne!(bars[0].0, bars[1].0, "two copies, two containers");
+        assert_eq!(bars[0].1, crate::wire::click_tag(20, &[v("a1")]));
+        assert_eq!(bars[1].1, crate::wire::click_tag(20, &[v("a2")]));
+    }
+
+    /// The per-copy re-declaration touches exactly one copy — the whole
+    /// point of the keys: each copy's own working sort arrows.
+    #[test]
+    fn a_keyed_redeclare_reaches_one_copy_and_survives_nothing_else() {
+        let mut scene = Scene::new();
+        scene.apply(dynamic_table_scene());
+        let stamped = scene.apply(vec![insert_account("a1"), insert_account("a2")]);
+        let first = stamped
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::SetColumnHeaders { id, tag, .. }
+                    if *tag == crate::wire::click_tag(20, &[v("a1")]) =>
+                {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let ops = scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(20),
+            sorted: 1,
+            direction: crate::wire::SORT_DESC,
+            path: vec![v("a1")],
+            titles: vec!["Ticker".into(), "Qty".into()],
+        }]);
+        match &ops[..] {
+            [ApplyOp::SetColumnHeaders { id, sorted, direction, tag, .. }] => {
+                assert_eq!(*id, first, "a1's container and no other");
+                assert_eq!((*sorted, *direction), (1, crate::wire::SORT_DESC));
+                assert_eq!(tag, &crate::wire::click_tag(20, &[v("a1")]));
+            }
+            other => panic!("one keyed re-declare lowers one bar apply, got {other:?}"),
+        }
+    }
+
+    /// A LATE template declaration re-stamps every live copy's bar.
+    #[test]
+    fn a_late_template_declaration_reaches_existing_copies() {
+        let mut scene = Scene::new();
+        let mut tx = dynamic_table_scene();
+        // Strip the in-template declaration: the guest declares late.
+        tx.retain(|op| !matches!(op, TxOp::SetColumnHeaders { .. }));
+        scene.apply(tx);
+        let stamped = scene.apply(vec![insert_account("a1"), insert_account("a2")]);
+        assert!(
+            !stamped.iter().any(|op| matches!(op, ApplyOp::SetColumnHeaders { .. })),
+            "no declaration yet, no bars"
+        );
+        let ops = scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(20),
+            sorted: crate::wire::SORT_NONE,
+            direction: 0,
+            path: Vec::new(),
+            titles: vec!["Ticker".into(), "Qty".into()],
+        }]);
+        let count = ops
+            .iter()
+            .filter(|op| matches!(op, ApplyOp::SetColumnHeaders { .. }))
+            .count();
+        assert_eq!(count, 2, "both live copies re-stamped");
+    }
+
+    #[test]
+    #[should_panic(expected = "name no stamped copy")]
+    fn a_keyed_redeclare_refuses_a_missing_copy() {
+        let mut scene = Scene::new();
+        scene.apply(dynamic_table_scene());
+        scene.apply(vec![insert_account("a1")]);
+        scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(20),
+            sorted: 0,
+            direction: 0,
+            path: vec![v("ghost")],
+            titles: vec!["Ticker".into(), "Qty".into()],
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "name no stamped copy")]
+    fn a_removed_copy_takes_its_bar_addressing_with_it() {
+        let mut scene = Scene::new();
+        scene.apply(dynamic_table_scene());
+        scene.apply(vec![insert_account("a1")]);
+        scene.apply(vec![TxOp::CollectionRemove {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a1"),
+        }]);
+        scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(20),
+            sorted: 0,
+            direction: 0,
+            path: vec![v("a1")],
+            titles: vec!["Ticker".into(), "Qty".into()],
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "takes no key path")]
+    fn a_live_container_refuses_keys() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(4),
+            sorted: crate::wire::SORT_NONE,
+            direction: 0,
+            path: vec![v("a1")],
+            titles: vec!["Name".into(), "Size".into()],
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must have ONE root")]
+    fn a_nested_arity_mismatch_dies_at_declaration() {
+        let mut scene = Scene::new();
+        let mut tx = dynamic_table_scene();
+        // One cell fewer than declared: drop the second label's attach.
+        tx.retain(|op| {
+            !matches!(
+                op,
+                TxOp::AddChild { parent: WidgetId(21), child: WidgetId(23) }
+            )
+        });
+        scene.apply(tx);
     }
 
     #[test]

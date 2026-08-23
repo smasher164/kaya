@@ -1981,11 +1981,13 @@ let sort_desc column = { sort_column = Int32.of_int column; sort_direction = 1l 
    otherwise. Re-call after sorting to move the indicator. *)
 let columns (Widget id) titles sort =
   let tx = the_tx () in
+  (* path_len 0: no key path, so the values are titles alone
+     (docs/tables-plan.md, dynamic tables). *)
   emit tx
     (Kaya_wire.tx_set_column_headers id
        (Int32.to_int sort.sort_column land 0xFFFFFFFF)
        (Int32.to_int sort.sort_direction)
-       (List.length titles)
+       (List.length titles) 0
        (List.map (fun t -> Kaya_wire.Str t) titles))
 
 (* Sums: a variant type whose constructors carry inline records. *)

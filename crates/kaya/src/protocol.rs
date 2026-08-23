@@ -1443,8 +1443,17 @@ pub enum TxOp {
     /// DECLARE the column header bar on a For's container, replacing the
     /// previous declaration; `sorted` is a 0-based index or
     /// SORT_NONE, `direction` 0 asc / 1 desc (docs/tables-plan.md).
-    /// In a template scope the target is the nested For's node id.
-    SetColumnHeaders { widget: WidgetId, sorted: u32, direction: u32, titles: Vec<String> },
+    /// `widget` is a live For's container (path empty), or a nested
+    /// For's TEMPLATE NODE — path empty declares every copy's bar,
+    /// keys outermost-first re-declare ONE stamped copy's (the
+    /// per-copy sort indicator; the dynamic-tables section).
+    SetColumnHeaders {
+        widget: WidgetId,
+        sorted: u32,
+        direction: u32,
+        path: Vec<Value>,
+        titles: Vec<String>,
+    },
 }
 
 /// A transaction: applied atomically, in submission order, last write

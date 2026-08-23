@@ -986,8 +986,10 @@ func (tx *Tx) Columns(w Widget, titles []string, sort Sort) {
 	for i, title := range titles {
 		values[i] = title
 	}
+	// pathLen 0: no key path, so the values are titles alone
+	// (docs/tables-plan.md, dynamic tables).
 	tx.emit(TxSetColumnHeaders(w.id, sort.sorted, sort.direction,
-		uint32(len(titles)), values))
+		uint32(len(titles)), 0, values))
 }
 
 // Textarea creates a multi-line text editor with its change handler

@@ -1072,24 +1072,28 @@ pub fn decode_transaction_with_blobs(
                 let sorted = r.u32();
                 let direction = r.u32();
                 let count = r.u32() as usize;
-                let _reserved = r.u32();
-                // The declared `count` and the list's own length must
-                // agree, or a header renders with the wrong arity on some
-                // platform (highlight_ranges' rule).
-                let flat = r.record();
+                let path_len = r.u32() as usize;
+                // KEYS FIRST, then titles — sort_requested's identity
+                // convention pointed the other way — and both declared
+                // lengths must agree with the list's own, or a header
+                // renders with the wrong arity on some platform
+                // (highlight_ranges' rule).
+                let mut flat = r.record();
                 assert!(
-                    flat.len() == count,
-                    "kaya: set_column_headers declares {count} columns but carries {} titles",
+                    flat.len() == path_len + count,
+                    "kaya: set_column_headers declares {path_len} keys and {count} columns \
+                     but carries {} values",
                     flat.len()
                 );
                 let titles = flat
+                    .split_off(path_len)
                     .into_iter()
                     .map(|v| match v {
                         Value::Str(s) => s,
                         other => panic!("kaya: a column title is {other:?}, wanted a string"),
                     })
                     .collect();
-                TxOp::SetColumnHeaders { widget, sorted, direction, titles }
+                TxOp::SetColumnHeaders { widget, sorted, direction, path: flat, titles }
             }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
@@ -2456,15 +2460,19 @@ impl Writer {
                     }
                 })
             }
-            TxOp::SetColumnHeaders { widget, sorted, direction, titles } => {
+            TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                 self.record(TX_SET_COLUMN_HEADERS, |b, blobs| {
                     b.extend_from_slice(&widget.0.to_le_bytes());
                     b.extend_from_slice(&sorted.to_le_bytes());
                     b.extend_from_slice(&direction.to_le_bytes());
                     b.extend_from_slice(&(titles.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&((path.len() + titles.len()) as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
-                    b.extend_from_slice(&(titles.len() as u32).to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    // Keys first, then titles — the decode's contract.
+                    for key in path {
+                        write_value(b, key, blobs);
+                    }
                     for title in titles {
                         write_value(b, &Value::Str(title.clone()), blobs);
                     }
@@ -3172,13 +3180,24 @@ mod tests {
                 widget: WidgetId(4),
                 sorted: SORT_NONE,
                 direction: SORT_ASC,
+                path: Vec::new(),
                 titles: vec!["Name".into(), "Date Modified".into()],
             },
             TxOp::SetColumnHeaders {
                 widget: WidgetId(4),
                 sorted: 1,
                 direction: SORT_DESC,
+                path: Vec::new(),
                 titles: vec!["Name".into(), "Size".into(), "Kind".into()],
+            },
+            // The keyed shape: a stamped copy's re-declaration, keys
+            // outermost first (docs/tables-plan.md, dynamic tables).
+            TxOp::SetColumnHeaders {
+                widget: WidgetId(7),
+                sorted: 0,
+                direction: SORT_ASC,
+                path: vec![Value::Str("brokerage".into()), Value::I64(3)],
+                titles: vec!["Ticker".into(), "Qty".into()],
             },
         ];
         let mut w = Writer::new();

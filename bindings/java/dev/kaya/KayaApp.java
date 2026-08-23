@@ -3388,8 +3388,10 @@ public final class KayaApp {
         public void columns(Widget w, String[] titles, Sort sort) {
             Object[] values = new Object[titles.length];
             System.arraycopy(titles, 0, values, 0, titles.length);
+            // pathLen 0: no key path, so the values are titles alone
+            // (docs/tables-plan.md, dynamic tables).
             emit(KayaWire.txSetColumnHeaders(
-                w.id, sort.sorted, sort.direction, titles.length, values));
+                w.id, sort.sorted, sort.direction, titles.length, 0, values));
         }
 
         public Widget forEach(Collection c, Consumer<Tpl> body) {

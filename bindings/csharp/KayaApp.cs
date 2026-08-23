@@ -1702,8 +1702,10 @@ sealed class Tx
     {
         var values = new object[titles.Length];
         for (int i = 0; i < titles.Length; i++) values[i] = titles[i];
+        // pathLen 0: no key path, so the values are titles alone
+        // (docs/tables-plan.md, dynamic tables).
         Records.Add(KayaWire.TxSetColumnHeaders(
-            w.Id, sort.Sorted, sort.Direction, (uint)titles.Length, values));
+            w.Id, sort.Sorted, sort.Direction, (uint)titles.Length, 0, values));
     }
 
     public Widget ForEach(Collection c, Action<Tpl> body)
