@@ -31,6 +31,12 @@ fi
 # read from logcat.
 set -euo pipefail
 
+KAYA_T0=$SECONDS
+timing() {
+    echo "TIMING $1 $((SECONDS - KAYA_T0))s"
+    KAYA_T0=$SECONDS
+}
+
 ROOT_FOR_CHECK="$(cd "$(dirname "$0")/../.." && pwd)"
 # Compile the android target before anything heavy: a missing match arm
 # should fail here, not after the emulator boots.
@@ -48,12 +54,27 @@ cd "$ROOT"
 
 tools/gen-header.sh --check
 tools/gen-bindings.sh --check
+timing preflight
+
+. "$ROOT/tools/lib/android-emulator-state.sh"
+bash "$ROOT/tools/lib/android-emulator-state.sh" --selftest || exit 1
 
 # AVDs live under target/ so nothing leaks into $HOME.
 export ANDROID_AVD_HOME="$ROOT/target/avd"
 mkdir -p "$ANDROID_AVD_HOME"
 AVD=kaya
 IMAGE="system-images;android-35;google_apis;arm64-v8a"
+GUEST_EMULATOR_ID=/data/local/tmp/kaya-emulator-identity
+emulator_state="$(android_emulator_state_id "$ANDROID_SDK_ROOT")" || exit 1
+case "$emulator_state" in
+    *$'\n'*) ;;
+    *)
+        echo "run-emulator: could not resolve the emulator state identity" >&2
+        exit 1
+        ;;
+esac
+EMULATOR_EXE="${emulator_state%%$'\n'*}"
+SYSTEM_IMAGE_DIR="${emulator_state#*$'\n'}"
 # One tablet alongside the phone pool, for exactly one reason: every
 # pool device is 320dp wide, an unambiguously COMPACT window, and
 # Material's standard directive shows two panes only at 840dp — so
@@ -81,55 +102,211 @@ fi
 # parallel. All pool instances share the one AVD READ-ONLY — the sharing
 # rule is all-or-nothing, a read-write instance locks every sibling out
 # — and read-only instances quickboot from the snapshot in ~2-4s. The
-# snapshot itself can only be written by a read-write instance, so it is
-# created once here. Pool instances stay warm across runs on purpose.
-POOL="${KAYA_ANDROID_EMUS:-3}"
-boot_wait() { # serial
-    local serial="$1" tries=0
+# snapshot itself can only be written by a read-write instance. Pool
+# instances stay warm across runs on purpose. See docs/traps.md, "An
+# Android toolchain move outlives its dev shell".
+POOL="${KAYA_ANDROID_EMUS:-4}"
+case "$POOL" in
+    ''|*[!0-9]*)
+        echo "run-emulator: KAYA_ANDROID_EMUS must be a positive integer" >&2
+        exit 1
+        ;;
+esac
+if [ "$POOL" -lt 1 ]; then
+    echo "run-emulator: KAYA_ANDROID_EMUS must be at least 1" >&2
+    exit 1
+fi
+TABLET_PORT=$((5554 + 2 * POOL))
+TABLET_SERIAL="emulator-$TABLET_PORT"
+
+boot_wait() { # serial pid-or-empty
+    local serial="$1" pid="$2" tries=0
     until adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | grep -q 1; do
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid" 2>/dev/null || true
+            echo "$serial exited before Android completed boot; emulator log tail:" >&2
+            tail -5 "$ROOT/target/emu-${serial#emulator-}.log" >&2 || true
+            return 1
+        fi
         tries=$((tries + 1))
         if [ "$tries" -gt 120 ]; then
             echo "$serial did not boot; emulator log tail:" >&2
             tail -5 "$ROOT/target/emu-${serial#emulator-}.log" >&2 || true
-            exit 1
+            return 1
         fi
         sleep 1
     done
 }
-make_snapshot() { # avd port
-    local avd="$1" port="$2"
-    [ -d "$ANDROID_AVD_HOME/$avd.avd/snapshots/default_boot" ] && return 0
-    echo "== creating quickboot snapshot for $avd (one-time) =="
-    emulator -avd "$avd" -no-window -no-audio -no-boot-anim \
-        -gpu swiftshader_indirect -port "$port" >"$ROOT/target/emu-$port.log" 2>&1 &
-    boot_wait "emulator-$port"
-    adb -s "emulator-$port" emu kill >/dev/null 2>&1 || true
-    sleep 5
+
+avd_name() { # serial
+    android_avd_name "$1"
 }
-make_snapshot "$AVD" 5554
+
+connected_emulators() {
+    adb devices 2>/dev/null | python3 -c '
+import re
+import sys
+
+for line in sys.stdin:
+    fields = line.split()
+    if len(fields) == 2 and fields[1] == "device" and re.fullmatch(r"emulator-[0-9]+", fields[0]):
+        print(fields[0])'
+}
+
+wait_device_gone() { # serial
+    local serial="$1" tries=0
+    while adb -s "$serial" get-state 2>/dev/null | grep -q device; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 150 ]; then
+            echo "run-emulator: $serial did not stop within 30 seconds" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
+}
+
+stop_avd_instance() { # serial exact-avd
+    local serial="$1" expected="$2" actual
+    actual="$(avd_name "$serial")" || {
+        echo "run-emulator: could not identify the AVD on $serial; refusing to stop it" >&2
+        return 1
+    }
+    if [ "$actual" != "$expected" ]; then
+        echo "run-emulator: $serial is $actual, not $expected; refusing to stop it" >&2
+        return 1
+    fi
+    adb -s "$serial" emu kill >/dev/null 2>&1 || return 1
+    wait_device_gone "$serial"
+}
+
+stop_all_avd_instances() { # exact-avd
+    local expected="$1" serial actual
+    while IFS= read -r serial; do
+        [ -n "$serial" ] || continue
+        actual="$(avd_name "$serial")" || continue
+        if [ "$actual" = "$expected" ]; then
+            stop_avd_instance "$serial" "$expected" || return 1
+        fi
+    done < <(connected_emulators)
+}
+
+wait_emulator_exit() { # pid label
+    local pid="$1" label="$2" tries=0
+    while kill -0 "$pid" 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 150 ]; then
+            echo "run-emulator: $label did not exit within 30 seconds" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
+    if wait "$pid" 2>/dev/null; then
+        return 0
+    fi
+    echo "run-emulator: $label exited nonzero after emulator console kill" >&2
+    return 1
+}
+
+make_snapshot() { # avd port
+    local avd="$1" port="$2" serial="emulator-$2"
+    local avd_dir="$ANDROID_AVD_HOME/$1.avd"
+    local snapshot="$avd_dir/snapshots/default_boot"
+    local marker="$avd_dir/.kaya-default-boot-id"
+    local log="$ROOT/target/emu-$2.log" builder_pid
+    case "$avd" in
+        "$AVD"|"$TABLET_AVD") ;;
+        *)
+            echo "run-emulator: refusing to manage unknown AVD $avd" >&2
+            return 1
+            ;;
+    esac
+    if android_snapshot_state_current \
+        "$marker" "$snapshot" "$EMULATOR_EXE" "$SYSTEM_IMAGE_DIR"; then
+        return 0
+    fi
+    echo "== emulator state moved; reseeding quickboot snapshot for $avd =="
+    stop_all_avd_instances "$avd" || return 1
+    if adb -s "$serial" get-state 2>/dev/null | grep -q device; then
+        echo "run-emulator: $serial is occupied by another AVD; refusing to replace it" >&2
+        return 1
+    fi
+    rm -rf "$snapshot"
+    rm -f "$marker"
+    emulator -avd "$avd" -no-snapshot-load -no-window -no-audio -no-boot-anim \
+        -gpu swiftshader_indirect -port "$port" >"$log" 2>&1 &
+    builder_pid=$!
+    boot_wait "$serial" "$builder_pid" || return 1
+    adb -s "$serial" shell rm -f "$GUEST_EMULATOR_ID" || return 1
+    adb -s "$serial" emu kill >/dev/null 2>&1 || return 1
+    wait_emulator_exit "$builder_pid" "$avd snapshot builder" || return 1
+    if [ ! -f "$snapshot/snapshot.pb" ]; then
+        echo "run-emulator: $avd snapshot builder wrote no fresh snapshot.pb" >&2
+        return 1
+    fi
+    if grep -qE 'unable to lock snapshot save|Snapshots have been disabled|Failed to save snapshot' "$log"; then
+        echo "run-emulator: $avd snapshot builder reported that it could not save:" >&2
+        grep -E 'unable to lock snapshot save|Snapshots have been disabled|Failed to save snapshot' "$log" >&2
+        return 1
+    fi
+    android_write_snapshot_state \
+        "$marker" "$EMULATOR_EXE" "$SYSTEM_IMAGE_DIR" || return 1
+}
+
+live_instance_current() { # serial avd
+    android_live_instance_current \
+        "$1" "$2" "$EMULATOR_EXE" "$SYSTEM_IMAGE_DIR" "$GUEST_EMULATOR_ID"
+}
+
+READER_PORTS=()
+READER_AVDS=()
+READER_PIDS=()
+launch_reader() { # port avd
+    local port="$1" expected_avd="$2" serial="emulator-$1" actual pid
+    if live_instance_current "$serial" "$expected_avd"; then
+        return 0
+    fi
+    if adb -s "$serial" get-state 2>/dev/null | grep -q device; then
+        actual="$(avd_name "$serial")" || {
+            echo "run-emulator: could not identify $serial; refusing to replace it" >&2
+            return 1
+        }
+        echo "run-emulator: $serial is $actual but has no current live-instance identity; restarting it"
+        case "$actual" in
+            "$AVD"|"$TABLET_AVD")
+                stop_avd_instance "$serial" "$actual" || return 1
+                ;;
+            *)
+                echo "run-emulator: $serial belongs to foreign AVD $actual; refusing to replace it" >&2
+                return 1
+                ;;
+        esac
+    fi
+    emulator -avd "$expected_avd" -read-only \
+        -snapshot default_boot -force-snapshot-load \
+        -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect \
+        -port "$port" >"$ROOT/target/emu-$port.log" 2>&1 &
+    pid=$!
+    READER_PORTS+=("$port")
+    READER_AVDS+=("$expected_avd")
+    READER_PIDS+=("$pid")
+}
+
+make_snapshot "$AVD" 5554 || exit 1
+make_snapshot "$TABLET_AVD" "$TABLET_PORT" || exit 1
+
 SERIALS=()
 i=0
 while [ "$i" -lt "$POOL" ]; do
     port=$((5554 + 2 * i))
     serial="emulator-$port"
     SERIALS+=("$serial")
-    if ! adb -s "$serial" get-state 2>/dev/null | grep -q device; then
-        emulator -avd "$AVD" -read-only -no-window -no-audio -no-boot-anim \
-            -gpu swiftshader_indirect -port "$port" >"$ROOT/target/emu-$port.log" 2>&1 &
-    fi
+    launch_reader "$port" "$AVD" || exit 1
     i=$((i + 1))
 done
 # The tablet takes the port after the pool's and is NOT a pool member:
 # a leg that claimed it from the pool would leave the other legs' size
 # class up to a race.
-TABLET_PORT=$((5554 + 2 * POOL))
-TABLET_SERIAL="emulator-$TABLET_PORT"
-make_snapshot "$TABLET_AVD" "$TABLET_PORT"
-if ! adb -s "$TABLET_SERIAL" get-state 2>/dev/null | grep -q device; then
-    emulator -avd "$TABLET_AVD" -read-only -no-window -no-audio -no-boot-anim \
-        -gpu swiftshader_indirect -port "$TABLET_PORT" \
-        >"$ROOT/target/emu-$TABLET_PORT.log" 2>&1 &
-fi
+launch_reader "$TABLET_PORT" "$TABLET_AVD" || exit 1
 # THE LANE'S FOREIGN CLIPBOARD APP. Every assertion in the clipboard
 # scene crosses a process boundary on purpose: a check where kaya reads
 # what kaya wrote parses its own malformed lowering perfectly happily.
@@ -153,9 +330,52 @@ if [ ! -f "$CLIPHELPER_APK" ]; then
     exit 1
 fi
 
-for serial in "${SERIALS[@]}" "$TABLET_SERIAL"; do
-    boot_wait "$serial"
+finish_reader() { # port avd pid
+    local port="$1" expected_avd="$2" pid="$3" serial="emulator-$1"
+    local actual observed log="$ROOT/target/emu-$1.log"
+    boot_wait "$serial" "$pid" || return 1
+    actual="$(avd_name "$serial")" || return 1
+    if [ "$actual" != "$expected_avd" ]; then
+        echo "run-emulator: $serial booted $actual, wanted $expected_avd" >&2
+        return 1
+    fi
+    if ! android_snapshot_log_clean "$log"; then
+        observed="$(android_snapshot_log_failure "$log" 2>/dev/null \
+            || echo 'emulator log missing')"
+        echo "run-emulator: $serial did not restore the required quickboot snapshot:" >&2
+        echo "  $observed" >&2
+        return 1
+    fi
+    if adb -s "$serial" shell test -e "$GUEST_EMULATOR_ID"; then
+        echo "run-emulator: $serial restored a snapshot carrying a live-instance identity" >&2
+        echo "  reseed $expected_avd; a reader must identify only its own overlay" >&2
+        return 1
+    fi
+    if ! android_write_guest_identity \
+        "$serial" "$GUEST_EMULATOR_ID" \
+        "$EMULATOR_EXE" "$SYSTEM_IMAGE_DIR" "$expected_avd"; then
+        echo "run-emulator: $serial did not retain its emulator identity" >&2
+        return 1
+    fi
+}
+
+i=0
+while [ "$i" -lt "${#READER_PORTS[@]}" ]; do
+    finish_reader \
+        "${READER_PORTS[$i]}" "${READER_AVDS[$i]}" "${READER_PIDS[$i]}" || exit 1
+    i=$((i + 1))
 done
+
+for serial in "${SERIALS[@]}"; do
+    live_instance_current "$serial" "$AVD" || {
+        echo "run-emulator: $serial is not a current $AVD instance" >&2
+        exit 1
+    }
+done
+live_instance_current "$TABLET_SERIAL" "$TABLET_AVD" || {
+    echo "run-emulator: $TABLET_SERIAL is not a current $TABLET_AVD instance" >&2
+    exit 1
+}
 
 # THE DEVICE IS THIS LANE'S WIDTH, so it owes the rule a resize owes.
 # check-steps forbids an expect_split between 400 and 840dp, the band
@@ -192,11 +412,6 @@ assert_outside_band "${SERIALS[0]}" "phone pool"
 assert_outside_band "$TABLET_SERIAL" "tablet"
 
 status=0
-KAYA_T0=$SECONDS
-timing() {
-    echo "TIMING $1 $((SECONDS - KAYA_T0))s"
-    KAYA_T0=$SECONDS
-}
 timing boot
 
 if [ -n "${KAYA_RECORD:-}" ]; then
@@ -207,9 +422,8 @@ fi
 
 # Legs run in a pool as wide as the device pool: each claims an
 # emulator, runs against it with adb -s, and reports through a verdict
-# file; drain() prints in submission order and doubles as the barrier
-# before the next gradle build rewrites the APK a queued leg would
-# install.
+# file; drain() prints in submission order and closes the suite before
+# the next build and stage.
 LEGS_DIR="$(mktemp -d)"
 # THE POOL STAYS WARM ACROSS RUNS (nothing kills it at exit), so every
 # device-global switch this run flips has to come back off. In the trap
@@ -484,6 +698,10 @@ select_helper_ime() { # serial
 # checked against each other here: the manifests cannot see this grep,
 # and this grep cannot see the manifests.
 A11Y_LABEL="kaya harness"
+# tools/lib/android-leg-order.py derives this set from the shared verbs.
+A11Y_SCENES="filedialog save editor"
+# The same gate derives this set from the shared composing-range verb.
+IME_SCENES="ranges"
 a11y_label_check() {
     python3 - "$A11Y_LABEL" android/*/src/main/AndroidManifest.xml <<'A11YPY'
 import pathlib
@@ -553,10 +771,10 @@ running_legs() {
 }
 
 run_apk() {
-    local name="$1"
+    local name="$1" script="$4"
     leg_names+=("$name")
     (
-        local serial='' slot='' i
+        local serial='' slot='' i candidate needs_ime=0 ready=1
         while [ -z "$serial" ]; do
             i=0
             while [ "$i" -lt "${#SERIALS[@]}" ]; do
@@ -571,7 +789,16 @@ run_apk() {
         done
         local t0=$SECONDS
         local verdict=FAIL
-        if run_apk_on "$serial" "$@"; then
+        for candidate in $IME_SCENES; do
+            if [ "$script" = "$candidate" ]; then
+                needs_ime=1
+                break
+            fi
+        done
+        if [ "$needs_ime" = 1 ] && ! select_helper_ime "$serial"; then
+            ready=0
+        fi
+        if [ "$ready" = 1 ] && run_apk_on "$serial" "$@"; then
             verdict=PASS
         fi
         echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
@@ -605,21 +832,158 @@ run_apk_tablet() {
     tablet_pids+=($!)
 }
 
+a11y_disarm() {
+    local serial="$1" package="$2" a11y="$3"
+    local enabled=''
+    enabled="$(adb -s "$serial" shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r' || true)"
+    if [[ "$enabled" != *"$a11y"* ]]; then
+        return 0
+    fi
+    adb -s "$serial" shell settings delete secure enabled_accessibility_services >/dev/null
+    adb -s "$serial" shell settings put secure accessibility_enabled 0 >/dev/null
+    adb -s "$serial" shell am force-stop "$package" >/dev/null 2>&1 || true
+
+    local tries=0 bound=1 process_id=''
+    while [ "$tries" -lt 50 ]; do
+        bound=0
+        if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
+            | tr -d '\r' | grep -q "Bound services:.*$A11Y_LABEL"; then
+            bound=1
+        fi
+        process_id="$(adb -s "$serial" shell pidof "$package" 2>/dev/null | tr -d '\r' || true)"
+        enabled="$(adb -s "$serial" shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r' || true)"
+        if [ "$bound" = 0 ] && [ -z "$process_id" ] && [[ "$enabled" != *"$a11y"* ]]; then
+            return 0
+        fi
+        tries=$((tries + 1))
+        sleep 0.2
+    done
+    echo "run-emulator: $serial could not disarm the prior harness accessibility service" >&2
+    echo "  (bound=$bound process=${process_id:-none} enabled=${enabled:-none})" >&2
+    return 1
+}
+
+a11y_hygiene() { # serial — retire a service left by an interrupted run
+    local serial="$1" enabled='' component package
+    local components=()
+    enabled="$(adb -s "$serial" shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r' || true)"
+    case "$enabled" in
+        ''|null) return 0 ;;
+    esac
+    IFS=: read -r -a components <<<"$enabled"
+    for component in "${components[@]}"; do
+        case "$component" in
+            */dev.kaya.KayaHarnessAccessibility)
+                package="${component%%/*}"
+                a11y_disarm "$serial" "$package" "$component" || return 1
+                ;;
+        esac
+    done
+}
+
+# One device read per run replaces one read before every ordinary leg.
+# Picker legs keep the guarded per-leg retirement below.
+for serial in "${SERIALS[@]}" "$TABLET_SERIAL"; do
+    a11y_hygiene "$serial" || exit 1
+done
+
+stage_suite_apk() { # label apk package target...
+    local label="$1" apk="$2" package="$3"
+    shift 3
+    local targets=("$@")
+    local expected=0 i=0 j serial launched observed=0 passed=0 verdict
+    local stage_dir="$LEGS_DIR/stage-$label"
+    local stage_pids=()
+    case "$label" in
+        compose) expected=$((POOL + 1)) ;;
+        jvm|go) expected=$POOL ;;
+        *)
+            echo "run-emulator: refusing to stage unknown suite $label" >&2
+            return 1
+            ;;
+    esac
+    if [ "${#targets[@]}" -ne "$expected" ]; then
+        echo "run-emulator: $label staging received ${#targets[@]} targets, wanted $expected" >&2
+        return 1
+    fi
+    while [ "$i" -lt "${#targets[@]}" ]; do
+        j=$((i + 1))
+        while [ "$j" -lt "${#targets[@]}" ]; do
+            if [ "${targets[$i]}" = "${targets[$j]}" ]; then
+                echo "run-emulator: $label staging names ${targets[$i]} twice" >&2
+                return 1
+            fi
+            j=$((j + 1))
+        done
+        i=$((i + 1))
+    done
+    if ! mkdir "$stage_dir"; then
+        echo "run-emulator: could not create the $label staging verdict directory" >&2
+        return 1
+    fi
+    for serial in "${targets[@]}"; do
+        (
+            local a11y="$package/dev.kaya.KayaHarnessAccessibility"
+            local target_verdict=FAIL
+            if a11y_disarm "$serial" "$package" "$a11y" \
+                && adb -s "$serial" install -r "$apk" >/dev/null; then
+                target_verdict=OK
+            fi
+            printf '%s\n' "$target_verdict" >"$stage_dir/$serial.verdict"
+        ) >"$stage_dir/$serial.log" 2>&1 &
+        stage_pids+=($!)
+    done
+    launched=${#stage_pids[@]}
+    wait "${stage_pids[@]}" 2>/dev/null || true
+    for serial in "${targets[@]}"; do
+        echo "== stage-$label-$serial =="
+        cat "$stage_dir/$serial.log" 2>/dev/null || true
+        if [ -f "$stage_dir/$serial.verdict" ]; then
+            observed=$((observed + 1))
+            verdict="$(cat "$stage_dir/$serial.verdict" 2>/dev/null || true)"
+        else
+            verdict=MISSING
+        fi
+        [ "$verdict" = OK ] && passed=$((passed + 1))
+        echo "stage-$label-$serial: $verdict"
+    done
+    if [ "$launched" -ne "$expected" ] || [ "$observed" -ne "$expected" ]; then
+        echo "run-emulator: $label staging under-ran (wanted $expected, launched $launched, reported $observed)" >&2
+        return 1
+    fi
+    if [ "$passed" -ne "$expected" ]; then
+        echo "run-emulator: $label staging failed on $((expected - passed)) of $expected targets" >&2
+        return 1
+    fi
+    echo "stage-$label: OK ($passed/$expected targets)"
+}
+
 run_apk_on() {
     local serial="$1" name="$2" apk="$3" component="$4" script="$5"
     shift 5
     local failed=0
-    adb -s "$serial" install -r "$apk" >/dev/null
+    local package="${component%%/*}"
+    local a11y="$package/dev.kaya.KayaHarnessAccessibility"
+    local needs_a11y=0 candidate
+    for candidate in $A11Y_SCENES; do
+        if [ "$script" = "$candidate" ]; then
+            needs_a11y=1
+            break
+        fi
+    done
+    # Startup hygiene handles an interrupted prior run; only a picker
+    # scene can have armed this run's service.
+    if [ "$needs_a11y" = 1 ]; then
+        a11y_disarm "$serial" "$package" "$a11y" || return 1
+    fi
     # THE HARNESS'S EYES OUTSIDE THIS APP. Android's file picker is
     # DocumentsUI, a separate APK, and the platform stops one app reading
     # another's UI — so the scene needs an accessibility service, which
-    # only the user (or adb) can enable. Per leg rather than once for the
-    # AVD: `install -r` on the app that owns the service can drop it, and a
-    # silently-disabled service looks exactly like a picker that never
-    # appeared. Declared only by the validation apps, so this reaches no
-    # user's app.
+    # only the user (or adb) can enable. Declared only by the validation
+    # apps, so this reaches no user's app. Ordinary scenes pay no
+    # accessibility query here.
     adb -s "$serial" shell am force-stop "${component%%:*}" >/dev/null 2>&1 || true
-    adb -s "$serial" shell am force-stop "${component%%/*}"
+    adb -s "$serial" shell am force-stop "$package"
     # AND THE PICKER, a DIFFERENT PACKAGE that survives the force-stop
     # above: left standing it sits on top of the app's task, and the next
     # leg's `am start` brings that task forward instead of starting the
@@ -633,64 +997,66 @@ run_apk_on() {
     # whole trick: force-stop kills every component of the package —
     # including this service, which the validation app declares — and
     # logcat -c wipes the connection message that proves it came up.
-    local a11y="${component%%/*}/dev.kaya.KayaHarnessAccessibility"
-    # THE ARM, RETRIED, because enabling races the install that precedes
-    # it. MEASURED 2026-08-06, after three lane runs died to "never bound"
-    # on three different devices: on an IDLE device the identical sequence
-    # binds in ONE SECOND. What differs in a lane is that `install -r` has
-    # just REPLACED the package that declares this service, and enabling on
-    # the heels of that replacement sometimes lands before the package
-    # manager has finished — the setting reads correct, dumpsys says
-    # Enabled, and Bound stays empty forever. Re-arming costs a second; a
-    # reboot is the last resort because it was proven to work when
-    # re-arming was never tried.
+    # The bounded arm and READY admission are retained; docs/traps.md,
+    # "Package replacement can resurrect a service after force-stop".
     #
-    # CLEARED BEFORE EACH SET: `settings put` with the value already there
-    # is a no-op, and a no-op notifies nobody.
-    local a11y="${component%%/*}/dev.kaya.KayaHarnessAccessibility"
-    local bound=0 arm=0
-    while [ "$arm" -lt 3 ] && [ "$bound" != 1 ]; do
-        arm=$((arm + 1))
-        adb -s "$serial" shell settings put secure enabled_accessibility_services "" >/dev/null
-        adb -s "$serial" shell settings put secure enabled_accessibility_services "$a11y" >/dev/null
-        adb -s "$serial" shell settings put secure accessibility_enabled 1 >/dev/null
-        local tries=0
-        while [ "$tries" -lt 50 ]; do
-            if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
-                | tr -d '\r' | grep -q "Bound services:.*$A11Y_LABEL"; then
-                bound=1
-                break
+    # DELETED BEFORE EACH SET: writing the value already there is a no-op,
+    # and a no-op notifies nobody.
+    local bound=0 ready=0 arm=0
+    if [ "$needs_a11y" = 1 ]; then
+        while [ "$arm" -lt 3 ] && [ "$ready" != 1 ]; do
+            arm=$((arm + 1))
+            bound=0
+            adb -s "$serial" logcat -c
+            adb -s "$serial" shell settings delete secure enabled_accessibility_services >/dev/null
+            adb -s "$serial" shell settings put secure enabled_accessibility_services "$a11y" >/dev/null
+            adb -s "$serial" shell settings put secure accessibility_enabled 1 >/dev/null
+            local tries=0
+            while [ "$tries" -lt 50 ]; do
+                if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
+                    | tr -d '\r' | grep -q "Bound services:.*$A11Y_LABEL"; then
+                    bound=1
+                fi
+                if [ "$bound" = 1 ] && adb -s "$serial" logcat -d -s kaya:* 2>/dev/null \
+                    | tr -d '\r' | grep -q "KAYA_A11Y_WINDOWS: READY"; then
+                    ready=1
+                    break
+                fi
+                if adb -s "$serial" logcat -d -s kaya:* 2>/dev/null \
+                    | tr -d '\r' | grep -q "KAYA_A11Y_WINDOWS: BLIND"; then
+                    break
+                fi
+                tries=$((tries + 1))
+                sleep 0.2
+            done
+            if [ "$ready" != 1 ] && [ "$arm" -lt 3 ]; then
+                echo "run-emulator: $serial bound=$bound but had no readable window on arm $arm — re-arming" >&2
             fi
-            tries=$((tries + 1))
-            sleep 0.2
         done
-        if [ "$bound" != 1 ] && [ "$arm" -lt 3 ]; then
-            echo "run-emulator: $serial did not bind on arm $arm — re-arming" >&2
+        if [ "$ready" != 1 ] && [ "${KAYA_A11Y_REBOOTED:-}" != "$serial" ]; then
+            echo "run-emulator: $serial did not bind with a readable window after 3 arms — rebooting it once" >&2
+            adb -s "$serial" reboot >/dev/null 2>&1
+            adb -s "$serial" wait-for-device >/dev/null 2>&1
+            local waited=0
+            while [ "$waited" -lt 90 ]; do
+                if [ "$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+                    break
+                fi
+                waited=$((waited + 1))
+                sleep 1
+            done
+            sleep 5
+            KAYA_A11Y_REBOOTED="$serial" run_apk_on "$serial" "$name" "$apk" "$component" "$script" "$@"
+            local retry_rc=$?
+            return "$retry_rc"
         fi
-    done
-    if [ "$bound" != 1 ] && [ "${KAYA_A11Y_REBOOTED:-}" != "$serial" ]; then
-        echo "run-emulator: $serial did not bind after 3 arms — rebooting it once" >&2
-        adb -s "$serial" reboot >/dev/null 2>&1
-        adb -s "$serial" wait-for-device >/dev/null 2>&1
-        local waited=0
-        while [ "$waited" -lt 90 ]; do
-            if [ "$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
-                break
-            fi
-            waited=$((waited + 1))
-            sleep 1
-        done
-        sleep 5
-        KAYA_A11Y_REBOOTED="$serial" run_apk_on "$serial" "$name" "$apk" "$component" "$script" "$@"
-        local retry_rc=$?
-        return "$retry_rc"
-    fi
-    if [ "$bound" != 1 ]; then
-        echo "run-emulator: the harness accessibility service never bound on $serial" >&2
-        echo "  (three arms and a reboot; enabled_accessibility_services was set to" >&2
-        echo "   $a11y, but the system never bound it — the scene would report a" >&2
-        echo "   picker that never came up)" >&2
-        return 1
+        if [ "$ready" != 1 ]; then
+            echo "run-emulator: the harness accessibility service never bound with a readable window on $serial" >&2
+            echo "  (three arms and a reboot; enabled_accessibility_services was set to" >&2
+            echo "   $a11y, bound=$bound — the scene would run with blind eyes and report" >&2
+            echo "   a picker that never came up)" >&2
+            return 1
+        fi
     fi
     local rec_pid=
     local rec_extra=()
@@ -794,6 +1160,9 @@ run_apk_on() {
         adb -s "$serial" shell dumpsys activity activities \
             >"$ROOT/target/validate-failures/android-$name-activities.txt" 2>/dev/null || true
         echo "full buffers kept at target/validate-failures/android-$name-buffers.log"
+        failed=1
+    fi
+    if [ "$needs_a11y" = 1 ] && ! a11y_disarm "$serial" "$package" "$a11y"; then
         failed=1
     fi
     [ "$failed" = 0 ]
@@ -1174,6 +1543,9 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
     apk_assets_verify \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
+    stage_suite_apk compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2 "${SERIALS[@]}" "$TABLET_SERIAL" || exit 1
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity 1 \
@@ -1460,13 +1832,8 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # so every match sits six bytes further along than in UTF-16 — the unit
     # a Kotlin CharSequence indexes — and a backend forwarding kaya's byte
     # offsets unconverted would decorate six characters early.
-    # ...AND THE INPUT METHOD IS RE-ASSERTED FIRST, on every device in the
-    # pool, because which one this leg lands on is the pool's choice. The
-    # drain is what makes that safe.
-    drain
-    for serial in "${SERIALS[@]}"; do
-        select_helper_ime "$serial" || exit 1
-    done
+    # The worker re-asserts the helper IME after it claims this leg's
+    # device, while retaining that device's slot.
     run_apk ranges-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity ranges \
@@ -1490,6 +1857,9 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     apk_assets_verify \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" || exit 1
     timing build-jvm
+    stage_suite_apk jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt "${SERIALS[@]}" || exit 1
     run_apk jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity 1 \
@@ -1636,15 +2006,10 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity dirty \
         --es KAYA_SELFTEST_SCRIPT "'${dirty_script}expect_title \"dirty\"'"
-    drain
-    for serial in "${SERIALS[@]}"; do
-        select_helper_ime "$serial" || exit 1
-    done
     run_apk ranges-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity ranges \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script ranges)'"
-    drain
     run_apk styling-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity styling \
@@ -1736,6 +2101,9 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     apk_assets_verify \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
     timing build-go
+    stage_suite_apk go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go "${SERIALS[@]}" || exit 1
     run_apk go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity 1 \
@@ -1905,15 +2273,10 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity dirty \
         --es KAYA_SELFTEST_SCRIPT "'${dirty_script}expect_title \"dirty\"'"
-    drain
-    for serial in "${SERIALS[@]}"; do
-        select_helper_ime "$serial" || exit 1
-    done
     run_apk ranges-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity ranges \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script ranges)'"
-    drain
     # THE TEXT EDITOR (docs/editor-plan.md), the only script on this lane
     # that drives an APP rather than a feature. THE ONE SCENE HERE WITH NO
     # RUST SIBLING, by design: the plan chose Go so a BINDING's awkward

@@ -20,7 +20,19 @@ cd "$ROOT" || exit 1
 FIXTURE=keyed-selftest
 STORE="$ROOT/target/.kaya-gates"
 INSIDE="$ROOT/tools/.keyed-probe"   # tools/ rides every gate key
-OUTSIDE="$ROOT/crates/.keyed-probe" # crates/ is NOT in the fixture's set
+OUTSIDE="$ROOT/target/.keyed-probe-outside" # target/ is NOT in the fixture's set
+
+# docs/traps.md, "A cache self-test outside its own key can still invalidate Cargo".
+unsafe_outside=0
+case "$OUTSIDE" in
+    "$ROOT"/target/*) ;;
+    *) unsafe_outside=1 ;;
+esac
+if [ "$unsafe_outside" -ne 0 ]; then
+    echo "check-keyed: OUTSIDE probe has $unsafe_outside unsafe target: $OUTSIDE." >&2
+    echo "  Keep it under $ROOT/target/ — outside keyed-selftest's inputs and Cargo's source inputs." >&2
+    exit 1
+fi
 
 cleanup() { rm -f "$INSIDE" "$OUTSIDE" "$STORE/$FIXTURE"; }
 trap cleanup EXIT

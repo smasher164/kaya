@@ -104,12 +104,12 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 
 ## Suites and platforms
 
-- The whole matrix: `tools/validate-all.sh` — the five lanes run
-  CONCURRENTLY by default (bounded by the slowest lane; the per-lane
-  ceilings below are the live budgets, each set at roughly 1.25x its
-  measured contended time); `--serial` for single-lane benchmarking,
-  contention-free debugging, or recording mode. Per-lane logs print for
-  any FAIL.
+- The whole matrix: `tools/validate-all.sh` — all five platform lanes run
+  CONCURRENTLY by default. When Android finishes, one `nice -n 10` gate
+  sweep starts and overlaps any longer lanes still running; the per-lane
+  ceilings below are the live budgets. `--serial` is for single-lane
+  benchmarking, contention-free debugging, or recording mode. Per-lane
+  logs print for any FAIL.
 - macOS: `tools/validate-mac.sh` (KAYA_JOBS=n for pool width, =1 for
   serial; KAYA_RECORD=1 for recording mode). Legs open real windows.
 - Linux: `tools/validate-linux.sh` (docker; X11 + Wayland rings;
@@ -120,6 +120,10 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   the first flex-layout-manager cut needed the container to surface;
   this is the cheap version of that trip.
 - iOS: `tools/ios/run-sim.sh` (env reaches the app via SIMCTL_CHILD_*).
+  On every dedicated pool phone, preparation enumerates exact
+  `dev.kaya.` bundle ids, uninstalls that finite list through `simctl`,
+  then warms and probes LocalStorage before any leg. Do not keep an
+  unrelated `dev.kaya.*` app on those UDIDs.
 - Android: `tools/android/run-emulator.sh` (env via intent extras;
   scripts fold newlines to `;` for transport — comments are stripped
   first; verdicts read from logcat; on FAIL the runner dumps
@@ -139,9 +143,9 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 - The matrix enforces PER-LANE DURATION CEILINGS, not just the doctrine
   in CLAUDE.md's invariant 8: tools/validate-all.sh fails a lane that
   exceeds its budget with "DURATION ANOMALY" even when every leg passed
-  (today mac 560s, linux 420s, windows 480s, ios 540s, android 250s —
-  the live numbers are validate-all.sh's per-lane `case`, and each one
-  carries the measurement that set it). A lane
+  (today gates 490s, mac 560s, linux 470s, windows 520s, ios 540s,
+  android 310s — the live numbers are validate-all.sh's per-lane
+  `case`, and each one carries the measurement that set it). A lane
   that slows by this much changed in KIND — look for work added to every
   leg before assuming load. Raise a ceiling in validate-all.sh only with
   a reason.
@@ -160,7 +164,7 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   `KAYA_WINUI_NAV_PROBE` / `KAYA_WINUI_MENU_PROBE` isolate those two
   subsystems.
 - Pool widths: `KAYA_JOBS` (mac/linux legs), `KAYA_ANDROID_EMUS`
-  (emulators, default 3), `KAYA_IOS_SIMS` (simulators, default 3),
+  (emulators, default 4), `KAYA_IOS_SIMS` (simulators, default 3),
   `KAYA_WIN_JOBS` (windows legs, default 4). `tools/probe-env.sh
   --warm` boots the simulator, emulator and VM instead of only
   reporting them.
@@ -187,7 +191,7 @@ touching layout code:
   tracks; the drawn control hugging inside its track is normal.
 - **Android, live bounds**: uiautomator before the selftest exits —
   ```
-  S=emulator-5554   # adb -s: the pool runs KAYA_ANDROID_EMUS (default 3) emulators
+  S=emulator-5554   # adb -s: the pool runs KAYA_ANDROID_EMUS (default 4) emulators
   # KAYA_SELFTEST_SCRIPT is REQUIRED, not optional: with KAYA_SELFTEST
   # set and no script the interpreter logs FAILED and calls
   # finishAndRemoveTask, so the app is gone before the dump. (This is
@@ -257,14 +261,15 @@ itself gated by `gen-header`, which IS keyed on all of crates/. Key a
 downstream gate on an interface, and something must be guarding that
 interface; here it is.
 
-THE ARTIFACT-READING GATES ARE NEVER KEYED and must stay that way:
-check-abort, check-wheel and check-build-id each load or inspect
-something under target/, so an unchanged source tree does not imply an
-unchanged answer. tools/check-keyed.sh fails if any of them is ever
-wrapped. Other gates are unkeyed for their own reasons — check-case's
-inputs are every tracked path, check-keyed is the cache's own gate —
-and each states that reason beside itself in tools/gates.sh's list,
-where check-keyed also insists it be non-empty.
+THE ARTIFACT-READING GATES ARE KEYED ON THE ARTIFACT TOO: check-abort,
+check-wheel, check-empty-child, check-pane-ladder and check-table-tier
+mix the built file's embedded build id into their source key, so an
+unchanged source tree beside a different target/ cannot reuse the old
+answer. check-build-id alone must never be keyed: caching the staleness
+gate is the defect it exists to find. Other gates are unkeyed for their
+own reasons — check-case's inputs are every tracked path, check-keyed is
+the cache's own gate — and each states that reason beside itself in
+tools/gates.sh's list, where check-keyed also insists it be non-empty.
 
 Adding a gate to the cache means adding its input set to GATES. Name
 DIRECTORIES, not files. The asymmetry is the whole safety argument:

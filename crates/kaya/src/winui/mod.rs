@@ -424,6 +424,10 @@ struct CoreState {
     /// still fire on this thread).
     apply_quiet: std::sync::Arc<std::sync::atomic::AtomicBool>,
     columns: Vec<Grid>,
+    /// Aligned with `columns`, including retained dead slots, so a keyed
+    /// harness lookup can reject a copy whose widget and table are gone.
+    #[cfg(feature = "harness")]
+    column_ids: Vec<WidgetId>,
     rows: Vec<Grid>,
     window: Window,
     /// Auxiliary surfaces by kaya window id (the primary is
@@ -2284,6 +2288,11 @@ fn table_widths(table: &WinTable, track: f64) -> Vec<f64> {
         }
     }
     widths
+}
+
+#[cfg(any(feature = "harness", test))]
+fn table_content_fits(content: f64, viewport: f64) -> bool {
+    content <= viewport + 2.0
 }
 
 /// Write one table's tracks onto the header and every row, if they moved.
@@ -9582,6 +9591,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // the cross axis holds a single track.
                     grid.SetRowSpacing(8.0)?;
                     core.columns.push(grid.clone());
+                    #[cfg(feature = "harness")]
+                    core.column_ids.push(id);
                     NativeWidget::Column(grid)
                 }
                 WidgetKind::Row => {
@@ -12554,6 +12565,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             select_options: HashMap::new(),
             apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             columns: Vec::new(),
+            #[cfg(feature = "harness")]
+            column_ids: Vec::new(),
             rows: Vec::new(),
             child_order: HashMap::new(),
             grow: HashMap::new(),
@@ -14370,11 +14383,15 @@ impl crate::harness::Stage for WinUiStage {
             // never through the tracks that were asked for.
             let surface: UIElement = grid.cast()?;
             let mut edges: Vec<f64> = Vec::new();
+            let mut right = f64::NEG_INFINITY;
             let mut push = |cell: &UIElement| -> windows_core::Result<()> {
                 let at = cell
                     .TransformToVisual(&surface)?
                     .TransformPoint(Point { X: 0.0, Y: 0.0 })?;
-                edges.push(f64::from(at.X));
+                let element: FrameworkElement = cell.cast()?;
+                let left = f64::from(at.X);
+                edges.push(left);
+                right = right.max(left + element.ActualWidth()?);
                 Ok(())
             };
             let header_cells = header.Children()?;
@@ -14395,7 +14412,7 @@ impl crate::harness::Stage for WinUiStage {
             }
             edges.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let mut clusters: Vec<f64> = Vec::new();
-            for x in edges {
+            for &x in &edges {
                 if clusters.last().is_none_or(|last| x - last > 2.0) {
                     clusters.push(x);
                 }
@@ -14410,9 +14427,9 @@ impl crate::harness::Stage for WinUiStage {
             }
             // THE SPAN HALF, which alignment alone cannot see: a
             // content-hugging table keeps every cluster exactly right
-            // while drawing in a corner of its viewport. The track is
-            // what the parent flex container GAVE this container; the
-            // drawn width is what the tracks actually resolved to.
+            // while drawing in a corner of its assigned track. The
+            // resolved columns are also allowed to exceed neither the
+            // table surface's own horizontal viewport nor its padding.
             let defs = header.ColumnDefinitions()?;
             let mut drawn = header.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1));
             for at in 0..defs.Size()? {
@@ -14420,14 +14437,24 @@ impl crate::harness::Stage for WinUiStage {
             }
             drawn += 2.0 * pad;
             let track = assigned_track(core, &grid)?;
-            Ok(if track <= 0.0 || drawn >= track - 2.0 {
-                String::new()
-            } else {
+            let viewport = grid.ActualWidth()?;
+            let left = edges.first().copied().unwrap_or(f64::INFINITY);
+            Ok(if track <= 0.0 || viewport <= 0.0 {
+                "no live table viewport geometry".to_owned()
+            } else if drawn < track - 2.0 {
                 format!(
                     "draws {}dip of a {}dip track",
                     drawn.round() as i64,
                     track.round() as i64
                 )
+            } else if drawn > viewport + 2.0 || left < -2.0 || right > viewport + 2.0 {
+                format!(
+                    "cells span {}dip inside a {}dip viewport",
+                    (right - left).round() as i64,
+                    viewport.round() as i64
+                )
+            } else {
+                String::new()
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -14458,29 +14485,70 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
-    fn resolve_id(&self, kind: crate::harness::TargetKind, id: &str) -> Option<isize> {
+    fn resolve_id(
+        &self,
+        kind: crate::harness::TargetKind,
+        id: &str,
+        keys: Option<&str>,
+    ) -> Option<isize> {
         // The a11y_id arm wrote the authored key through
         // AutomationProperties::SetAutomationId, so this reads the
         // backend's own applied prop back off the controls.
         let id = windows_core::HSTRING::from(id);
+        let keys = keys.map(str::to_owned);
         Self::on_ui_read(move |core| -> windows_core::Result<Option<isize>> {
             use crate::harness::TargetKind as K;
             use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
-            use windows_core::Interface;
+            fn carries_id<T: windows_core::Interface>(
+                widget: &T,
+                id: &windows_core::HSTRING,
+            ) -> bool {
+                use bindings::Microsoft::UI::Xaml::DependencyObject;
+                widget
+                    .cast::<DependencyObject>()
+                    .ok()
+                    .and_then(|d| AutomationProperties::GetAutomationId(&d).ok())
+                    .map(|got| &got == id)
+                    .unwrap_or(false)
+            }
             fn find<T: windows_core::Interface>(
                 v: &[T],
                 id: &windows_core::HSTRING,
             ) -> Option<isize> {
-                use bindings::Microsoft::UI::Xaml::DependencyObject;
                 v.iter()
-                    .position(|w| {
-                        w.cast::<DependencyObject>()
-                            .ok()
-                            .and_then(|d| AutomationProperties::GetAutomationId(&d).ok())
-                            .map(|got| &got == id)
-                            .unwrap_or(false)
-                    })
+                    .position(|widget| carries_id(widget, id))
                     .map(|i| i as isize)
+            }
+            if let Some(keys) = keys.as_deref() {
+                if kind != K::Column {
+                    return Ok(None);
+                }
+                return TABLES.with_borrow(|tables| {
+                    let node = core
+                        .columns
+                        .iter()
+                        .zip(&core.column_ids)
+                        .find_map(|(column, widget)| {
+                            (core.widgets.contains_key(widget) && carries_id(column, &id))
+                                .then(|| tables.get(&widget.0))
+                                .flatten()
+                                .and_then(|table| crate::harness::table_tag_node(&table.tag))
+                        });
+                    let Some(node) = node else {
+                        return Ok(None);
+                    };
+                    Ok(core
+                        .columns
+                        .iter()
+                        .zip(&core.column_ids)
+                        .position(|(_, widget)| {
+                            core.widgets.contains_key(widget)
+                                && tables.get(&widget.0).is_some_and(|table| {
+                                    crate::harness::table_tag_matches_keys(&table.tag, node, keys)
+                                })
+                        })
+                        .map(|i| i as isize))
+                });
             }
             Ok(match kind {
                 // The buttons registry stores click TAGS by design (the
@@ -14585,6 +14653,7 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok("<no such target>".to_string());
             };
             let grid = &registry[i];
+            let table = vertical && table_of(core, t, |_| ()).is_some();
             // The DECLARED gap, recovered by COM identity the way
             // cross_mode recovers the id: summing with the Grid's own
             // RowSpacing/ColumnSpacing mirrored the lowering's write and
@@ -14696,7 +14765,15 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok(format!("no child tracks recorded ({kids} children, 0 tracks)"));
             }
             let span = sum + gaps;
-            Ok(if (span - inner).abs() <= 2.0 {
+            Ok(if table && table_content_fits(span, inner) {
+                String::new()
+            } else if table {
+                format!(
+                    "children span {}dip inside a {}dip viewport",
+                    span.round() as i64,
+                    inner.round() as i64
+                )
+            } else if (span - inner).abs() <= 2.0 {
                 String::new()
             } else {
                 format!(
@@ -16162,6 +16239,12 @@ fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_viewport_rejects_overflow() {
+        assert!(table_content_fits(102.0, 100.0));
+        assert!(!table_content_fits(102.1, 100.0));
+    }
 
     /// One theme dictionary's markup, from its key to its close.
     fn section(xaml: &str, key: &str) -> String {

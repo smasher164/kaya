@@ -1,5 +1,7 @@
 # Tables: column headers and click-to-sort on the For vocabulary
 
+Continuation after the post-capture fixes: docs/handoff-dynamic-tables.md.
+
 STATUS: plan drafted 2026-08-20; the mac depth slice LANDED the same
 day (wire + walls + Rust surface + SwiftUI Table + the three verbs +
 the scene; validate-mac and the full matrix ALL PASS). 2026-08-21:
@@ -159,7 +161,16 @@ is a separate admission if a real app ever needs one).
    (expect_columns reads the render's record, which is written on
    appear even at zero size; only pixels could disagree). Every table
    guest declares grow(1) on the For, and any future geometry-true
-   table observable starts from this incident.
+   table observable starts from this incident. `expect_fills` therefore
+   has a table arm: unlike an ordinary flex container it permits unused
+   row space, but it rejects raw table content beyond the allocated
+   vertical viewport. The shared `table.steps` runs that assertion on
+   every backend; it was watched red on Compose (no table measurement)
+   and WinUI (113dip of content in a legitimate 307dip viewport) before
+   those backends recorded/recognized the table shape. Its
+   `expect_column_edges` assertions repeat after every sort
+   re-declaration, as does the portfolio's per-copy geometry, so a
+   first-frame-only measurement cannot answer for later header bars.
 
 ## The wire (append-only ids)
 
@@ -235,14 +246,15 @@ move-by-key idiom, never an index.
 
 ## Dynamic tables (the 2026-08-22 design; ledger: "Dynamically created tables — HIGH PRIORITY")
 
-The fenced shape: a table created once per data item — "for every
-account, a positions table" — refused today at declaration because
-set_column_headers addresses a live For container by bare widget id
-and a nested For's rows() carries a template node instead. The
-dashboard works around it with one collection repopulated on
-selection (guests/python/portfolio.py's repopulate()), and deleting
-that workaround is this milestone's acceptance test. Build order
-around it is RULED: tables -> virtualization -> canvas.
+Before b819423, the fenced shape — a table created once per data item,
+"for every account, a positions table" — was refused at declaration:
+set_column_headers addressed a live For container by bare widget id
+while a nested For's rows() carried a template node. The dashboard
+worked around that with one collection repopulated on selection
+(guests/python/portfolio.py's former repopulate()). The Rust/Python
+depth slice deleted that workaround; the milestone remains open for
+the other six bindings' nested spellings. Build order around it is
+RULED: tables -> virtualization -> canvas.
 
 WHAT THE STAMPING MACHINERY ALREADY GIVES US, which shrinks the
 milestone: run_body births a nested For's SITE per copy, keyed
@@ -279,27 +291,28 @@ removed). stamp_entry emits the copy's header apply after run_body,
 override-or-template. A late template declaration (after copies
 exist) re-stamps every live copy's bar.
 
-BINDINGS: Rust's nested rows().columns() ALREADY emits with the
-template node id — the fence is the core's lookup, so the template-
-scoped case may cost Rust nothing but the on_sort registration moving
-to the nodes table (stamped handlers already lead with the copy's
-keys). The per-copy RE-declaration needs a spelling per language —
-the fan-out's real work, censused by tpl-surfaces.py once the first
-two exist. Python is second (the dashboard's language).
+BINDINGS: Rust's nested rows().columns() emits with the template node
+id; the fence was the core lookup. Its on_sort registration now uses
+the nodes table (stamped handlers already lead with the copy's keys),
+and Rust and Python both have keyed per-copy re-declaration spellings.
+The same spelling in the other six languages is the fan-out's real
+work; each language extends tpl-surfaces.py's census as it lands.
 
-HARNESS: a per-copy table target needs a spelling. PROPOSED (open to
-veto before the fan-out): `kind@id[key]`, dot-joined keys for depth
-(`column@positions[brokerage]`), resolved by Stage::resolve_id from
-authored id -> template node -> the stamp keyed by the copy path. The
-scene's forcing assertion is per-copy divergence: click ONE copy's
-header, assert ITS indicator moved and a SIBLING's did not.
+HARNESS: the ruled spelling is `kind@id[key]`, dot-joined keys for
+depth (`column@positions[brokerage]`), resolved from authored id ->
+template node -> the stamp keyed by the copy path. Untyped segments
+match string keys only; an I64 key is never stringified, so `3` cannot
+collide with the string key `"3"`. A typed extension is a separate
+grammar decision. The forcing assertion is per-copy divergence: click
+ONE copy's header, assert ITS indicator moved and a SIBLING's did not.
 
 SEQUENCING: spec.rs first (the hash moves, everything regenerates),
 core walls + state with unit tests, Rust + SwiftUI + the dashboard
 reworked to the real nested shape on mac, THEN the fan-out (six
-bindings' spellings, the census clauses, the scene on five lanes).
+bindings' spellings, their census clauses, and the five-lane matrix;
+the Python dashboard stays desktop-only until packaging).
 
-## The second slice, serialized (2026-08-23 — resume here)
+## The second slice, serialized (2026-08-23 — depth green, breadth open)
 
 b819423 is the protocol root, pushed and green up the whole ladder for
 everything it touches: TX 45 carries copy keys (reserved:U32 became
@@ -317,40 +330,62 @@ from signatures can never again be emitted by name); all eight
 bindings pass path_len 0 spelling-neutral; both interpreter hash pins
 moved.
 
-THE WORK OWED, in order (depth then breadth):
-1. Rust nested spelling: Rows::columns() on a nested For already
-   emits the right record (the Row Drop pushes the node id + empty
-   path). Owed: on_sort for the nested case — Rows::id() asserts
-   !nested; register on the Messages NODES table instead (stamped
-   handlers' first args are the copy's keys, the established
-   convention) — and a Rust spelling for the per-copy re-declaration
-   (the sort handler holds the keys; design a tx method taking the
-   For's node handle plus keys).
-2. Python (the dashboard's language): read bindings/python's nested
-   For/collection surface FIRST — it was not examined in slice 1.
-   columns() in the nested zone emits node-id + empty path; on_sort
-   reaches the nodes table; the per-copy re-declare needs a pythonic
-   keyed spelling.
-3. Harness copy-targets: kind@id[key], dot-joined keys for depth
-   (column@positions[brokerage]) is the PROPOSED grammar — it awaits
-   the maintainer's explicit approval; ask before building. One
-   parser serves all three harnesses (crates/kaya/src/harness.rs
-   Target + Stage::resolve_id; SwiftUI's kayaTarget; Compose's
-   resolver), resolving authored id -> template node -> the copy by
-   key.
-4. The dashboard sheds its workaround: guests/python/portfolio.py
-   deletes repopulate() (that deletion is the milestone's acceptance
-   test) for the real shape — every account stamps its own positions
-   table — and portfolio.steps grows the DIVERGENCE assertion the
-   milestone exists for: header_click one copy's table, expect ITS
-   indicator moved and the sibling's unmoved. Desktop lanes only
+THE DEPTH SLICE IS GREEN IN THIS ORDER; BREADTH REMAINS:
+1. Rust — IMPLEMENTED. Nested Rows::columns() emits the template node plus
+   empty path; Rows::on_sort registers in the Messages nodes table;
+   Tx::columns_at takes the node handle and copy keys for per-copy
+   re-declaration. Compile-time surface checks and the emitted key-
+   before-title record were watched red first.
+2. Python — IMPLEMENTED. Nested Collection.columns() emits the template
+   declaration, on_sort reaches the node handler, and
+   positions.at(account).set_columns() is the keyed spelling. The binding
+   also gained Collection.rows(grow=, align=, a11y_id=) when the forcing
+   app exposed the missing ordinary-For geometry/identity hop; each
+   handoff and trace emission was watched red.
+3. Harness copy-targets — IMPLEMENTED after maintainer approval of
+   `kind@id[key]`, dot-joined string keys for depth
+   (`column@positions[brokerage]`). The shared runner, GTK/WinUI stage
+   routing and both interpreter resolvers map authored id -> template
+   node -> exact live copy; malformed targets and I64 paths are refused.
+4. Dashboard — IMPLEMENTED in the real shape. repopulate() is gone; every
+   account stamps its own positions collection, and portfolio.steps
+   clicks one copy's header, proves its sibling unchanged, then proves
+   both independent sorts survive a tick. Desktop lanes only
    (portfolio is IOS_UNWIRED/ANDROID_UNWIRED until packaging).
-5. Census gates move WITH each spelling, same commit:
-   tools/tpl-surfaces.py (template-zone columns/on_sort),
-   check-sugar-surface's table clause, check-steps if the target
-   grammar grows. No new verbs, so check-verbs should hold green.
-6. Ladder: every new assertion watched failing first, validate-mac,
-   then the five-lane matrix before "landed".
+5. Census — IMPLEMENTED for the two depth languages. tpl-surfaces.py reads
+   Rust and Python's own nested table points, check-sugar-surface
+   perturbs every new spelling, all three ordinary-For keyword/emitter
+   pairs, and the portfolio's three nested geometry hops.
+   check-steps holds the shared grammar and the Swift/Compose resolvers;
+   the three desktop scene legs exercise GTK/WinUI's Stage routing. Go,
+   C#, Java, Swift, OCaml and Haskell must extend the census tables in
+   the same commits as their spellings.
+6. Ladder — GREEN. The cargo suite passed 405 unit tests, 4 runnable
+   docs and 14 compile-fail docs; all 42 gates and validate-mac's 329
+   legs passed. The 2026-08-23 accepted concurrent matrix was ALL PASS: gates 374s,
+   mac 323s/329 legs, Linux 439s/580, Windows 465s/191, iOS 429s/106,
+   Android 252s/112; 467s wall time. The gate-sweep ceiling moved from
+   390 to 490 against this slice's measured 378/387/391s band and 29
+   new watched perturbations; its retention branch was watched red.
+
+WORKTREE STATUS 2026-08-23: items 1–6 are implemented and watched in
+the worktree. The dynamic-tables headline remains open for the six-
+binding breadth.
+
+POST-MATRIX VISUAL FOLLOW-UP: the artifact review found GTK allocating
+three unequal-natural, equal-weight account cards from an invalid summed
+measure, and macOS giving the new accounts For its default start breadth.
+GTK now inverts its exact weighted allocator (including rounding dust),
+the Python rows spelling carries grow+stretch+authored id, and the app
+requests 800x600. The scene pins the window, both nested alignments and
+table containment; every backend's column-edge reader rejects horizontal
+overflow. The watched numbers and why native cell ink is one-sided live
+in docs/traps.md; the resolved ledger entry owns the screenshot finding.
+
+The 2026-08-24 fix-forward attempt is recorded in docs/deferred.md's
+resolved screenshot entry. Every scene assertion and the gate sweep
+passed, but duration guards refused the matrix record; it does not move
+the accepted depth record or the open six-binding breadth.
 
 MEASURED IN SLICE 1 — do not rediscover:
 - A nested collection must be declared INSIDE the template scope
@@ -369,8 +404,9 @@ MEASURED IN SLICE 1 — do not rediscover:
 - check-abort's C# arm builds unconditionally since b819423 (its
   [ -f ] guard ran a stale dll and called it green).
 
-Parked on the dialog-flake entries, not this slice: the iOS aim
-instrumentation (log the goto'd directory beside the picker's
-breadcrumb) and a stale kaya-editor-* litter sweep in the simulator's
-Documents; android's blindness face waits on a non-empty-but-wrong
-window-list sighting.
+Closed during the visual follow-up: per-phone iOS preparation removes
+every exact prior-run `dev.kaya.*` bundle before LocalStorage admission,
+deleting the stale editor containers. Still parked on the dialog-flake
+entries: log the goto'd directory beside the picker's breadcrumb;
+Android's blindness face waits on a non-empty-but-wrong window-list
+sighting.

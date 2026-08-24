@@ -806,6 +806,22 @@ class _BoundCollection:
             for derived in self._owner._derived:
                 derived._recompute()
 
+    def set_columns(self, *titles, sort=None):
+        """Re-declare this collection instance's header bar after sorting."""
+        handle = getattr(self._owner, "_for_handle", None)
+        if handle is None:
+            raise RuntimeError(
+                "kaya: set_columns before columns() — the header bar "
+                "is declared with the For, then re-declared here"
+            )
+        sort = sort or Sort.NONE
+        _records().append(
+            wire.tx_set_column_headers(
+                handle, sort.sorted, sort.direction,
+                len(titles), len(self._path), [*self._path, *titles],
+            )
+        )
+
     def _absorb_key(self, key):
         """An explicit key, shown to the minter on its way into the
         table: a numeric key at or above the counter carries it up.
@@ -1136,6 +1152,15 @@ class Collection(_BoundCollection):
             )
         return _ForTrace(self)
 
+    def rows(self, grow=None, align=None, a11y_id=None):
+        """The configured spelling of the ordinary For loop:
+        `for item in items.rows(grow=1, align="stretch"):`."""
+        trace = iter(self)
+        trace._grow = grow
+        trace._align = align
+        trace._a11y_id = a11y_id
+        return trace
+
     def columns(self, *titles, sort=None, on_sort=None, grow=None, a11y_id=None):
         """Declare the column header bar on this collection's For —
         the table spelling of the same loop
@@ -1143,30 +1168,12 @@ class Collection(_BoundCollection):
         One title per column; the row template's body must hold a
         `with kaya.row():` of exactly one cell per column — the core
         refuses a mismatch loudly. `on_sort` takes the 0-based column
-        index of a header click; re-declare with set_columns() after
-        sorting (docs/tables-plan.md). `a11y_id` authors the table
+        index of a header click; inside a nested template, its
+        outermost-first copy keys precede that index. Re-declare with
+        set_columns() after sorting (docs/tables-plan.md). `a11y_id` authors the table
         container's automation key — the kind@id harness target and the
         platform accessibility identifier, one prop."""
         return _ColumnsTrace(self, list(titles), sort or Sort.NONE, on_sort, grow, a11y_id)
-
-    def set_columns(self, *titles, sort=None):
-        """Re-declare the header bar — the sort handler's move, after
-        it reorders the collection by key. Targets the For this
-        collection traced (columns() remembered the handle)."""
-        if getattr(self, "_for_handle", None) is None:
-            raise RuntimeError(
-                "kaya: set_columns before columns() — the header bar "
-                "is declared with the For, then re-declared here"
-            )
-        sort = sort or Sort.NONE
-        # path_len 0: no key path, so the values are titles alone
-        # (docs/tables-plan.md, dynamic tables).
-        _records().append(
-            wire.tx_set_column_headers(
-                self._for_handle, sort.sorted, sort.direction,
-                len(titles), 0, list(titles),
-            )
-        )
 
     def _decode(self, variant, fields, current):
         """Rebuild a model value from an undo delta's wire record.
@@ -1304,6 +1311,9 @@ class _ForTrace:
     def __init__(self, coll):
         self._template = _Template(
             wire.tx_create_for, coll._id, is_for=True, coll=coll)
+        self._grow = None
+        self._align = None
+        self._a11y_id = None
         self._state = 0
 
     def __iter__(self):
@@ -1326,6 +1336,15 @@ class _ForTrace:
                 )
             _open_traces.pop()
             self._template._exit()
+            if self._grow is not None:
+                _records().append(
+                    wire.tx_set_grow(self._template.handle.id, float(self._grow)))
+            if self._align is not None:
+                _records().append(
+                    wire.tx_set_align(self._template.handle.id, _align_value(self._align)))
+            if self._a11y_id is not None:
+                _records().append(
+                    wire.tx_set_a11y_id(self._template.handle.id, self._a11y_id))
         raise StopIteration
 
 

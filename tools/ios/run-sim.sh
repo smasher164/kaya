@@ -75,6 +75,11 @@ tools/gen-bindings.sh --check
 # a break in it fails at the top rather than inside one leg's watcher,
 # where the symptom would be a scene timing out with no reason.
 SIMDRIVE=$(tools/ios/simdrive/build.sh)
+# The admission probe exercises the LocalStorage export path itself;
+# docs/traps.md records why a live FileProvider pid is not enough.
+EXPORT_PROBE_APP=$(tools/ios/exportprobe/build.sh)
+EXPORT_PROBE_BUNDLE=dev.kaya.exportpreflight
+KAYA_BUNDLE_PREFIX=dev.kaya.
 # WHERE EACH DIALOG LEG'S SIMDRIVE TIMING LANDS, and deliberately NOT in
 # LEGS_DIR: that directory is deleted on exit, and a GREEN run's numbers
 # are the healthy baseline a starved run is read against
@@ -973,6 +978,181 @@ picker_warm() { # udid -> 0 when this device can aim a picker
     return 0
 }
 
+kaya_installed_apps() { # udid
+    local udid="$1" listing
+    listing=$(timeout 60 xcrun simctl listapps "$udid" \
+        | plutil -convert json -o - -- - \
+        | python3 -c '
+import json
+import sys
+
+apps = json.load(sys.stdin)
+if not isinstance(apps, dict) or not apps:
+    raise SystemExit("simctl listapps returned no app mapping")
+prefix = sys.argv[1]
+for bundle in sorted(apps):
+    if bundle.startswith(prefix):
+        print(bundle)
+' "$KAYA_BUNDLE_PREFIX") || {
+        echo "run-sim: could not census installed apps on $udid" >&2
+        return 1
+    }
+    printf '%s' "$listing"
+}
+
+picker_cleanup() { # udid
+    local udid="$1" listed remaining bundle removed=0
+    local bundles=()
+    listed=$(kaya_installed_apps "$udid") || return 1
+    while IFS= read -r bundle; do
+        [ -n "$bundle" ] || continue
+        bundles+=("$bundle")
+    done <<<"$listed"
+    for bundle in "${bundles[@]}"; do
+        case "$bundle" in
+            dev.kaya.*) ;;
+            *)
+                echo "run-sim: refusing to uninstall non-kaya app $bundle from $udid" >&2
+                return 1
+                ;;
+        esac
+        timeout 60 xcrun simctl uninstall "$udid" "$bundle" >/dev/null 2>&1 || {
+            echo "run-sim: could not uninstall prior-run app $bundle from $udid" >&2
+            return 1
+        }
+        removed=$((removed + 1))
+    done
+    remaining=$(kaya_installed_apps "$udid") || return 1
+    if [ -n "$remaining" ]; then
+        echo "run-sim: prior-run kaya apps remain on $udid after cleanup:" >&2
+        printf '%s\n' "$remaining" >&2
+        return 1
+    fi
+    echo "run-sim: removed $removed prior-run kaya app(s) from $udid"
+}
+
+picker_export_probe() { # udid -> 0 healthy, 75 measured LocalStorage failure
+    local udid="$1" launch="" launch_rc=0 pid="" data_container="" container_rc=0
+    local result_file ready_file result="" drive="" drive_rc=0 system_log="" log_rc=0
+    local started probe_name
+    probe_name="kaya-export-preflight-$$-$RANDOM-$(date +%s)"
+
+    timeout 60 xcrun simctl terminate "$udid" "$EXPORT_PROBE_BUNDLE" >/dev/null 2>&1 || true
+    timeout 60 xcrun simctl install "$udid" "$EXPORT_PROBE_APP" >/dev/null 2>&1 || {
+        echo "run-sim: the LocalStorage export probe would not install on $udid" >&2
+        return 1
+    }
+    data_container=$(timeout 60 xcrun simctl get_app_container \
+        "$udid" "$EXPORT_PROBE_BUNDLE" data 2>/dev/null) || container_rc=$?
+    if [ "$container_rc" -ne 0 ] || [ -z "$data_container" ]; then
+        echo "run-sim: the LocalStorage export probe has no data container on $udid" >&2
+        return 1
+    fi
+    result_file="$data_container/Library/Caches/kaya-export-preflight-result"
+    ready_file="$data_container/Library/Caches/kaya-export-preflight-ready"
+    rm -f "$result_file" "$ready_file"
+    started=$(date '+%Y-%m-%d %H:%M:%S%z')
+    launch=$(SIMCTL_CHILD_KAYA_EXPORT_NAME="$probe_name" timeout 60 \
+        xcrun simctl launch "$udid" "$EXPORT_PROBE_BUNDLE" 2>&1) || launch_rc=$?
+    if [ "$launch_rc" -ne 0 ]; then
+        echo "run-sim: the LocalStorage export probe would not launch on $udid: $launch" >&2
+        return 1
+    fi
+    pid=$(python3 -c '
+import re
+import sys
+for line in reversed(sys.stdin.read().splitlines()):
+    match = re.search(r":\s*([0-9]+)\s*$", line)
+    if match:
+        print(match.group(1))
+        break
+' <<<"$launch")
+    if [ -z "$pid" ]; then
+        echo "run-sim: the LocalStorage export probe launch named no pid on $udid: $launch" >&2
+        return 1
+    fi
+
+    for _ in $(seq 1 80); do
+        [ -s "$ready_file" ] && break
+        sleep 0.25
+    done
+    if [ ! -s "$ready_file" ]; then
+        echo "run-sim: the LocalStorage export probe never presented its picker on $udid" >&2
+        timeout 60 xcrun simctl terminate "$udid" "$EXPORT_PROBE_BUNDLE" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    drive=$(KAYA_SIMDRIVE_LOG="$PREP_DIR/export-$udid-simdrive.log" timeout 90 \
+        "$SIMDRIVE" "$udid" "$pid" savename "$probe_name" 2>&1) || drive_rc=$?
+    if [ "$drive_rc" -eq 0 ]; then
+        drive=$(KAYA_SIMDRIVE_LOG="$PREP_DIR/export-$udid-simdrive.log" timeout 90 \
+            "$SIMDRIVE" "$udid" "$pid" savepress 2>&1) || drive_rc=$?
+    fi
+    for _ in $(seq 1 80); do
+        if [ -s "$result_file" ]; then
+            IFS= read -r result <"$result_file"
+            break
+        fi
+        sleep 0.25
+    done
+    timeout 60 xcrun simctl terminate "$udid" "$EXPORT_PROBE_BUNDLE" >/dev/null 2>&1 || true
+
+    if [ "$result" = ok ]; then
+        return 0
+    fi
+    system_log=$(timeout 30 xcrun simctl spawn "$udid" log show --style compact \
+        --start "$started" --predicate \
+        'eventMessage CONTAINS "FP -1005" OR eventMessage CONTAINS "Index out of sync" OR eventMessage CONTAINS "didPickDocumentURLs called with nil or 0 URLS"' \
+        2>&1) || log_rc=$?
+    if [ "$log_rc" -ne 0 ]; then
+        system_log="log query failed with rc=$log_rc: $system_log"
+    fi
+    case "$result:$system_log" in
+        empty*|*"FP -1005"*|*"Index out of sync"*|*"didPickDocumentURLs called with nil or 0 URLS"*)
+            echo "run-sim: LocalStorage export health failed on $udid ($result)" >&2
+            [ -z "$system_log" ] || printf '%s\n' "$system_log" >&2
+            return 75
+            ;;
+    esac
+    echo "run-sim: LocalStorage export probe failed on $udid" >&2
+    echo "  result=${result:-missing} drive_rc=$drive_rc drive=${drive:-<empty>}" >&2
+    [ -z "$system_log" ] || printf '%s\n' "$system_log" >&2
+    return 1
+}
+
+picker_reseed() { # udid
+    local udid="$1"
+    timeout 60 xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+    timeout 180 xcrun simctl erase "$udid" >/dev/null 2>&1 || return 1
+    timeout 60 xcrun simctl boot "$udid" >/dev/null 2>&1 || return 1
+    timeout 180 xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || return 1
+}
+
+picker_prepare() { # udid
+    local udid="$1" rc=0
+    picker_cleanup "$udid" || return 1
+    picker_warm "$udid" || return 1
+    picker_export_probe "$udid" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$rc" -ne 75 ]; then
+        return "$rc"
+    fi
+    echo "run-sim: reseeding $udid after a stale LocalStorage export" >&2
+    picker_reseed "$udid" || return 1
+    picker_warm "$udid" || return 1
+    rc=0
+    picker_export_probe "$udid" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$rc" -eq 75 ]; then
+        echo "run-sim: LocalStorage export stayed unhealthy after reseeding $udid once" >&2
+    fi
+    return 1
+}
+
 # The clipboard verbs, dispatched off the request line's first token.
 clip_verb() { # udid verb args...
     local udid="$1" verb="$2"
@@ -1336,8 +1516,9 @@ running_legs() {
     echo "$n"
 }
 
-# Join the backgrounded device preparation (the relay check and the
-# picker warms — see boot below) before ANY leg claims a device. Inside
+# Join the backgrounded per-device preparation before ANY leg claims a
+# device, then measure clipboard isolation against the final device state.
+# Inside
 # the queue functions rather than at each phase's head so no future
 # phase can forget it; idempotent, so forty calls cost one join.
 prep_join() {
@@ -1346,14 +1527,16 @@ prep_join() {
     if [ ${#PREP_PIDS[@]} -gt 0 ]; then
         wait "${PREP_PIDS[@]}" 2>/dev/null || true
     fi
-    local f rc
-    for f in "$PREP_DIR"/*.rc; do
+    local f rc udid
+    for udid in "${UDIDS[@]}"; do
+        f="$PREP_DIR/picker-$udid.rc"
         rc=$(cat "$f" 2>/dev/null || echo missing)
         if [ "$rc" != 0 ]; then
             echo "run-sim: device preparation failed ($(basename "$f") rc=$rc)" >&2
             return 1
         fi
     done
+    clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || return 1
 }
 
 queue_leg() { # fn name args...
@@ -1456,30 +1639,28 @@ if [ -n "${KAYA_RECORD:-}" ]; then
     export SIMCTL_CHILD_KAYA_RECORD=1
 fi
 boot_pool
-# BEFORE ANY LEG, and on every run: are these devices' clipboards their
-# own (clip_relay_check), and has each phone burned the first-picker
-# ignores-its-directory boot quirk (picker_warm)? BACKGROUNDED here and
-# JOINED IN queue_leg (prep_join) since 2026-08-20: both need only
-# booted devices, the build phase that follows needs no devices, and
-# serially they sat ~15s on the lane's critical path. A preparation
+# BEFORE ANY LEG, and on every run: can each phone export and reopen a
+# file through LocalStorage? BACKGROUNDED here and JOINED IN queue_leg
+# (prep_join): this needs only booted devices, while the build phase that
+# follows needs no devices. A preparation
 # failure still fails the lane before any leg runs — just at the first
-# queue instead of five seconds in.
+# queue instead of at an arbitrary dialog leg. prep_join measures the
+# clipboard only after any one-device reseed has finished.
 PREP_DIR="$(mktemp -d)"
 PREP_PIDS=()
-(
-    clip_relay_check "${UDIDS[0]}" "$PAD_UDID"
-    prep_rc=$?
-    echo "$prep_rc" >"$PREP_DIR/relay.rc"
-) &
-PREP_PIDS+=($!)
 for udid in "${UDIDS[@]}"; do
     (
-        picker_warm "$udid"
-        prep_rc=$?
-        echo "$prep_rc" >"$PREP_DIR/warm-$udid.rc"
+        prep_rc=0
+        picker_prepare "$udid" || prep_rc=$?
+        echo "$prep_rc" >"$PREP_DIR/picker-$udid.rc"
     ) &
     PREP_PIDS+=($!)
 done
+# A recovery erases and reboots one device. Recording mode cannot start
+# its suite-long sessions until that possibility has been retired.
+if [ -n "${KAYA_RECORD:-}" ]; then
+    prep_join || exit 1
+fi
 rec_suite_start
 timing boot
 

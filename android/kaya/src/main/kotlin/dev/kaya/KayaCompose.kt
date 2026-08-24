@@ -19,6 +19,7 @@ import android.provider.OpenableColumns
 import android.util.Base64
 import android.util.Log
 import android.view.KeyEvent
+import android.view.ViewTreeObserver
 import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
@@ -229,22 +230,32 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var tablePresented by mutableStateOf("")
 
     /**
-     * Cell leading edges in dp, window space, keyed "<rowId>/<col>"
-     * ("h/<col>" for kaya's own header cells) — written by the
-     * render's position readers, clustered by expect_column_edges.
+     * Cell leading edges in dp, window space, keyed by declaration
+     * generation and "<rowId>/<col>" ("h/<col>" for kaya's own header
+     * cells) — written by the render's position readers, clustered by
+     * expect_column_edges. The generation keeps a re-declaration from
+     * reading the preceding layout's bounds.
      * Concurrent because the harness thread reads while the UI thread
      * writes.
      */
     val cellEdgeX = java.util.concurrent.ConcurrentHashMap<String, Float>()
+    val cellEdgeRightX = java.util.concurrent.ConcurrentHashMap<String, Float>()
+    @Volatile var tableGeometryGeneration = 0L
 
     /**
-     * The table's assigned horizontal track and the width it drew, in
-     * dp (-1 before layout; track -1 when unbounded) — the span half of
-     * expect_column_edges' claim. Volatile: written at layout, read by
-     * the harness thread.
+     * The table's assigned horizontal track, laid-out viewport, and raw
+     * content span, in dp (-1 before layout; track -1 when unbounded).
+     * The raw span stays unbounded by the viewport so expect_column_edges
+     * can distinguish overflow from a correctly filled table. Volatile:
+     * written at layout, read by the harness thread.
      */
     @Volatile var tableTrackW = -1f
     @Volatile var tableDrawnW = -1f
+    @Volatile var tableContentW = -1f
+    @Volatile var tableViewportLeftX = -1f
+    @Volatile var tableViewportRightX = -1f
+    @Volatile var tableViewportH = -1f
+    @Volatile var tableContentH = -1f
 
     /**
      * KAYA'S MODEL MIRROR of the widget's text — what the app was last
@@ -1217,7 +1228,7 @@ object KayaCompose {
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
         activity.setContent { KayaTheme { KayaRoot() } }
-        if (System.getenv("KAYA_SELFTEST") != null) startSelftest(activity)
+        if (System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
     }
 
     /** The visible title: the top entry's while the stack is covered
@@ -2016,6 +2027,16 @@ object KayaCompose {
                     while (b.position() % 8 != 0) b.get()
                     val node = KayaSceneModel.nodes[id]
                         ?: error("kaya: set_columns targets unknown widget $id")
+                    node.tableGeometryGeneration += 1
+                    node.cellEdgeX.clear()
+                    node.cellEdgeRightX.clear()
+                    node.tableTrackW = -1f
+                    node.tableDrawnW = -1f
+                    node.tableContentW = -1f
+                    node.tableViewportLeftX = -1f
+                    node.tableViewportRightX = -1f
+                    node.tableViewportH = -1f
+                    node.tableContentH = -1f
                     node.tableColumns = titles
                     node.tableSorted = sorted
                     node.tableDirection = direction
@@ -2172,6 +2193,19 @@ object KayaCompose {
         b.int // len
         check(type == VALUE_BLOB) { "kaya: expected a blob value, got type $type" }
         return b.long
+    }
+
+    private fun admitSelftestOnFirstDraw(activity: ComponentActivity) {
+        val decor = activity.window.decorView
+        decor.viewTreeObserver.addOnPreDrawListener(
+            object : ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    decor.viewTreeObserver.removeOnPreDrawListener(this)
+                    startSelftest(activity)
+                    return true
+                }
+            },
+        )
     }
 
     /**
@@ -2384,19 +2418,84 @@ object KayaCompose {
         )
     }
 
-    private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
-        // kind@id — the authored a11y_id, creation order never entering
-        // (harness.rs's Target doc; the check-steps container lint's
-        // sanctioned alternative). First match in creation order.
-        if (spec.contains('@')) {
-            val bits = spec.split('@', limit = 2)
-            if (bits.size != 2 || bits[0] != kind || bits[1].isEmpty()) return null
-            return registry.firstOrNull { it.a11yId == bits[1] }
+    private data class TableStamp(val node: Long, val keys: List<String>)
+
+    private fun tableStamp(tag: ByteArray): TableStamp? {
+        if (tag.size < 16) return null
+        val b = ByteBuffer.wrap(tag).order(ByteOrder.LITTLE_ENDIAN)
+        val node = b.long
+        val count = b.int.toLong() and 0xffff_ffffL
+        b.int // reserved
+        if (count == 0L || count > ((tag.size - 16) / 8).toLong()) return null
+        val keys = ArrayList<String>(count.toInt())
+        repeat(count.toInt()) {
+            if (b.remaining() < 8) return null
+            val type = b.int
+            val len = b.int.toLong() and 0xffff_ffffL
+            if (type != VALUE_STR || len > b.remaining().toLong()) return null
+            val bytes = ByteArray(len.toInt())
+            b.get(bytes)
+            val padding = (8 - b.position() % 8) % 8
+            if (b.remaining() < padding) return null
+            b.position(b.position() + padding)
+            val key = try {
+                Charsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString()
+            } catch (_: java.nio.charset.CharacterCodingException) {
+                return null
+            }
+            keys.add(key)
         }
-        val bits = spec.split('#')
-        if (bits.size != 2 || bits[0] != kind) return null
-        if (bits[1] == "last") return registry.lastOrNull()
-        val i = bits[1].toIntOrNull() ?: return null
+        if (b.hasRemaining()) return null
+        return TableStamp(node, keys)
+    }
+
+    private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
+        // harness.rs's Target spelling; sortTag is the stamped table identity.
+        val at = spec.indexOf('@')
+        if (at >= 0) {
+            if (spec.substring(0, at) != kind) return null
+            val authored = spec.substring(at + 1)
+            val open = authored.indexOf('[')
+            val id: String
+            val keys: List<String>?
+            if (open >= 0) {
+                if (!authored.endsWith(']')) return null
+                val keyText = authored.substring(open + 1, authored.length - 1)
+                if (keyText.contains('[') || keyText.contains(']')) return null
+                id = authored.substring(0, open)
+                if (id.any { it == '[' || it == ']' || it == '@' }) return null
+                keys = keyText.split('.')
+                if (keyText.isEmpty() || keys.any { it.isEmpty() }) return null
+            } else {
+                if (authored.any { it == ']' || it == '@' }) return null
+                id = authored
+                keys = null
+            }
+            if (id.isEmpty()) return null
+            if (keys == null) return registry.firstOrNull { it.a11yId == id }
+            if (kind != "column") return null
+            val live = registry.filter { KayaSceneModel.nodes[it.id] === it }
+            val node = live.asSequence()
+                .filter { it.a11yId == id }
+                .mapNotNull { tableStamp(it.sortTag)?.node }
+                .firstOrNull() ?: return null
+            return live.firstOrNull {
+                tableStamp(it.sortTag)?.let { stamp ->
+                    stamp.node == node && stamp.keys == keys
+                } == true
+            }
+        }
+        val hash = spec.indexOf('#')
+        if (hash < 0 || hash != spec.lastIndexOf('#') || spec.substring(0, hash) != kind) {
+            return null
+        }
+        val index = spec.substring(hash + 1)
+        if (index == "last") return registry.lastOrNull()
+        val i = index.toIntOrNull() ?: return null
         return registry.getOrNull(i)
     }
 
@@ -4010,7 +4109,9 @@ object KayaCompose {
     }
 
     private fun kayaWidgetTarget(spec: String): KayaNode? {
-        val kind = spec.substringBefore('#')
+        val delimiter = spec.indexOfAny(charArrayOf('#', '@'))
+        if (delimiter < 0) return null
+        val kind = spec.substring(0, delimiter)
         val registry = when (kind) {
             "button" -> KayaSceneModel.buttons
             "checkbox" -> KayaSceneModel.checkboxes
@@ -5222,38 +5323,86 @@ object KayaCompose {
                         // content-hugging layout slips past every
                         // model-side observable.
                         val want = parts.getOrNull(2)?.toIntOrNull() ?: -1
-                        val clusters = onUi(activity) {
-                            target(parts[1], "column", KayaSceneModel.columns)
-                                ?.cellEdgeX?.values?.sorted()?.let { xs ->
-                                    val reps = mutableListOf<Float>()
-                                    var prev: Float? = null
-                                    for (x in xs) {
-                                        val p = prev
-                                        prev = x
-                                        if (p != null && x - p <= 2f) continue
-                                        reps.add(x)
+                        data class EdgeRead(
+                            val clusters: List<Float>,
+                            val aligned: Boolean,
+                            val ordered: Boolean,
+                            val found: Int,
+                            val expected: Int,
+                            val left: Float,
+                            val right: Float,
+                            val viewportLeft: Float,
+                            val viewportRight: Float,
+                            val track: Float,
+                            val drawn: Float,
+                        )
+                        val read = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
+                                val generation = "${node.tableGeometryGeneration}:"
+                                val keys = buildList {
+                                    node.tableColumns.indices.forEach { add("${generation}h/$it") }
+                                    node.children.forEach { row ->
+                                        node.tableColumns.indices.forEach {
+                                            add("$generation${row.id}/$it")
+                                        }
                                     }
-                                    reps
                                 }
-                        }
-                        val span = onUi(activity) {
-                            target(parts[1], "column", KayaSceneModel.columns)?.let {
-                                Pair(it.tableTrackW, it.tableDrawnW)
+                                val starts = keys.mapNotNull { node.cellEdgeX[it] }
+                                val rights = keys.mapNotNull { node.cellEdgeRightX[it] }
+                                val byColumn = node.tableColumns.indices.map { column ->
+                                    buildList {
+                                        node.cellEdgeX["${generation}h/$column"]?.let { add(it) }
+                                        node.children.forEach { row ->
+                                            node.cellEdgeX["$generation${row.id}/$column"]?.let { add(it) }
+                                        }
+                                    }
+                                }
+                                val reps = byColumn.mapNotNull { it.minOrNull() }
+                                EdgeRead(
+                                    reps,
+                                    byColumn.all { xs ->
+                                        xs.size == node.children.size + 1 &&
+                                            (xs.maxOrNull()!! - xs.minOrNull()!!) <= 2f
+                                    },
+                                    reps.zipWithNext().all { (left, right) -> right - left > 2f },
+                                    minOf(starts.size, rights.size),
+                                    keys.size,
+                                    starts.minOrNull() ?: -1f,
+                                    rights.maxOrNull() ?: -1f,
+                                    node.tableViewportLeftX,
+                                    node.tableViewportRightX,
+                                    node.tableTrackW,
+                                    node.tableDrawnW,
+                                )
                             }
                         }
                         when {
-                            clusters == null || span == null ->
+                            read == null ->
                                 failures.add("no such target ${parts[1]}")
-                            clusters.size != want ->
+                            read.found != read.expected || read.expected == 0 ->
+                                failures.add(
+                                    "${parts[1]} has ${read.found} of ${read.expected} live cell bounds"
+                                )
+                            read.clusters.size != want || !read.aligned || !read.ordered ->
                                 failures.add(
                                     "${parts[1]} cell edges cluster at " +
-                                        clusters.map { it.toInt() } +
+                                        read.clusters.map { it.toInt() } +
                                         ", wanted ${parts.getOrNull(2)} columns"
                                 )
-                            span.first >= 0 && span.second < span.first - 2 ->
+                            read.track <= 0f || read.drawn <= 0f ||
+                                read.viewportRight <= read.viewportLeft ->
+                                failures.add("${parts[1]} has no live table viewport geometry")
+                            read.drawn < read.track - 2 ->
                                 failures.add(
-                                    "${parts[1]} draws ${span.second.toInt()}dp of a " +
-                                        "${span.first.toInt()}dp track"
+                                    "${parts[1]} draws ${read.drawn.toInt()}dp of a " +
+                                        "${read.track.toInt()}dp track"
+                                )
+                            read.left < read.viewportLeft - 2 ||
+                                read.right > read.viewportRight + 2 ->
+                                failures.add(
+                                    "${parts[1]} cells span " +
+                                        "${(read.right - read.left).toInt()}dp inside a " +
+                                        "${(read.viewportRight - read.viewportLeft).toInt()}dp viewport"
                                 )
                             else -> observed.add("${parts[1]} column edges $want")
                         }
@@ -5749,22 +5898,24 @@ object KayaCompose {
                     "expect_overflow" -> {
                         // The toolkit's own ScrollState: maxValue > 0
                         // IS overflow.
-                        val target = parts.getOrNull(1) ?: ""
-                        val st = onUi(activity) { scrollTarget(target)?.scrollState }
+                        val spec = parts.getOrNull(1) ?: ""
+                        val st = onUi(activity) {
+                            target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState
+                        }
                         if (st == null) {
-                            failures.add("no such target $target")
+                            failures.add("no such target $spec")
                         } else if (st.maxValue > 0) {
-                            observed.add("$target overflows")
+                            observed.add("$spec overflows")
                         } else {
-                            failures.add("$target fits (maxValue 0)")
+                            failures.add("$spec fits (maxValue 0)")
                         }
                     }
                     "scroll_end" -> {
                         // The REAL scrolling API, driven to its end.
                         // Silent, like click.
-                        val target = parts.getOrNull(1) ?: ""
+                        val spec = parts.getOrNull(1) ?: ""
                         onUi(activity) {
-                            scrollTarget(target)?.scrollState?.let { st ->
+                            target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState?.let { st ->
                                 kotlinx.coroutines.MainScope().launch {
                                     st.scrollTo(st.maxValue)
                                 }
@@ -5772,15 +5923,17 @@ object KayaCompose {
                         }
                     }
                     "expect_at_end" -> {
-                        val target = parts.getOrNull(1) ?: ""
-                        val st = onUi(activity) { scrollTarget(target)?.scrollState }
+                        val spec = parts.getOrNull(1) ?: ""
+                        val st = onUi(activity) {
+                            target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState
+                        }
                         if (st == null) {
-                            failures.add("no such target $target")
+                            failures.add("no such target $spec")
                         } else if (st.maxValue - st.value <= 2) {
-                            observed.add("$target at end")
+                            observed.add("$spec at end")
                         } else {
                             failures.add(
-                                "$target short of end (${st.value} of ${st.maxValue})")
+                                "$spec short of end (${st.value} of ${st.maxValue})")
                         }
                     }
                     // THE THREE TEXT-RANGE READS, each going to the
@@ -6195,6 +6348,15 @@ object KayaCompose {
                                         ownCross < parentInner - 2.0 ->
                                         "spans ${Math.round(ownCross)}px of its parent's " +
                                             "${Math.round(parentInner)}px breadth"
+                                    container.tableColumns.isNotEmpty() &&
+                                        (container.tableViewportH <= 0f ||
+                                            container.tableContentH <= 0f) ->
+                                        "no table layout recorded"
+                                    container.tableColumns.isNotEmpty() &&
+                                        container.tableContentH > container.tableViewportH + 2f ->
+                                        "children span ${Math.round(container.tableContentH)}dp " +
+                                            "inside a ${Math.round(container.tableViewportH)}dp viewport"
+                                    container.tableColumns.isNotEmpty() -> ""
                                     extent <= 0.0 -> "no container layout recorded"
                                     // Summing unrecorded tracks as zeros
                                     // reports a leftover built from nothing;
@@ -6591,7 +6753,8 @@ object KayaCompose {
                         // model state the long-press gesture drives —
                         // the SAME presentation route. No emission.
                         val spec = parts.getOrNull(1) ?: ""
-                        if (spec.startsWith("entry#") || spec.startsWith("textarea#")) {
+                        val kind = spec.takeWhile { it != '#' && it != '@' }
+                        if (kind == "entry" || kind == "textarea") {
                             // Editable text keeps its native edit menu
                             // as dress; probing a menu that cannot
                             // exist is the false-verdict class.
@@ -7216,11 +7379,14 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     }
     SideEffect { node.tablePresented = presented }
     val cols = node.tableColumns.size
+    val geometryGeneration = "${node.tableGeometryGeneration}:"
     val density = LocalDensity.current.density
     val colGapPx = with(LocalDensity.current) { 24.dp.roundToPx() }
     val rowGapPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() }
     fun Modifier.edge(key: String): Modifier = onGloballyPositioned {
-        node.cellEdgeX[key] = it.positionInWindow().x / density
+        val left = it.positionInWindow().x / density
+        node.cellEdgeX[key] = left
+        node.cellEdgeRightX[key] = left + it.size.width / density
     }
     Layout(
         content = {
@@ -7237,17 +7403,23 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                         .clickable {
                             KayaPresent.emitSortRequested(node.sortTag, index)
                         }
-                        .edge("h/$index"),
+                        .edge("${geometryGeneration}h/$index"),
                 )
             }
             HorizontalDivider()
             node.children.forEach { row ->
                 row.children.forEachIndexed { index, cell ->
-                    Box(Modifier.edge("${row.id}/$index")) { KayaRender(cell) }
+                    Box(Modifier.edge("$geometryGeneration${row.id}/$index")) { KayaRender(cell) }
                 }
             }
         },
-        modifier = modifier,
+        modifier = modifier.onGloballyPositioned {
+            val left = it.positionInWindow().x / density
+            node.tableViewportLeftX = left
+            node.tableViewportRightX = left + it.size.width / density
+            kayaContainerExtents[node.id] = it.size.height.toDouble()
+            kayaContainerCross[node.id] = it.size.width.toDouble()
+        },
     ) { measurables, constraints ->
         // Children arrive in content order: cols headers, the divider,
         // then the stamped cells row-major (the core held every row to
@@ -7283,12 +7455,15 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         node.tableTrackW =
             if (constraints.hasBoundedWidth) constraints.maxWidth / density else -1f
         node.tableDrawnW = totalW / density
+        node.tableContentW = acc / density
         val divider = measurables[cols].measure(Constraints(minWidth = totalW, maxWidth = totalW))
         val headerH = headers.maxOfOrNull { it.height } ?: 0
         val rowHeights = cells.chunked(cols).map { row -> row.maxOfOrNull { it.height } ?: 0 }
-        val totalH = (headerH + rowGapPx + divider.height + rowGapPx +
-            rowHeights.sum() + rowGapPx * (rowHeights.size - 1).coerceAtLeast(0))
-            .coerceIn(constraints.minHeight, constraints.maxHeight)
+        val contentH = headerH + rowGapPx + divider.height + rowGapPx +
+            rowHeights.sum() + rowGapPx * (rowHeights.size - 1).coerceAtLeast(0)
+        val totalH = contentH.coerceIn(constraints.minHeight, constraints.maxHeight)
+        node.tableContentH = contentH / density
+        node.tableViewportH = totalH / density
         layout(totalW, totalH) {
             headers.forEachIndexed { c, p -> p.place(colX[c], 0) }
             divider.place(0, headerH + rowGapPx)
@@ -10103,15 +10278,6 @@ private fun kayaMenuDescend(
 /// A user-driven back on the top entry: an intercept_back-armed top
 /// emits back_requested and nothing pops (the veto class); an unarmed
 /// top pops here and reconciles the core post-fact.
-/** Resolve a `scroll#i` target against the creation-order registry. */
-internal fun scrollTarget(spec: String): KayaNode? {
-    val bits = spec.split("#")
-    if (bits.size != 2 || bits[0] != "scroll") return null
-    if (bits[1] == "last") return KayaSceneModel.scrolls.lastOrNull()
-    val i = bits[1].toIntOrNull() ?: return null
-    return KayaSceneModel.scrolls.getOrNull(i)
-}
-
 /** The sections materialization: the M3 bottom NavigationBar (the
  * platform's dominant idiom — hints are ignored here by physics).
  * The bar's item taps are the USER route: they move the selection

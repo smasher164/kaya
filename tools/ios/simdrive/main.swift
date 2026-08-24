@@ -684,6 +684,19 @@ func whoHoldsTheScreen() -> String {
         + "/\(described.isEmpty ? "no description" : described)"
 }
 
+/// docs/deferred.md's iOS save-sheet WATCH tap-time discriminator.
+func tapOwner(_ point: CGPoint) -> String {
+    let translation = sim.objectAtPoint(point)
+    let pid = translation?.value(forKey: "pid") as? Int32
+    let element = translation.flatMap { sim.element(for: $0) }
+    let role = element.map { text($0, "AXRole") } ?? ""
+    let described = element.map { text($0, "AXDescription") } ?? ""
+    return "tap_pid=\(pid.map(String.init) ?? "none") "
+        + "tap_proc=\(pid.map(processName) ?? "none") "
+        + "tap_role=\(role.isEmpty ? "none" : role) "
+        + "tap_desc=\(described.isEmpty ? "none" : described)"
+}
+
 // MARK: - the save sheet
 
 /// The export sheet's name fields, BY ROLE. The field publishes no
@@ -751,7 +764,8 @@ func cancelSheet(_ what: String) {
         rounds += 1
         let strip = navigationStrip(sim, screen: screen)
         if let (_, centre) = strip.first(where: { $0.0.hasPrefix("Cancel") }) {
-            note("cancel_round", "n=\(rounds) found=cancel \(xy(centre))")
+            let owner = tapOwner(centre)
+            note("cancel_round", "n=\(rounds) found=cancel \(xy(centre)) \(owner)")
             tapper.tap(at: centre, screen: screen)
             cancelled = true
             break
@@ -761,7 +775,8 @@ func cancelSheet(_ what: String) {
             note("cancel_round", "n=\(rounds) found=nothing controls=\(strip.count)")
             break
         }
-        note("cancel_round", "n=\(rounds) found=back \(xy(back.1))")
+        let owner = tapOwner(back.1)
+        note("cancel_round", "n=\(rounds) found=back \(xy(back.1)) \(owner)")
         tapper.tap(at: back.1, screen: screen)
         usleep(600_000)
     }
@@ -974,6 +989,7 @@ case "savepress":
         let strip = navigationStrip(sim, screen: screen)
         let stripMs = sinceMs(stripAt)
         var tapped = "no-save-in-strip"
+        var roundOwner = "tap_owner=not-tapped"
         // THIS ROUND'S centre, not the last one seen: a round that found
         // no Save tapped nowhere, and printing the previous round's
         // coordinate is a claim nothing measured.
@@ -983,6 +999,7 @@ case "savepress":
             saveOffered += 1
             saveCentres.insert(String(format: "%.0f,%.0f", saveCentre.x, saveCentre.y))
             tapped = "tapped"
+            roundOwner = tapOwner(saveCentre)
             Tapper(device: sim.device).tap(at: saveCentre, screen: screen)
         } else if presses == 1 {
             fail("no Save in the navigation strip; it offers \(strip.map { $0.0 })")
@@ -993,6 +1010,7 @@ case "savepress":
             "save_round",
             "n=\(presses) strip_ms=\(stripMs) controls=\(strip.count) save=\(tapped) "
                 + "\(roundCentre.map { xy($0) } ?? "x=none y=none") "
+                + "\(roundOwner) "
                 + "gone=\(sheetGone ? "yes" : "no") round_ms=\(sinceMs(roundAt))")
     }
     if !sheetGone {

@@ -33,14 +33,25 @@ for arg in "$@"; do
 done
 
 LANES_DIR="$(mktemp -d)"
-# A FAILING LANE'S LOG OUTLIVES THE RUN: a transient nobody can look at
-# is indistinguishable from a bug nobody found. Passing lanes leave
-# nothing behind.
+# A FAILING LANE OR DURATION ANOMALY'S LOG OUTLIVES THE RUN: a transient
+# nobody can look at is indistinguishable from a bug nobody found.
+# Ordinary passing lanes leave nothing behind.
 KEEP_DIR="$ROOT/target/validate-failures"
 trap 'rm -rf "$LANES_DIR"' EXIT
 
 lane_names=()
 lane_pids=()
+keep_lane_log() {
+    local name="$1"
+    if mkdir -p "$KEEP_DIR" \
+        && cp "$LANES_DIR/$name.log" "$KEEP_DIR/$name.log"; then
+        echo "== $name log kept at target/validate-failures/$name.log =="
+        return 0
+    fi
+    echo "== $name log could not be kept at target/validate-failures/$name.log ==" >&2
+    return 1
+}
+
 run_lane() {
     local name="$1"
     shift
@@ -53,6 +64,9 @@ run_lane() {
             cat "$LANES_DIR/$name.log"
             echo "$name: FAIL ($((SECONDS - t0))s)"
             status=1
+            if ! keep_lane_log "$name"; then
+                status=1
+            fi
         fi
         return
     fi
@@ -71,24 +85,16 @@ run_lane() {
 status=0
 T0=$SECONDS
 if [ "$MODE" = parallel ]; then
-    # THE GATE SWEEP RUNS AS ITS OWN CONCURRENT UNIT, ONCE (ratified
-    # 2026-08-20): inside the mac lane it sat serially in front of the
-    # matrix's slowest path, under five-lane contention — measured, a
-    # 250s sweep ahead of 280s of legs, and moving it BEFORE the lanes
-    # just relocated the same serialization. The sweep does not need to
-    # PRECEDE anything: the matrix's verdict includes its rc exactly as
-    # it includes each lane's, and a failed sweep fails the matrix. The
-    # token is a fingerprint of every keyed gate's input set computed at
-    # t0 — it attests SAME-TREE, not swept-and-passed — and the mac
-    # lane skips its own sweep only while the fingerprint still matches
-    # (a within-run handshake, not a cache — nothing survives this
-    # invocation; a hand-run of validate-mac sees no token and sweeps).
-    # The sweep's two probe windows never take key focus and the other
-    # lanes' windows live in a container, emulators, a simulator and a
-    # VM, so nothing here fights the mac legs for the desktop.
+    # ALL FIVE PLATFORM LANES START TOGETHER. The one gate sweep waits
+    # for Android's recorded pid, then runs at niceness 10 while longer
+    # lanes continue; docs/traps.md records the contention measurement.
+    # The token is a t0 fingerprint of every keyed gate's inputs: it
+    # attests SAME-TREE, not swept-and-passed, so the mac lane can skip
+    # its own sweep while the matrix still owns the later sweep's rc.
+    # Nothing survives this invocation; a hand-run of validate-mac has
+    # no token and sweeps.
     KAYA_MATRIX_GATES_TOKEN="$(tools/gates.sh --fingerprint)" || exit 1
     export KAYA_MATRIX_GATES_TOKEN
-    run_lane gates tools/gates.sh
     run_lane mac tools/validate-mac.sh
     # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone —
     # bare KAYA_JOBS would resize the mac pool too. Empty means the
@@ -103,6 +109,9 @@ if [ "$MODE" = parallel ]; then
     run_lane windows tools/deploy-win.sh "$HOST" all
     run_lane ios tools/ios/run-sim.sh
     run_lane android tools/android/run-emulator.sh
+    android_lane_pid="${lane_pids[${#lane_pids[@]} - 1]}"
+    wait "$android_lane_pid" 2>/dev/null || true
+    run_lane gates nice -n 10 tools/gates.sh
 else
     run_lane mac tools/validate-mac.sh
     run_lane linux tools/validate-linux.sh
@@ -121,9 +130,9 @@ if [ "$MODE" = parallel ]; then
         if [ "$verdict" != PASS ]; then
             echo "== $name (log) =="
             cat "$LANES_DIR/$name.log"
-            mkdir -p "$KEEP_DIR"
-            cp "$LANES_DIR/$name.log" "$KEEP_DIR/$name.log"
-            echo "== $name log kept at target/validate-failures/$name.log =="
+            if ! keep_lane_log "$name"; then
+                status=1
+            fi
             status=1
         fi
         legs=$(grep -c ": PASS" "$LANES_DIR/$name.log" 2>/dev/null)
@@ -237,15 +246,16 @@ if [ "$MODE" = parallel ]; then
             # a measured cold-boot run (267s) with the usual headroom
             # while still catching a change in kind on a warm one.
             android) budget=310 ;;
-            # The sweep as its own concurrent unit (2026-08-20):
-            # measured 250s under five-lane contention the day it moved
-            # out of the mac lane, then 304 and 314 in the next three
-            # matrices — the first sample was a light run, and the
-            # sweep's compile-heavy gates soak whatever cores the lanes
-            # leave free, so its contended time moves when THEIR shape
-            # does (the linux lane's display pool shifted it the same
-            # day). 390 keeps ~1.25x over the observed band's top.
-            gates) budget=390 ;;
+            # 490 since 2026-08-23: dynamic tables added 17 watched
+            # copy-target perturbations to check-steps and 12 surface/
+            # forcing-app perturbations to check-sugar-surface. Three contended
+            # sweeps on that tree measured 378, 387 and 391s; 490 restores
+            # ~1.25x over the new observed band's top.
+            #
+            # The sweep remains its own matrix unit. It begins after
+            # Android and overlaps whichever longer lanes remain, so its
+            # compile-heavy gates still soak variable contended host share.
+            gates) budget=490 ;;
             *) budget=0 ;;
         esac
         if [ "$budget" -gt 0 ] && [ "$secs" != '?' ] && [ "$secs" -gt "$budget" ]; then
@@ -253,6 +263,11 @@ if [ "$MODE" = parallel ]; then
                 "A lane that slows down by this much changed in kind, not in degree:" \
                 "look for work added to EVERY leg (an env export, a per-leg wait, a" \
                 "rebuild that stopped caching) before assuming it is load."
+            if [ "$verdict" = PASS ]; then
+                if ! keep_lane_log "$name"; then
+                    status=1
+                fi
+            fi
             status=1
         fi
     done

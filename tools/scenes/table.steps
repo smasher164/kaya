@@ -21,13 +21,19 @@
 # column starts ascending) coming back through the toolkit.
 expect_columns column#0 "Name|Size"
 expect_column_edges column#0 2
+# A table is a viewport: its rows may leave slack, but they may not
+# extend beyond the track the grown For received.
+expect_fills column#0
 expect_rows column#0 "banana,30|apple,10|cherry,20"
 header_click column#0 0
 expect_columns column#0 "Name|Size ^0"
+expect_column_edges column#0 2
 expect_rows column#0 "apple,10|banana,30|cherry,20"
 header_click column#0 0
 expect_columns column#0 "Name|Size v0"
+expect_column_edges column#0 2
 expect_rows column#0 "cherry,20|banana,30|apple,10"
 header_click column#0 1
 expect_columns column#0 "Name|Size ^1"
+expect_column_edges column#0 2
 expect_rows column#0 "apple,10|cherry,20|banana,30"

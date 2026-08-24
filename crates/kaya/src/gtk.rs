@@ -666,6 +666,211 @@ mod flex {
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
 
+    fn normalized_weights(weights: &[f64]) -> (Vec<f64>, f64) {
+        let scale = weights
+            .iter()
+            .fold(0.0_f64, |largest, weight| largest.max(*weight));
+        assert!(scale.is_finite() && scale > 0.0);
+        let normalized: Vec<f64> = weights.iter().map(|weight| weight / scale).collect();
+        let pool = normalized.iter().sum();
+        (normalized, pool)
+    }
+
+    fn grow_shares(total: i32, weights: &[f64]) -> Vec<i32> {
+        if weights.is_empty() {
+            return Vec::new();
+        }
+        let total = total.max(0);
+        let (weights, pool) = normalized_weights(weights);
+        let mut spent = 0;
+        weights
+            .iter()
+            .enumerate()
+            .map(|(i, weight)| {
+                if i + 1 == weights.len() {
+                    total - spent
+                } else {
+                    let share = ((f64::from(total) * weight / pool).round() as i32)
+                        .clamp(0, total - spent);
+                    spent += share;
+                    share
+                }
+            })
+            .collect()
+    }
+
+    // docs/traps.md, "GTK flex measurement must invert its own weighted allocation".
+    fn required_grow_pool(growers: &[(f64, i32)]) -> i32 {
+        if growers.is_empty() {
+            return 0;
+        }
+        let raw_weights: Vec<f64> = growers.iter().map(|(weight, _)| *weight).collect();
+        let (weights, pool) = normalized_weights(&raw_weights);
+        let rounding_error = (growers.len().saturating_sub(1) as f64) / 2.0;
+        let last = growers.len() - 1;
+        let mut total = 0;
+        for (i, ((_, required), weight)) in growers.iter().zip(weights).enumerate() {
+            let required = (*required).max(0);
+            let candidate = if required == 0 {
+                0
+            } else if i == last {
+                let strict = (f64::from(required - 1) + rounding_error) * pool / weight;
+                (strict.floor() + 1.0) as i32
+            } else {
+                (f64::from(required) * pool / weight).ceil() as i32
+            };
+            total = total.max(candidate);
+        }
+        loop {
+            let shares = grow_shares(total, &raw_weights);
+            if shares
+                .iter()
+                .zip(growers)
+                .all(|(share, (_, required))| *share >= (*required).max(0))
+            {
+                return total;
+            }
+            let next = total.saturating_add(1);
+            if next == total {
+                return total;
+            }
+            total = next;
+        }
+    }
+
+    fn main_axis_measure(children: &[(f64, i32, i32)], spacing: i32) -> (i32, i32) {
+        let mut fixed = 0_i32;
+        let mut minimum_growers = Vec::new();
+        let mut natural_growers = Vec::new();
+        for (weight, minimum, natural) in children {
+            if *weight > 0.0 {
+                minimum_growers.push((*weight, *minimum));
+                natural_growers.push((*weight, *natural));
+            } else {
+                fixed = fixed.saturating_add(*natural);
+            }
+        }
+        let count = i32::try_from(children.len()).unwrap_or(i32::MAX);
+        let gaps = spacing.saturating_mul(count.saturating_sub(1));
+        (
+            fixed
+                .saturating_add(required_grow_pool(&minimum_growers))
+                .saturating_add(gaps),
+            fixed
+                .saturating_add(required_grow_pool(&natural_growers))
+                .saturating_add(gaps),
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{grow_shares, main_axis_measure, required_grow_pool};
+
+        #[test]
+        fn gtk_flex_measure_holds_grower_requirements() {
+            let unequal = [(1.0, 145), (1.0, 100), (1.0, 70)];
+            let pool = required_grow_pool(&unequal);
+            assert_eq!(pool, 435);
+            assert!(grow_shares(pool, &[1.0, 1.0, 1.0])
+                .iter()
+                .zip(unequal.iter())
+                .all(|(share, (_, required))| share >= required));
+
+            let rounding_dust = [(1.0, 1), (1.0, 1), (2.0, 3)];
+            let pool = required_grow_pool(&rounding_dust);
+            assert_eq!(pool, 7);
+            assert_eq!(grow_shares(pool, &[1.0, 1.0, 2.0]), [2, 2, 3]);
+
+            let four_equal = [(1.0, 1), (1.0, 1), (1.0, 1), (1.0, 1)];
+            let pool = required_grow_pool(&four_equal);
+            assert_eq!(pool, 7);
+            for total in pool..=pool + 16 {
+                assert!(grow_shares(total, &[1.0; 4])
+                    .iter()
+                    .zip(four_equal.iter())
+                    .all(|(share, (_, required))| share >= required));
+            }
+
+            let skewed = [
+                (0.57, 22),
+                (61_377.0, 56),
+                (0.107, 98),
+                (0.826, 76),
+                (0.02475, 45),
+                (0.02476, 60),
+            ];
+            let pool = required_grow_pool(&skewed);
+            assert!((152_000_000..153_000_000).contains(&pool));
+            assert!(grow_shares(pool, &skewed.map(|(weight, _)| weight))
+                .iter()
+                .zip(skewed.iter())
+                .all(|(share, (_, required))| share >= required));
+
+            let floating_edge = [(3.0, 1), (1.0, 4)];
+            let pool = required_grow_pool(&floating_edge);
+            assert_eq!(pool, 15);
+            assert_eq!(grow_shares(pool, &[3.0, 1.0]), [11, 4]);
+
+            assert_eq!(
+                main_axis_measure(&[(0.0, 10, 100), (1.0, 50, 70)], 8),
+                (158, 178)
+            );
+        }
+
+        #[test]
+        fn gtk_flex_allocator_never_negative() {
+            for total in 0..=16 {
+                let shares = grow_shares(total, &[1.0; 4]);
+                assert_eq!(shares.iter().sum::<i32>(), total);
+                assert!(shares.iter().all(|share| *share >= 0));
+            }
+            assert_eq!(grow_shares(2, &[1.0; 4]), [1, 1, 0, 0]);
+        }
+
+        #[test]
+        fn gtk_table_viewport_rejects_overflow() {
+            assert!(super::super::table_content_fits(102.0, 100.0));
+            assert!(!super::super::table_content_fits(102.1, 100.0));
+            use super::super::{table_horizontal_issue, TableHorizontalIssue as Issue};
+            assert_eq!(
+                table_horizontal_issue(0.0, 100.0, 100.0, 100.0, 100.0),
+                None
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 100.0, 103.0, 100.0, 100.0),
+                Some(Issue::ContentOverflow)
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 97.0, 100.0, 100.0, 100.0),
+                Some(Issue::ContentUnderfill)
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 100.0, 100.0, 100.0, 120.0),
+                Some(Issue::TrackUnderfill)
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 100.0, 100.0, 120.0, 100.0),
+                Some(Issue::TrackOverflow)
+            );
+            assert_eq!(
+                table_horizontal_issue(-2.0, 100.0, 100.0, 100.0, 100.0),
+                None
+            );
+            assert_eq!(
+                table_horizontal_issue(-2.1, 100.0, 100.0, 100.0, 100.0),
+                Some(Issue::ContentLeftOverflow)
+            );
+            assert_eq!(
+                table_horizontal_issue(2.0, 100.0, 100.0, 100.0, 100.0),
+                None
+            );
+            assert_eq!(
+                table_horizontal_issue(2.1, 100.0, 100.0, 100.0, 100.0),
+                Some(Issue::ContentLeftUnderfill)
+            );
+        }
+    }
+
     pub struct FlexLayoutInner {
         pub orientation: std::cell::Cell<gtk4::Orientation>,
         pub spacing: std::cell::Cell<i32>,
@@ -704,28 +909,24 @@ mod flex {
             orientation: gtk4::Orientation,
             for_size: i32,
         ) -> (i32, i32, i32, i32) {
-            let (mut minimum, mut natural, mut count) = (0, 0, 0);
+            let (mut minimum, mut natural) = (0, 0);
+            let mut main_children = Vec::new();
             let mut child = widget.first_child();
             while let Some(c) = child {
                 if c.is_visible() {
                     let (cmin, cnat, _, _) = c.measure(orientation, for_size);
                     if self.is_main(orientation) {
-                        // Along the axis the children queue on, extents
-                        // add up; across it they overlap.
-                        minimum += cmin;
-                        natural += cnat;
+                        let weight = super::grow_weight(&c);
+                        main_children.push((weight, cmin, cnat));
                     } else {
                         minimum = minimum.max(cmin);
                         natural = natural.max(cnat);
                     }
-                    count += 1;
                 }
                 child = c.next_sibling();
             }
-            if self.is_main(orientation) && count > 1 {
-                let gaps = self.spacing.get() * (count - 1);
-                minimum += gaps;
-                natural += gaps;
+            if self.is_main(orientation) {
+                (minimum, natural) = main_axis_measure(&main_children, self.spacing.get());
             }
             (minimum, natural, -1, -1)
         }
@@ -749,7 +950,7 @@ mod flex {
                         // consulted: the contract is flex-basis 0.
                         0
                     } else {
-                        c.measure(self.orientation.get(), -1).1
+                        c.measure(self.orientation.get(), cross_total).1
                     };
                     children.push((c.clone(), weight, natural));
                 }
@@ -761,27 +962,20 @@ mod flex {
             let gaps = self.spacing.get() * (children.len() as i32 - 1);
             let fixed: i32 = children.iter().map(|(_, _, nat)| *nat).sum();
             let leftover = (main_total - fixed - gaps).max(0);
-            let pool: f64 = children.iter().map(|(_, w, _)| *w).sum();
+            let weights: Vec<f64> = children
+                .iter()
+                .filter_map(|(_, weight, _)| (*weight > 0.0).then_some(*weight))
+                .collect();
+            let mut shares = grow_shares(leftover, &weights).into_iter();
 
 // Pass 2: place them. The growers' shares are handed out exactly,
 // WITHOUT clamping to their minimum sizes — a clamp would silently
 // turn 1:3 into something else in a tight window, and the overflow
-// policy is one DESIGN still defers.
+            // policy is one DESIGN still defers.
             let mut offset = 0;
-            let mut spent = 0;
-            let growers = children.iter().filter(|(_, w, _)| *w > 0.0).count();
-            let mut seen = 0;
             for (c, weight, natural) in &children {
                 let extent = if *weight > 0.0 {
-                    seen += 1;
-                    if seen == growers {
-                        // The last grower absorbs the rounding dust.
-                        leftover - spent
-                    } else {
-                        let share = (leftover as f64 * weight / pool).round() as i32;
-                        spent += share;
-                        share
-                    }
+                    shares.next().expect("a grower has a computed share")
                 } else {
                     *natural
                 };
@@ -968,6 +1162,71 @@ fn table_header(column: &gtk4::Box) -> Option<gtk4::Box> {
     let first = column.first_child()?;
     let header = first.downcast::<gtk4::Box>().ok()?;
     header.has_css_class(TABLE_HEADER_CLASS).then_some(header)
+}
+
+#[cfg(any(feature = "harness", test))]
+// docs/traps.md, "A table viewport contains rows".
+fn table_content_fits(content: f64, viewport: f64) -> bool {
+    content <= viewport + 2.0
+}
+
+#[cfg(any(feature = "harness", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableHorizontalIssue {
+    TrackUnderfill,
+    TrackOverflow,
+    ContentLeftUnderfill,
+    ContentLeftOverflow,
+    ContentUnderfill,
+    ContentOverflow,
+}
+
+#[cfg(any(feature = "harness", test))]
+fn table_horizontal_issue(
+    min_start: f64,
+    min_end: f64,
+    max_end: f64,
+    viewport: f64,
+    assigned: f64,
+) -> Option<TableHorizontalIssue> {
+    if assigned > 0.0 && viewport < assigned - 2.0 {
+        Some(TableHorizontalIssue::TrackUnderfill)
+    } else if assigned > 0.0 && viewport > assigned + 2.0 {
+        Some(TableHorizontalIssue::TrackOverflow)
+    } else if min_end < viewport - 2.0 {
+        Some(TableHorizontalIssue::ContentUnderfill)
+    } else if max_end > viewport + 2.0 {
+        Some(TableHorizontalIssue::ContentOverflow)
+    } else if min_start > 2.0 {
+        Some(TableHorizontalIssue::ContentLeftUnderfill)
+    } else if min_start < -2.0 {
+        Some(TableHorizontalIssue::ContentLeftOverflow)
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "harness")]
+fn table_horizontal_track(column: &gtk4::Box) -> f64 {
+    let viewport = f64::from(column.width());
+    let target: gtk4::Widget = column.clone().upcast();
+    let Some(parent) = target.parent() else { return viewport };
+    let Some(manager) = parent.layout_manager() else { return viewport };
+    if let Some(layout) = manager.downcast_ref::<flex::FlexLayout>() {
+        return if layout.orientation() == gtk4::Orientation::Horizontal {
+            child_track(&target).unwrap_or(viewport)
+        } else {
+            f64::from(parent.width())
+        };
+    }
+    if let Some(layout) = manager.downcast_ref::<gtk4::BoxLayout>() {
+        return if layout.orientation() == gtk4::Orientation::Vertical {
+            f64::from(parent.width())
+        } else {
+            viewport
+        };
+    }
+    viewport
 }
 
 /// The stamped rows of a table container: everything after the header
@@ -1214,6 +1473,8 @@ struct CoreState {
     /// observation reads.
     indeterminate: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     columns: Vec<gtk4::Box>,
+    #[cfg(feature = "harness")]
+    column_ids: Vec<WidgetId>,
     rows: Vec<gtk4::Box>,
     /// The declared tables, by For-container id (see GtkTable).
     tables: HashMap<u64, GtkTable>,
@@ -5068,6 +5329,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 // No flex manager yet, deliberately: GtkBox's own layout stays
 // until a child actually carries a weight (see ensure_flex).
                     core.columns.push(column.clone());
+                    #[cfg(feature = "harness")]
+                    core.column_ids.push(id);
                     NativeWidget::Column(column)
                 }
                 WidgetKind::Row => {
@@ -7522,6 +7785,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
+                #[cfg(feature = "harness")]
+                column_ids: Vec::new(),
                 rows: Vec::new(),
                 tables: HashMap::new(),
                 window: window.upcast(),
@@ -9084,9 +9349,8 @@ impl crate::harness::Stage for GtkStage {
             lines.extend(table_rows(&column).iter().map(|row| ink(children_of(row))));
             let target: gtk4::Widget = column.clone().upcast();
             let mut edges: Vec<f64> = Vec::new();
-            // The narrowest line decides the span: one line that expands
-            // while the rest hug would otherwise answer for all of them.
-            let mut drawn = f64::MAX;
+            let mut min_drawn = f64::MAX;
+            let mut max_drawn = f64::MIN;
             for line in &lines {
                 let mut end = None;
                 for cell in line {
@@ -9094,16 +9358,19 @@ impl crate::harness::Stage for GtkStage {
                         return "the toolkit places no cell here yet".to_string();
                     };
                     edges.push(f64::from(rect.x()));
-                    end = Some(f64::from(rect.x()) + f64::from(rect.width()));
+                    let cell_end = f64::from(rect.x()) + f64::from(rect.width());
+                    end = Some(end.map_or(cell_end, |line_end: f64| line_end.max(cell_end)));
                 }
                 if let Some(end) = end {
-                    drawn = drawn.min(end);
+                    min_drawn = min_drawn.min(end);
+                    max_drawn = max_drawn.max(end);
                 }
             }
             if edges.is_empty() {
                 return "no cells".to_string();
             }
             edges.sort_by(|a, b| a.total_cmp(b));
+            let min_start = edges[0];
             let mut clusters: Vec<f64> = Vec::new();
             for x in edges {
                 match clusters.last() {
@@ -9118,12 +9385,52 @@ impl crate::harness::Stage for GtkStage {
                     clusters.len()
                 );
             }
-            // ...AND THE TABLE SPANS ITS TRACK. Alignment alone cannot
-            // see a content-hugging table: every cluster stays exactly
-            // right while the table draws in a corner of its viewport.
-            let track = child_track(&target).unwrap_or_else(|| f64::from(column.width()));
-            if drawn < track - 2.0 {
-                return format!("draws {}px of a {}px track", drawn.round(), track.round());
+            let viewport = f64::from(column.width());
+            let assigned = table_horizontal_track(&column);
+            match table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned) {
+                Some(TableHorizontalIssue::TrackUnderfill) => {
+                    return format!(
+                        "viewport draws {}px of its assigned {}px track",
+                        viewport.round(),
+                        assigned.round()
+                    );
+                }
+                Some(TableHorizontalIssue::TrackOverflow) => {
+                    return format!(
+                        "viewport spans {}px outside its assigned {}px track",
+                        viewport.round(),
+                        assigned.round()
+                    );
+                }
+                Some(TableHorizontalIssue::ContentLeftUnderfill) => {
+                    return format!(
+                        "cells start at {}px inside a {}px viewport",
+                        min_start.round(),
+                        viewport.round()
+                    );
+                }
+                Some(TableHorizontalIssue::ContentLeftOverflow) => {
+                    return format!(
+                        "cells start at {}px outside a {}px viewport",
+                        min_start.round(),
+                        viewport.round()
+                    );
+                }
+                Some(TableHorizontalIssue::ContentUnderfill) => {
+                    return format!(
+                        "draws {}px of a {}px viewport",
+                        min_drawn.round(),
+                        viewport.round()
+                    );
+                }
+                Some(TableHorizontalIssue::ContentOverflow) => {
+                    return format!(
+                        "cells end at {}px outside a {}px viewport",
+                        max_drawn.round(),
+                        viewport.round()
+                    );
+                }
+                None => {}
             }
             String::new()
         })
@@ -9151,19 +9458,53 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
-    fn resolve_id(&self, kind: crate::harness::TargetKind, id: &str) -> Option<isize> {
+    fn resolve_id(
+        &self,
+        kind: crate::harness::TargetKind,
+        id: &str,
+        keys: Option<&str>,
+    ) -> Option<isize> {
         // The a11y_id arm wrote the authored key onto the WIDGET NAME
         // (set_widget_name, the AT-SPI accessible-id lowering), so the
         // records this reads are the backend's own applied prop.
         let id = id.to_owned();
+        let keys = keys.map(str::to_owned);
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};
             use crate::harness::TargetKind as K;
+            fn table_tag(core: &CoreState, widget: WidgetId) -> Option<Vec<u8>> {
+                core.widgets.contains_key(&widget).then(|| ())?;
+                core.tables
+                    .get(&widget.0)
+                    .map(|table| table.tag.borrow().clone())
+            }
             fn find(names: Vec<gtk4::Widget>, id: &str) -> Option<isize> {
                 names
                     .iter()
                     .position(|w| w.widget_name() == id)
                     .map(|i| i as isize)
+            }
+            if let Some(keys) = keys.as_deref() {
+                if kind != K::Column {
+                    return None;
+                }
+                let node = core
+                    .columns
+                    .iter()
+                    .zip(&core.column_ids)
+                    .filter(|(column, _)| column.widget_name() == id)
+                    .find_map(|(_, widget)| table_tag(core, *widget))
+                    .and_then(|tag| crate::harness::table_tag_node(&tag))?;
+                return core
+                    .columns
+                    .iter()
+                    .zip(&core.column_ids)
+                    .position(|(_, widget)| {
+                        table_tag(core, *widget).is_some_and(|tag| {
+                            crate::harness::table_tag_matches_keys(&tag, node, keys)
+                        })
+                    })
+                    .map(|i| i as isize);
             }
             let widgets: Vec<gtk4::Widget> = match kind {
                 K::Button => core.buttons.iter().map(|w| w.clone().upcast()).collect(),
@@ -9349,6 +9690,13 @@ impl crate::harness::Stage for GtkStage {
                 return "no children".to_owned();
             }
             span += container_spacing(&widget) * (count - 1);
+            if table_header(container).is_some() {
+                return if table_content_fits(f64::from(span), f64::from(inner)) {
+                    String::new()
+                } else {
+                    format!("children span {span}px inside a {inner}px viewport")
+                };
+            }
             if (span - inner).abs() <= 2 {
                 String::new()
             } else {

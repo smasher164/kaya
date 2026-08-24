@@ -1169,8 +1169,12 @@ own the state (see the undo note in this file).
   stays positional (leaf kinds are stable by body order); the layout
   scene's rows can now be asserted whenever someone wants them, and
   the container lint STAYS for positional targets — @ids are its
-  sanctioned alternative, not its retirement.
-  KEY: kind@id, resolve_id, targets_mut, a11y_id addressing, column@positions)
+  sanctioned alternative, not its retirement. EXTENDED 2026-08-23:
+  `kind@id[key.path]` narrows a table target to one string-keyed stamped
+  copy; resolve_id maps authored id -> template node -> live sort tag,
+  and the exhaustive targets_mut match now makes an omitted future
+  targeted Step a compile error.
+  KEY: kind@id, kind@id[key.path], resolve_id, targets_mut, a11y_id addressing, column@positions)
   ORIGINAL ENTRY, for the record: harness scripts should
   address widgets by the same authored key on every platform, not by
   `kind#index`. Positional targets exist only because they were free
@@ -4440,7 +4444,7 @@ sites. The witness's same-line route clause is CORRECT and unchanged:
 with atomic lines it reads truth, and its refusal sentence is what
 cracked the case.
 
-## Tables — the depth slice landed on mac; the fan-out is open (2026-08-20)
+## Tables — backend and flat-guest breadth landed; residuals below (2026-08-20)
 KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows, expect_column_edges, column_edges, KayaSynthesizedTable, KayaTableSurface, GtkColumnView, SizeGroup, TABLES thread_local
 
 The plan is docs/tables-plan.md (DESIGN.md's ratified column-props
@@ -4453,7 +4457,7 @@ mid-slice: `set_columns` collided with the grid `columns` PROP's
 generated per-prop setters in every binding (go builds broke on two
 TxSetColumns), and prop-derived names share one namespace with
 record-derived names in eight generators — a naming wall worth
-remembering. Open, per backend and surface:
+remembering. The landing, per backend and surface:
 
 - ~~DEPTH STUB: table on compose~~ (LANDED 2026-08-21: the
   synthesized header over FLOORED-AND-DISTRIBUTED columns — one
@@ -4554,9 +4558,9 @@ remembering. Open, per backend and surface:
   rather than `reserved`), and the click-shaped C-floor classifier
   tightened to require the pad, so the next such record reaches all
   nine surfaces with zero emitter edits. Go's tplzone parity test also
-  caught the missing template-node dispatch sibling — OnSortNode
-  exists so a stamped copy's sort cannot drop silently even while the
-  core refuses nested headers.)
+  caught the missing template-node dispatch sibling — OnSortNode was
+  already present before the dynamic-table slice, ready for a stamped
+  copy's sort once nested headers landed.)
 - Residuals from the 2026-08-21 breadth fan-out, none load-bearing
   today: ~~GTK's column_edges reads header LABELS but cell WIDGETS, an
   asymmetry a future non-label cell would meet first~~ (FIXED
@@ -4607,35 +4611,49 @@ remembering. Open, per backend and surface:
   app-level handler surface — and rust's carries a generic parameter.
   Two built-in fake-name self-tests must fire 8/8 or the gate exits, and
   four watched negatives on copies of the real bindings each named the
-  binding that had lost its spelling. The template zone is deliberately
-  out of the claim: the core refuses nested headers, so `columns` is a
-  live-zone declaration and Go's `OnSortNode` has no sibling in the
-  other seven.)
+  binding that had lost its spelling. This original claim deliberately
+  covered the live zone only. The 2026-08-23 dynamic-table depth slice
+  extended the census to Rust and Python's nested columns/on_sort and
+  keyed re-declaration spellings; the other six bindings remain open.)
 
 ## Dynamically created tables — HIGH PRIORITY (maintainer, 2026-08-21)
 KEY: nested tables, template-zone set_column_headers, per-copy sort, dynamic table instances, forcing app
 
+DEPTH SLICE GREEN 2026-08-23: b819423 is the pushed protocol/core
+root. Rust and Python now spell nested columns/on_sort plus keyed
+re-declaration; the approved `kind@id[key.path]` string-key target
+reaches the shared runner, GTK/WinUI stages and both interpreters; and
+portfolio.py has deleted its repopulation workaround for one nested
+positions collection instance per account. The watched per-copy
+divergence scene is green on all three desktop lanes, and its census
+walls moved with every spelling. The headline remains open for Go,
+C#, Java, Swift, OCaml and Haskell breadth. The depth record is 405
+unit tests + 4 runnable docs + 14 compile-fail docs, 42 gates,
+validate-mac's 329 legs, and a five-lane matrix ALL PASS: gates 374s,
+mac 323s/329, Linux 439s/580, Windows 465s/191, iOS 429s/106 and
+Android 252s/112, 467s wall time. The gate-sweep ceiling moved from
+390 to 490 against the measured 378/387/391s band created by this
+slice's 29 new watched perturbations; its log-retention branch was
+watched red before the record run.
+
 The maintainer ranked this high the day the tables fan-out closed, in
 plain words: tables whose EXISTENCE is dynamic. A hand-placed table
-with fully dynamic rows works everywhere; what the core fences off —
-loudly, at declaration time (scene.rs's SetColumnHeaders template-zone
-refusal) — is a table created once per data item: "for every account,
-a positions table," where three accounts mean three tables and each
-copy needs its own working sort arrows. Nothing half-works; the shape
-is simply refused until built.
+with fully dynamic rows worked everywhere; before b819423 the core
+fenced off, loudly at declaration time, a table created once per data
+item: "for every account, a positions table," where three accounts
+mean three tables and each copy needs its own working sort arrows.
+Nothing half-worked; the shape was simply refused until built.
 
-Why it is a milestone and not a fix: the set_column_headers record
-addresses its target by bare widget id — there is no spelling for
-"the table inside copy #2." The occurrence half (sort_requested) was
-built with template-id-plus-key-path addressing from day one, so the
-click-to-guest route exists; the DECLARATION half needs the record to
-grow path addressing, which moves the spec hash and regenerates all
-eight bindings. Then: all four backends render headers per stamped
-copy, the harness verbs learn to target a specific copy, all eight
-languages grow the template-zone columns/on_sort spelling (the
-template-zone census will rightly demand both zones), and a scene
-pins per-copy sort state end to end. Rough size: the Compose slice
-plus its fan-out.
+Why it is a milestone and not a fix: set_column_headers originally
+addressed its target by bare widget id — there was no spelling for
+"the table inside copy #2." The occurrence half (sort_requested) had
+template-id-plus-key-path addressing from day one. b819423 grew the
+declaration half's path addressing and regenerated all eight bindings
+without changing their existing spellings; the depth slice then made
+the four backends' ordinary stamped applies addressable, added the
+harness target and pinned per-copy sort state end to end. The open
+breadth is the other six languages' template-zone columns/on_sort and
+keyed re-declaration spelling, with the census widened alongside each.
 
 THE TRIGGER IS A FORCING APP, and the maintainer picked it the same
 day: A PORTFOLIO DASHBOARD — an accounts overview where each account
@@ -4652,12 +4670,88 @@ briefcase-style bundling is established upstream, so the work is
 kaya's bootstrap (interpreter + binding into the APK and the iOS
 bundle), not pioneering. The desktops need nothing — Python runs on
 all three today, so the dashboard can start there while packaging
-lands. The two open
-sub-decisions are RULED (maintainer, 2026-08-22): the app's name is
+lands. The two formerly open sub-decisions are RULED (maintainer,
+2026-08-22): the app's name is
 PORTFOLIO — the working name keeps, and every scene, guest and window
 title already spells it — and the build order is TABLES ->
 VIRTUALIZATION -> CANVAS, both list-shaped features before the
 drawing surface.
+
+## Harness copy-target typed keys — deferred grammar decision (found 2026-08-23)
+KEY: kind@id[key.path], I64 copy key, numeric-looking string key, typed harness target
+
+The approved untyped copy-target grammar treats every bracket segment
+as a string key. That is the only collision-free reading: silently
+parsing `3` as I64 would make a copy keyed by the string `"3"`
+unaddressable, while stringifying I64 would let two distinct protocol
+paths resolve to one widget. Portfolio uses named account keys, so the
+dynamic-tables forcing scene loses nothing. An app that needs to target
+an I64-keyed copy requires a separately approved typed spelling; dots
+and brackets inside string keys need that same escaping decision.
+
+## ~~GAP — the dynamic portfolio's GTK rows overlap and its macOS tables clip horizontally (found 2026-08-23, by artifact review)~~
+KEY: portfolio screenshot overlap, GTK required_grow_pool, accounts.rows align stretch, table viewport containment, cellEdgeRightX
+
+The first post-slice artifact review found two independent pixel bugs
+behind a green per-copy scene. GTK showed AAPL colliding with the first
+account total: FlexLayout measured three equal-weight cards by summing
+their unequal natural requirements (145/100/70px = 315px), then its
+flex-basis-zero allocator divided that answer equally. The measure must
+instead find the pool whose exact rounded weighted shares satisfy every
+child: 435px here, and 7px rather than 6 for the 1/1/2 rounding-dust
+case. Both pure cases live in the GTK backend and `check-gtk` runs them;
+the old sum was watched returning 315 before the inverse landed.
+
+macOS was one wrapper deeper than the earlier detail-column fix. The
+detail filled, but the new accounts For defaulted to start, so each
+native table received a 145pt viewport and its cell ink reached 409pt.
+The app now requests an 800x600 dashboard and spells
+`accounts.rows(grow=1, align="stretch", a11y_id="accounts")`; Python's
+ordinary-For surface, trace test, census reader and six independent
+watched perturbations moved with those keywords. The scene watched the
+old window answer 540x330, the wrapper classify start, and the cells
+overflow 409pt/145pt before all three assertions turned green.
+
+RESOLVED 2026-08-23: `expect_column_edges` retains real cell bounds and
+rejects content beyond a positioned horizontal viewport on SwiftUI,
+GTK, WinUI and Compose (watched diagnostics included 508dip/1dip and
+291dp/288dp). The post-fix audit closed its own false greens: current
+cell identities and nonzero viewport geometry are required, clustering
+does not chain through 2-unit neighbours, and the geometry read repeats
+after each header re-declaration and the portfolio tick. A table's
+vertical `expect_fills` arm is containment, not exact row fill; the
+shared table scene watched Compose's missing measurement and WinUI's
+exact rule fail before both adopted that meaning. Exact fill had itself
+falsely rejected the corrected short tables at 97/117px on X11 and
+105/117px on Wayland. Fresh direct captures were inspected: all four
+macOS columns and every row are visible, and GTK's three cards no longer
+overlap. The reusable measurements are in docs/traps.md.
+
+FOLLOW-UP VALIDATION 2026-08-24: all 1,318 real scene legs and the gate
+sweep passed (mac 320s/329, Linux 474s/580, Windows 533s/191, iOS
+493s/106, Android 268s/112, gates 348s; 619s wall). `validate-all`
+nevertheless exited 1 on the Linux 470s and Windows 520s duration guards
+alone. This supports the resolved visual finding; it is not a replacement
+ALL PASS matrix record.
+
+## RESEARCH — macOS native portfolio tables show grey empty-row bands (noticed 2026-08-24)
+KEY: macOS table filler rows, grey bands, VTI, NSTableView, SwiftUI Table, scrollability, empty viewport
+
+The inspected macOS capture shows light-grey blank bands after each
+table's authored rows — below VTI, below VXUS and twice below CASH. That
+is a pixel observation, not yet a diagnosis. Every authored row and all
+four columns are visible, and the geometry assertions are green, but
+their contract deliberately permits unused vertical viewport space and
+does not say whether native empty space is blank, striped or scrollable.
+
+Research the platform behavior before changing it: use primary Apple
+documentation and a focused live AppKit/SwiftUI probe to identify whether
+the bands are NSTableView's native filler/alternation, selection material
+or kaya placeholders; establish the actual vertical scrolling behavior;
+then bring the native-preserve / content-height / suppress-striping options
+and their independently-scrollable-table tradeoffs to the maintainer for
+a ruling. Do not implement an aesthetic guess. The continuation and exact
+code/test seams are in docs/handoff-dynamic-tables.md.
 
 ## ~~GAP — a nested SwiftUI container cannot fill its track, so the mac dashboard clips its table (found 2026-08-22, by the first capture)~~
 KEY: KayaFlex fillCross, align stretch scene, nested container hugs cross, portfolio table clips, flexStretch textarea-only
@@ -4897,7 +4991,9 @@ a crossing child. It would throw on a SubcomposeLayout-based kind
 ## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
 KEY: save-jvm AccessDenied, sdcard Documents, storage state, straggler
 back, appResumed, KAYA_DIALOG_SEEN, KAYA_DIALOG_UNSEEN, windowCensus,
-dialogReport, wait for adding window timeout
+dialogReport, wait for adding window timeout, OnPreDrawListener,
+first-draw admission, android lane barrier, four-phone Android pool,
+greedy makespan, nice -n 10, a11y_hygiene
 
 One pool device, one matrix run, 4s-green solo on either side. The
 validation apps hold NO storage permission BY MEASUREMENT
@@ -5212,9 +5308,129 @@ level deeper: the blindness lives in the window LIST's arrival, so
 any further remedy waits on a sighting where the list is non-empty
 and still wrong.
 
+ELEVENTH SIGHTING (2026-08-23, filedialog-go under the dynamic-table
+matrix) falsified the remaining event-handshake window exactly. Three
+BACKs navigated out and dismissed PickActivity; cancel and onResume
+landed, then a FOURTH BACK — admitted because picker closing itself had
+moved `windowEpoch`, with KAYA_DISMISS_REMOVED still absent — was queued
+through the no-focus handoff and finish()ed MainActivity. The model-level
+`expect "cancelled"` passed and the real-tree `expect_ax` found only the
+dead activity's empty root. Full timestamps and the permanent finding
+are in docs/traps.md, "A changed event is not a changed picker path."
+
+The implemented A.2 wall replaces the global event with direct picker
+state: same window, full breadcrumb trail stable twice, strictly shorter
+than the last path that earned a BACK, with every earned path spent
+before dispatch. A row or Save press marks the presentation closing so
+cleanup cannot start the same race one action over. This is a deliberate
+refinement of ruled option A rather than the bridge-Activity expansion
+option B would require; B remains the escalation if a picker refuses a
+spent BACK and produces the new safe-red. The cancel-path state machine
+is self-tested on the path nobody avoids, and deleting both independent
+walls was watched crashing filedialog-compose and save-compose with its
+exact assertion. Validation results follow in this entry.
+
+TWELFTH SIGHTING, the first standalone run after A.2, was NOT a BACK:
+save-compose never reached dismissal. The service connected, then
+AccessibilityManagerService timed out adding the app window id 103 and
+picker id 105; WindowManager independently showed PickActivity rendered,
+resumed and focused while KAYA_DIALOG_UNSEEN measured an empty window
+list. The per-leg setup had installed while the old service component was
+still enabled, and package replacement auto-started its process AFTER the
+runner's force-stop had passed. A working preserved Go trace has the
+opposite order and a fresh process. The runner now disarms, force-stops and
+waits for the prior service before install, then requires the new bound
+service to publish a readable-window handshake before `am start`; the
+executable order census holds both boundaries. Its first positive run
+caught one more false clear: Android rejects `settings put ... ""` as
+`Bad arguments` and retains the old component, so the disarm refused all
+JVM legs instead of letting them run blind. Both clear sites use
+`settings delete` now. Moving disarm behind install failed the executable
+order gate; restoring the empty-string clear failed its new clause; and
+removing `flagRetrieveInteractiveWindows` made the live runner re-arm,
+reboot, then refuse the scene after 90s with bound=1 and no readable
+window. Restored, the full standalone Android lane passed in 154s
+(Compose 56s, JVM 36s, Go 42s), including every picker and table leg; one
+bound-but-not-ready first arm was re-armed before launch.
+The next contended matrix exposed the cost boundary: all 112 legs passed,
+but the lane took 415s against its 310s ceiling because disarm plus the
+READY arm ran before ordinary in-app scenes too. The service is now
+armed only for the `filedialog`, `save` and `editor` scripts; the
+executable census derives that set from the shared picker verbs. Removing
+`save` from the set and removing the conditional arm were each watched
+red with one proven substitution. The unchanged 112-leg standalone lane
+passed in 142s (Compose 49s, JVM 32s, Go 36s), including all seven live
+DocumentsUI legs.
+
+The next nice-only matrices still took Android 339/333/338s. The last
+one exposed the startup boundary: `clipboard-compose` expired its first
+five-second label wait as the Activity's first real frame arrived only
+10–23ms before the deadline after a 6.774s launch; HWUI reported a
+4682ms Davey frame and 234 skipped frames. Its other 21 assertions
+passed. Compose now admits selftest from a one-shot
+`OnPreDrawListener`; residual accessibility cleanup is one startup
+`a11y_hygiene` sweep across the phones and tablet; and validate-all starts
+all five platform lanes together, then waits for Android before starting
+the niced gate sweep. The order, exact pid provenance, single-sweep shape,
+early/double UI admission and one-shot removal perturbations are watched.
+The standalone lane passed with Compose/JVM/Go at 52/32/34s.
+
+The first barrier-only matrix made the residual measurable: gates waited
+for Android and then passed in 218s, but Android's 112 green legs took
+311s against 310. Its exact phase sum was preflight 3 + boot 18 + helper
+17 + Compose 103 + JVM 2/68 + Go 4/96; there was no hidden retry to cut.
+Nicing the other four runner shells was falsified immediately: Android
+worsened to 316s while only mac moved materially, because the Docker,
+CoreSimulator and UTM work is daemon-launched. The three-phone log's
+actual service demand was Compose/JVM/Go 228/174/232s; greedy makespans
+move 80/59/84 -> 61/47/64 with a fourth slot, projecting about 266s with
+measured overhead. Runner and environment probe now share a stable
+four-phone default, and both restorations to three are watched red. The
+first all-five-at-t0 run with it passed every leg but took 350s: exact
+phases 3+22+31+102+6+81+4+101, versus 126s standalone. The pool was not
+the whole remedy. A staged experiment reserved Android through its final
+Compose drain (a 63s standalone prefix) before admitting the other four
+lanes; the measured contended JVM+Go suffix projected the lane at 255s.
+That was not a matrix pass and the experiment was rejected because all
+five platform lanes must launch together. The four-phone default and 310s
+ceiling remain; the duration anomaly is open.
+
+The two bounded runner removals are now implemented, while scheduler
+acceptance remains open. A source census found 112 per-leg replacements of three
+unchanged APKs (38/36/38 legs, 111095703/64911093/74364739 bytes): 9.384 GB
+per run. One post-verification install per eligible device would be
+5+4+4=13 installs and 1.113 GB, removing 99 replacements and 8.272 GB.
+Nine retained Android buffer logs supplied 646/563/563 deduplicated
+death-to-install-commit samples with medians 0.734/0.884/0.804s and means
+1.114/1.735/1.019s; including commit-to-next-start projects 22-36s off a
+four-phone critical path. Separately, the three ranges legs are each
+bracketed by a whole-pool drain and four-device IME selection. The
+retained phone-leg sums model at 86/67/87s without that barrier against
+measured phases of 102/81/101s, a 44s upper bound that also contains adb
+and control overhead. Suite-scoped installation now holds verified build
+-> every eligible device -> first leg, and ranges selects the helper IME
+only after claiming its device slot, held through launch; their topology,
+target/verdict refusals and cleanup paths are watched red. The optimized
+default four-phone standalone run passed all 112 legs in 105s, exact phases
+3+8+11+35+2+21+2+23, versus the prior 126s baseline and the rejected
+five-phone experiment's 141s. The measurements and projection boundary are
+recorded in docs/traps.md; the duration entry stays open until a real
+all-five-at-t0 matrix pass.
+
+FIRST OPTIMIZED-RUNNER ALL-AT-T0 ATTEMPT 2026-08-24: Android passed all
+112 real scene legs in 268s, 42s inside its unchanged ceiling. The full
+record was refused on Linux and Windows duration alone, so this is
+positive scheduler evidence, not the accepted matrix pass required above;
+the entry remains open. Per maintainer direction there is no rerun,
+ceiling move or scheduler change. Whole-host contention, thermal state
+and unrelated applications were uncontrolled variables, not measured
+causes.
+
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive
-retap, KAYA_SIMDRIVE_LOG, ios-simdrive-logs
+retap, KAYA_SIMDRIVE_LOG, ios-simdrive-logs, LocalStorage, FP -1005,
+Index out of sync, empty didPickDocumentURLs, export preflight, simctl
+listapps, dev.kaya. bundle cleanup, retained app data
 
 Three matrices in a row, a different leg each time, every one 100%
 green solo: save-go's Save tap dropped twice (the sheet stayed up and
@@ -5329,11 +5545,12 @@ choose found "no row named notes; the picker lists ['kaya-editor-1116',
 listing THIS run's own kaya-editor-1116 as a row among six stale
 siblings from previous runs. The first-picker-after-boot trap's shape
 (docs/traps.md; run-sim warms the document stack for exactly this),
-recurring mid-run. Two follow-ups when this face returns: instrument
-the AIM (log the directory the goto requested beside the breadcrumb
-the picker answered — currentDirectory already reads it), and sweep
-the simulator's stale kaya-editor-* litter, which makes every parent
-listing noisier each run.
+recurring mid-run. The retained-container half is now closed: per-phone
+preparation uninstalls every exact prior-run `dev.kaya.*` bundle through
+`simctl`, which removes its data container before LocalStorage admission.
+The remaining follow-up when this face returns is to instrument the AIM:
+log the directory goto requested beside the breadcrumb the picker
+answered (`currentDirectory` already reads it).
 
 A green run's log is the baseline: target/ios-simdrive-logs/<leg>.log
 for each of the four dialog scenes, cleared per run; a failing leg's
@@ -5368,13 +5585,68 @@ FOUR delivered taps at (38,92) across 6.2s, the strip still offering
 Cancel each round (controls=8,8,8 then 7 — the sheet was changing
 under the last one), and the FINAL save press then landed cleanly
 (round 1, sheet gone in 859ms) with the result never reaching the
-guest. Three extra taps delivered into a sheet whose dismissal lags
-its chrome is the android straggler class in this platform's
-spelling — the back that pressed once too often because the
-affordance was still published. Next instrument if it recurs: log
-which PROCESS consumed taps 2-4 (the sheet going, or the app behind
-it), the who-holds-the-screen read taken AT TAP TIME rather than at
-failure. The leg passes solo; the family's no-rerun rule stands.
+guest. At the time this was read as three extra taps delivered into a
+sheet whose dismissal lagged its chrome — the android straggler class
+in this platform's spelling. The raw timing remains measured, but the
+"extra taps" interpretation is falsified by the instrumented run
+below. The leg passes solo; the family's no-rerun rule stands.
+
+RECURRENCE 2026-08-23, save-swiftui under the dynamic-table depth
+matrix: the cancel cycle delivered Back/Back/Back/Cancel over 9.633s
+with 1621 reads, 64ms slowest and zero timeouts; the next sheet's one
+Save tap at (323.8,92) honestly dismissed it in 965ms with zero
+timeouts, then `documentPickerWasCancelled` fired and the backend
+emitted cancellation. The callback was not lost, so this sighting
+falsifies the earlier “result never reaching the guest” reading. The
+recorded next instrument is now live: every cancel-cycle and Save tap
+logs the hit-test owner's pid, process, role and description immediately
+before the HID send. The next contended matrix, not a known-green solo,
+is what makes those facts print.
+
+THE INSTRUMENT PRINTED in the next contended matrix, and the iOS lane
+passed. All five controls belonged to the same DocumentManager service
+(pid 13656 in that run), all were AXButtons, and their descriptions
+were `savers-swiftui`, `On My iPhone`, `Browse`, `Cancel`, then `Save`.
+The three Back taps were intentional navigation from the app folder to
+On My iPhone to Browse before Cancel; none was an extra tap into a
+dismissing sheet or the app behind it. The Save tap was likewise the
+picker's own Save button. This corrects the fourth sighting's causal
+reading without deleting its measurements.
+
+THE NEXT MATRIX CLOSED THE CALLBACK-GENERATION BRANCH (2026-08-23):
+105/106 iOS legs passed; save-swiftui's real Save AXButton dismissed in
+one tap with zero read timeouts, then UIKit delivered cancellation.
+Unified logging measured LocalStorage FP -1005 for `did=8079` ("The file
+doesn't exist"), DocumentManager failing to tag it, `Index out of sync.
+Forcing reindex`, and an empty `didPickDocumentURLs` because the item
+failed preparation/materialization. The failed run's old picker scene
+was fully invalidated 57ms before the new controller was ready; a green
+sibling overlapped those generations by 15ms, falsifying the proposed
+dismissal delay. The passing sibling also carried the destination
+file-coordination claim that the failed run never reached.
+
+The lane now admits each phone with a real known-byte export/reopen. An
+empty callback or contemporaneous FP -1005 re-seeds only that UDID and
+retries the admission once; a second failure refuses before any leg.
+The static wall's per-device, two-attempt, one-device, readback and prep
+ordering perturbations all printed one substitution and failed. The
+live probe's `publish("ok")` was changed once to `publish("empty
+watched-negative")`: the real `picker_export_probe` returned its
+recoverable 75 on kaya-sim-1, then returned 0 after the one-count restore.
+This closes the result-generation suspect, not the WATCH: the older
+six-delivered-and-ignored-taps sighting is still a different open face.
+
+RECURRENCE AFTER GREEN PREFLIGHT: editor-go's real Save dismissed in
+820ms, then LocalStorage repeated FP -1005, `Index out of sync` and empty
+URLs. The failed phone held 101 installed Kaya bundles, 58 old editor
+directories in that app, and 503 Kaya scratch directories across 12
+retained containers. `simctl install` preserves those containers, so the
+probe's separate clean app was the wrong scope. Per-phone preparation
+now uninstalls the exact finite `dev.kaya.*` census before warm/probe and
+refuses a nonempty recensus. The live skip-one negative removed 100 apps,
+named retained `dev.kaya.editorgo`, and the positive cleanup removed it.
+The full standalone iOS lane then passed; this still does not close the
+distinct six-delivered-and-ignored-taps face.
 
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
@@ -5579,19 +5851,48 @@ expensive legs are expensive for SEMANTIC reasons — NSSavePanel's
 presentation, the iOS paste prompt, the stall scene's deliberate block
 — not duplication.
 
-2. THE GATE SWEEP IS ITS OWN CONCURRENT MATRIX UNIT: validate-all
-   computes a same-tree fingerprint at t0, launches all five lanes
-   plus the sweep together, and the mac lane skips its in-lane sweep
-   while the fingerprint matches (a within-run handshake — a hand-run
-   validate-mac sees no token and sweeps as always). First attempt
-   put the sweep BEFORE the lanes and merely relocated the
-   serialization (530s, measured); the concurrent shape needed two
-   safety fixes it flushed out — build-dylib now holds a lock (two
-   builders can arrive in one second) and REPLACES the dylib
-   atomically instead of deleting first, which had a ~30s no-dylib
-   hole that eight legs died in on the first concurrent run. Matrix:
-   ~504-546s -> 450/452s on consecutive ALL PASS runs; the bound is
-   now the iOS lane, and the mac lane runs its 320 legs in ~280s.
+2. THE GATE SWEEP IS ITS OWN MATRIX UNIT. The 2026-08-20 landing
+   computed a same-tree fingerprint at t0 and launched all five lanes
+   plus the sweep together; the mac lane skipped its in-lane sweep while
+   the fingerprint matched (a within-run handshake — a hand-run
+   validate-mac sees no token and sweeps as always). Putting the sweep
+   BEFORE the lanes merely relocated serialization (530s, measured).
+   The concurrent shape flushed out two safety fixes: build-dylib now
+   holds a lock and replaces the dylib atomically instead of creating a
+   ~30s no-dylib hole. Matrix wall: ~504–546s -> 450/452s on consecutive
+   ALL PASS runs.
+
+   AMENDED 2026-08-23: six-way-at-t0 contention took Android from 142s
+   solo to 373s with a normal sweep, 339s with niceness 10, and 333s in a
+   falsified six-job Linux experiment; a later niced run still took
+   338s. The first barrier-only matrix passed every leg and the delayed
+   sweep but left Android at 311s/310. Nicing the other four runner shells
+   was falsified at Android 316s: daemon-launched platform work did not
+   inherit the intended priority. The measured three-slot leg makespans
+   selected a stable four-phone Android pool, but the all-five-at-t0
+   acceptance still passed its 112 legs in 350s/310. Standalone four-phone
+   phases were 3+9+11+40+2+27+2+32 = 126s; contended phases were
+   3+22+31+102+6+81+4+101. A staged experiment then reserved Android
+   through its final Compose drain before admitting the other four lanes;
+   its 63s prefix plus measured 192s contended suffix projected 255s. It
+   never produced an accepted matrix result and was rejected because it
+   broke the ratified all-five-platform concurrency rule. Validate-all's
+   contract remains: start all five platform lanes together, wait for
+   Android's recorded pid, then launch `nice -n 10 tools/gates.sh` while
+   longer lanes continue. The four-phone runner/probe default and 310s
+   ceiling remain; the 350s result leaves the duration anomaly open.
+   A follow-up source/log census found two in-run work removals: 112 repeated
+   APK installs became 13 suite/device installs, and the ranges IME
+   requirement moved inside its claimed device slot instead of draining the
+   whole pool. The first guarded implementation run passed all 112 legs in
+   105s standalone (3+8+11+35+2+21+2+23), against the prior four-phone 126s
+   and rejected five-phone 141s. Their byte counts, retained-event samples
+   and projection boundary live in docs/traps.md, "A sixth compile unit can
+   starve Android past both its duration ceiling and first draw," and in the
+   Android WATCH above. The first all-at-t0 attempt on those removals is
+   recorded there: Android passed 112 legs in 268s/310, but Linux and
+   Windows duration guards refused the full record. This remains an open
+   anomaly rather than an accepted scheduler pass.
 
 THE BELOW-400 PUSH, 2026-08-20 (the maintainer asked for the matrix
 under ~400s; it reached 422 and three lanes now cluster at the bound):

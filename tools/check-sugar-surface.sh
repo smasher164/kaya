@@ -453,6 +453,266 @@ case "$tpl_row_probe" in
 esac
 unset tpl_row_probe
 
+# (c2) THE DYNAMIC-TABLE READERS ARE WATCHED at every implemented point.
+#      Each deletion is scoped to the block it claims to read; the same
+#      names elsewhere stay in place.
+tpl_table_probe=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+
+
+def stage(text):
+    root = tempfile.mkdtemp()
+    os.makedirs(f"{root}/crates/kaya/src", exist_ok=True)
+    for rel in ("bindings", "tools", "guests"):
+        os.symlink(os.path.abspath(rel), f"{root}/{rel}")
+    open(f"{root}/crates/kaya/src/app.rs", "w", encoding="utf-8").write(text)
+    return root
+
+
+def stage_python(app_text, python_text):
+    root = stage(app_text)
+    os.unlink(f"{root}/bindings")
+
+    def link_children(source, destination, skip):
+        os.makedirs(destination, exist_ok=True)
+        for name in os.listdir(source):
+            if name != skip:
+                os.symlink(os.path.abspath(f"{source}/{name}"),
+                           f"{destination}/{name}")
+
+    link_children("bindings", f"{root}/bindings", "python")
+    link_children("bindings/python", f"{root}/bindings/python", "kaya")
+    link_children("bindings/python/kaya", f"{root}/bindings/python/kaya",
+                  "__init__.py")
+    open(f"{root}/bindings/python/kaya/__init__.py", "w",
+         encoding="utf-8").write(python_text)
+    return root
+
+
+def scoped(src, start, stop, old, new):
+    if src.count(start) != 1:
+        return None, src.count(start)
+    at = src.index(start)
+    end = src.index(stop, at)
+    block = src[at:end]
+    n = block.count(old)
+    if n == 1:
+        src = src[:at] + block.replace(old, new) + src[end:]
+    return src, n
+
+
+def run(name, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage(text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def run_python(name, app_text, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_python(app_text, text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def run_python_with_checks(name, app_text, text, count, surface_want, check_want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_python(app_text, text)
+    surface = subprocess.run(
+        [sys.executable, "tools/tpl-surfaces.py", root],
+        capture_output=True, text=True,
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}/bindings/python"
+    checks = subprocess.run(
+        [sys.executable, "-m", "kaya_app_checks"],
+        cwd=root, env=env, capture_output=True, text=True,
+    )
+    shutil.rmtree(root)
+    print(
+        f"{name}=applied:1 surface-rc:{surface.returncode} "
+        f"surface-named:{surface_want in surface.stdout} "
+        f"checks-rc:{checks.returncode} checks-named:{check_want in checks.stdout}"
+    )
+
+
+src = open("crates/kaya/src/app.rs", encoding="utf-8").read()
+text, n = scoped(src,
+                 "impl<I: for_scope::Id> Rows<'_, '_, I> {",
+                 "impl Rows<'_, '_, WidgetId> {",
+                 "    pub fn columns(", "    pub fn columns_removed(")
+run("rust-columns", text or src, n,
+    "rust's TEMPLATE-zone table cannot spell columns")
+
+text, n = scoped(src,
+                 "impl Rows<'_, '_, TemplateNodeId> {",
+                 "/// The header bar's sort indicator",
+                 "        f: impl Fn(Path, u32) -> M + 'static,",
+                 "        f: impl Fn(u32) -> M + 'static,")
+run("rust-sort", text or src, n,
+    "rust's TEMPLATE-zone table cannot spell on_sort")
+
+old = "    pub fn columns_at("
+n = src.count(old)
+run("rust-keyed", src.replace(old, "    pub fn columns_at_removed(") if n == 1 else src,
+    n, "rust's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+py = open("bindings/python/kaya/__init__.py", encoding="utf-8").read()
+row_points = (
+    (
+        "grow", "_grow", "grow",
+        "wire.tx_set_grow(self._template.handle.id, float(self._grow))",
+        "ordinary For grow", "FAIL rows(grow=) reaches its For",
+    ),
+    (
+        "align", "_align", "align",
+        "wire.tx_set_align(self._template.handle.id, _align_value(self._align))",
+        "ordinary For align", "FAIL rows(align=) reaches its For",
+    ),
+    (
+        "a11y", "_a11y_id", "a11y_id",
+        "wire.tx_set_a11y_id(self._template.handle.id, self._a11y_id)",
+        "ordinary For a11y id", "FAIL rows(a11y_id=) reaches its For",
+    ),
+)
+for name, field, arg, emitter, point, check_want in row_points:
+    surface_want = f"python's TEMPLATE-zone table cannot spell {point}"
+    text, n = scoped(
+        py, "class Collection(_BoundCollection):", "class _Scope:",
+        f"        trace.{field} = {arg}", f"        trace.{field} = None",
+    )
+    run_python_with_checks(
+        f"python-rows-{name}", src, text or py, n, surface_want, check_want,
+    )
+    text, n = scoped(
+        py, "class _ForTrace:", "def _alloc_widget_or_node",
+        emitter, emitter.replace("wire.tx_", "wire.tx_removed_"),
+    )
+    run_python(
+        f"python-rows-{name}-emitter", src, text or py, n, surface_want,
+    )
+
+text, n = scoped(py,
+                 "class Collection(_BoundCollection):", "class _Scope:",
+                 "    def columns(", "    def columns_removed(")
+run_python("python-columns", src, text or py, n,
+           "python's TEMPLATE-zone table cannot spell columns")
+
+text, n = scoped(
+    py, "class _ColumnsTrace:", "class PickedFile:",
+    "                _app._register(handle, wire.OCC_SORT_REQUESTED, self._on_sort)",
+    "                _app._register(handle, wire.OCC_SORT_REMOVED, self._on_sort)")
+run_python("python-sort", src, text or py, n,
+           "python's TEMPLATE-zone table cannot spell on_sort")
+
+text, n = scoped(py, "    def set_columns(", "    def _absorb_key(",
+                 "len(self._path)", "0")
+run_python("python-keyed-len", src, text or py, n,
+           "python's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+text, n = scoped(py, "    def set_columns(", "    def _absorb_key(",
+                 "[*self._path, *titles]", "[*titles, *self._path]")
+run_python("python-keyed-order", src, text or py, n,
+           "python's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+old = "class _BoundCollection:"
+n = py.count(old)
+run_python("python-reader", src,
+           py.replace(old, "class _BoundCollectionRemoved:") if n == 1 else py,
+           n, "cannot find python's dynamic-table zones")
+PROBE
+)
+want_table_probe="rust-columns=applied:1 rc:1 named:True
+rust-sort=applied:1 rc:1 named:True
+rust-keyed=applied:1 rc:1 named:True
+python-rows-grow=applied:1 surface-rc:1 surface-named:True checks-rc:1 checks-named:True
+python-rows-grow-emitter=applied:1 rc:1 named:True
+python-rows-align=applied:1 surface-rc:1 surface-named:True checks-rc:1 checks-named:True
+python-rows-align-emitter=applied:1 rc:1 named:True
+python-rows-a11y=applied:1 surface-rc:1 surface-named:True checks-rc:1 checks-named:True
+python-rows-a11y-emitter=applied:1 rc:1 named:True
+python-columns=applied:1 rc:1 named:True
+python-sort=applied:1 rc:1 named:True
+python-keyed-len=applied:1 rc:1 named:True
+python-keyed-order=applied:1 rc:1 named:True
+python-reader=applied:1 rc:1 named:True"
+if [ "$tpl_table_probe" != "$want_table_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the Rust/Python dynamic-table census" \
+        "did not catch its watched deletions). Wanted:" >&2
+    echo "$want_table_probe" >&2
+    echo "Got:" >&2
+    echo "$tpl_table_probe" >&2
+    exit 1
+fi
+echo "check-sugar-surface: dynamic-table perturbations applied:"
+echo "$tpl_table_probe"
+unset tpl_table_probe want_table_probe
+
+portfolio_table_probe=$(python3 - <<'PROBE'
+from pathlib import Path
+import sys
+
+source = Path("guests/python/portfolio.py").read_text(encoding="utf-8")
+rules = (
+    (
+        "outer For grow/align/id",
+        'for account in accounts.rows(\n'
+        '                grow=1, align="stretch", a11y_id="accounts",\n'
+        '            ):',
+    ),
+    (
+        "account card grow",
+        'with kaya.column(grow=1, align="stretch"):',
+    ),
+    (
+        "nested table grow",
+        'on_sort=on_sort, grow=1, a11y_id="positions",',
+    ),
+)
+
+
+def missing(text):
+    return [name for name, needle in rules if text.count(needle) != 1]
+
+
+failed = False
+baseline = missing(source)
+if baseline:
+    print("check-sugar-surface: portfolio is missing " + ", ".join(baseline))
+    failed = True
+for name, needle in rules:
+    count = source.count(needle)
+    doctored = source.replace(needle, "", 1) if count == 1 else source
+    fired = missing(doctored)
+    print(
+        f"check-sugar-surface: portfolio {name} self-test applied "
+        f"{count} substitution(s)"
+    )
+    if count != 1 or fired != [name]:
+        print(
+            f"check-sugar-surface: SELF-TEST FAIL ({name} fired {fired!r})"
+        )
+        failed = True
+sys.exit(1 if failed else 0)
+PROBE
+)
+portfolio_table_rc=$?
+echo "$portfolio_table_probe"
+if [ "$portfolio_table_rc" -ne 0 ]; then
+    status=1
+fi
+unset portfolio_table_probe portfolio_table_rc
+
 # (d) THE PROP CENSUS IS WATCHED THE SAME WAY, in three perturbations.
 #     Each stages a temp repo root in which ONE file differs and
 #     everything else symlinks the real tree, and prints its

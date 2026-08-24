@@ -67,6 +67,18 @@ def brace_block(src, header_re, open_ch="{", close_ch="}"):
     return None
 
 
+def python_class_block(src, name):
+    """One top-level Python class, through the next top-level class."""
+    start = re.search(
+        rf"^class\s+{re.escape(name)}(?:\([^\n]*\))?:\s*$", src, re.M
+    )
+    if not start:
+        return None
+    following = re.search(r"^class\s+", src[start.end():], re.M)
+    end = len(src) if not following else start.end() + following.start()
+    return src[start.start():end]
+
+
 def keyword_block(src, start_re, end_re):
     """The body between a start line and its matching end line.
 
@@ -269,6 +281,158 @@ PROP_ZONES = [
     ("ocaml", members_ocaml, "module Tpl (bindings/ocaml/kaya_app.ml)", 10),
     ("haskell", members_haskell, "data TplAttr (bindings/haskell/KayaApp.hs)", 3),
 ]
+
+
+# A table is a For surface rather than a widget kind. Read the nested
+# builder and its keyed re-declaration from their own blocks so the live
+# Tx/Messages methods cannot satisfy them (docs/tables-plan.md).
+TABLE_POINTS = {
+    "rust": ("columns", "on_sort", "keyed re-declaration"),
+    "python": (
+        "columns",
+        "on_sort",
+        "keyed re-declaration",
+        "ordinary For grow",
+        "ordinary For align",
+        "ordinary For a11y id",
+    ),
+}
+
+
+def table_rust(_):
+    src = read("crates/kaya/src/app.rs")
+    rows = brace_block(
+        src, r"^impl<I:\s*for_scope::Id>\s+Rows<'_,\s*'_,\s*I>\s*\{"
+    )
+    nested = brace_block(
+        src, r"^impl\s+Rows<'_,\s*'_,\s*TemplateNodeId>\s*\{"
+    )
+    tx = brace_block(src, r"^impl<'a>\s+Tx<'a>\s*\{")
+    messages = brace_block(src, r"^impl<M>\s+Messages<M>\s*\{")
+    if None in (rows, nested, tx, messages):
+        return None
+
+    got = set()
+    if re.search(r"^\s{4}pub fn columns\s*\(", rows, re.M):
+        got.add("columns")
+    nested_sort = re.search(
+        r"^\s{4}pub fn on_sort<M>\s*\(.*?Fn\(Path,\s*u32\).*?"
+        r"msgs\.on_sort_node\(self\.id\(\),\s*f\)",
+        nested,
+        re.M | re.S,
+    )
+    node_sort = re.search(
+        r"^\s{4}pub fn on_sort_node\s*\(.*?Fn\(Path,\s*u32\).*?"
+        r"self\.nodes\.borrow_mut\(\)\.insert",
+        messages,
+        re.M | re.S,
+    )
+    if nested_sort and node_sort:
+        got.add("on_sort")
+    node_id = re.search(
+        r"^\s{4}pub fn id\(&self\)\s*->\s*TemplateNodeId", nested, re.M
+    )
+    keyed = re.search(
+        r"^\s{4}pub fn columns_at\s*\(.*?node:\s*TemplateNodeId.*?"
+        r"path:\s*&Path",
+        tx,
+        re.M | re.S,
+    )
+    if node_id and keyed:
+        got.add("keyed re-declaration")
+    return got
+
+
+def table_python(_):
+    src = read("bindings/python/kaya/__init__.py")
+    bound = python_class_block(src, "_BoundCollection")
+    collection = python_class_block(src, "Collection")
+    for_trace = python_class_block(src, "_ForTrace")
+    trace = python_class_block(src, "_ColumnsTrace")
+    if None in (bound, collection, for_trace, trace):
+        return None
+
+    got = set()
+    columns = re.search(
+        r"^\s{4}def columns\([^\n]*\bon_sort=None[^\n]*\):.*?"
+        r"return _ColumnsTrace\(self,.*?\bon_sort\b",
+        collection,
+        re.M | re.S,
+    )
+    header = re.search(
+        r"wire\.tx_set_column_headers\(\s*handle\.id,.*?"
+        r"len\(self\._titles\),\s*0,\s*self\._titles",
+        trace,
+        re.S,
+    )
+    if columns and header:
+        got.add("columns")
+
+    registration = re.search(
+        r"_app\._register\(handle,\s*wire\.OCC_SORT_REQUESTED,\s*self\._on_sort\)",
+        trace,
+        re.S,
+    )
+    if columns and registration:
+        got.add("on_sort")
+
+    rows = re.search(
+        r"^\s{4}def rows\((.*?)\):\n(.*?)(?=^\s{4}def |\Z)",
+        collection,
+        re.M | re.S,
+    )
+    if rows:
+        args, body = rows.groups()
+        row_points = (
+            (
+                "ordinary For grow", "grow", "_grow",
+                r"wire\.tx_set_grow\(self\._template\.handle\.id,\s*float\(self\._grow\)\)",
+            ),
+            (
+                "ordinary For align", "align", "_align",
+                r"wire\.tx_set_align\(self\._template\.handle\.id,\s*"
+                r"_align_value\(self\._align\)\)",
+            ),
+            (
+                "ordinary For a11y id", "a11y_id", "_a11y_id",
+                r"wire\.tx_set_a11y_id\(self\._template\.handle\.id,\s*self\._a11y_id\)",
+            ),
+        )
+        for point, arg, field, emitter in row_points:
+            handed_off = f"{arg}=None" in args and f"trace.{field} = {arg}" in body
+            emitted = re.search(
+                rf"if self\.{field} is not None:.*?{emitter}",
+                for_trace,
+                re.S,
+            )
+            if handed_off and emitted:
+                got.add(point)
+
+    setter = re.search(
+        r"^\s{4}def set_columns\(.*?(?=^\s{4}def |\Z)",
+        bound,
+        re.M | re.S,
+    )
+    if (
+        setter
+        and 'getattr(self._owner, "_for_handle", None)' in setter.group(0)
+        and "len(self._path)" in setter.group(0)
+        and "[*self._path, *titles]" in setter.group(0)
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
+TABLE_ZONES = [
+    ("rust", table_rust, "typed Rows + Tx::columns_at (crates/kaya/src/app.rs)"),
+    (
+        "python",
+        table_python,
+        "Collection/_ColumnsTrace/_BoundCollection (bindings/python/kaya/__init__.py)",
+    ),
+]
+# docs/deferred.md's dynamic-tables entry keeps Go, C#, Java, Swift,
+# OCaml and Haskell open; each joins this depth census with its spelling.
 
 
 # --- the TAKES-A-SOURCE census -----------------------------------------
@@ -737,6 +901,32 @@ def main():
                 "children off its edge. THE LIVE ZONE'S SETTER OF THE SAME NAME "
                 "DOES NOT COUNT: this census reads the zone's own block precisely "
                 "because the two spell the prop identically."
+            )
+            status = 1
+
+    # Tables are construction on a For, outside the kind/prop blocks.
+    for lang, reader, where in TABLE_ZONES:
+        try:
+            got = reader(None)
+        except OSError as e:
+            print(f"tpl-surfaces: cannot read {lang}'s dynamic-table surface ({e})")
+            status = 1
+            continue
+
+        if got is None:
+            print(
+                f"tpl-surfaces: cannot find {lang}'s dynamic-table zones — {where}. "
+                "Fix the scoped reader rather than treating an unread surface as empty."
+            )
+            status = 1
+            continue
+
+        missing = [point for point in TABLE_POINTS[lang] if point not in got]
+        if missing:
+            print(
+                f"check-sugar-surface: {lang}'s TEMPLATE-zone table cannot spell "
+                + ", ".join(missing)
+                + f" — in {where}. A live table method of the same name does not count."
             )
             status = 1
 

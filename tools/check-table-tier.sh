@@ -135,6 +135,169 @@ def line_of(off):
 
 text = strip(raw)
 
+
+def harness_case(name, next_name):
+    """Code between two adjacent harness cases, or None with a loud census red."""
+    needle = f'case "{name}":'
+    following = f'case "{next_name}":'
+    count = raw.count(needle)
+    print(f"check-table-tier: harness case {name} found {count} time(s)")
+    if count != 1:
+        bad.append(f"{path}: wanted exactly one `{needle}`, found {count}. The table "
+                   "geometry clause has no trustworthy harness arm to inspect.")
+        return None
+    start = raw.index(needle)
+    end = raw.find(following, start + len(needle))
+    if end < 0:
+        bad.append(f"{path}: `{needle}` is not followed by `{following}`. The table "
+                   "geometry clause moved, so this reader would inspect the wrong arm.")
+        return None
+    return strip(raw[start:end])
+
+
+edges_case = harness_case("expect_column_edges", "header_click")
+if edges_case is not None:
+    required = (
+        "kayaCurrentTableGeometry(node)",
+        "kayaCurrentTableTrackWidth(node)",
+        "kayaTableColumnAlignment(columns)",
+        "kayaTableColumnRepresentativesIncrease(representatives)",
+        "kayaTableViewportMatchesTrack(viewport, track: track)",
+        "kayaTableFramesFitHorizontally(frames, inside: viewport)",
+    )
+    if any(item not in edges_case for item in required):
+        bad.append(f"{path}: expect_column_edges must read current cell geometry, compare "
+                   "the recorded table-track WIDTH, and contain the cells in the global "
+                   "viewport. One of those three calls is absent from its own harness arm.")
+
+track_match = braced(text, r"func kayaTableViewportMatchesTrack\s*\(")
+if track_match is None:
+    bad.append(f"{path}: no `func kayaTableViewportMatchesTrack(` — the table-track "
+               "comparison is not a pure predicate the runtime probe can drive.")
+elif "abs(Double(viewport.width) - track) <= tolerance" not in text[track_match[0]:track_match[1]]:
+    bad.append(f"{path}: kayaTableViewportMatchesTrack must reject BOTH a viewport "
+               "narrower than its assigned track and one wider than it. A one-sided "
+               "comparison accepts the horizontally clipped native-table shape.")
+
+generation_match = braced(text, r"func kayaTableGeometryGeneration\s*\(")
+if generation_match is None:
+    bad.append(f"{path}: no `func kayaTableGeometryGeneration(` — current geometry "
+               "has no generation wall this gate can inspect.")
+elif "hasher.combine(node.tableGeometryEpoch)" not in text[
+    generation_match[0]:generation_match[1]
+]:
+    bad.append(f"{path}: kayaTableGeometryGeneration must include tableGeometryEpoch. "
+               "Model-only generations accept a coherent old viewport after a layout-only "
+               "change, before SwiftUI's reporters run.")
+
+track_match = braced(text, r"func kayaCurrentTableTrackWidth\s*\(")
+if track_match is None:
+    bad.append(f"{path}: no `func kayaCurrentTableTrackWidth(` — expect_column_edges "
+               "can only read the unversioned flex-track cache.")
+else:
+    current_track = text[track_match[0]:track_match[1]]
+    required = (
+        "kayaTableGeometryGeneration(table)",
+        "observation.generation == generation",
+        "observation.size.width > 0",
+    )
+    if any(item not in current_track for item in required):
+        bad.append(f"{path}: kayaCurrentTableTrackWidth must accept only a positive track "
+                   "tagged with the table's current geometry generation. An old track can "
+                   "agree with a clipped viewport after a layout-only change.")
+
+track_reader = braced(text, r"private struct KayaTrackReader\s*:\s*View\b")
+if track_reader is None:
+    bad.append(f"{path}: no `private struct KayaTrackReader: View` — the tagged table "
+               "track and its same-size republish task moved outside this gate's view.")
+else:
+    reader = text[track_reader[0]:track_reader[1]]
+    required = (
+        "let tableGeneration: Int?",
+        ".task(id: tableGeneration)",
+        "generation: tableGeneration",
+    )
+    if any(item not in reader for item in required):
+        bad.append(f"{path}: KayaTrackReader must tag table tracks and republish from a "
+                   "task keyed by tableGeneration. A same-size invalidation changes no "
+                   "frame, so onChange(of: geo.size) cannot refill the current track.")
+
+track_handoff = (
+    "tableGeneration: child.tableColumns.isEmpty\n"
+    "                                        ? nil : kayaTableGeometryGeneration(child)"
+)
+track_handoff_count = raw.count(track_handoff)
+print(f"check-table-tier: table-generation track handoff found {track_handoff_count} time(s)")
+if track_handoff_count != 2:
+    bad.append(f"{path}: wanted the table-generation handoff at both KayaTrackReader "
+               f"construction sites, found {track_handoff_count}. The vertical and "
+               "horizontal flex paths must tag the same observation.")
+
+invalidation_match = braced(text, r"func kayaInvalidateTableGeometry\s*\(")
+if invalidation_match is None:
+    bad.append(f"{path}: no `func kayaInvalidateTableGeometry(` — layout-only changes "
+               "cannot synchronously make the prior table observations stale.")
+else:
+    invalidation = text[invalidation_match[0]:invalidation_match[1]]
+    if "kayaScene.columns" not in invalidation or "table.tableGeometryEpoch &+= 1" not in invalidation:
+        bad.append(f"{path}: kayaInvalidateTableGeometry must bump every live declared "
+                   "table's geometry epoch. Clearing frames without a new reporter task id "
+                   "can leave them missing forever when the frame is unchanged.")
+
+resize_helper = braced(text, r"func kayaSetWindowContentSize\s*\(")
+if resize_helper is None:
+    bad.append(f"{path}: no `func kayaSetWindowContentSize(` — native content-size "
+               "changes can bypass the synchronous table-geometry invalidation.")
+else:
+    helper = text[resize_helper[0]:resize_helper[1]]
+    invalidation_call = "kayaInvalidateTableGeometry()"
+    native_call = "window.setContentSize(size)"
+    if (invalidation_call not in helper or native_call not in helper
+            or helper.index(invalidation_call) > helper.index(native_call)):
+        bad.append(f"{path}: kayaSetWindowContentSize must invalidate table geometry "
+                   "before NSWindow.setContentSize. A main-queue hop is not a completed "
+                   "SwiftUI layout turn.")
+direct_size_calls = text.count(".setContentSize(")
+print(f"check-table-tier: native setContentSize callsites found {direct_size_calls} time(s)")
+if direct_size_calls != 1:
+    bad.append(f"{path}: wanted exactly one native setContentSize call inside the "
+               f"invalidation helper, found {direct_size_calls}. Every direct call is a "
+               "route that can retain a coherent old table snapshot.")
+
+apply_match = braced(text, r"private func kayaApply\s*\(")
+if apply_match is None:
+    bad.append(f"{path}: no `private func kayaApply(` — the transaction-boundary "
+               "geometry invalidation route moved outside this gate's view.")
+else:
+    apply_body = text[apply_match[0]:apply_match[1]]
+    call = "kayaInvalidateTableGeometry()"
+    boundary = "batch.withUnsafeBytes"
+    if call not in apply_body or boundary not in apply_body or apply_body.index(call) > apply_body.index(boundary):
+        bad.append(f"{path}: kayaApply must invalidate table geometry before reading the "
+                   "batch. A sibling or ancestor can move a table without changing the "
+                   "table subtree hashed by the model generation.")
+
+resize_case = harness_case("resize_window", "expect_sections_presentation")
+if resize_case is not None:
+    if "kayaSetWindowContentSize(" not in resize_case:
+        bad.append(f"{path}: resize_window must route through "
+                   "kayaSetWindowContentSize. Otherwise the immediately following expect "
+                   "can accept the old green viewport, cells, and track without yielding "
+                   "for layout.")
+
+fills_case = harness_case("expect_fills", "expect_menus")
+if fills_case is not None:
+    required = (
+        "kayaCurrentTableGeometry(container)",
+        "kayaTableFramesFitVertically(rows, inside: viewport)",
+        ".missingViewport",
+        ".missingCells",
+    )
+    if any(item not in fills_case for item in required):
+        bad.append(f"{path}: expect_fills' table arm must refuse absent/currently incomplete "
+                   "geometry and contain live rows vertically in the recorded viewport; "
+                   "vertical slack remains valid. One of those checks is absent from the arm.")
+
 TIERS = ("KayaNativeTable", "KayaSynthesizedTable")
 
 surface = braced(text, r"struct KayaTableSurface\s*:\s*View\b")
@@ -333,12 +496,86 @@ refuses() {
     echo "check-table-tier: self-test — $3 refused, as demanded"
 }
 
+hits="$(perturb "$SWIFTUI" '        hasher\.combine\(node\.tableGeometryEpoch\)\n' \
+    '' "$T/no-layout-epoch.swift")"
+applied "$hits" "the layout epoch removed from table geometry generations"
+refuses "$T/no-layout-epoch.swift" "must include tableGeometryEpoch" \
+    "model-only geometry generations accepting a pre-layout snapshot"
+
+hits="$(perturb "$SWIFTUI" '        table\.tableGeometryEpoch &\+= 1\n' \
+    '' "$T/no-layout-invalidation.swift")"
+applied "$hits" "the live-table layout invalidation removed"
+refuses "$T/no-layout-invalidation.swift" "must bump every live declared" \
+    "an invalidator that changes no reporter task id"
+
+hits="$(perturb "$SWIFTUI" \
+    'private func kayaApply\(_ batch: Data, _ blobs: \[UInt64: Data\]\) \{\n    kayaInvalidateTableGeometry\(\)' \
+    'private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {' \
+    "$T/no-apply-invalidation.swift")"
+applied "$hits" "the transaction-boundary layout invalidation removed"
+refuses "$T/no-apply-invalidation.swift" "kayaApply must invalidate table geometry" \
+    "a sibling mutation retaining old table geometry"
+
+hits="$(perturb "$SWIFTUI" \
+    'func kayaSetWindowContentSize\(_ window: NSWindow, _ size: NSSize\) \{\n    kayaInvalidateTableGeometry\(\)' \
+    'func kayaSetWindowContentSize(_ window: NSWindow, _ size: NSSize) {' \
+    "$T/no-resize-helper-invalidation.swift")"
+applied "$hits" "the native resize helper invalidation removed"
+refuses "$T/no-resize-helper-invalidation.swift" \
+    "kayaSetWindowContentSize must invalidate table geometry" \
+    "a native content-size change retaining the previous snapshot"
+
+hits="$(perturb "$SWIFTUI" \
+    'kayaSetWindowContentSize\(\n                                window, NSSize\(width: rw, height: rh\)\)' \
+    'window.setContentSize(NSSize(width: rw, height: rh))' \
+    "$T/no-resize-invalidation.swift")"
+applied "$hits" "the resize harness bypassed the invalidating helper"
+refuses "$T/no-resize-invalidation.swift" "resize_window must route through" \
+    "resize_window accepting the previous green snapshot"
+
+hits="$(perturb "$SWIFTUI" 'observation\.generation == generation,' \
+    'true,' "$T/unversioned-table-track.swift")"
+applied "$hits" "the table-track generation check bypassed"
+refuses "$T/unversioned-table-track.swift" "must accept only a positive track" \
+    "an old assigned track accepted as current"
+
+hits="$(perturb "$SWIFTUI" '\.task\(id: tableGeneration\)' \
+    '.task(id: 0)' "$T/unkeyed-table-track-task.swift")"
+applied "$hits" "the table-track republish task keyed to a constant"
+refuses "$T/unkeyed-table-track-task.swift" "must tag table tracks and republish" \
+    "a same-size invalidation unable to refresh its track"
+
+hits="$(perturb "$SWIFTUI" \
+    'tableGeneration: child\.tableColumns\.isEmpty\n                                        \? nil : kayaTableGeometryGeneration\(child\)' \
+    'tableGeneration: nil' "$T/untagged-flex-track.swift")"
+applied "$hits" "one flex path stopped handing table generations to its track reader"
+refuses "$T/untagged-flex-track.swift" "wanted the table-generation handoff" \
+    "one flex orientation recording untagged table tracks"
+
 hits="$(perturb "$SWIFTUI" 'struct KayaFlex: Layout \{' \
     'let kayaEscapedTier = KayaNativeTable(node: node)
 struct KayaFlex: Layout {' "$T/escaped-tier.swift")"
 applied "$hits" "a tier view constructed outside the routing"
 refuses "$T/escaped-tier.swift" "is constructed outside" \
     "a second construction site for the native tier"
+
+hits="$(perturb "$SWIFTUI" 'kayaCurrentTableTrackWidth\(node\)' \
+    'kayaMainExtents[node.id]' "$T/edge-main-axis.swift")"
+applied "$hits" "the table width replaced by its parent main-axis extent"
+refuses "$T/edge-main-axis.swift" "expect_column_edges must read current cell geometry" \
+    "column-edge containment reading height as width"
+
+hits="$(perturb "$SWIFTUI" 'abs\(Double\(viewport\.width\) - track\) <= tolerance' \
+    'Double(viewport.width) >= track - tolerance' "$T/one-sided-track.swift")"
+applied "$hits" "the table-track comparison made one-sided"
+refuses "$T/one-sided-track.swift" "must reject BOTH a viewport" \
+    "an oversized native table accepted inside a narrower assigned track"
+
+hits="$(perturb "$SWIFTUI" 'kayaTableFramesFitVertically\(rows, inside: viewport\)' \
+    'kayaTableFramesFitHorizontally(rows, inside: viewport)' "$T/fills-horizontal.swift")"
+applied "$hits" "expect_fills checking rows on the horizontal axis"
+refuses "$T/fills-horizontal.swift" "expect_fills' table arm must refuse" \
+    "table fill accepting vertical row overflow"
 
 hits="$(perturb "$SWIFTUI" '    var widthClass: KayaTableWidth \{' \
     '    var escapedTier: some View { KayaNativeTable(node: node) }
@@ -452,6 +689,111 @@ if [ "$rc" -ne 0 ]; then
     echo "  the cell that disagreed)." >&2
     exit 1
 fi
+
+runtime_refuses() {
+    # <doctored-source> <binary-name> <diagnostic> <what>
+    local source binary diagnostic what rc
+    source="$1"
+    binary="$2"
+    diagnostic="$3"
+    what="$4"
+    if ! build_probe "$source" "$T/$binary"; then
+        echo "check-table-tier: SELF-TEST BROKEN — $what did not compile" >&2
+        exit 1
+    fi
+    DYLD_LIBRARY_PATH="$ROOT/target/debug" "$T/$binary" > "$T/$binary.out" 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "check-table-tier: SELF-TEST FAILED — $what was accepted" >&2
+        cat "$T/$binary.out" >&2
+        exit 1
+    fi
+    if ! grep -qF "$diagnostic" "$T/$binary.out"; then
+        echo "check-table-tier: SELF-TEST FAILED — $what reddened without naming" \
+            "'$diagnostic'. Got:" >&2
+        cat "$T/$binary.out" >&2
+        exit 1
+    fi
+    echo "check-table-tier: self-test — $what reds the real-window probe (exit $rc)"
+}
+
+runtime_refuses "$T/no-layout-epoch.swift" "no-layout-epoch" \
+    "a layout invalidation rejects the previous generation" \
+    "a model-only table geometry generation"
+runtime_refuses "$T/no-resize-helper-invalidation.swift" "no-resize-helper-invalidation" \
+    "a resize never accepts the previous generation" \
+    "a resize helper that does not invalidate table geometry"
+runtime_refuses "$T/unversioned-table-track.swift" "unversioned-table-track" \
+    "a layout invalidation rejects the previous track" \
+    "an unversioned assigned table track"
+runtime_refuses "$T/unkeyed-table-track-task.swift" "unkeyed-table-track-task" \
+    "a same-size layout invalidation republishes geometry and track" \
+    "a table-track task that cannot republish at the same size"
+
+# Geometry guards share this watched shadow; every perturbation's count
+# is printed before the one doctored interpreter is compiled.
+hits="$(perturb "$SWIFTUI" 'abs\(Double\(viewport\.width\) - track\) <= tolerance' \
+    'Double(viewport.width) >= track - tolerance' "$T/overflowing-track.swift")"
+applied "$hits" "an oversized table viewport accepted against its track"
+hits="$(perturb "$T/overflowing-track.swift" 'edge - representative <= tolerance' \
+    'edge - representative <= tolerance * 2' "$T/chained-clusters.swift")"
+applied "$hits" "representative edge clustering replaced by a drift chain"
+hits="$(perturb "$T/chained-clusters.swift" 'guard clusters\.count == 1 else \{' \
+    'guard !clusters.isEmpty else {' "$T/unkeyed-columns.swift")"
+applied "$hits" "a column borrowing another column's cluster accepted"
+hits="$(perturb "$T/unkeyed-columns.swift" \
+    'if next - previous <= tolerance \{ return false \}' \
+    'if next == previous { return false }' "$T/unordered-columns.swift")"
+applied "$hits" "descending column representatives accepted"
+hits="$(perturb "$T/unordered-columns.swift" 'let frame = geo\.frame\(in: \.global\)' \
+    'let frame = geo.frame(in: .global).offsetBy(dx: 1000, dy: 1000)' \
+    "$T/displaced-cells.swift")"
+applied "$hits" "live cell geometry displaced outside its viewport"
+hits="$(perturb "$T/displaced-cells.swift" \
+    'observation\.generation == generation' \
+    'observation.generation == generation || true' "$T/stale-cells.swift")"
+applied "$hits" "stale cell generations accepted as current"
+hits="$(perturb "$T/stale-cells.swift" 'viewport\.generation == generation,' \
+    'viewport.generation == generation || true,' "$T/stale-viewport.swift")"
+applied "$hits" "a stale viewport generation accepted as current"
+hits="$(perturb "$T/stale-viewport.swift" \
+    'guard gotRows == wantedRows, gotColumns == wantedColumns else \{' \
+    'if gotRows < 0 {' "$T/incomplete-geometry.swift")"
+applied "$hits" "incomplete current cell geometry accepted"
+if ! build_probe "$T/incomplete-geometry.swift" "$T/table-geometry-doctored"; then
+    echo "check-table-tier: SELF-TEST BROKEN — the doctored geometry probe did not" \
+        "compile, so the runtime negative proved nothing" >&2
+    exit 1
+fi
+DYLD_LIBRARY_PATH="$ROOT/target/debug" "$T/table-geometry-doctored" \
+    > "$T/geometry-doctored.out" 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+    echo "check-table-tier: SELF-TEST FAILED — chained clusters and displaced cells" \
+        "were accepted by the real-window probe." >&2
+    cat "$T/geometry-doctored.out" >&2
+    exit 1
+fi
+for diagnostic in \
+    "table track overflow is rejected" \
+    "edge clustering is anchored to its representative" \
+    "column identity rejects frames borrowed from an existing cluster" \
+    "column representatives must remain distinct and increasing" \
+    "missing current row-cell geometry is rejected" \
+    "stale row-cell geometry is rejected" \
+    "a mutated table immediately refuses the previous generation" \
+    "a layout invalidation rejects the previous generation" \
+    "live native cells stay inside the recorded viewport horizontally" \
+    "live native rows stay inside the recorded viewport vertically"
+do
+    if ! grep -qF "$diagnostic" "$T/geometry-doctored.out"; then
+        echo "check-table-tier: SELF-TEST FAILED — the geometry shadow reddened," \
+            "but did not name '$diagnostic'. Got:" >&2
+        cat "$T/geometry-doctored.out" >&2
+        exit 1
+    fi
+done
+echo "check-table-tier: self-test — identity, generation, and containment guards all red (exit $rc)"
 
 # The runtime clause guards itself: the compact arm flipped on a COPY
 # must red the probe, and the perturbation must be PROVEN applied. This

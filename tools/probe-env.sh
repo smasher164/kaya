@@ -10,14 +10,17 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # One place that knows how to ask whether each test surface is ready.
-# Nothing here mutates state except `--warm`, which boots what is cold.
+# Nothing here mutates state except `--warm`, which boots independently
+# warmable surfaces. The coupled Android phone+tablet pool is reported here
+# and owned by tools/android/run-emulator.sh, including its snapshot identity.
 #
 #   tools/probe-env.sh          report readiness of every surface
-#   tools/probe-env.sh --warm   also boot the simulator / emulator / VM
+#   tools/probe-env.sh --warm   also boot independent simulator / VM surfaces
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
+. "$ROOT/tools/lib/android-emulator-state.sh"
 WARM=0
 [ "${1:-}" = --warm ] && WARM=1
 status=0
@@ -146,31 +149,79 @@ else
 fi
 
 # --- Android emulator ------------------------------------------------
-ANDROID_POOL="${KAYA_ANDROID_EMUS:-2}"
-if command -v adb >/dev/null; then
-    up=$(adb devices 2>/dev/null | grep -c "emulator-.*device$" || true)
-    if [ "$up" -ge "$ANDROID_POOL" ]; then
-        report android OK "emulator pool warm ($up/$ANDROID_POOL)"
-    elif [ "$WARM" = 1 ] && command -v emulator >/dev/null; then
-        # Read-only instances of the shared AVD, like run-emulator.
-        export ANDROID_AVD_HOME="$ROOT/target/avd"
-        i=0
-        while [ "$i" -lt "$ANDROID_POOL" ]; do
-            port=$((5554 + 2 * i))
-            if ! adb -s "emulator-$port" get-state 2>/dev/null | grep -q device; then
-                emulator -avd kaya -read-only -no-window -no-audio -no-boot-anim \
-                    -gpu swiftshader_indirect -port "$port" \
-                    >"$ROOT/target/emu-$port.log" 2>&1 &
+ANDROID_POOL="${KAYA_ANDROID_EMUS:-4}"
+case "$ANDROID_POOL" in
+    ''|*[!0-9]*)
+        report android DOWN "KAYA_ANDROID_EMUS must be a positive integer"
+        ;;
+    *)
+        if [ "$ANDROID_POOL" -lt 1 ]; then
+            report android DOWN "KAYA_ANDROID_EMUS must be at least 1"
+        elif command -v adb >/dev/null && command -v emulator >/dev/null; then
+            export ANDROID_AVD_HOME="$ROOT/target/avd"
+            android_state=""
+            if ! android_state="$(android_emulator_state_id "${ANDROID_SDK_ROOT:-}")"; then
+                report android DOWN "could not resolve the pinned emulator and system image"
+            else
+                case "$android_state" in
+                    *$'\n'*)
+                        android_emulator="${android_state%%$'\n'*}"
+                        android_image="${android_state#*$'\n'}"
+                        android_guest_id=/data/local/tmp/kaya-emulator-identity
+                        android_snapshot_stale=""
+                        if ! android_snapshot_state_current \
+                            "$ANDROID_AVD_HOME/kaya.avd/.kaya-default-boot-id" \
+                            "$ANDROID_AVD_HOME/kaya.avd/snapshots/default_boot" \
+                            "$android_emulator" "$android_image"; then
+                            android_snapshot_stale=phone
+                        fi
+                        if ! android_snapshot_state_current \
+                            "$ANDROID_AVD_HOME/kaya-tablet.avd/.kaya-default-boot-id" \
+                            "$ANDROID_AVD_HOME/kaya-tablet.avd/snapshots/default_boot" \
+                            "$android_emulator" "$android_image"; then
+                            android_snapshot_stale="${android_snapshot_stale:+$android_snapshot_stale and }tablet"
+                        fi
+                        if [ -n "$android_snapshot_stale" ]; then
+                            report android COLD "$android_snapshot_stale snapshot stale — tools/android/run-emulator.sh reseeds both before readers"
+                        else
+                            android_phone_up=0
+                            i=0
+                            while [ "$i" -lt "$ANDROID_POOL" ]; do
+                                port=$((5554 + 2 * i))
+                                if android_live_instance_current \
+                                    "emulator-$port" kaya \
+                                    "$android_emulator" "$android_image" "$android_guest_id"; then
+                                    android_phone_up=$((android_phone_up + 1))
+                                fi
+                                i=$((i + 1))
+                            done
+                            android_tablet_port=$((5554 + 2 * ANDROID_POOL))
+                            android_tablet_up=0
+                            if android_live_instance_current \
+                                "emulator-$android_tablet_port" kaya-tablet \
+                                "$android_emulator" "$android_image" "$android_guest_id"; then
+                                android_tablet_up=1
+                            fi
+                            if [ "$android_phone_up" -eq "$ANDROID_POOL" ] \
+                                && [ "$android_tablet_up" -eq 1 ]; then
+                                report android OK "current phone pool ($android_phone_up/$ANDROID_POOL) and tablet (1/1)"
+                            elif [ "$WARM" -eq 1 ]; then
+                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — --warm delegates this coupled pool to tools/android/run-emulator.sh"
+                            else
+                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — tools/android/run-emulator.sh owns the coupled pool"
+                            fi
+                        fi
+                        ;;
+                    *)
+                        report android DOWN "emulator state identity was incomplete"
+                        ;;
+                esac
             fi
-            i=$((i + 1))
-        done
-        report android OK "emulator pool booting ($ANDROID_POOL instances; quickboot ~5s)"
-    else
-        report android COLD "emulator pool cold ($up/$ANDROID_POOL; --warm or run-emulator boots it)"
-    fi
-else
-    report android DOWN "adb unavailable — run inside nix develop"
-fi
+        else
+            report android DOWN "adb/emulator unavailable — run inside nix develop"
+        fi
+        ;;
+esac
 
 # --- Linux container -------------------------------------------------
 if docker info >/dev/null 2>&1; then

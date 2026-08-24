@@ -233,6 +233,65 @@ the same patterns return through interpreter drop-downs
   size and left no free space anywhere in the tree — every grow weight
   then divided nothing. The backend now forces Fill on the root; the
   normalization is recorded in DESIGN's layout worklist.
+- **GTK flex measurement must invert its own weighted allocation, not
+  sum grower naturals.** The portfolio's three equal-weight account
+  cards needed 145/100/70px naturally. Their sum, 315px, was not a
+  valid answer: allocation gives each grower one equal track, so the
+  first card received about 105px and its table and total overlapped.
+  The smallest valid pool is 435px. The inverse must run the exact
+  allocator too: weights 1/1/2 with requirements 1/1/3 need 7px, not
+  the ratio estimate's 6, because the last grower absorbs rounding
+  dust. Nor is the floating-point ratio seed always conservative:
+  weights 3/1 with requirements 1/4 seed 14px, whose exact allocation
+  is 11/3; the verifier must advance to 15px and 11/4. `check-gtk` runs
+  all three cases in the Linux backend container.
+- **A table viewport contains rows; rows do not have to fill it.** At
+  the corrected 800x600 portfolio size, X11's short Brokerage table
+  legitimately drew 97px of a 117px vertical viewport and Wayland's
+  drew 105px. Exact `expect_fills` made both green layouts red. The
+  table arm is therefore one-sided against vertical overflow, while
+  `expect_column_edges` owns horizontal clipping. Native macOS cell
+  ink is one-sided too: it measured 527pt inside a correct 636pt
+  viewport because the last label ends before its column does; the
+  broken capture was the opposite fact, 409pt of ink inside a 145pt
+  viewport. A cell-ink endpoint may reject overflow, never demand
+  equality with a native column boundary. The first cross-backend audit
+  found three different `expect_fills` meanings hiding behind that
+  sentence: Swift returned success without reading rows, Compose had no
+  table extent, and WinUI demanded exact equality. The shared table
+  scene now forces the one-sided vertical read on every backend; its
+  pre-fix Compose and WinUI diagnostics were watched printing "no
+  container layout recorded" and 113dip/307dip respectively. Horizontal
+  readers require live current-cell bounds inside a positioned viewport,
+  and the viewport must match its assigned track in both directions: a
+  300pt viewport against a 297pt track passed the first one-sided
+  predicate just as the clipped 145pt viewport did. The compiled probe
+  drives exact 300/300, underfill 300/303, and overflow 300/297. The
+  start is two-sided too: GTK's first reader tracked only each line's
+  right endpoint, so a whole table shifted left or inset right could keep
+  the wanted clusters and still pass. Starts at -2/+2px are the tolerance
+  boundary; -2.1/+2.1 are watched overflow/underfill failures. The scene
+  repeats the read after each header re-declaration rather than letting
+  the first frame answer forever.
+- **A main-queue resize is not a completed SwiftUI layout turn.** The
+  harness returned from `DispatchQueue.main.sync { setContentSize(...) }`
+  with the previous viewport, cell frames and flex track still mutually
+  consistent, so the following retryable expect could pass once without
+  ever yielding for their reporters. Hashing the table subtree did not
+  help a resize or a sibling-only transaction, and an unversioned track
+  could still agree with the wrong viewport. Every applied batch and
+  native content-size change now advances an observable table geometry
+  epoch before acting; viewport, cells and track carry that generation,
+  and the track reporter's task is keyed by it so even a same-size resize
+  republishes. The real-NSWindow probe watches the old triple become
+  unusable synchronously, then waits for one fresh matching triple at a
+  changed size and again at the same size.
+- **Stretch does not jump over a same-axis collection wrapper.** The
+  mac portfolio's detail column already filled its track, but its new
+  nested accounts For still defaulted to start and handed each native
+  table a 145pt viewport. `accounts.rows(align="stretch")` is the
+  required inner hop; the forcing scene checks both authored alignments
+  and the 800x600 window before it reads table edges.
 - **A share-green backend can still be POOLING the leftover beside its
   children — root_fills does not close the class, it only closes the
   root-level instance.** AppKit's NSStackView under its default
@@ -743,9 +802,16 @@ the same patterns return through interpreter drop-downs
   four build lines now fail the run loudly, and KayaCompose.kt has a
   mac-side compile gate at last (tools/check-compose.sh — the
   swift-typecheck sibling; the emulator used to be the FIRST
-  compiler to see the Kotlin layer). When reading suite results,
-  check verdict COUNTS, never just exit codes — pipeline wrappers
-  can eat the code.
+   compiler to see the Kotlin layer). When reading suite results,
+   check verdict COUNTS, never just exit codes — pipeline wrappers
+   can eat the code.
+- **A textual leg census needs a marker setup cannot print.** The
+  2026-08-24 summary reported Android 128 and total 1,334, but the runner
+  had 112 real Android legs and the matrix 1,318. Thirteen per-device and
+  three per-suite APK-staging successes also ended `: PASS`, exactly what
+  `validate-all` counts. Staging now prints `: OK`;
+  `android-leg-order.py`'s real-source self-test changes it back and
+  `check-steps` must refuse.
 - **One-shot registration hooks race window attachment — register on
   viewDidMoveToWindow, never on a queued closure.** (Corrected
   diagnosis 2026-07-21; the entry here previously blamed
@@ -936,6 +1002,27 @@ attempt checked before the first step and fired never, because the
 guest's transactions have not arrived yet at that point, so the scene
 legitimately looks empty. On the failure path it also cannot
 false-positive on a scene that mounts late.
+
+## A vacuous opening expect is not Swift scene admission
+
+2026-08-23, the dynamic-table matrix. Only
+`listdetail-python-swiftui` failed: its opening `expect_entries 0`
+passed against the pristine model, then the click 10ms later could not
+resolve `button#0`. The label existed afterward. Python had submitted
+the label, button and mount in one atomic build transaction, so this was
+not a partial transaction; SwiftUI's primary `onAppear` had started the
+command pump and selftest as siblings, and the selftest outran the main
+queue apply. The neighbouring languages passed by timing.
+
+An opening observation supplies a bounded render retry, but a model-only
+zero can be true before a scene exists. Swift therefore admits the
+selftest only at the completed apply-batch boundary after any surface
+has mounted content. A node-bearing batch with no mount arms one
+five-second grace period instead, so the unmounted-scene diagnosis above
+still runs; a later mount wins immediately and a stale timer cannot
+start a second harness. `tools/check-steps.sh` holds the all-surface
+route and the one-shot transition, including a compiled truth table and
+watched-red shadows.
 
 ## A gate that does not compile the layer it is named for
 
@@ -2096,6 +2183,14 @@ regardless was watched costing ~2.9s per expect on an empty directory —
 a stall on every use, in exchange for nothing. Only the forms that NAME
 FILES wait.
 
+The save-panel sibling needs its own longer post-hop tail. Measured in the
+2026-08-23 five-lane matrix: the second request began at +9682ms, its state
+read returned nil at +20202ms, and the same panel was readable less than
+291ms later; rename, save, and disk readback then all passed. The first main
+hop already costs about 8.7s, so the former 100 x 20ms tail expired just
+before the sheet's accessibility state arrived. `kayaAwaitSavePanelState()`
+now owns a five-second tail; the open-panel browser keeps its shorter bound.
+
 `file_choose <name>` needs the same wait and for a sharper reason: it is
 an ACTION, so the step wrapper never re-runs it, and its own read of the
 empty browser refuses the row permanently. A read with no retry cover
@@ -2291,7 +2386,9 @@ THE ORDER IS THE WHOLE TRICK, and getting it wrong cost two runs.
 service, because the validation app is what declares it — and
 `logcat -c` wipes the connection message that proves it came up. Enable
 first and the service is killed and its one piece of evidence erased,
-which reads exactly like a service that never started. Enable AFTER both.
+which reads exactly like a service that never started. Disable and retire
+the previous service before install; enable the fresh one after the
+post-install force-stop and log clear.
 
 And writing the setting is not the same as the system binding the
 service. An unbound service fails exactly like a picker that never
@@ -2333,6 +2430,44 @@ write the adjacency down somewhere executable. Every gate in this repo
 that pays for itself has that shape — check-stubs pairs a runner's legs
 against a backend's stub, paired-cfg pairs a unix item against a windows
 one, and this pairs a step against the step it must follow.
+
+## Package replacement can resurrect a service after force-stop
+
+`adb install -r` restarts an accessibility service whose component is
+still enabled, asynchronously. The old Android order installed and then
+force-stopped. In the 2026-08-23 save-compose failure, force-stop returned
+before that restart: the service process began at 19:48:43.456 and bound
+at .536, then AccessibilityManagerService timed out adding both the app
+window (id 103) and the focused, rendered picker (id 105). `getWindows()`
+stayed empty and the harness truthfully printed `KAYA_DIALOG_UNSEEN` with
+zero windows. A working Go trace killed the replacement-started process
+and bound a new one; its picker was readable.
+
+Disarm is therefore a PRE-INSTALL operation: clear the enabled component,
+disable accessibility, force-stop its package, and wait until the service
+is unbound and the process is gone. After install, the existing
+force-stop/log-clear/enable order still applies. Bound is not enough
+either: the service publishes `KAYA_A11Y_WINDOWS: READY` only after a
+readable current window exists, and the runner will not launch a scene
+before seeing it. One spelling that looks like a clear is not one:
+`settings put secure enabled_accessibility_services ""` prints `Bad
+arguments` and retains the old component. The first positive run made the
+new disarm wall print that value through every JVM leg; the runner uses
+`settings delete` now. tools/lib/android-leg-order.py holds all three
+boundaries.
+
+That wall is for PACKAGE REPLACEMENT, not every scene. The first
+contended matrix with the wall armed the service before all 112 legs and
+took 415s against the 310s ceiling; 220s of the standalone-to-matrix
+growth sat in the three leg phases, with cached builds. Interrupted-run
+state is now removed by one startup `a11y_hygiene` census across every
+phone and the tablet. Only `filedialog`, `save` and `editor` leave the app
+for DocumentsUI, so only those scenes retain the guarded pre-install
+disarm, READY admission and post-leg disarm; ordinary legs perform no
+settings query. The shared scripts are the source of that set:
+tools/lib/android-leg-order.py derives it from the picker verbs, so a
+fourth scene cannot silently launch without eyes. The post-admission
+standalone run passed all 112 legs with Compose/JVM/Go at 52/32/34s.
 
 ## What DocumentsUI publishes, and the directory it cannot reach
 
@@ -2384,6 +2519,31 @@ cancel loop reported `backs=8 gone=false` on the main thread and
 `backs=3 gone=true` off it. The service asserts the thread now rather
 than commenting on it, because the symptom is a timeout nobody would
 trace back here.
+
+## A changed event is not a changed picker path
+
+The event-handshake cancel gate still admitted a straggler under the
+2026-08-23 dynamic-table matrix. Three BACKs at 19:30:29.537,
+19:30:30.186 and 19:30:30.639 walked from the scene directory to
+Documents, to the storage root, then dismissed PickActivity. Its cancel
+result and kaya's onResume landed at 19:30:31.073. A fourth BACK was
+already queued at 19:30:31.082; it landed when MainActivity gained focus
+and finish()ed it at 19:30:31.238. `KAYA_DISMISS_REMOVED` was absent.
+
+`windowEpoch` was the false witness. Picker closing generates
+accessibility events too, so “some event happened” cannot prove the
+previous BACK navigated to another directory. The next press is now
+earned only by the same picker window publishing a full breadcrumb trail
+that is stable on two reads and is a strict prefix of the last path that
+earned one. A path is spent before dispatch; unreadable, oscillating and
+already-spent states only withhold. A row or Save action marks the whole
+presentation as closing so cleanup cannot inject a BACK behind it.
+
+The gate's cancel-path self-test feeds three successively shorter paths,
+same-state repeats, old/new oscillation, an unreadable read and a closing
+action. With the spent-state and strict-shortening walls both removed,
+the real filedialog and save legs were watched crashing at that self-test
+instead of passing vacuously.
 
 Two more, from the same session. `openFileDescriptor` in mode `w` does
 NOT truncate — the provider maps it to O_WRONLY without O_TRUNC, and
@@ -2634,14 +2794,64 @@ presentation is inert — four re-assertions at 0.8/1.6/2.4/3.2s produced
 no second reveal and the picker never moved. The property is read when
 the remote view controller is configured and never again.
 
-**So the runner owns it**: `picker_warm` in tools/ios/run-sim.sh
-launches the system's own Files app on each pool device before any leg
+**So the runner owns the aim**: after the exact prior-run cleanup below,
+`picker_warm` in tools/ios/run-sim.sh launches the system's own Files app
+on each pool phone before any leg
 (same DocumentManager, same file provider), waits for
 `com.apple.FileProvider` to carry a pid — it carries none until
 something on that boot has used the document stack, which is exactly the
 cold/warm edge — settles, and terminates it. 5.2s on a cold device,
-0.23s on a warm one. tools/check-steps.sh keeps the call in front of the
-legs, with both refusals watched failing.
+0.23s on a warm one. The export-health trap below is a distinct state of
+the same provider; tools/check-steps.sh holds both walls on the
+per-device preparation path.
+
+## A live iOS FileProvider can have a stale LocalStorage item index
+
+A dynamic-table matrix ran 105 of 106 iOS legs green; `save-swiftui`
+delivered one HID tap to DocumentManager's real Save AXButton, observed
+the sheet leave with no accessibility timeout, then received
+`documentPickerWasCancelled`. The device log supplied the missing cause:
+LocalStorage failed `did=8079` with FP -1005, "The file doesn't exist";
+DocumentManager could not tag the item, declared its index out of sync
+and forced a reindex, then called `didPickDocumentURLs` with an empty
+array because the export could not be prepared and materialized. UIKit
+maps that empty result to the public cancellation delegate. A passing
+sibling instead acquired a file-coordination claim on its final
+destination and returned that URL.
+
+This is not a presentation/dismissal race. On the failed device the old
+picker scene was invalidated 57ms before the next remote controller was
+ready; a passing sibling had the new controller ready 15ms before the
+old scene finished invalidating. Deferring the callback or retrying
+`documentPickerWasCancelled` would therefore target the wrong state,
+and the public callback cannot distinguish failed materialization from
+a person's real Cancel.
+
+A later `editor-go` leg reproduced the same failure after its clean
+preflight passed: one real Save tap dismissed the sheet in 820ms, then
+LocalStorage emitted FP -1005/out-of-sync/empty URLs. The failing phone
+held 101 installed `dev.kaya.*` apps; editor-go's container alone held 58
+old editor directories, and 12 retained data containers held 503 Kaya
+scratch directories. `simctl install` preserves app data, while the
+probe's fresh container had tested only itself.
+
+Preparation now parses `simctl listapps` through `plutil`, accepts only
+the exact `dev.kaya.` prefix, uninstalls that finite list through official
+`simctl uninstall` and requires a second empty census before warm/probe.
+A live negative removed 100 apps while deliberately retaining
+`dev.kaya.editorgo`; the postcondition named it, and restoration removed
+the last app. The runner then exports a unique known-byte file through a
+real `UIDocumentPickerViewController`, drives and reads back its name,
+requires a nonempty URL and reopens the destination byte for byte. Empty
+cancellation or a contemporaneous FP -1005/out-of-sync log re-seeds only
+that simulator, warms it and runs the export once more; anything else, or
+a second health failure, refuses before a leg. The probe attests the
+provider route and its own clean container; cleanup makes prior guest
+containers unable to poison the run. tools/check-steps.sh holds the exact
+cleanup scope/emitter/postcondition, bounded destructive surface,
+per-phone call, two attempts, one-device erase, recording/clipboard
+ordering and probe semantics; its real-source perturbations are watched
+red.
 
 ## A freshness check by mtime, against a build system that hashes
 
@@ -4019,6 +4229,35 @@ subsystem, LANE-WIDE"). The rule: on a long session, when a SECOND
 unrelated android one-off appears, reboot the pool BEFORE chasing the
 leg — the reboot costs two minutes and the chase costs an evening.
 
+## An Android toolchain move outlives its dev shell
+
+Measured 2026-08-23 after cab6d33 moved the pinned emulator from
+36.6.11 to 37.1.11: the four v36 emulator processes stayed alive across
+the flake change, so two matrices on the new tree silently reused the
+old host binary. Killing them finally started v37, but both AVDs still
+had July quickboot snapshots. `make_snapshot` treated the directory's
+existence as compatibility; all four v37 readers logged `Failed to load
+snapshot 'default_boot'` and `starting from scratch. Reason:
+incompatible snapshot version`, then booted from scratch in 36.244–
+38.664s. The lane passed functionally in 498s while `TIMING boot` said
+0s because its clock started after every boot wait. Compose carried the
+post-boot churn (11s median, 481s summed leg time), JVM fell to 8s and
+Go to 6s; the changing cost across one unchanged interpreter rules out
+work added to every leg.
+
+The dev-shell fingerprint cannot evict a process outside its shell, a
+snapshot on disk does not attest which emulator can restore it, and a
+restored boot id is not a process identity. The Android launchers now
+fingerprint the immutable emulator and system-image store paths, tie a
+saved snapshot to that pair, and tie each read-only guest overlay to
+the pair, AVD and serial. A mismatch reseeds with one writable instance
+before any readers launch; readers force `default_boot` to load instead
+of accepting a cold fallback. The only host marker lives under
+`target/avd`; the live `/data/local/tmp/kaya-emulator-identity` marker
+lives only in each read-only process's guest overlay and is removed from
+the writable seed before shutdown, so it is never stored in the seed
+snapshot.
+
 ## The x11 lane has NO window manager, so X focus reverts to POINTERROOT
 ## when a dialog closes — and the POINTER'S POSITION decides who types
 
@@ -4181,6 +4420,24 @@ baseline" run would have been the perturbed one.
 Restore with `shutil.copyfile` plus `os.utime(path, None)`, and keep the
 verify in every perturb loop that rebuilds anything.
 
+## A cache self-test outside its own key can still invalidate Cargo (2026-08-23)
+
+`check-keyed` used `crates/.keyed-probe` (gone) to prove that changing a path outside
+the fixture gate's input set leaves its key stable. Creating and removing that
+one file left the tree byte-clean but advanced the top-level `crates/` directory
+mtime. The core build script declares that whole directory with
+`rerun-if-changed`, so the next matrix rebuilt every core target. On Windows
+that became 13s of target checks, 53s of release builds and 45s of test builds;
+the relink changed the same 41 of 288 deploy artifacts, missed the combined
+deploy stamp and paid another 42s for the source rebuilds on the guest.
+
+The timestamp identified the writer exactly: a 494s gate sweep began at
+18:35:34, `check-keyed` occupied its +310s window, and `crates/` moved at
+18:40:46.551 while no file below it had moved after 18:00. An outside-key probe
+therefore lives under ignored `target/`, which is outside both the fixture's
+declared inputs and every shipped artifact's source set; `check-keyed` refuses
+any other root before it creates the file.
+
 ## A deep worktree makes deploy-win.sh unreachable, and the error names ssh
 
 `tools/deploy-win.sh` multiplexes over
@@ -4271,3 +4528,131 @@ negative is only watched if the thing that ran contains the
 perturbation — the build's freshness is part of the proof, not
 plumbing. The same session's WinUI sibling fix carried the guard from
 the start (the Compiling line is quoted in the ledger's strike note).
+
+## A sixth compile unit can starve Android past both its duration ceiling and first draw
+
+Measured 2026-08-23 after the dynamic-table sweep grew to 42 gates. The
+optimized Android lane was 142s standalone (Compose/JVM/Go legs
+49/32/36s), then passed all 112 legs in the matrix but took 373s against
+its unchanged 310s ceiling: the same blocks were 118/99/107s. Its three
+builds stayed cached at 0.13-0.15s, no accessibility arm retried and no
+device rebooted. The 427s gate sweep overlapped every block at ordinary
+priority, so the slowdown was host scheduling across the whole lane,
+not work added to one guest or one picker. The iOS export admission was
+healthy on its first attempt and ended at the front of its lane; it
+cannot explain three equal deltas through Android's end.
+
+Niceness was necessary and NOT sufficient. It moved Android 373 -> 339s
+(blocks 108/90/91s) and left the sweep green at 467s. Linux's container
+VM was sampled at about 495% CPU, but lowering its pool from eight to six
+falsified that as the remaining lever: Android moved only 339 -> 333s
+while Linux moved 371 -> 419s. The eight-job balance stays. A later
+nice-only matrix still took Android 338s and exposed the startup boundary:
+`clipboard-compose`'s first five-second label wait began before a real
+frame; launch took 6.774s, HWUI logged a 4682ms Davey frame and 234
+skipped frames, and display landed only 10–23ms before expiry. Its other
+21 assertions passed, so this was admission plus CPU starvation, not
+clipboard behavior.
+
+Compose now starts the harness from a one-shot decor-view pre-draw.
+The first barrier-only matrix proved the sixth unit was not the whole
+remaining cost: every Android leg passed, gates waited and then passed in
+218s, but Android took 311s/310. Its phase sum accounted for every second
+(preflight 3, boot 18, helper 17, Compose 103, JVM build+legs 2+68, Go
+build+legs 4+96); broad five-platform host share was the residual, not a
+hidden wait. Nicing the four sibling runner shells was falsified next:
+Android worsened to 316s while only the directly spawned mac lane moved
+materially (325 -> 338s); Docker, CoreSimulator and UTM work is
+daemon-launched and does not reliably inherit the wrapper's niceness.
+
+The saved three-phone log made the bounded lever arithmetic: phone-leg
+service demand was Compose/JVM/Go 228/174/232s. The same submission order
+has greedy makespans 80/59/84s on three slots and 61/47/64s on four,
+projecting the lane near 266s with measured non-pool overhead. The stable
+runner and environment-probe default is therefore four phone emulators,
+not a matrix-only override; changing it back to the live-red three is a
+watched perturbation.
+
+The pool alone was then falsified under the real host share: standalone
+four-phone phases were 3+9+11+40+2+27+2+32 = 126s, while an all-five-at-t0
+matrix made the same green 112 legs take
+3+22+31+102+6+81+4+101 = 350s. The other lanes and delayed gates all
+passed (332/384/414/454/208s); only Android crossed its unchanged 310s
+ceiling. Reserving merely boot+helper projects 317s and cannot clear it.
+
+A staged experiment reserved Android through the drained Compose suite
+before admitting macOS, Linux, Windows and iOS. Its bounded arithmetic was
+63s for that standalone prefix plus the measured 192s contended JVM/Go
+suffix, projecting 255s. That was a projection, not a passing matrix
+result, and the experiment was rejected: it violated the ratified rule
+that all five platform lanes launch together. Its atomic
+`compose-complete` token and sibling barrier are not matrix doctrine.
+
+The runner now carries two bounded work removals that do not change that
+doctrine. First, its former 38 Compose, 36 JVM and 38 Go legs each ran
+`adb install -r` on their suite's SAME APK. The measured artifacts in
+the current tree are 111095703, 64911093 and 74364739 bytes respectively:
+112 installs transfer 9.384 GB. Installing once after each verified build
+on every device that can claim that suite is 5 Compose installs (four
+phones plus the tablet), 4 JVM and 4 Go: 13 installs and 1.113 GB, removing
+99 replacements and 8.272 GB. This is not a clean-data boundary — `-r`
+preserves app data, and the exact-package force-stop already supplies the
+per-leg process boundary.
+
+The retained evidence bounds the time claim separately from the byte
+census. Nine `target/validate-failures/android-*-buffers.log` files were
+read per file, then overlapping install events were deduplicated by their
+full `installer_clear_app_data_caller` line. From the preceding
+`am_proc_died` to that install commit, the Compose/JVM/Go samples numbered
+646/563/563, with medians 0.734/0.884/0.804s and means
+1.114/1.735/1.019s. Commit to the next `wm_create_activity` or
+`am_proc_start` numbered 702/622/608, with medians
+0.064/0.097/0.079s. Removing the repeated installs projected about 88s of
+median or 143s of mean aggregate device-slot work, roughly 22-36s over four
+phones. The implementation stages only after build-id, icon and asset
+verification, disarms the target package immediately before replacement,
+refuses a missing/duplicate target or verdict, and admits no suite leg
+until every eligible device passed. Per-leg install is forbidden by the
+same executable guard.
+
+Second, every suite formerly drained the phone pool, reselected the helper
+IME on all four devices, ran its one ranges leg, and drained again. In the retained
+350s log the measured phone-leg sums were 309/262/332s; assigning those
+same recorded durations greedily in submission order with no ranges
+barrier gives 86/67/87s, against the observed 102/81/101s phases. The 44s
+gap is an UPPER BOUND, not promised savings: those phases also contain
+control and adb overhead. What the source proves is the serialized tail:
+ranges-compose was 15s; ranges-jvm was 5s before a separate final
+three-leg wave whose maximum was 5s; ranges-go was 4s before editor-go's
+9s. The worker now claims one device slot, reselects that exact device's
+IME, and retains the slot through `run_apk_on`, allowing the other devices
+to keep working; ranges and editor share each suite's one final drain.
+`tools/lib/android-leg-order.py` holds both topologies and watches every new
+branch red with a counted perturbation.
+
+The first optimized default four-phone standalone run passed all 112 legs
+in 105s: preflight 3 + boot 8 + helper 11 + Compose 35 + JVM build/legs
+2/21 + Go build/legs 2/23. The prior four-phone baseline was 126s and the
+rejected five-phone experiment was 141s. This establishes the runner
+change, not the scheduler: no accepted all-at-t0 matrix had yet run on it.
+
+The accepted scheduler therefore still launches all five platform lanes
+concurrently, keeps the stable four-phone Android default and the 310s
+ceiling, and waits for Android's recorded pid before starting the one gate
+sweep at niceness 10 while longer lanes continue. The 350s all-at-t0
+measurement means the Android duration anomaly remains open; there is no
+final matrix pass on this scheduler. `tools/check-gates.sh` must reject a
+future platform launch moved behind Android admission as well as drift in
+pool width, pid provenance, single-sweep shape or niceness.
+
+The first optimized-runner attempt under that scheduler, 2026-08-24,
+passed every scene assertion and the gate sweep: mac 320s/329, Linux
+474s/580, Windows 533s/191, iOS 493s/106, Android 268s/112, gates 348s;
+619s wall. `validate-all` still exited 1 because Linux exceeded its
+ceiling by 4s and Windows by 13s. The overages were not a per-leg blast
+radius: Linux spent 96s in its cold core build and 366s in 580 green legs,
+with both portfolio legs at 1s; Windows spent 75/47/65s in fresh
+build/deploy/unit-test phases and 310s in 191 green legs, none over 26s.
+Android is now positively measured below 310s, but there is still no
+accepted ALL PASS record on these removals. Thermal state and unrelated
+application load were uncontrolled variables, not measured causes.

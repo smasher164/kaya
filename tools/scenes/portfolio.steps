@@ -1,61 +1,56 @@
-# The portfolio dashboard's scene (docs/portfolio-plan.md §3) — the
-# second forcing app, Python on the desktop lanes; the mobile lanes
-# carry it declared-off until the packaging milestone bootstraps
-# CPython there.
-#
-# Targets: LEAF kinds by creation order (safe cross-language — body
-# order is screen order): label#0 portfolio total, label#1 account
-# name, label#2 account total; button#0 "Day tick", buttons #1..#3 the
-# stamped account rows in ACCOUNT_ORDER. The TABLE by AUTHORED KEY —
-# column@positions, the app's a11y_id — because container creation
-# order is per-language and the container lint forbids indexing it
-# (the kind@id grammar is the sanctioned route; harness.rs Target).
-#
-# Every money string is integer-cents arithmetic from the app's BOOK —
-# dollars dot cents, no thousands separator (plan §1) — so a drifted
-# price table fails here byte-for-byte.
+# The portfolio dashboard's dynamic-table scene (docs/portfolio-plan.md):
+# Python on the desktop lanes; mobile remains unwired until packaging.
+# Each account copy stamps its own table, addressed by the shared
+# authored id plus that copy's string key.
 expect label#0 "Portfolio: $10026.50"
 expect label#1 "Brokerage"
 expect label#2 "Account total: $7163.50"
-# The detail column's geometry, pinned the day the first photograph
-# caught it drawing a third of itself on macOS with every line below
-# green (the GAP entry beside the dynamic-tables milestone): the
-# column spans the track its grow earned, and its children span the
-# column.
-expect_fills column@detail
+expect label#3 "Retirement"
+expect label#4 "Account total: $2363.00"
+expect label#5 "Savings"
+expect label#6 "Account total: $500.00"
+expect_window_size 800x600
 expect_aligned column@detail "stretch"
-expect_columns column@positions "Ticker|Qty|Price|Value"
-expect_column_edges column@positions 4
-expect_rows column@positions "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
-# Selection: a stamped account button's REAL click; the one positions
-# collection repopulates (the dynamic-tables workaround, plan §1) and
-# the detail follows.
-click button#2
-expect label#1 "Retirement"
-expect label#2 "Account total: $2363.00"
-expect_rows column@positions "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
-# Sort is the guest's policy on NUMERIC keys (cents, never the money
-# string): Value ascending, then the same column flips.
-header_click column@positions 3
-expect_columns column@positions "Ticker|Qty|Price|Value ^3"
-expect_rows column@positions "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
-header_click column@positions 3
-expect_columns column@positions "Ticker|Qty|Price|Value v3"
-expect_rows column@positions "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
-# A new column starts ascending — Qty discriminates from the order the
-# value sort left behind.
-header_click column@positions 1
-expect_columns column@positions "Ticker|Qty|Price|Value ^1"
-expect_rows column@positions "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
-# Re-selection resets the indicator with the repopulation (plan §1's
-# recorded decision, not an accident).
-click button#1
-expect label#1 "Brokerage"
-expect_columns column@positions "Ticker|Qty|Price|Value"
-expect_rows column@positions "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
-# One day tick: fixed per-ticker deltas (plan §2), every total moves to
-# its precomputed value.
+expect_aligned column@accounts "stretch"
+# The detail has zero remainder; a table is a viewport, so its sibling
+# assertion permits empty row space but refuses content beyond the edge.
+expect_fills column@detail
+expect_fills column@positions[brokerage]
+expect_column_edges column@positions[brokerage] 4
+expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
+expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
+expect_column_edges column@positions[retirement] 4
+expect_columns column@positions[retirement] "Ticker|Qty|Price|Value"
+expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
+expect_column_edges column@positions[savings] 4
+expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
+expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
+# One copy's sort indicator and order move; both siblings stay put.
+header_click column@positions[retirement] 3
+expect_columns column@positions[retirement] "Ticker|Qty|Price|Value ^3"
+expect_column_edges column@positions[retirement] 4
+expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
+expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
+expect_rows column@positions[retirement] "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
+header_click column@positions[retirement] 3
+expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
+expect_column_edges column@positions[retirement] 4
+expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
+# A second copy owns an independent sort state.
+header_click column@positions[brokerage] 1
+expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
+expect_column_edges column@positions[brokerage] 4
+expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
+expect_rows column@positions[brokerage] "NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50|AAPL,10,$180.00,$1800.00"
+# The tick updates every nested collection and preserves each copy's sort.
 click button#0
 expect label#0 "Portfolio: $10023.00"
 expect label#2 "Account total: $7153.00"
-expect_rows column@positions "AAPL,10,$182.50,$1825.00|NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00"
+expect label#4 "Account total: $2370.00"
+expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
+expect_column_edges column@positions[brokerage] 4
+expect_rows column@positions[retirement] "BND,20,$72.00,$1440.00|VXUS,15,$62.00,$930.00"
+expect_column_edges column@positions[retirement] 4
+expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
+expect_column_edges column@positions[savings] 4
+expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"

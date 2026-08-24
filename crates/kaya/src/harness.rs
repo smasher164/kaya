@@ -81,15 +81,17 @@ pub fn script(scene: &str) -> Option<&'static str> {
 /// `#last`) — or by AUTHORED KEY (`kind@id`, the a11y_id the guest
 /// declared), which dissolves the creation-order instability that
 /// makes container indices per-language (tools/check-steps.sh's
-/// container lint). When `id` is Some, `index` is meaningless until
-/// the runner normalizes the target through `Stage::resolve_id`.
-/// The id borrows the script's own leaked lifetime (the scene-script
-/// precedent above), which is what keeps Target Copy.
+/// container lint). `kind@id[key.path]` adds the stamped copy's
+/// outermost-first string keys. When `id` is Some, `index` is
+/// meaningless until the runner normalizes through `Stage::resolve_id`.
+/// The authored strings borrow the script's own leaked lifetime (the
+/// scene-script precedent above), which is what keeps Target Copy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Target {
     pub kind: TargetKind,
     pub index: isize,
     pub id: Option<&'static str>,
+    pub keys: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -608,11 +610,8 @@ pub struct TextRange {
 }
 
 impl Step {
-    /// Every Target this step carries, mutably — the runner's kind@id
-    /// normalization rewrites them in place. The wildcard arm is
-    /// guarded by `targets_mut_census` below: a NEW Target-carrying
-    /// variant that forgets to join this match fails cargo test, not a
-    /// scene.
+    /// Every Target this step carries, for the runner's kind@id
+    /// normalization.
     fn targets_mut(&mut self) -> Vec<&mut Target> {
         match self {
             Step::Click(t)
@@ -642,7 +641,47 @@ impl Step {
             | Step::Compose(t, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectInset { target, .. } => target.iter_mut().collect(),
-            _ => Vec::new(),
+            Step::Settle(..)
+            | Step::ExpectStall
+            | Step::ExpectNoStall
+            | Step::Type(..)
+            | Step::ExpectRootFills
+            | Step::ExpectTypeface(..)
+            | Step::ExpectAppIcon(..)
+            | Step::ExpectTitle(..)
+            | Step::ExpectSections(..)
+            | Step::ExpectSection(..)
+            | Step::ExpectSectionSymbol(..)
+            | Step::ExpectSectionsPresentation(..)
+            | Step::SelectSection(..)
+            | Step::ExpectWindowSize(..)
+            | Step::ExpectDirty(..)
+            | Step::CloseWindow(..)
+            | Step::ExpectWindows(..)
+            | Step::ExpectAlert(..)
+            | Step::FileChoose(..)
+            | Step::FileDialogGoto(..)
+            | Step::ExpectSaveDialog(..)
+            | Step::FileDialogName(..)
+            | Step::FileSave(..)
+            | Step::ClipboardSeed(..)
+            | Step::ExpectClipboard(..)
+            | Step::ExpectFileDialog(..)
+            | Step::AlertChoose(..)
+            | Step::ExpectAlerts(..)
+            | Step::ExpectEntries(..)
+            | Step::Back(..)
+            | Step::MenuActivate(..)
+            | Step::ExpectMenu(..)
+            | Step::ExpectMenuSymbol(..)
+            | Step::ExpectMenus(..)
+            | Step::ExpectMenuPresentation(..)
+            | Step::ExpectToolbar
+            | Step::ExpectToolbarItem(..)
+            | Step::Shortcut(..)
+            | Step::ResizeWindow(..)
+            | Step::ExpectSplit(..)
+            | Step::ExpectPanes(..) => Vec::new(),
         }
     }
 
@@ -811,13 +850,14 @@ pub trait Stage: Send + 'static {
     /// viewport.
     fn column_edges(&self, target: Target, want: usize) -> String;
     /// The creation index of the FIRST widget of `kind` carrying the
-    /// authored a11y_id `id`, or None while no such widget exists —
-    /// how a `kind@id` target becomes the index every other read uses
+    /// authored a11y_id `id`, and (when present) whose table sort tag
+    /// carries `keys`, or None while no such widget exists — how a
+    /// `kind@id[key.path]` target becomes the index every other read uses
     /// (the runner normalizes before each step; observations retry the
     /// absence like any not-yet-applied scene state). Read from the
     /// BACKEND'S OWN records of the applied prop, never the script's
     /// hopes.
-    fn resolve_id(&self, kind: TargetKind, id: &str) -> Option<isize>;
+    fn resolve_id(&self, kind: TargetKind, id: &str, keys: Option<&str>) -> Option<isize>;
     /// Click the column header at `column` through the platform's real
     /// header path, so it emits sort_requested.
     fn header_click(&self, target: Target, column: u32);
@@ -1861,12 +1901,32 @@ fn parse_window_target(rest: &str) -> (Option<u64>, &str) {
 }
 
 fn parse_target(spec: &str) -> Result<Target, String> {
-    // The authored-key spelling: kind@id, resolved against the a11y_id
-    // the guest declared — creation order never enters, so containers
-    // are freely addressable (the check-steps container lint's
-    // sanctioned alternative).
-    if let Some((kind, id)) = spec.split_once('@') {
+    // The authored-key spelling: kind@id, optionally narrowed to one
+    // stamped copy by its outermost-first string keys.
+    if let Some((kind, authored)) = spec.split_once('@') {
         let kind = parse_target_kind(kind, spec)?;
+        let (id, keys) = if let Some(open) = authored.find('[') {
+            if !authored.ends_with(']')
+                || authored[open + 1..authored.len() - 1].contains('[')
+                || authored[open + 1..authored.len() - 1].contains(']')
+            {
+                return Err(format!("target copy keys are malformed: {spec:?}"));
+            }
+            let keys = &authored[open + 1..authored.len() - 1];
+            if keys.is_empty() || keys.split('.').any(str::is_empty) {
+                return Err(format!("target copy keys want dot-joined non-empty segments: {spec:?}"));
+            }
+            let id = &authored[..open];
+            if id.contains(['[', ']', '@']) {
+                return Err(format!("target copy keys are malformed: {spec:?}"));
+            }
+            (id, Some(keys))
+        } else {
+            if authored.contains([']', '@']) {
+                return Err(format!("target copy keys are malformed: {spec:?}"));
+            }
+            (authored, None)
+        };
         if id.is_empty() {
             return Err(format!("target id is empty: {spec:?}"));
         }
@@ -1874,11 +1934,12 @@ fn parse_target(spec: &str) -> Result<Target, String> {
             kind,
             index: 0,
             id: Some(&*Box::leak(id.to_owned().into_boxed_str())),
+            keys: keys.map(|keys| &*Box::leak(keys.to_owned().into_boxed_str())),
         });
     }
     let (kind, index) = spec
         .split_once('#')
-        .ok_or_else(|| format!("target wants kind#index or kind@id: {spec:?}"))?;
+        .ok_or_else(|| format!("target wants kind#index or kind@id[key.path]: {spec:?}"))?;
     let kind = parse_target_kind(kind, spec)?;
     let index = if index == "last" {
         -1
@@ -1887,7 +1948,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
             .parse()
             .map_err(|_| format!("target index wants a number or `last`: {spec:?}"))?
     };
-    Ok(Target { kind, index, id: None })
+    Ok(Target { kind, index, id: None, keys: None })
 }
 
 fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
@@ -2482,14 +2543,15 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 let Some(id) = t.id else { continue };
                 let deadline = Instant::now() + POLL_DEADLINE;
                 loop {
-                    if let Some(index) = stage.resolve_id(t.kind, id) {
-                        *t = Target { kind: t.kind, index, id: None };
+                    if let Some(index) = stage.resolve_id(t.kind, id, t.keys) {
+                        *t = Target { kind: t.kind, index, id: None, keys: None };
                         break;
                     }
                     if !retry || Instant::now() >= deadline {
                         unresolved = Some(format!(
-                            "{} names no widget: no {:?} carries a11y_id \"{id}\"",
-                            target_spec(t), t.kind
+                            "{} names no widget: no {:?} carries a11y_id \"{id}\"{}",
+                            target_spec(t), t.kind,
+                            t.keys.map_or(String::new(), |keys| format!(" at copy [{keys}]"))
                         ));
                         break;
                     }
@@ -3584,12 +3646,57 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Textarea => "textarea",
     };
     if let Some(id) = t.id {
-        format!("{kind}@{id}")
+        t.keys.map_or_else(
+            || format!("{kind}@{id}"),
+            |keys| format!("{kind}@{id}[{keys}]"),
+        )
     } else if t.index < 0 {
         format!("{kind}#last")
     } else {
         format!("{kind}#{}", t.index)
     }
+}
+
+fn table_tag_identity(tag: &[u8]) -> Option<(u64, Vec<Option<&str>>)> {
+    if tag.len() < 16 {
+        return None;
+    }
+    let node = u64::from_le_bytes(tag[0..8].try_into().ok()?);
+    let count = u32::from_le_bytes(tag[8..12].try_into().ok()?) as usize;
+    if count == 0 || count > (tag.len() - 16) / 8 {
+        return None;
+    }
+    let mut at = 16usize;
+    let mut path = Vec::new();
+    for _ in 0..count {
+        let ty = u32::from_le_bytes(tag.get(at..at + 4)?.try_into().ok()?);
+        let len = u32::from_le_bytes(tag.get(at + 4..at + 8)?.try_into().ok()?) as usize;
+        let payload_at = at.checked_add(8)?;
+        let payload = tag.get(payload_at..payload_at.checked_add(len)?)?;
+        path.push(match ty {
+            crate::wire::VALUE_STR => Some(std::str::from_utf8(payload).ok()?),
+            crate::wire::VALUE_I64 if len == 8 => None,
+            _ => return None,
+        });
+        let padded = len.checked_add(7)? & !7;
+        at = payload_at.checked_add(padded)?;
+    }
+    (at == tag.len()).then_some((node, path))
+}
+
+pub(crate) fn table_tag_node(tag: &[u8]) -> Option<u64> {
+    table_tag_identity(tag).map(|(node, _)| node)
+}
+
+/// `kind@id[key.path]` is string-key-only (docs/tables-plan.md).
+pub(crate) fn table_tag_matches_keys(tag: &[u8], node: u64, keys: &str) -> bool {
+    let Some((got_node, path)) = table_tag_identity(tag) else {
+        return false;
+    };
+    let wanted: Vec<_> = keys.split('.').collect();
+    got_node == node
+        && path.len() == wanted.len()
+        && path.iter().zip(wanted).all(|(got, want)| *got == Some(want))
 }
 
 /// Format child main-axis extents as whole-percentage shares of their
@@ -3775,10 +3882,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(steps.len(), 6);
-        assert_eq!(steps[1], Step::Click(Target { kind: TargetKind::Button, index: -1, id: None }));
+        assert_eq!(steps[1], Step::Click(Target { kind: TargetKind::Button, index: -1, id: None, keys: None }));
         assert_eq!(
             steps[4],
-            Step::SetText(Target { kind: TargetKind::Entry, index: 0, id: None }, "a b".into())
+            Step::SetText(Target { kind: TargetKind::Entry, index: 0, id: None, keys: None }, "a b".into())
         );
         assert!(parse("warp reality#0").is_err());
         assert_eq!(resolve(-1, 3), 2);
@@ -3791,14 +3898,14 @@ mod tests {
         assert_eq!(
             parse(r#"set_text textarea#0 "a\r\nb\nc\\d\qe""#).unwrap()[0],
             Step::SetText(
-                Target { kind: TargetKind::Textarea, index: 0, id: None },
+                Target { kind: TargetKind::Textarea, index: 0, id: None, keys: None },
                 "a\r\nb\nc\\d\\qe".into()
             )
         );
         assert_eq!(
             parse("expect_shares column#1 \"25,75\"").unwrap()[0],
             Step::ExpectShares(
-                Target { kind: TargetKind::Column, index: 1, id: None },
+                Target { kind: TargetKind::Column, index: 1, id: None, keys: None },
                 "25,75".into()
             )
         );
@@ -3898,7 +4005,7 @@ mod tests {
         assert_eq!(steps.len(), 1, "{steps:?}");
         assert_eq!(
             steps[0],
-            Step::Expect(Target { kind: TargetKind::Label, index: 0, id: None }, sentence.to_owned())
+            Step::Expect(Target { kind: TargetKind::Label, index: 0, id: None, keys: None }, sentence.to_owned())
         );
         // And the separator still separates when it is not inside a
         // string, which is the property the transports depend on.
@@ -3906,7 +4013,7 @@ mod tests {
         assert_eq!(joined.len(), 3, "{joined:?}");
         assert_eq!(
             joined[1],
-            Step::Expect(Target { kind: TargetKind::Label, index: 0, id: None }, "a; b".to_owned())
+            Step::Expect(Target { kind: TargetKind::Label, index: 0, id: None, keys: None }, "a; b".to_owned())
         );
     }
 
@@ -3917,7 +4024,7 @@ mod tests {
     fn entry_expect_and_focus_route_and_count() {
         let steps =
             parse("expect entry#0 \"entry-text\"\nexpect_focused entry#0").unwrap();
-        assert_eq!(steps[1], Step::ExpectFocused(Target { kind: TargetKind::Entry, index: 0, id: None }));
+        assert_eq!(steps[1], Step::ExpectFocused(Target { kind: TargetKind::Entry, index: 0, id: None, keys: None }));
         let (tx, rx) = std::sync::mpsc::channel();
         run(steps, MockStage { seen: &SEEN, verdict: tx });
         let (code, verdict) = rx.recv().unwrap();
@@ -4081,7 +4188,10 @@ mod tests {
         fn child_texts(&self, _: Target) -> String {
             "a|b".into()
         }
-        fn columns_presented(&self, _: Target) -> String {
+        fn columns_presented(&self, target: Target) -> String {
+            if target.index == 7 {
+                NORMALIZED_SEEN.lock().unwrap().push(format!("{target:?}"));
+            }
             String::new()
         }
         fn row_cells(&self, _: Target) -> String {
@@ -4090,7 +4200,17 @@ mod tests {
         fn column_edges(&self, _: Target, _: usize) -> String {
             String::new()
         }
-        fn resolve_id(&self, _: TargetKind, _: &str) -> Option<isize> {
+        fn resolve_id(&self, kind: TargetKind, id: &str, keys: Option<&str>) -> Option<isize> {
+            if id == "missing" {
+                return None;
+            }
+            if let Some(keys) = keys {
+                RESOLVE_SEEN
+                    .lock()
+                    .unwrap()
+                    .push(format!("{kind:?} {id} {keys}"));
+                return Some(7);
+            }
             Some(0)
         }
         fn header_click(&self, _: Target, _: u32) {}
@@ -4284,6 +4404,8 @@ mod tests {
     }
 
     static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static RESOLVE_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static NORMALIZED_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     /// The zero-expect guard fires: a script a transport mangled into
     /// nothing (or someone forgot to assert in) must fail, not pass.
@@ -4306,7 +4428,7 @@ mod tests {
         let steps = parse("expect_order column#0 \"a|b\"").unwrap();
         assert_eq!(
             steps[0],
-            Step::ExpectOrder(Target { kind: TargetKind::Column, index: 0, id: None }, "a|b".into())
+            Step::ExpectOrder(Target { kind: TargetKind::Column, index: 0, id: None, keys: None }, "a|b".into())
         );
         let (tx, rx) = std::sync::mpsc::channel();
         run(steps, MockStage { seen: &SEEN, verdict: tx });
@@ -4433,7 +4555,7 @@ mod tests {
             fn column_edges(&self, _: Target, _: usize) -> String {
                 String::new()
             }
-            fn resolve_id(&self, _: TargetKind, _: &str) -> Option<isize> {
+            fn resolve_id(&self, _: TargetKind, _: &str, _: Option<&str>) -> Option<isize> {
                 Some(0)
             }
             fn header_click(&self, _: Target, _: u32) {}
@@ -4608,7 +4730,7 @@ mod tests {
         let steps = parse("expect_fills column#0").unwrap();
         assert_eq!(
             steps[0],
-            Step::ExpectFills(Target { kind: TargetKind::Column, index: 0, id: None })
+            Step::ExpectFills(Target { kind: TargetKind::Column, index: 0, id: None, keys: None })
         );
         let (tx, rx) = std::sync::mpsc::channel();
         run(steps, MockStage { seen: &SEEN, verdict: tx });
@@ -4652,7 +4774,7 @@ mod tests {
             fn column_edges(&self, _: Target, _: usize) -> String {
                 String::new()
             }
-            fn resolve_id(&self, _: TargetKind, _: &str) -> Option<isize> {
+            fn resolve_id(&self, _: TargetKind, _: &str, _: Option<&str>) -> Option<isize> {
                 Some(0)
             }
             fn header_click(&self, _: Target, _: u32) {}
@@ -4829,7 +4951,7 @@ mod tests {
         let steps = parse("expect_fills textarea#0").unwrap();
         assert_eq!(
             steps[0],
-            Step::ExpectFills(Target { kind: TargetKind::Textarea, index: 0, id: None })
+            Step::ExpectFills(Target { kind: TargetKind::Textarea, index: 0, id: None, keys: None })
         );
         let (tx, rx) = std::sync::mpsc::channel();
         run(steps, MockStage { seen: &SEEN, verdict: tx });
@@ -4850,24 +4972,124 @@ mod tests {
         assert!(verdict.contains("96pt of a 126pt track"), "{verdict}");
     }
 
-    /// kind@id parses to an authored-key target; an empty id is
-    /// refused at parse. The runtime refusal sentence ("names no
-    /// widget") was watched failing live on mac 2026-08-21 with the
-    /// app's id renamed away; the GTK/WinUI path shares the runner's
-    /// normalization, whose absence arm the resolve-retry test below
-    /// cannot reach without a full stage, so the live watch is the
-    /// negative of record.
+    /// Authored targets preserve their script spelling, and malformed
+    /// copy suffixes never degrade into a bare authored id.
     #[test]
     fn authored_key_targets_parse() {
-        let steps = parse("expect_columns column@positions \"A|B\"").unwrap();
+        let bare = parse("expect_columns column@positions \"A|B\"").unwrap();
+        let Step::ExpectColumns(bare, _) = &bare[0] else {
+            panic!("parsed {:?}", bare[0]);
+        };
+        assert_eq!(bare.id, Some("positions"));
+        assert_eq!(bare.keys, None);
+        assert_eq!(target_spec(bare), "column@positions");
+
+        let steps = parse(
+            "expect_columns column@positions[brokerage.taxable] \"A|B\"",
+        )
+        .unwrap();
         match &steps[0] {
             Step::ExpectColumns(t, _) => {
                 assert_eq!(t.kind, TargetKind::Column);
                 assert_eq!(t.id, Some("positions"));
+                assert_eq!(t.keys, Some("brokerage.taxable"));
+                assert_eq!(target_spec(t), "column@positions[brokerage.taxable]");
             }
             other => panic!("parsed {other:?}"),
         }
-        assert!(parse("expect_columns column@ \"A|B\"").is_err());
+        for target in [
+            "column@",
+            "column@positions[]",
+            "column@positions[.a]",
+            "column@positions[a.]",
+            "column@positions[a..b]",
+            "column@positions[a",
+            "column@positions[a]]",
+            "column@positions[[a]",
+            "column@positions][a]",
+            "column@positions[a][b]",
+        ] {
+            assert!(
+                parse(&format!("expect_columns {target} \"A|B\"")).is_err(),
+                "accepted {target}"
+            );
+        }
+    }
+
+    /// The core-minted sort tag is decoded without trusting its length;
+    /// numeric keys never collide with numeric-looking string keys.
+    #[test]
+    fn table_tags_match_string_copy_paths() {
+        use crate::protocol::Value;
+
+        let exact = crate::wire::click_tag(
+            41,
+            &[Value::Str("brokerage".into()), Value::Str("taxable".into())],
+        );
+        assert_eq!(table_tag_node(&exact), Some(41));
+        assert!(table_tag_matches_keys(&exact, 41, "brokerage.taxable"));
+        assert!(!table_tag_matches_keys(&exact, 42, "brokerage.taxable"));
+        assert!(!table_tag_matches_keys(&exact, 41, "brokerage.retirement"));
+        assert!(!table_tag_matches_keys(&exact, 41, "brokerage"));
+
+        let numeric = crate::wire::click_tag(41, &[Value::I64(3)]);
+        assert_eq!(table_tag_node(&numeric), Some(41));
+        assert!(!table_tag_matches_keys(&numeric, 41, "3"));
+
+        let pathless = crate::wire::click_tag(41, &[]);
+        assert_eq!(table_tag_node(&pathless), None);
+        assert!(!table_tag_matches_keys(&pathless, 41, "brokerage"));
+
+        assert_eq!(table_tag_node(&exact[..exact.len() - 1]), None);
+        assert!(!table_tag_matches_keys(&exact[..16], 41, "brokerage.taxable"));
+    }
+
+    /// Resolution sees the full keyed target; every downstream Stage
+    /// method sees only the normalized creation index.
+    #[test]
+    fn authored_copy_target_resolves_then_normalizes() {
+        RESOLVE_SEEN.lock().unwrap().clear();
+        NORMALIZED_SEEN.lock().unwrap().clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_columns column@positions[brokerage.taxable] \"\"").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(
+            *RESOLVE_SEEN.lock().unwrap(),
+            vec!["Column positions brokerage.taxable".to_owned()]
+        );
+        assert_eq!(
+            *NORMALIZED_SEEN.lock().unwrap(),
+            vec!["Target { kind: Column, index: 7, id: None, keys: None }".to_owned()]
+        );
+        assert_eq!(verdict, "KAYA_SELFTEST: OK ()");
+    }
+
+    /// A missing keyed copy reports the complete script target instead
+    /// of blaming the authored id alone.
+    #[test]
+    fn authored_copy_target_failure_keeps_copy_path() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse(
+                "expect_columns column#0 \"\"\n\
+                 click column@missing[brokerage.taxable]",
+            )
+            .unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(
+            verdict.contains(
+                "column@missing[brokerage.taxable] names no widget: no Column carries a11y_id \
+                 \"missing\" at copy [brokerage.taxable]"
+            ),
+            "{verdict}"
+        );
     }
 
     /// expect_aligned takes a container target and a mode, counts as
@@ -4881,7 +5103,7 @@ mod tests {
         assert_eq!(
             steps[0],
             Step::ExpectAligned(
-                Target { kind: TargetKind::Column, index: 0, id: None },
+                Target { kind: TargetKind::Column, index: 0, id: None, keys: None },
                 "center".into()
             )
         );
@@ -4943,7 +5165,7 @@ mod tests {
         assert_eq!(steps[0], Step::MenuActivate("File>Save".into()));
         assert_eq!(
             steps[1],
-            Step::ContextOpen(Target { kind: TargetKind::Label, index: 1, id: None })
+            Step::ContextOpen(Target { kind: TargetKind::Label, index: 1, id: None, keys: None })
         );
         assert_eq!(
             steps[2],
@@ -5347,7 +5569,7 @@ mod tests {
         assert_eq!(
             *MENU_SEEN.lock().unwrap(),
             vec![
-                "context_open Target { kind: Label, index: 1, id: None }".to_owned(),
+                "context_open Target { kind: Label, index: 1, id: None, keys: None }".to_owned(),
                 "menu_activate Rename".to_owned(),
                 "shortcut primary+s".to_owned(),
             ]

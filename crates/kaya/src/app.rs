@@ -379,21 +379,19 @@ impl<T: KayaSum> Collection<T> {
     ///
     /// The argument is the zone the For is declared in ([`ForScope`]), so
     /// a nested For is the same statement one level in.
-    pub fn rows<'t, 'b, S: ForScope<'b>>(&self, scope: &'t mut S) -> Rows<'t, 'b> {
+    pub fn rows<'t, 'b, S: ForScope<'b>>(
+        &self,
+        scope: &'t mut S,
+    ) -> Rows<'t, 'b, S::RowsId> {
         assert_root(self);
         let tx = scope.zone_tx();
         // The For's id, allocated HERE rather than at first iteration,
         // so the builder chain (columns / on_sort) has the handle the
         // statement form used to withhold (docs/tables-plan.md).
-        let for_id = if S::NESTED {
-            tx.ctx.alloc_node().0
-        } else {
-            tx.ctx.alloc_widget().0
-        };
+        let for_id = <S::RowsId as for_scope::Id>::alloc(tx);
         Rows {
             tx: Some(tx),
             collection: self.id,
-            nested: S::NESTED,
             for_id,
             columns: None,
         }
@@ -2489,6 +2487,24 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// Re-declare one stamped copy's header bar after its sort request.
+    /// An empty path re-declares the template-wide bar for every copy.
+    pub fn columns_at(
+        &mut self,
+        node: TemplateNodeId,
+        path: &Path,
+        titles: &[&str],
+        sort: Sort,
+    ) {
+        self.ops.push(TxOp::SetColumnHeaders {
+            widget: WidgetId(node.0),
+            sorted: sort.sorted,
+            direction: sort.direction,
+            path: path.clone(),
+            titles: titles.iter().map(|t| (*t).to_owned()).collect(),
+        });
+    }
+
     /// A For over `collection`: the closure declares the template, a
     /// blueprint stamped once per entry. Returns the For's widget id
     /// alongside the body's result, which is how handles declared inside
@@ -2726,15 +2742,12 @@ impl<'a> Tx<'a> {
 /// and parents the For into the enclosing container scope. RAII makes the
 /// close structural: break- and panic-safe, and while the row lives the
 /// transaction is statically unreachable except through it.
-pub struct Rows<'t, 'b> {
+pub struct Rows<'t, 'b, I = WidgetId> {
     tx: Option<&'t mut Tx<'b>>,
     collection: CollectionId,
-    /// Which id space this For's own node comes from — see
-    /// [`ForScope`].
-    nested: bool,
     /// The For's own id, allocated at construction so the builder
     /// chain can hand it out before iteration begins.
-    for_id: u64,
+    for_id: I,
     /// A pending header-bar declaration, emitted by the Row's Drop
     /// AFTER the template closes — set_columns validates the row
     /// template against the declared arity, so it must follow the
@@ -2742,7 +2755,7 @@ pub struct Rows<'t, 'b> {
     columns: Option<(Vec<String>, Sort)>,
 }
 
-impl Rows<'_, '_> {
+impl<I: for_scope::Id> Rows<'_, '_, I> {
     /// Declare the column header bar: one title per column, plus the
     /// indicator. The row template's root must be a `row` of exactly
     /// one cell per column — the core refuses a mismatch loudly.
@@ -2756,15 +2769,12 @@ impl Rows<'_, '_> {
         self.columns = Some((titles, sort));
     }
 
-    /// The For's container handle — what a sort handler re-declares
-    /// the header against. Live zone only, like the table it names.
+}
+
+impl Rows<'_, '_, WidgetId> {
+    /// The live For's container handle.
     pub fn id(&self) -> WidgetId {
-        assert!(
-            !self.nested,
-            "kaya: a nested For's rows() has a template node, not a widget — \
-             nested tables are the fan-out's open surface (docs/tables-plan.md)"
-        );
-        WidgetId(self.for_id)
+        self.for_id
     }
 
     /// Register the header-click handler as part of the chain —
@@ -2776,6 +2786,43 @@ impl Rows<'_, '_> {
         f: impl Fn(u32) -> M + 'static,
     ) -> Self {
         msgs.on_sort(self.id(), f);
+        self
+    }
+}
+
+impl Rows<'_, '_, TemplateNodeId> {
+    /// The nested For's template node, shared by all stamped copies.
+    pub fn id(&self) -> TemplateNodeId {
+        self.for_id
+    }
+
+    /// A stamped copy's sort request carries its outermost-first key path.
+    ///
+    /// ```compile_fail
+    /// fn cannot_drop_the_path(
+    ///     table: &kaya::Collection<String>,
+    ///     t: &mut kaya::Tpl<'_, '_>,
+    ///     msgs: &kaya::Messages<()>,
+    /// ) {
+    ///     let _ = table.rows(t).on_sort(msgs, |_column| ());
+    /// }
+    /// ```
+    ///
+    /// ```
+    /// fn keeps_the_path(
+    ///     table: &kaya::Collection<String>,
+    ///     t: &mut kaya::Tpl<'_, '_>,
+    ///     msgs: &kaya::Messages<()>,
+    /// ) {
+    ///     let _ = table.rows(t).on_sort(msgs, |_path, _column| ());
+    /// }
+    /// ```
+    pub fn on_sort<M>(
+        self,
+        msgs: &Messages<M>,
+        f: impl Fn(Path, u32) -> M + 'static,
+    ) -> Self {
+        msgs.on_sort_node(self.id(), f);
         self
     }
 }
@@ -2804,12 +2851,12 @@ impl Sort {
     }
 }
 
-impl<'t, 'b> Iterator for Rows<'t, 'b> {
+impl<'t, 'b, I: for_scope::Id> Iterator for Rows<'t, 'b, I> {
     type Item = Row<'t, 'b>;
 
     fn next(&mut self) -> Option<Row<'t, 'b>> {
         let tx = self.tx.take()?;
-        let id = self.for_id;
+        let id = self.for_id.raw();
         let parent = tx.current_parent();
         tx.ops.push(TxOp::CreateFor {
             id,
@@ -2832,13 +2879,35 @@ impl<'t, 'b> Iterator for Rows<'t, 'b> {
 /// `#[doc(hidden)]` method would still be callable; a trait in a private
 /// module cannot even be brought into scope outside this crate.
 mod for_scope {
-    use super::Tx;
+    use super::{TemplateNodeId, Tx, WidgetId};
+
+    pub trait Id: Copy {
+        fn alloc(tx: &Tx<'_>) -> Self;
+        fn raw(self) -> u64;
+    }
+
+    impl Id for WidgetId {
+        fn alloc(tx: &Tx<'_>) -> Self {
+            tx.ctx.alloc_widget()
+        }
+
+        fn raw(self) -> u64 {
+            self.0
+        }
+    }
+
+    impl Id for TemplateNodeId {
+        fn alloc(tx: &Tx<'_>) -> Self {
+            tx.ctx.alloc_node()
+        }
+
+        fn raw(self) -> u64 {
+            self.0
+        }
+    }
 
     pub trait Zone<'b> {
-        /// True inside a template body. Decides the id space of the
-        /// For's own node, and nothing else — the records, the
-        /// auto-parenting and the close are identical at both depths.
-        const NESTED: bool;
+        type RowsId: Id;
         fn zone_tx(&mut self) -> &mut Tx<'b>;
     }
 }
@@ -2865,21 +2934,21 @@ pub trait ForScope<'b>: for_scope::Zone<'b> {}
 impl<'b, T: for_scope::Zone<'b>> ForScope<'b> for T {}
 
 impl<'b> for_scope::Zone<'b> for Tx<'b> {
-    const NESTED: bool = false;
+    type RowsId = WidgetId;
     fn zone_tx(&mut self) -> &mut Tx<'b> {
         self
     }
 }
 
 impl<'b> for_scope::Zone<'b> for Tpl<'_, 'b> {
-    const NESTED: bool = true;
+    type RowsId = TemplateNodeId;
     fn zone_tx(&mut self) -> &mut Tx<'b> {
         self.tx
     }
 }
 
 impl<'b> for_scope::Zone<'b> for Row<'_, 'b> {
-    const NESTED: bool = true;
+    type RowsId = TemplateNodeId;
     fn zone_tx(&mut self) -> &mut Tx<'b> {
         self.tx.as_mut().expect("kaya: row used after close")
     }
@@ -3153,6 +3222,18 @@ impl<M> Messages<M> {
             w.0,
             Box::new(move |occ| match occ {
                 Occurrence::SortRequested { column, .. } => Some(f(*column)),
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_sort_node(&self, n: TemplateNodeId, f: impl Fn(Path, u32) -> M + 'static) {
+        self.nodes.borrow_mut().insert(
+            n.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceSortRequested { path, column, .. } => {
+                    Some(f(path.clone(), *column))
+                }
                 _ => None,
             }),
         );
@@ -6099,6 +6180,93 @@ mod tests {
         }
 
         assert_eq!(sugar(), floor());
+    }
+
+    #[test]
+    fn nested_table_rows_map_copy_sorts_through_the_node() {
+        use super::{Messages, Sort};
+        use crate::protocol::{Occurrence, TemplateNodeId, TxOp};
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum Msg {
+            Sort(Vec<Value>, u32),
+        }
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let msgs = Messages::new();
+
+        let mut table = None;
+        let mut tx = ctx.begin();
+        let groups = tx.collection::<Todo>();
+        let root = tx
+            .column(|tx| {
+                for mut group in groups.rows(tx) {
+                    group.column(|t| {
+                        let positions = t.collection::<Todo>();
+                        let rows = positions
+                            .rows(t)
+                            .columns(&["Name", "Done"], Sort::none())
+                            .on_sort(&msgs, Msg::Sort);
+                        table = Some(rows.id());
+                        for mut position in rows {
+                            position.row(|t| {
+                                t.label(Todo::title());
+                                t.checkbox(Todo::done());
+                            });
+                        }
+                    });
+                }
+            })
+            .id();
+        tx.mount(root);
+        tx.commit();
+
+        let table: TemplateNodeId = table.expect("nested table node");
+        let ops = tx_rx.try_recv().expect("committed ops");
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            TxOp::SetColumnHeaders { widget, path, .. }
+                if widget.0 == table.0 && path.is_empty()
+        )));
+
+        let path = vec![Value::from("brokerage")];
+        occ_tx
+            .send(Inbox::Occ(Occurrence::InstanceSortRequested {
+                node: table,
+                path: path.clone(),
+                column: 1,
+            }))
+            .unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::Shutdown)).unwrap();
+        assert_eq!(msgs.next(&ctx), Some(Msg::Sort(path, 1)));
+    }
+
+    #[test]
+    fn columns_at_emits_the_copy_path_before_the_titles() {
+        use super::Sort;
+        use crate::protocol::{TemplateNodeId, TxOp};
+
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let path = vec![Value::from("brokerage"), Value::I64(7)];
+        let table = TemplateNodeId(41);
+
+        let mut tx = ctx.begin();
+        tx.columns_at(table, &path, &["Name", "Done"], Sort::desc(1));
+        tx.commit();
+
+        assert!(matches!(
+            tx_rx.try_recv().expect("committed ops").as_slice(),
+            [TxOp::SetColumnHeaders { widget, sorted, direction, path: got, titles }]
+                if widget.0 == table.0
+                    && *sorted == 1
+                    && *direction == crate::wire::SORT_DESC
+                    && got == &path
+                    && titles == &["Name".to_owned(), "Done".to_owned()]
+        ));
     }
 
     /// The round trip minus any backend: the app builds the milestone-1

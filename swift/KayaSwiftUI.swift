@@ -371,18 +371,27 @@ final class KayaNode: Identifiable {
     /// expect_columns proves the table rendered rather than that the
     /// wire arrived.
     var tablePresented = ""
-    /// Cell leading edges in window space, keyed "<rowId>/<col>" (and
-    /// "h/<col>" where kaya composes the header) — written by the
-    /// render's edge reporters, clustered by expect_column_edges. The
-    /// native macOS header is NSTableView's own and aligns with its
-    /// cells by construction, so that path records cells alone.
-    var cellEdgeX: [String: Double] = [:]
+    /// docs/traps.md, "A table viewport contains rows".
+    var tableGeometryEpoch = 0
+    var tableCellFrames: [String: KayaTableCellObservation] = [:]
+    var tableViewport: KayaTableViewportObservation?
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
         self.id = id
         self.kind = kind
         self.tag = tag
     }
+}
+
+struct KayaTableCellObservation {
+    let generation: Int
+    let frame: CGRect
+}
+
+struct KayaTableViewportObservation {
+    let generation: Int
+    let frame: CGRect
+    let synthesized: Bool
 }
 
 /// One presentation surface: the primary (id 0, always present) or a created
@@ -636,6 +645,36 @@ var kayaCellMinX: [UInt64: Double] = [:]
 /// Mounts that arrived before the environment actions were stashed; drained
 /// by KayaRoot's onAppear.
 var kayaPendingOpens: [UInt64] = []
+enum KayaSelftestAdmissionState: Equatable {
+    case waiting
+    case grace
+    case started
+}
+
+enum KayaSelftestAdmissionEffect: Equatable {
+    case none
+    case armGrace
+    case start
+}
+
+// docs/traps.md, "A vacuous opening expect is not Swift scene admission".
+func kayaSelftestAdmissionTransition(
+    _ state: KayaSelftestAdmissionState,
+    mounted: Bool,
+    hasNodes: Bool,
+    graceExpired: Bool
+) -> (KayaSelftestAdmissionState, KayaSelftestAdmissionEffect) {
+    if state == .started { return (.started, .none) }
+    if mounted { return (.started, .start) }
+    if graceExpired {
+        return state == .grace ? (.started, .start) : (state, .none)
+    }
+    if state == .waiting && hasNodes { return (.grace, .armGrace) }
+    return (state, .none)
+}
+
+private var kayaSelftestAdmissionState = KayaSelftestAdmissionState.waiting
+private let kayaSelftestUnmountedGrace: TimeInterval = 5.0
 
 /// Absolute timestamps on stderr so a leg log correlates with `log show`.
 func kayaDiag(_ msg: String) {
@@ -1920,6 +1959,7 @@ func kayaExpandPath(_ path: String) -> String {
     /// than hangs. Measured fill after the panel presents: under 0.5s in every
     /// mode.
     private let kayaPanelFillTurns = 100
+    private let kayaSavePanelFillTurns = 250
 
     /// The panel's state, WAITED FOR — because the browser exists before its
     /// contents do.
@@ -2032,30 +2072,11 @@ func kayaExpandPath(_ path: String) -> String {
         return (where_, name)
     }
 
-    /// The save panel's state, waited for — and the wait is NOT
-    /// decoration, it is the difference between a green leg and a red
-    /// one. MEASURED 2026-08-09, twice in one run and again with this
-    /// function's two extra property sets removed: the first
-    /// `DispatchQueue.main.sync` after the presentation is asked for
-    /// returns **8.7 SECONDS** later and still finds no sheet, and the
-    /// state settles one 20ms turn after that. `NSSavePanel` blocks the
-    /// main thread for that whole time, every time — it does not warm up
-    /// (both panels in the same process cost 8688ms and 8671ms), and the
-    /// cost is invariant to what this function configures, so it is the
-    /// panel service's and not kaya's. The same box presented an
-    /// `NSOpenPanel` in 6.5s cold and 0.93s warm, with WindowServer at
-    /// ~49% serving two VMs.
-    ///
-    /// So the loop below cannot be dropped in favour of the step's own retry,
-    /// which is the shape the open panel's reader uses: that budget is SPENT
-    /// INSIDE THE BLOCKED HOP (docs/traps.md, the same 2026-08-07 measurement
-    /// that put the content wait inside `kayaAwaitOpenPanelState`), here for
-    /// the PRESENCE of the sheet rather than the fill of a browser.
-    ///
-    /// It waits for the SHEET, never for rows — see kayaSavePanelState.
+    /// The save-panel sibling of the blocked-hop trap in docs/traps.md;
+    /// it waits for the sheet, never for rows.
     func kayaAwaitSavePanelState() -> (String, String)? {
         var state = DispatchQueue.main.sync { kayaSavePanelState() }
-        for _ in 0..<kayaPanelFillTurns {
+        for _ in 0..<kayaSavePanelFillTurns {
             if state != nil { return state }
             Thread.sleep(forTimeInterval: 0.02)
             state = DispatchQueue.main.sync { kayaSavePanelState() }
@@ -3042,6 +3063,13 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
 /// The size request's macOS materialization: resize the primary window's
 /// CONTENT to the requested DIP, keeping the current extent on any axis the
 /// scene has not requested. iOS applies nothing — the system owns geometry.
+#if os(macOS)
+func kayaSetWindowContentSize(_ window: NSWindow, _ size: NSSize) {
+    kayaInvalidateTableGeometry()
+    window.setContentSize(size)
+}
+#endif
+
 private func kayaApplyWindowSize(_ windowId: UInt64) {
     #if os(macOS)
         let window = kayaNSWindows[windowId]
@@ -3052,7 +3080,7 @@ private func kayaApplyWindowSize(_ windowId: UInt64) {
         let size = NSSize(
             width: model?.width ?? current.width,
             height: model?.height ?? current.height)
-        window.setContentSize(size)
+        kayaSetWindowContentSize(window, size)
     #endif
 }
 
@@ -3080,6 +3108,7 @@ private func kayaApplyWindowDirty(_ windowId: UInt64) {
 }
 
 private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
+    kayaInvalidateTableGeometry()
     // Coalesced menu re-assert: any record that touches the command
     // catalog re-syncs the native chrome ONCE at the batch boundary
     // (the macOS NSMenu segment, the shortcut dispatch table).
@@ -3928,6 +3957,38 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
     }
     if menusTouched {
         kayaMenuChanged()
+    }
+    kayaDriveSelftestAdmission()
+}
+
+private func kayaWindowHasMountedContent(_ window: KayaWindowModel) -> Bool {
+    if window.root != nil || window.entries.contains(where: { $0.root != nil }) {
+        return true
+    }
+    return window.sections.contains { section in
+        section.root != nil || section.entries.contains(where: { $0.root != nil })
+    }
+}
+
+private func kayaDriveSelftestAdmission(graceExpired: Bool = false) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
+    let mounted = kayaScene.windows.values.contains(where: kayaWindowHasMountedContent)
+    let (next, effect) = kayaSelftestAdmissionTransition(
+        kayaSelftestAdmissionState,
+        mounted: mounted,
+        hasNodes: !kayaScene.nodes.isEmpty,
+        graceExpired: graceExpired)
+    kayaSelftestAdmissionState = next
+    switch effect {
+    case .none:
+        break
+    case .armGrace:
+        DispatchQueue.main.asyncAfter(deadline: .now() + kayaSelftestUnmountedGrace) {
+            kayaDriveSelftestAdmission(graceExpired: true)
+        }
+    case .start:
+        kayaStartSelftest()
     }
 }
 
@@ -4812,21 +4873,88 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     }
 #endif
 
-/// Resolves `kind#index` against the registry the verb reads, mirroring
-/// harness.rs's parse_target: a kind that names a different registry, a
-/// malformed index, or one out of range is a loud step failure — never a
-/// silently misresolved read (`row#0` once indexed the COLUMNS registry).
-private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode]) -> KayaNode? {
-    // kind@id — the authored a11y_id, creation order never entering
-    // (harness.rs's Target doc; the check-steps container lint's
-    // sanctioned alternative). First match in creation order.
-    if spec.contains("@") {
-        let bits = spec.split(separator: "@", maxSplits: 1)
-        guard bits.count == 2, bits[0] == kind, !bits[1].isEmpty else { return nil }
-        let id = String(bits[1])
-        return registry.first { $0.a11yId == id }
+private struct KayaTableStamp {
+    let node: UInt64
+    let keys: [String]
+}
+
+private func kayaTableStamp(_ tag: [UInt8]) -> KayaTableStamp? {
+    func u32(_ at: Int) -> UInt32? {
+        guard at >= 0, at <= tag.count - 4 else { return nil }
+        return (0..<4).reduce(UInt32(0)) { $0 | (UInt32(tag[at + $1]) << UInt32(8 * $1)) }
     }
-    let bits = spec.split(separator: "#")
+    func u64(_ at: Int) -> UInt64? {
+        guard at >= 0, at <= tag.count - 8 else { return nil }
+        return (0..<8).reduce(UInt64(0)) { $0 | (UInt64(tag[at + $1]) << UInt64(8 * $1)) }
+    }
+
+    guard tag.count >= 16, let node = u64(0), let rawCount = u32(8) else { return nil }
+    let count = Int(rawCount)
+    guard count > 0, count <= (tag.count - 16) / 8 else { return nil }
+    var at = 16
+    var keys: [String] = []
+    for _ in 0..<count {
+        guard let type = u32(at), let rawLength = u32(at + 4), type == valueStr else {
+            return nil
+        }
+        let length = Int(rawLength)
+        guard length <= Int.max - 7 else { return nil }
+        let payload = at + 8
+        guard payload <= tag.count, length <= tag.count - payload,
+            let key = String(bytes: tag[payload..<(payload + length)], encoding: .utf8)
+        else { return nil }
+        keys.append(key)
+        let padded = (length + 7) & ~7
+        guard padded <= tag.count - payload else { return nil }
+        at = payload + padded
+    }
+    guard at == tag.count else { return nil }
+    return KayaTableStamp(node: node, keys: keys)
+}
+
+/// Resolves the target grammar against the verb's creation-order registry.
+private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode]) -> KayaNode? {
+    let text = String(spec)
+    if let at = text.firstIndex(of: "@") {
+        guard text[..<at] == kind else { return nil }
+        let authored = String(text[text.index(after: at)...])
+        let id: String
+        let keys: [String]?
+        if let open = authored.firstIndex(of: "[") {
+            guard authored.last == "]" else { return nil }
+            id = String(authored[..<open])
+            guard !id.contains(where: { $0 == "[" || $0 == "]" || $0 == "@" }) else {
+                return nil
+            }
+            let start = authored.index(after: open)
+            let end = authored.index(before: authored.endIndex)
+            let keyText = String(authored[start..<end])
+            guard !keyText.isEmpty,
+                !keyText.contains(where: { $0 == "[" || $0 == "]" })
+            else { return nil }
+            let path = keyText.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            guard !path.contains(where: { $0.isEmpty }) else { return nil }
+            keys = path
+        } else {
+            guard !authored.contains(where: { $0 == "]" || $0 == "@" }) else { return nil }
+            id = authored
+            keys = nil
+        }
+        guard !id.isEmpty else { return nil }
+        guard let keys else { return registry.first { $0.a11yId == id } }
+        guard kind == "column" else { return nil }
+        let live = registry.filter { kayaScene.nodes[$0.id] === $0 }
+        guard
+            let node = live.lazy.filter({ $0.a11yId == id })
+                .compactMap({ kayaTableStamp($0.sortTag)?.node }).first
+        else { return nil }
+        return live.first {
+            guard let stamp = kayaTableStamp($0.sortTag) else { return false }
+            return stamp.node == node && stamp.keys == keys
+        }
+    }
+    guard text.filter({ $0 == "#" }).count == 1 else { return nil }
+    let bits = text.split(separator: "#", omittingEmptySubsequences: false)
     guard bits.count == 2, bits[0] == kind else { return nil }
     if bits[1] == "last" { return registry.last }
     guard let i = Int(bits[1]), registry.indices.contains(i) else { return nil }
@@ -4995,7 +5123,7 @@ private func kayaCheckMenuPath(_ path: String) -> String? {
 /// context_open's target may be any non-editable widget kind — the
 /// kind picks the registry, exactly as parse_target routes.
 private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
-    switch spec.split(separator: "#").first.map(String.init) ?? "" {
+    switch String(spec.prefix { $0 != "#" && $0 != "@" }) {
     case "button": return kayaTarget(spec, "button", kayaScene.buttons)
     case "checkbox": return kayaTarget(spec, "checkbox", kayaScene.checkboxes)
     case "label": return kayaTarget(spec, "label", kayaScene.labels)
@@ -5358,54 +5486,74 @@ private func kayaRunScript(_ script: String) {
                     failures.append("no such target \(parts[1])")
                 }
             case "expect_column_edges":
-                // The uniform GEOMETRY claim, both halves: the cells'
-                // leading edges (recorded in window space by the
-                // render's reporters) form exactly N clusters within
-                // two units, AND the table spans the flex track it was
-                // assigned — the regression a content-hugging layout
-                // slips past every model-side observable. On the
-                // NATIVE path both header and cell BOXES are
-                // Table-placed, so intra-box content offsets are
-                // invisible here (measured 2026-08-21: a padding
-                // perturbation correctly did not fire) and the cluster
-                // half's live protection is the COUNT — a column that
-                // never renders reads 1 of 2. The synthesized tiers
-                // place cells themselves, and their negatives moved
-                // real placement.
+                // docs/tables-plan.md decision 6; docs/traps.md,
+                // "A table viewport contains rows".
                 let want = Int(parts[2]) ?? -1
                 let got = DispatchQueue.main.sync {
-                    () -> (clusters: [Double], track: Double, drawn: Double)? in
+                    () -> (KayaCurrentTableGeometry, Double?)? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return nil
                     }
-                    var clusters: [Double] = []
-                    var prev: Double?
-                    for x in node.cellEdgeX.values.sorted() {
-                        if let p = prev, x - p <= 2 {
-                            prev = x
-                            continue
-                        }
-                        clusters.append(x)
-                        prev = x
-                    }
-                    return (
-                        clusters, kayaMainExtents[node.id] ?? -1,
-                        kayaDrawnExtents[node.id] ?? -1
-                    )
+                    let trackWidth = kayaCurrentTableTrackWidth(node)
+                    return (kayaCurrentTableGeometry(node), trackWidth)
                 }
-                if let got, got.clusters.count == want, got.track <= 0 || got.drawn >= got.track - 2 {
-                    observed.append("\(parts[1]) column edges \(want)")
-                } else if let got, got.clusters.count != want {
-                    let seen = got.clusters.map { String(Int($0.rounded())) }
-                        .joined(separator: ",")
-                    failures.append(
-                        "\(parts[1]) cell edges cluster at [\(seen)], wanted \(parts[2]) columns")
-                } else if let got {
-                    failures.append(
-                        "\(parts[1]) draws \(Int(got.drawn.rounded()))pt of a "
-                            + "\(Int(got.track.rounded()))pt track")
-                } else {
+                guard let got else {
                     failures.append("no such target \(parts[1])")
+                    break
+                }
+                switch got.0 {
+                case .missingViewport:
+                    failures.append("\(parts[1]) has no current table viewport geometry")
+                case let .missingCells(seen, expected):
+                    failures.append(
+                        "\(parts[1]) records \(seen) of \(expected) current table cells")
+                case let .current(viewport, rows, columns):
+                    guard !rows.isEmpty else {
+                        failures.append("\(parts[1]) has no current row-cell geometry")
+                        break
+                    }
+                    switch kayaTableColumnAlignment(columns) {
+                    case let .missing(column):
+                        failures.append(
+                            "\(parts[1]) column \(column) has no current cell geometry")
+                    case let .split(column, clusters):
+                        let seen = clusters.map { String(Int($0.rounded())) }
+                            .joined(separator: ",")
+                        failures.append(
+                            "\(parts[1]) column \(column) cell edges split at [\(seen)]")
+                    case let .aligned(representatives):
+                        let seen = representatives.map { String(Int($0.rounded())) }
+                            .joined(separator: ",")
+                        guard representatives.count == want,
+                            kayaTableColumnRepresentativesIncrease(representatives)
+                        else {
+                            failures.append(
+                                "\(parts[1]) cell edges represent [\(seen)], wanted "
+                                    + "\(parts[2]) distinct increasing columns")
+                            break
+                        }
+                        guard let track = got.1, track > 0 else {
+                            failures.append(
+                                "\(parts[1]) has no current assigned table track")
+                            break
+                        }
+                        let frames = columns.flatMap { $0 }
+                        if !kayaTableViewportMatchesTrack(viewport, track: track) {
+                            failures.append(
+                                "\(parts[1]) draws a \(Int(viewport.width.rounded()))pt viewport "
+                                    + "for a \(Int(track.rounded()))pt track")
+                        } else if !kayaTableFramesFitHorizontally(frames, inside: viewport),
+                            let bounds = kayaTableBounds(frames)
+                        {
+                            failures.append(
+                                "\(parts[1]) cells occupy "
+                                    + "\(Int(bounds.minX.rounded()))...\(Int(bounds.maxX.rounded()))pt "
+                                    + "outside viewport "
+                                    + "\(Int(viewport.minX.rounded()))...\(Int(viewport.maxX.rounded()))pt")
+                        } else {
+                            observed.append("\(parts[1]) column edges \(want)")
+                        }
+                    }
                 }
             case "header_click":
                 // The user's route: what the Table's sortOrder binding
@@ -6052,7 +6200,7 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     #if os(macOS)
                         let saveState = kayaAwaitSavePanelState()
-                        let saveWhy = "no save dialog live"
+                        let saveWhy = "save dialog state unavailable"
                     #else
                         // Read on the HOST, for the reason the open picker's
                         // read is: the sheet belongs to another process and
@@ -6086,7 +6234,7 @@ private func kayaRunScript(_ script: String) {
                     #if os(macOS)
                         if kayaAwaitSavePanelState() == nil {
                             failures.append(
-                                "file_dialog_name \(saveName): no save dialog is live")
+                                "file_dialog_name \(saveName): save dialog state unavailable")
                         } else {
                             DispatchQueue.main.sync { kayaSavePanelName(saveName) }
                         }
@@ -6109,7 +6257,7 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     #if os(macOS)
                         if kayaAwaitSavePanelState() == nil {
-                            failures.append("file_save: no save dialog is live")
+                            failures.append("file_save: save dialog state unavailable")
                         } else {
                             DispatchQueue.main.sync { kayaSavePanelDrive(save: saveArg != "cancel") }
                             // AND THE PANEL MUST BE GONE — the picker's
@@ -6453,6 +6601,27 @@ private func kayaRunScript(_ script: String) {
                         return
                             "spans \(Int(r.1.rounded()))pt of its parent's \(Int(parentInner.rounded()))pt breadth"
                     }
+                    // docs/traps.md: a table viewport permits slack, not row overflow.
+                    if !container.tableColumns.isEmpty {
+                        switch kayaCurrentTableGeometry(container) {
+                        case .missingViewport:
+                            return "no current table viewport geometry"
+                        case let .missingCells(got, want):
+                            return "records \(got) of \(want) current table cells"
+                        case let .current(viewport, rows, _):
+                            guard !rows.isEmpty else { return "" }
+                            guard kayaTableFramesFitVertically(rows, inside: viewport) else {
+                                guard let bounds = kayaTableBounds(rows) else {
+                                    return "has no current row-cell geometry"
+                                }
+                                return
+                                    "rows occupy \(Int(bounds.minY.rounded()))...\(Int(bounds.maxY.rounded()))pt "
+                                    + "outside viewport \(Int(viewport.minY.rounded()))..."
+                                    + "\(Int(viewport.maxY.rounded()))pt"
+                            }
+                            return ""
+                        }
+                    }
                     guard let extent = kayaContainerExtents[container.id], extent > 0 else {
                         return "no container layout recorded"
                     }
@@ -6732,7 +6901,10 @@ private func kayaRunScript(_ script: String) {
                 }
                 #if os(macOS)
                     DispatchQueue.main.sync {
-                        kayaNSWindows[0]?.setContentSize(NSSize(width: rw, height: rh))
+                        if let window = kayaNSWindows[0] {
+                            kayaSetWindowContentSize(
+                                window, NSSize(width: rw, height: rh))
+                        }
                     }
                 #else
                     // Phone and tablet hosts do not command window size — the
@@ -7202,23 +7374,17 @@ private func kayaRunScript(_ script: String) {
         print("KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))")
         exit(0)
     }
-    // THE UNMOUNTED-SCENE DIAGNOSIS. A scene that creates widgets and never
-    // calls mount(root) renders an EMPTY window, and every assertion then
-    // measures an invisible app. Target resolution cannot catch it — the
-    // widgets exist in the model, so `kind#index` resolves happily.
-    //
-    // Checked HERE rather than before the run, for two reasons: at script
-    // start the guest's transactions have not arrived yet, so the scene
-    // legitimately looks empty (the first attempt at this guard fired never);
-    // and on the failure path it cannot false-positive on a scene that mounts
-    // late. This cost most of an afternoon on 2026-07-25, and was misdiagnosed
-    // in turn as an SDK-generation, a language and a missing-API problem.
+    // docs/traps.md, "A scene that never mounts measures an invisible app".
     var reported = failures
-    if !kayaScene.nodes.isEmpty,
-        kayaScene.windows.values.allSatisfy({ $0.root == nil && $0.sections.isEmpty })
-    {
+    let unmountedNodeCount = DispatchQueue.main.sync { () -> Int? in
+        guard !kayaScene.nodes.isEmpty,
+            kayaScene.windows.values.allSatisfy({ !kayaWindowHasMountedContent($0) })
+        else { return nil }
+        return kayaScene.nodes.count
+    }
+    if let unmountedNodeCount {
         reported.insert(
-            "\(kayaScene.nodes.count) widgets exist but NO ROOT IS MOUNTED on any surface "
+            "\(unmountedNodeCount) widgets exist but NO ROOT IS MOUNTED on any surface "
                 + "— the scene never called mount(root), so every assertion above measured "
                 + "an empty window",
             at: 0)
@@ -7237,6 +7403,12 @@ private func kayaRunScript(_ script: String) {
 /// 25/75 into 26/74, and zero-size passes clobbered 96/286 into 0/0. Geometry
 /// only ever describes the rendered result. Main-actor only.
 var kayaMainExtents: [UInt64: Double] = [:]
+var kayaTrackSizes: [UInt64: CGSize] = [:]
+struct KayaTableTrackObservation {
+    let generation: Int
+    let size: CGSize
+}
+var kayaTableTrackSizes: [UInt64: KayaTableTrackObservation] = [:]
 
 /// The invisible frame each flex child rides in IS the track KayaFlex assigned.
 /// The reader records the frame's geometry — the layout rect, never the child's
@@ -7244,17 +7416,24 @@ var kayaMainExtents: [UInt64: Double] = [:]
 private struct KayaTrackReader: View {
     let id: UInt64
     let vertical: Bool
+    let tableGeneration: Int?
 
     var body: some View {
         GeometryReader { geo in
             Color.clear
                 .onAppear { record(geo.size) }
                 .onChange(of: geo.size) { _, size in record(size) }
+                .task(id: tableGeneration) { record(geo.size) }
         }
     }
 
     private func record(_ size: CGSize) {
+        kayaTrackSizes[id] = size
         kayaMainExtents[id] = Double(vertical ? size.height : size.width)
+        if let tableGeneration {
+            kayaTableTrackSizes[id] = KayaTableTrackObservation(
+                generation: tableGeneration, size: size)
+        }
     }
 }
 
@@ -7452,6 +7631,169 @@ private struct KayaColumnSpec: Identifiable {
     let title: String
 }
 
+// docs/traps.md, "A table viewport contains rows".
+func kayaInvalidateTableGeometry() {
+    for table in kayaScene.columns where !table.tableColumns.isEmpty {
+        table.tableGeometryEpoch &+= 1
+    }
+}
+
+func kayaTableGeometryGeneration(_ table: KayaNode) -> Int {
+    var hasher = Hasher()
+    func visit(_ node: KayaNode) {
+        hasher.combine(node.id)
+        hasher.combine(node.kind)
+        hasher.combine(node.text)
+        hasher.combine(node.role)
+        hasher.combine(node.inset)
+        hasher.combine(node.checked)
+        hasher.combine(node.value)
+        hasher.combine(node.minValue)
+        hasher.combine(node.maxValue)
+        hasher.combine(node.imageSize)
+        hasher.combine(node.indeterminate)
+        hasher.combine(node.columns)
+        hasher.combine(node.grow)
+        hasher.combine(node.spacing)
+        hasher.combine(node.align)
+        hasher.combine(node.tableSorted)
+        hasher.combine(node.tableDirection)
+        hasher.combine(node.tableGeometryEpoch)
+        for title in node.tableColumns { hasher.combine(title) }
+        hasher.combine(node.children.count)
+        for child in node.children { visit(child) }
+    }
+    visit(table)
+    return hasher.finalize()
+}
+
+func kayaCurrentTableTrackWidth(_ table: KayaNode) -> Double? {
+    let generation = kayaTableGeometryGeneration(table)
+    guard let observation = kayaTableTrackSizes[table.id],
+        observation.generation == generation,
+        observation.size.width > 0
+    else { return nil }
+    return Double(observation.size.width)
+}
+
+private func kayaTableCellKey(_ row: KayaNode, _ column: Int, _ cell: KayaNode) -> String {
+    "\(row.id)/\(column)/\(cell.id)"
+}
+
+func kayaTableEdgeClusters(_ edges: [Double], tolerance: Double = 2) -> [Double] {
+    var clusters: [Double] = []
+    for edge in edges.sorted() {
+        if let representative = clusters.last, edge - representative <= tolerance { continue }
+        clusters.append(edge)
+    }
+    return clusters
+}
+
+enum KayaTableColumnAlignment {
+    case missing(column: Int)
+    case split(column: Int, clusters: [Double])
+    case aligned(representatives: [Double])
+}
+
+func kayaTableColumnAlignment(
+    _ columns: [[CGRect]], tolerance: Double = 2
+) -> KayaTableColumnAlignment {
+    var representatives: [Double] = []
+    for (column, frames) in columns.enumerated() {
+        let clusters = kayaTableEdgeClusters(
+            frames.map { Double($0.minX) }, tolerance: tolerance)
+        guard !clusters.isEmpty else { return .missing(column: column) }
+        guard clusters.count == 1 else {
+            return .split(column: column, clusters: clusters)
+        }
+        representatives.append(clusters[0])
+    }
+    return .aligned(representatives: representatives)
+}
+
+func kayaTableColumnRepresentativesIncrease(
+    _ representatives: [Double], tolerance: Double = 2
+) -> Bool {
+    for (previous, next) in zip(representatives, representatives.dropFirst()) {
+        if next - previous <= tolerance { return false }
+    }
+    return true
+}
+
+func kayaTableBounds(_ frames: [CGRect]) -> CGRect? {
+    guard let first = frames.first else { return nil }
+    return frames.dropFirst().reduce(first) { $0.union($1) }
+}
+
+func kayaTableFramesFitHorizontally(
+    _ frames: [CGRect], inside viewport: CGRect, tolerance: CGFloat = 2
+) -> Bool {
+    guard let bounds = kayaTableBounds(frames) else { return false }
+    return bounds.minX >= viewport.minX - tolerance
+        && bounds.maxX <= viewport.maxX + tolerance
+}
+
+func kayaTableViewportMatchesTrack(
+    _ viewport: CGRect, track: Double, tolerance: Double = 2
+) -> Bool {
+    track > 0 && abs(Double(viewport.width) - track) <= tolerance
+}
+
+func kayaTableFramesFitVertically(
+    _ frames: [CGRect], inside viewport: CGRect, tolerance: CGFloat = 2
+) -> Bool {
+    guard let bounds = kayaTableBounds(frames) else { return false }
+    return bounds.minY >= viewport.minY - tolerance
+        && bounds.maxY <= viewport.maxY + tolerance
+}
+
+enum KayaCurrentTableGeometry {
+    case missingViewport
+    case missingCells(got: Int, want: Int)
+    case current(viewport: CGRect, rows: [CGRect], columns: [[CGRect]])
+}
+
+func kayaCurrentTableGeometry(_ table: KayaNode) -> KayaCurrentTableGeometry {
+    let generation = kayaTableGeometryGeneration(table)
+    guard let viewport = table.tableViewport,
+        viewport.generation == generation,
+        viewport.frame.width > 0,
+        viewport.frame.height > 0
+    else { return .missingViewport }
+
+    var rowKeys = Array(repeating: [String](), count: table.tableColumns.count)
+    let wantedRows = table.children.count * table.tableColumns.count
+    for row in table.children {
+        for column in table.tableColumns.indices where row.children.indices.contains(column) {
+            rowKeys[column].append(kayaTableCellKey(row, column, row.children[column]))
+        }
+    }
+    var columnKeys = rowKeys
+    if viewport.synthesized {
+        for column in table.tableColumns.indices {
+            columnKeys[column].insert("h/\(column)", at: 0)
+        }
+    }
+    func frames(_ keys: [String]) -> [CGRect] {
+        keys.compactMap { key -> CGRect? in
+            guard let observation = table.tableCellFrames[key],
+                observation.generation == generation
+            else { return nil }
+            return observation.frame
+        }
+    }
+    let rowFrames = rowKeys.map(frames)
+    let columnFrames = columnKeys.map(frames)
+    let gotRows = rowFrames.reduce(0) { $0 + $1.count }
+    let gotColumns = columnFrames.reduce(0) { $0 + $1.count }
+    let wantedColumns = wantedRows + (viewport.synthesized ? table.tableColumns.count : 0)
+    guard gotRows == wantedRows, gotColumns == wantedColumns else {
+        return .missingCells(got: gotColumns, want: wantedColumns)
+    }
+    return .current(
+        viewport: viewport.frame, rows: rowFrames.flatMap { $0 }, columns: columnFrames)
+}
+
 @available(macOS 14.4, iOS 17.4, *)
 struct KayaColumnComparator: SortComparator {
     var column: Int
@@ -7569,6 +7911,7 @@ private struct KayaNativeTable: View {
     }
 
     var body: some View {
+        let generation = kayaTableGeometryGeneration(node)
         Table(node.children, sortOrder: sortOrder) {
             TableColumnForEach(specs) { spec in
                 TableColumn(
@@ -7585,11 +7928,17 @@ private struct KayaNativeTable: View {
                             flexStretch: false
                         )
                         .background(
-                            KayaEdgeReporter(node: node, key: "\(row.id)/\(spec.id)"))
+                            KayaEdgeReporter(
+                                node: node,
+                                key: kayaTableCellKey(row, spec.id, row.children[spec.id]),
+                                generation: generation))
                     }
                 }
             }
         }
+        .background(
+            KayaTableViewportReporter(
+                node: node, generation: generation, synthesized: false))
         .onAppear { record() }
         .onChange(of: node.tableColumns) { record() }
         .onChange(of: node.tableSorted) { record() }
@@ -7612,15 +7961,36 @@ private struct KayaNativeTable: View {
     }
 }
 
-/// Records one cell's leading edge into the table node's cluster
-/// store, in window space — expect_column_edges' raw material.
+/// docs/traps.md, "A table viewport contains rows".
 private struct KayaEdgeReporter: View {
     let node: KayaNode
     let key: String
+    let generation: Int
     var body: some View {
         GeometryReader { geo in
-            let x = Double(geo.frame(in: .global).minX)
-            Color.clear.task(id: x) { node.cellEdgeX[key] = x }
+            let frame = geo.frame(in: .global)
+            let signature = "\(generation)/\(frame.minX)/\(frame.minY)/\(frame.maxX)/\(frame.maxY)"
+            Color.clear.task(id: signature) {
+                node.tableCellFrames[key] = KayaTableCellObservation(
+                    generation: generation, frame: frame)
+            }
+        }
+    }
+}
+
+private struct KayaTableViewportReporter: View {
+    let node: KayaNode
+    let generation: Int
+    let synthesized: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .global)
+            let signature = "\(generation)/\(frame.minX)/\(frame.minY)/\(frame.maxX)/\(frame.maxY)"
+            Color.clear.task(id: signature) {
+                node.tableViewport = KayaTableViewportObservation(
+                    generation: generation, frame: frame, synthesized: synthesized)
+            }
         }
     }
 }
@@ -7739,11 +8109,14 @@ private struct KayaSynthesizedTable: View {
     }
 
     var body: some View {
+        let generation = kayaTableGeometryGeneration(node)
         KayaTableLayout(cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing) {
             ForEach(Array(node.tableColumns.enumerated()), id: \.offset) { col, title in
                 Text(headerText(col, title))
                     .fontWeight(.semibold)
-                    .background(KayaEdgeReporter(node: node, key: "h/\(col)"))
+                    .background(
+                        KayaEdgeReporter(
+                            node: node, key: "h/\(col)", generation: generation))
                     .onTapGesture {
                         KayaHost.emitSortRequested(node.sortTag, UInt32(col))
                     }
@@ -7752,10 +8125,16 @@ private struct KayaSynthesizedTable: View {
             ForEach(node.children) { row in
                 ForEach(Array(row.children.enumerated()), id: \.offset) { col, cell in
                     KayaRender(node: cell, flexVertical: false, flexStretch: false)
-                        .background(KayaEdgeReporter(node: node, key: "\(row.id)/\(col)"))
+                        .background(
+                            KayaEdgeReporter(
+                                node: node, key: kayaTableCellKey(row, col, cell),
+                                generation: generation))
                 }
             }
         }
+        .background(
+            KayaTableViewportReporter(
+                node: node, generation: generation, synthesized: true))
         // task(id:), not onChange: this tier compiles at the macOS 13 /
         // iOS 16 floor, below the zero-parameter onChange.
         .task(id: presented) { node.tablePresented = presented }
@@ -8558,7 +8937,11 @@ struct KayaRender: View {
                                         KayaCellReader(id: child.id, parent: node.id, vertical: true)
                                     )
                             }
-                            .background(KayaTrackReader(id: child.id, vertical: true))
+                            .background(
+                                KayaTrackReader(
+                                    id: child.id, vertical: true,
+                                    tableGeneration: child.tableColumns.isEmpty
+                                        ? nil : kayaTableGeometryGeneration(child)))
                         }
                     }
                 } else {
@@ -8651,7 +9034,11 @@ struct KayaRender: View {
                                         KayaCellReader(id: child.id, parent: node.id, vertical: false)
                                     )
                             }
-                            .background(KayaTrackReader(id: child.id, vertical: false))
+                            .background(
+                                KayaTrackReader(
+                                    id: child.id, vertical: false,
+                                    tableGeneration: child.tableColumns.isEmpty
+                                        ? nil : kayaTableGeometryGeneration(child)))
                         }
                     }
                 } else {
@@ -13944,7 +14331,6 @@ struct KayaRoot: View {
             #endif
             kayaPlaceWindow()
             kayaStartCommandPump()
-            kayaStartSelftest()
         }
     }
 }

@@ -35,12 +35,85 @@ text = sys.stdin.read() if path == "-" else open(path).read()
 bad = []
 zero_at = {}
 kinds_seen = {}
+target_kinds = (
+    "button", "checkbox", "slider", "entry", "label", "column", "row",
+    "image", "scroll", "progress", "select", "radio", "grid", "textarea",
+)
+target_re = re.compile(r"\b(" + "|".join(target_kinds) + r")@([^\s;]*)")
+index_re = re.compile(r"\b(" + "|".join(target_kinds) + r")#([^\s;]*)")
+
+
+def unquoted(line):
+    quoted = False
+    escaped = False
+    out = []
+    for c in line:
+        if quoted:
+            out.append(" ")
+            if escaped:
+                escaped = False
+            elif c == "\\":
+                escaped = True
+            elif c == chr(34):
+                quoted = False
+        elif c == chr(34):
+            quoted = True
+            out.append(" ")
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def authored_target(token):
+    kind, authored = token.split("@", 1)
+    open_at = authored.find("[")
+    if open_at >= 0:
+        if not authored.endswith("]"):
+            return None
+        id_ = authored[:open_at]
+        key_text = authored[open_at + 1:-1]
+        if any(c in id_ for c in "[]@") or "[" in key_text or "]" in key_text:
+            return None
+        keys = key_text.split(".")
+        if not key_text or any(not key for key in keys):
+            return None
+    else:
+        if "]" in authored or "@" in authored:
+            return None
+        id_, keys = authored, None
+    if not id_:
+        return None
+    return kind, id_, keys
+
+
 for lineno, line in enumerate(text.splitlines(), 1):
     if line.lstrip().startswith("#"):
         continue
-    for kind, key in re.findall(r"\b(row|column|scroll|grid)@([\w-]+)\b", line):
-        kinds_seen.setdefault(kind, set()).add("@" + key)
-    for kind, index in re.findall(r"\b(row|column|scroll|grid)#(\d+)\b", line):
+    code = unquoted(line)
+    for match in target_re.finditer(code):
+        token = match.group(0)
+        parsed = authored_target(token)
+        if parsed is None:
+            bad.append(
+                f"{path}:{lineno}: malformed target {token!r}; wanted kind@id "
+                "or kind@id[key.path] with non-empty dot-joined string keys"
+            )
+            continue
+        kind, id_, keys = parsed
+        if kind in ("row", "column", "scroll", "grid"):
+            suffix = "" if keys is None else "[" + ".".join(keys) + "]"
+            kinds_seen.setdefault(kind, set()).add("@" + id_ + suffix)
+    for match in index_re.finditer(code):
+        kind, index = match.groups()
+        token = match.group(0)
+        if index != "last" and re.fullmatch(r"[0-9]+", index) is None:
+            bad.append(
+                f"{path}:{lineno}: malformed target {token!r}; wanted "
+                "kind#index with one numeric or last suffix"
+            )
+            continue
+        if kind not in ("row", "column", "scroll", "grid"):
+            continue
         # Index 0 of a container kind is the blessed pattern, on one
         # convention: the scene ADDRESSES exactly one widget of that
         # kind, so creation order cannot enter. column#0 is the For
@@ -59,7 +132,8 @@ for lineno, line in enumerate(text.splitlines(), 1):
             kinds_seen.setdefault(kind, set()).add("#0")
             continue
         kinds_seen.setdefault(kind, set()).add("#" + index)
-        bad.append(f"{path}:{lineno}: {kind}#{index}")
+        if index != "last":
+            bad.append(f"{path}:{lineno}: {kind}#{index}")
 for kind, lines in zero_at.items():
     if len(kinds_seen.get(kind, set())) > 1:
         others = "/".join(sorted(t for t in kinds_seen[kind] if t != "#0"))
@@ -82,8 +156,8 @@ if printf 'click row#1\nexpect column#2 "x"\n' | lint - >/dev/null; then
 fi
 # The uniqueness clause too: #0 beside an authored key of the same kind
 # is the exact shape that broke on Haskell (children-first creation).
-if printf 'expect_aligned column#0 "stretch"\nexpect_aligned column@x "center"\n' | lint - >/dev/null; then
-    echo "check-steps: SELF-TEST FAIL (column#0 beside column@x passed)" >&2
+if printf 'expect_aligned column#0 "stretch"\nexpect_aligned column@x[brokerage] "center"\n' | lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (column#0 beside column@x[brokerage] passed)" >&2
     exit 1
 fi
 # And the blessed lone #0 still passes, or every legacy scene reddens.
@@ -91,6 +165,65 @@ if ! printf 'expect_fills column#0\nexpect_fills row#0\n' | lint - >/dev/null; t
     echo "check-steps: SELF-TEST FAIL (lone column#0/row#0 refused)" >&2
     exit 1
 fi
+# Both authored forms and a deep string path pass.
+if ! printf 'expect_columns column@positions "A|B"\nexpect_columns column@positions[brokerage] "A|B"\nexpect_columns column@positions[brokerage.taxable] "A|B"\n' \
+    | lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (well-formed authored targets were refused)" >&2
+    exit 1
+fi
+# Every delimiter failure the three parsers reject must fail here too.
+for target in \
+    'column@' \
+    'column@positions[]' \
+    'column@positions[.a]' \
+    'column@positions[a.]' \
+    'column@positions[a..b]' \
+    'column@positions[a' \
+    'column@positions[a]]' \
+    'column@positions[[a]' \
+    'column@positions][a]' \
+    'column@positions[a][b]'
+do
+    grammar_out="$(printf 'expect_columns %s "A|B"\n' "$target" | lint -)"
+    if [ -z "$grammar_out" ]; then
+        echo "check-steps: SELF-TEST FAIL (malformed target $target passed)" >&2
+        exit 1
+    fi
+    case "$grammar_out" in
+        *"malformed target '$target'"*) ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL ($target failed for another reason): $grammar_out" >&2
+            exit 1
+            ;;
+    esac
+done
+unset target grammar_out
+# Indexed targets preserve the sole legacy spelling; empty or repeated
+# separators cannot depend on one parser's split defaults.
+if ! printf 'click button#0\nclick button#last\n' | lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (well-formed indexed targets were refused)" >&2
+    exit 1
+fi
+for target in \
+    'button#' \
+    'button##0' \
+    'button#0#1' \
+    'button#last#'
+do
+    grammar_out="$(printf 'click %s\n' "$target" | lint -)"
+    if [ -z "$grammar_out" ]; then
+        echo "check-steps: SELF-TEST FAIL (malformed target $target passed)" >&2
+        exit 1
+    fi
+    case "$grammar_out" in
+        *"malformed target '$target'"*) ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL ($target failed for another reason): $grammar_out" >&2
+            exit 1
+            ;;
+    esac
+done
+unset target grammar_out
 
 status=0
 for f in tools/scenes/*.steps; do
@@ -101,10 +234,700 @@ for f in tools/scenes/*.steps; do
     }
 done
 
-# The opening lint: a script must OPEN with an observation. Expects are
-# bounded retries (harness.rs POLL_DEADLINE) and the FIRST one doubles
-# as the scene-ready wait, so a script that opens with an action races
-# the mount on every platform at once.
+# The keyed-target grammar has THREE parsers. The desktop scene reaches
+# two; this source wall keeps Compose on the same route before Android
+# carries that scene (docs/tables-plan.md, dynamic tables).
+TARGET_HARNESS="crates/kaya/src/harness.rs"
+TARGET_SWIFT="swift/KayaSwiftUI.swift"
+TARGET_KOTLIN="android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+target_surfaces() { # [harness swift kotlin]
+    python3 - "$@" <<'PY'
+import pathlib
+import sys
+
+defaults = [
+    "crates/kaya/src/harness.rs",
+    "swift/KayaSwiftUI.swift",
+    "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
+]
+paths = sys.argv[1:] or defaults
+findings = []
+
+
+def fail(text):
+    findings.append("check-steps: " + text)
+
+
+if len(paths) != 3:
+    fail(f"keyed-target checker received {len(paths)} sources, wanted 3")
+    paths = defaults
+
+
+def read(path, label):
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail(f"cannot read {label}: {exc}")
+        return None
+
+
+def section(text, start, stop, label):
+    if text is None:
+        return None
+    at = text.find(start)
+    if at < 0:
+        fail(f"{label} has no {start!r} block; the keyed-target checker is blind")
+        return None
+    end = text.find(stop, at + len(start))
+    if end < 0:
+        fail(f"{label}'s {start!r} block has no {stop!r} boundary; the keyed-target checker is blind")
+        return None
+    return text[at:end]
+
+
+def has_all(text, parts):
+    return text is not None and all(part in text for part in parts)
+
+
+harness = read(paths[0], defaults[0])
+swift = read(paths[1], defaults[1])
+kotlin = read(paths[2], defaults[2])
+
+hparse = section(harness, "fn parse_target(spec: &str)", "fn parse_target_kind(", defaults[0])
+if hparse is not None and not has_all(hparse, [
+    "spec.split_once('@')",
+    "authored.find('[')",
+    "!authored.ends_with(']')",
+    "keys.is_empty() || keys.split('.').any(str::is_empty)",
+    "id.contains(['[', ']', '@'])",
+    "authored.contains([']', '@'])",
+    "(authored, None)",
+    "keys: keys.map",
+]):
+    fail("crates/kaya/src/harness.rs target grammar is not kind@id[key.path] with bare @ preserved")
+
+if harness is not None and not has_all(harness, [
+    "fn resolve_id(&self, kind: TargetKind, id: &str, keys: Option<&str>)",
+    "stage.resolve_id(t.kind, id, t.keys)",
+    "*t = Target { kind: t.kind, index, id: None, keys: None }",
+]):
+    fail("crates/kaya/src/harness.rs keyed targets do not carry keys through Stage::resolve_id")
+
+htag = section(harness, "fn table_tag_identity(", "/// Format child main-axis extents", defaults[0])
+if htag is not None and not has_all(htag, [
+    "crate::wire::VALUE_STR => Some(std::str::from_utf8(payload).ok()?)",
+    "crate::wire::VALUE_I64 if len == 8 => None",
+    "keys.split('.')",
+    "*got == Some(want)",
+]):
+    fail("crates/kaya/src/harness.rs table target matching is not string-key-only")
+if htag is not None and "if count == 0 || count >" not in htag:
+    fail("crates/kaya/src/harness.rs table stamps can resolve without copy keys")
+
+stable = section(swift, "private func kayaTableStamp(", "/// Resolves the target grammar", defaults[1])
+starget = section(swift, "private func kayaTarget(", "/// An optional leading `window#N`", defaults[1])
+if starget is not None and not has_all(starget, [
+    'text.firstIndex(of: "@")',
+    'authored.firstIndex(of: "[")',
+    'authored.last == "]"',
+    '!id.contains(where: { $0 == "[" || $0 == "]" || $0 == "@" })',
+    '!keyText.contains(where: { $0 == "[" || $0 == "]" })',
+    'keyText.split(separator: ".", omittingEmptySubsequences: false)',
+    '!path.contains(where: { $0.isEmpty })',
+    '!authored.contains(where: { $0 == "]" || $0 == "@" })',
+    'guard !id.isEmpty else { return nil }',
+    'guard let keys else { return registry.first { $0.a11yId == id } }',
+]):
+    fail("swift/KayaSwiftUI.swift target grammar is not kind@id[key.path] with bare @ preserved")
+if starget is not None and not has_all(starget, [
+    'guard text.filter({ $0 == "#" }).count == 1 else { return nil }',
+    'text.split(separator: "#", omittingEmptySubsequences: false)',
+]):
+    fail("swift/KayaSwiftUI.swift target grammar does not reject repeated or trailing #")
+
+if stable is not None and "guard count > 0, count <=" not in stable:
+    fail("swift/KayaSwiftUI.swift table stamps can resolve without copy keys")
+if stable is not None and "encoding: .utf8" not in stable:
+    fail("swift/KayaSwiftUI.swift table stamp keys are not strict UTF-8")
+
+if (stable is not None and starget is not None) and not (
+    "type == valueStr" in stable
+    and "kayaTableStamp($0.sortTag)?.node" in starget
+    and "guard let stamp = kayaTableStamp($0.sortTag) else" in starget
+    and "stamp.node == node && stamp.keys == keys" in starget
+):
+    fail("swift/KayaSwiftUI.swift keyed targets do not resolve through the table sortTag")
+
+if starget is not None and "let live = registry.filter { kayaScene.nodes[$0.id] === $0 }" not in starget:
+    fail("swift/KayaSwiftUI.swift keyed targets do not filter destroyed registry entries")
+
+sany = section(swift, "private func kayaAnyTarget(", "/// Cut one script LINE", defaults[1])
+if sany is not None and 'switch String(spec.prefix { $0 != "#" && $0 != "@" })' not in sany:
+    fail("swift/KayaSwiftUI.swift target kind extraction does not stop at the earliest #/@")
+
+stransition = section(
+    swift,
+    "func kayaSelftestAdmissionTransition(",
+    "private var kayaSelftestAdmissionState",
+    defaults[1],
+)
+sapply = section(
+    swift,
+    "private func kayaApply(",
+    "private func kayaWindowHasMountedContent(",
+    defaults[1],
+)
+smounted = section(
+    swift,
+    "private func kayaWindowHasMountedContent(",
+    "private func kayaDriveSelftestAdmission(",
+    defaults[1],
+)
+sdrive = section(
+    swift,
+    "private func kayaDriveSelftestAdmission(",
+    "/// The interaction harness's Swift interpreter",
+    defaults[1],
+)
+sdiagnosis = section(
+    swift,
+    '// docs/traps.md, "A scene that never mounts measures an invisible app".',
+    "FileHandle.standardError.write(",
+    defaults[1],
+)
+sroot = section(swift, "struct KayaRoot: View {", "// Recording mode tiles", defaults[1])
+swift_admission_shape_ok = all(
+    part is not None
+    for part in (stransition, sapply, smounted, sdrive, sdiagnosis, sroot)
+)
+apply_tail = (
+    "if menusTouched {\n"
+    "        kayaMenuChanged()\n"
+    "    }\n"
+    "    kayaDriveSelftestAdmission()\n"
+    "}"
+)
+if sapply is not None and (sapply.count("kayaDriveSelftestAdmission()") != 1
+                           or apply_tail not in sapply):
+    swift_admission_shape_ok = False
+    fail("swift/KayaSwiftUI.swift does not admit the harness at the completed apply-batch boundary")
+if stransition is not None:
+    transition_steps = [
+        "if state == .started { return (.started, .none) }",
+        "if mounted { return (.started, .start) }",
+        "if graceExpired {",
+        "return state == .grace ? (.started, .start) : (state, .none)",
+        "if state == .waiting && hasNodes { return (.grace, .armGrace) }",
+        "return (state, .none)",
+    ]
+    positions = [stransition.find(step) for step in transition_steps]
+    if any(at < 0 for at in positions) or positions != sorted(positions) \
+            or any(stransition.count(step) != 1 for step in transition_steps):
+        swift_admission_shape_ok = False
+        fail("swift/KayaSwiftUI.swift selftest admission transition is not terminal, mounted-first, and singly armed")
+if smounted is not None and not has_all(smounted, [
+    "window.root != nil",
+    "window.entries.contains(where: { $0.root != nil })",
+    "window.sections.contains { section in",
+    "section.root != nil",
+    "section.entries.contains(where: { $0.root != nil })",
+]):
+    swift_admission_shape_ok = False
+    fail("swift/KayaSwiftUI.swift mounted-content predicate does not cover window, section, and navigation roots")
+if sdrive is not None:
+    mounted_census = "let mounted = kayaScene.windows.values.contains(where: kayaWindowHasMountedContent)"
+    if sdrive.count(mounted_census) != 1:
+        swift_admission_shape_ok = False
+        fail("swift/KayaSwiftUI.swift selftest admission does not inspect every mounted surface")
+    drive_steps = [
+        "dispatchPrecondition(condition: .onQueue(.main))",
+        'ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil',
+        "let (next, effect) = kayaSelftestAdmissionTransition(",
+        "mounted: mounted",
+        "kayaSelftestAdmissionState = next",
+        "switch effect {",
+        "case .armGrace:",
+        "DispatchQueue.main.asyncAfter(deadline: .now() + kayaSelftestUnmountedGrace)",
+        "kayaDriveSelftestAdmission(graceExpired: true)",
+        "case .start:",
+        "kayaStartSelftest()",
+    ]
+    positions = [sdrive.find(step) for step in drive_steps]
+    if any(at < 0 for at in positions) or positions != sorted(positions) \
+            or any(sdrive.count(step) != 1 for step in drive_steps):
+        swift_admission_shape_ok = False
+        fail("swift/KayaSwiftUI.swift admission driver is not main-thread, state-before-effect, and bounded")
+if sdiagnosis is not None:
+    diagnosis_steps = [
+        "let unmountedNodeCount = DispatchQueue.main.sync { () -> Int? in",
+        "guard !kayaScene.nodes.isEmpty,",
+        "kayaScene.windows",
+        "else { return nil }",
+        "return kayaScene.nodes.count",
+        "if let unmountedNodeCount {",
+        '"\\(unmountedNodeCount) widgets exist but NO ROOT IS MOUNTED on any surface "',
+    ]
+    positions = [sdiagnosis.find(step) for step in diagnosis_steps]
+    if any(at < 0 for at in positions) or positions != sorted(positions) \
+            or any(sdiagnosis.count(step) != 1 for step in diagnosis_steps) \
+            or sdiagnosis.count("kayaScene.nodes") != 2 \
+            or sdiagnosis.count("kayaScene.windows") != 1:
+        swift_admission_shape_ok = False
+        fail("swift/KayaSwiftUI.swift final unmounted diagnosis is not snapshotted on the main queue")
+if swift is not None and (
+    swift.count("private let kayaSelftestUnmountedGrace: TimeInterval = 5.0") != 1
+    or "kayaScene.windows.values.allSatisfy({ !kayaWindowHasMountedContent($0) })" not in swift
+):
+    swift_admission_shape_ok = False
+    fail("swift/KayaSwiftUI.swift has no five-second all-surface fallback to the unmounted-scene diagnostic")
+if sroot is not None and (sroot.count("kayaStartCommandPump()") != 1
+                          or "kayaStartSelftest()" in sroot
+                          or "kayaDriveSelftestAdmission" in sroot):
+    swift_admission_shape_ok = False
+    fail("swift/KayaSwiftUI.swift starts the harness from primary onAppear before a mounted batch")
+if swift is not None and swift_admission_shape_ok:
+    def executable_calls(spelling, definition):
+        return [
+            line for line in swift.splitlines()
+            if spelling in line.split("//", 1)[0]
+            and definition not in line.split("//", 1)[0]
+        ]
+
+    call_census = [
+        ("kayaStartSelftest()", "func kayaStartSelftest()", 1),
+        ("kayaStartCommandPump()", "func kayaStartCommandPump()", 1),
+        ("kayaDriveSelftestAdmission()", "func kayaDriveSelftestAdmission(", 1),
+        ("kayaDriveSelftestAdmission(graceExpired: true)", "func kayaDriveSelftestAdmission(", 1),
+    ]
+    for spelling, definition, want in call_census:
+        got = len(executable_calls(spelling, definition))
+        if got != want:
+            fail(f"swift/KayaSwiftUI.swift has {got} executable {spelling} call(s), wanted {want}")
+
+ktable = section(kotlin, "private fun tableStamp(", "private fun target(", defaults[2])
+ktarget = section(kotlin, "private fun target(", "private fun quotedHead(", defaults[2])
+if ktarget is not None and not has_all(ktarget, [
+    "spec.indexOf('@')",
+    "authored.indexOf('[')",
+    "!authored.endsWith(']')",
+    "keyText.contains('[') || keyText.contains(']')",
+    "id.any { it == '[' || it == ']' || it == '@' }",
+    "keys = keyText.split('.')",
+    "keyText.isEmpty() || keys.any { it.isEmpty() }",
+    "authored.any { it == ']' || it == '@' }",
+    "if (id.isEmpty()) return null",
+    "if (keys == null) return registry.firstOrNull { it.a11yId == id }",
+]):
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt target grammar is not kind@id[key.path] with bare @ preserved")
+if ktarget is not None and not has_all(ktarget, [
+    "val hash = spec.indexOf('#')",
+    "hash != spec.lastIndexOf('#')",
+    "val index = spec.substring(hash + 1)",
+    "index.toIntOrNull()",
+]):
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt target grammar does not reject repeated or trailing #")
+
+if ktable is not None and "if (count == 0L || count >" not in ktable:
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt table stamps can resolve without copy keys")
+if ktable is not None and not has_all(ktable, [
+    "Charsets.UTF_8.newDecoder()",
+    ".onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)",
+    ".onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)",
+    ".decode(ByteBuffer.wrap(bytes))",
+    "catch (_: java.nio.charset.CharacterCodingException)",
+]):
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt table stamp keys are not strict UTF-8")
+
+if (ktable is not None and ktarget is not None) and not (
+    "type != VALUE_STR" in ktable
+    and "tableStamp(it.sortTag)?.node" in ktarget
+    and "tableStamp(it.sortTag)?.let { stamp ->" in ktarget
+    and "stamp.node == node && stamp.keys == keys" in ktarget
+):
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt keyed targets do not resolve through the table sortTag")
+
+if ktarget is not None and "val live = registry.filter { KayaSceneModel.nodes[it.id] === it }" not in ktarget:
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt keyed targets do not filter destroyed registry entries")
+
+kwidget = section(kotlin, "private fun kayaWidgetTarget(", "private fun kayaAxRole(", defaults[2])
+if kwidget is not None and "spec.indexOfAny(charArrayOf('#', '@'))" not in kwidget:
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt target kind extraction does not stop at the earliest #/@")
+
+kmount = section(kotlin, "fun mount(activity: ComponentActivity)", "/** The visible title", defaults[2])
+kadmit = section(
+    kotlin,
+    "private fun admitSelftestOnFirstDraw(",
+    "private fun startSelftest(",
+    defaults[2],
+)
+if kmount is not None:
+    render = kmount.find("activity.setContent { KayaTheme { KayaRoot() } }")
+    admit = kmount.find("admitSelftestOnFirstDraw(activity)")
+    if render < 0 or admit < render or "startSelftest(activity)" in kmount:
+        fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt starts the harness before first-draw admission")
+if kadmit is not None:
+    admission_steps = [
+        "addOnPreDrawListener(",
+        "override fun onPreDraw(): Boolean",
+        "removeOnPreDrawListener(this)",
+        "startSelftest(activity)",
+    ]
+    admission_positions = [kadmit.find(step) for step in admission_steps]
+    if any(at < 0 for at in admission_positions) \
+            or admission_positions != sorted(admission_positions) \
+            or kadmit.count("ViewTreeObserver.OnPreDrawListener") != 1 \
+            or any(kadmit.count(step) != 1 for step in admission_steps):
+        fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt first-draw admission is not one-shot")
+
+scroll_ok = kotlin is not None and not "fun scrollTarget(" in kotlin
+if kotlin is not None:
+    for verb, stop in [
+        ("expect_overflow", "scroll_end"),
+        ("scroll_end", "expect_at_end"),
+        ("expect_at_end", "expect_selection"),
+    ]:
+        arm = section(kotlin, f'"{verb}" ->', f'"{stop}" ->', defaults[2])
+        scroll_ok = scroll_ok and arm is not None and (
+            'target(spec, "scroll", KayaSceneModel.scrolls)' in arm
+        )
+if not scroll_ok:
+    fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt's three scroll arms do not share target()")
+
+print("\n".join(findings))
+sys.exit(1 if findings else 0)
+PY
+}
+
+target_perturb() { # source destination needle replacement
+    python3 - "$@" <<'PY'
+import pathlib
+import sys
+
+source, destination, needle, replacement = sys.argv[1:]
+text = pathlib.Path(source).read_text(encoding="utf-8")
+pathlib.Path(destination).write_text(text.replace(needle, replacement), encoding="utf-8")
+print(text.count(needle))
+PY
+}
+
+target_watch() { # label count slot source destination needle replacement finding
+    local label want slot source destination needle replacement finding hits out
+    label="$1"
+    want="$2"
+    slot="$3"
+    source="$4"
+    destination="$5"
+    needle="$6"
+    replacement="$7"
+    finding="$8"
+    hits="$(target_perturb "$source" "$destination" "$needle" "$replacement")" || return 1
+    echo "check-steps: keyed-target self-test $label applied $hits substitution(s)"
+    if [ "$hits" != "$want" ]; then
+        echo "check-steps: SELF-TEST FAIL ($label applied $hits times, want $want — an unchanged shadow cannot prove the rule fires)" >&2
+        return 1
+    fi
+    case "$slot" in
+        harness) set -- "$destination" "$TARGET_SWIFT" "$TARGET_KOTLIN" ;;
+        swift) set -- "$TARGET_HARNESS" "$destination" "$TARGET_KOTLIN" ;;
+        kotlin) set -- "$TARGET_HARNESS" "$TARGET_SWIFT" "$destination" ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL ($label names unknown target slot $slot)" >&2
+            return 1
+            ;;
+    esac
+    if out="$(target_surfaces "$@")"; then
+        echo "check-steps: SELF-TEST FAIL ($label passed its doctored source)" >&2
+        return 1
+    fi
+    if [ "$out" != "$finding" ]; then
+        echo "check-steps: SELF-TEST FAIL ($label failed for another reason):" >&2
+        echo "$out" >&2
+        return 1
+    fi
+}
+
+if target_out="$(target_surfaces)"; then
+    TARGET_T="$(mktemp -d)"
+    target_watch "shared empty-segment wall" 1 harness \
+        "$TARGET_HARNESS" "$TARGET_T/harness-grammar.rs" \
+        "keys.is_empty() || keys.split('.').any(str::is_empty)" \
+        "keys.is_empty()" \
+        "check-steps: crates/kaya/src/harness.rs target grammar is not kind@id[key.path] with bare @ preserved" || exit 1
+    target_watch "shared Stage key route" 1 harness \
+        "$TARGET_HARNESS" "$TARGET_T/harness-route.rs" \
+        "stage.resolve_id(t.kind, id, t.keys)" \
+        "stage.resolve_id(t.kind, id, None)" \
+        "check-steps: crates/kaya/src/harness.rs keyed targets do not carry keys through Stage::resolve_id" || exit 1
+    target_watch "shared string-key wall" 1 harness \
+        "$TARGET_HARNESS" "$TARGET_T/harness-string.rs" \
+        "crate::wire::VALUE_STR => Some(std::str::from_utf8(payload).ok()?)" \
+        "crate::wire::VALUE_STR => None" \
+        "check-steps: crates/kaya/src/harness.rs table target matching is not string-key-only" || exit 1
+    target_watch "shared keyed-stamp wall" 1 harness \
+        "$TARGET_HARNESS" "$TARGET_T/harness-count.rs" \
+        "if count == 0 || count >" \
+        "if count >" \
+        "check-steps: crates/kaya/src/harness.rs table stamps can resolve without copy keys" || exit 1
+    target_watch "Swift indexed grammar" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-index.swift" \
+        'guard text.filter({ $0 == "#" }).count == 1 else { return nil }' \
+        'guard text.contains("#") else { return nil }' \
+        "check-steps: swift/KayaSwiftUI.swift target grammar does not reject repeated or trailing #" || exit 1
+    target_watch "Swift keyed-stamp wall" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-count.swift" \
+        "guard count > 0, count <=" \
+        "guard count <=" \
+        "check-steps: swift/KayaSwiftUI.swift table stamps can resolve without copy keys" || exit 1
+    target_watch "Swift strict UTF-8" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-utf8.swift" \
+        "let key = String(bytes: tag[payload..<(payload + length)], encoding: .utf8)" \
+        "let key = String(bytes: tag[payload..<(payload + length)], encoding: .ascii)" \
+        "check-steps: swift/KayaSwiftUI.swift table stamp keys are not strict UTF-8" || exit 1
+    target_watch "Swift sortTag route" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-sort.swift" \
+        "kayaTableStamp(\$0.sortTag)?.node" \
+        "kayaTableStamp(\$0.tag)?.node" \
+        "check-steps: swift/KayaSwiftUI.swift keyed targets do not resolve through the table sortTag" || exit 1
+    target_watch "Swift live-node filter" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-live.swift" \
+        'let live = registry.filter { kayaScene.nodes[$0.id] === $0 }' \
+        "let live = registry" \
+        "check-steps: swift/KayaSwiftUI.swift keyed targets do not filter destroyed registry entries" || exit 1
+    target_watch "Swift earliest delimiter" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-kind.swift" \
+        'switch String(spec.prefix { $0 != "#" && $0 != "@" })' \
+        'switch String(spec.split(separator: "#").first ?? "")' \
+        "check-steps: swift/KayaSwiftUI.swift target kind extraction does not stop at the earliest #/@" || exit 1
+    target_watch "Swift direct startup admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-direct-start.swift" \
+        "            kayaStartCommandPump()" \
+        $'            kayaStartCommandPump()\n            kayaStartSelftest()' \
+        "check-steps: swift/KayaSwiftUI.swift starts the harness from primary onAppear before a mounted batch" || exit 1
+    target_watch "Swift apply-boundary admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-no-apply-admit.swift" \
+        "    kayaDriveSelftestAdmission()" \
+        "    kayaStartSelftest()" \
+        "check-steps: swift/KayaSwiftUI.swift does not admit the harness at the completed apply-batch boundary" || exit 1
+    target_watch "Swift terminal admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-repeat-admit.swift" \
+        "if state == .started { return (.started, .none) }" \
+        "if state == .started { return (.started, .start) }" \
+        "check-steps: swift/KayaSwiftUI.swift selftest admission transition is not terminal, mounted-first, and singly armed" || exit 1
+    target_watch "Swift mounted-batch admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-delay-mounted.swift" \
+        "if mounted { return (.started, .start) }" \
+        "if mounted { return (.grace, .armGrace) }" \
+        "check-steps: swift/KayaSwiftUI.swift selftest admission transition is not terminal, mounted-first, and singly armed" || exit 1
+    target_watch "Swift grace-expiry admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-dead-grace.swift" \
+        "return state == .grace ? (.started, .start) : (state, .none)" \
+        "return state == .grace ? (.grace, .none) : (state, .none)" \
+        "check-steps: swift/KayaSwiftUI.swift selftest admission transition is not terminal, mounted-first, and singly armed" || exit 1
+    target_watch "Swift single grace timer" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-repeat-grace.swift" \
+        "if state == .waiting && hasNodes { return (.grace, .armGrace) }" \
+        "if hasNodes { return (.grace, .armGrace) }" \
+        "check-steps: swift/KayaSwiftUI.swift selftest admission transition is not terminal, mounted-first, and singly armed" || exit 1
+    target_watch "Swift state-before-effect admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-late-state.swift" \
+        $'    kayaSelftestAdmissionState = next\n    switch effect {' \
+        $'    switch effect {\n    kayaSelftestAdmissionState = next' \
+        "check-steps: swift/KayaSwiftUI.swift admission driver is not main-thread, state-before-effect, and bounded" || exit 1
+    target_watch "Swift all-window immediate admission" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-primary-only-admit.swift" \
+        'let mounted = kayaScene.windows.values.contains(where: kayaWindowHasMountedContent)' \
+        'let mounted = kayaScene.windows[0].map(kayaWindowHasMountedContent) ?? false' \
+        "check-steps: swift/KayaSwiftUI.swift selftest admission does not inspect every mounted surface" || exit 1
+    target_watch "Swift all-surface mounted predicate" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-section-entry.swift" \
+        "section.entries.contains(where: { \$0.root != nil })" \
+        "false" \
+        "check-steps: swift/KayaSwiftUI.swift mounted-content predicate does not cover window, section, and navigation roots" || exit 1
+    target_watch "Swift bounded diagnostic fallback" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-late-fallback.swift" \
+        "private let kayaSelftestUnmountedGrace: TimeInterval = 5.0" \
+        "private let kayaSelftestUnmountedGrace: TimeInterval = 120.0" \
+        "check-steps: swift/KayaSwiftUI.swift has no five-second all-surface fallback to the unmounted-scene diagnostic" || exit 1
+    target_watch "Swift sections-only diagnostic" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-empty-sections.swift" \
+        'kayaScene.windows.values.allSatisfy({ !kayaWindowHasMountedContent($0) })' \
+        'kayaScene.windows.values.allSatisfy({ $0.root == nil && $0.sections.isEmpty })' \
+        "check-steps: swift/KayaSwiftUI.swift has no five-second all-surface fallback to the unmounted-scene diagnostic" || exit 1
+    target_watch "Swift main-queue diagnosis snapshot" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-background-diagnosis.swift" \
+        'let unmountedNodeCount = DispatchQueue.main.sync { () -> Int? in' \
+        'let unmountedNodeCount = DispatchQueue.global().sync { () -> Int? in' \
+        "check-steps: swift/KayaSwiftUI.swift final unmounted diagnosis is not snapshotted on the main queue" || exit 1
+    target_watch "Swift global start census" 1 swift \
+        "$TARGET_SWIFT" "$TARGET_T/swift-outside-start.swift" \
+        "func kayaStartCommandPump() {" \
+        $'kayaStartSelftest()\n\nfunc kayaStartCommandPump() {' \
+        "check-steps: swift/KayaSwiftUI.swift has 2 executable kayaStartSelftest() call(s), wanted 1" || exit 1
+    target_watch "Compose sortTag route" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-sort.kt" \
+        "tableStamp(it.sortTag)?.node" \
+        "tableStamp(it.tag)?.node" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt keyed targets do not resolve through the table sortTag" || exit 1
+    target_watch "Compose indexed grammar" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-index.kt" \
+        "hash != spec.lastIndexOf('#')" \
+        "hash != hash" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt target grammar does not reject repeated or trailing #" || exit 1
+    target_watch "Compose keyed-stamp wall" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-count.kt" \
+        "if (count == 0L || count > ((tag.size - 16) / 8).toLong()) return null" \
+        "if (count > ((tag.size - 16) / 8).toLong()) return null" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt table stamps can resolve without copy keys" || exit 1
+    target_watch "Compose strict UTF-8" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-utf8.kt" \
+        ".onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)" \
+        ".onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt table stamp keys are not strict UTF-8" || exit 1
+    target_watch "Compose live-node filter" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-live.kt" \
+        "val live = registry.filter { KayaSceneModel.nodes[it.id] === it }" \
+        "val live = registry" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt keyed targets do not filter destroyed registry entries" || exit 1
+    target_watch "Compose earliest delimiter" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-kind.kt" \
+        "val delimiter = spec.indexOfAny(charArrayOf('#', '@'))" \
+        "val delimiter = spec.indexOf('#')" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt target kind extraction does not stop at the earliest #/@" || exit 1
+    target_watch "Compose shared scroll route" 3 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-scroll.kt" \
+        'target(spec, "scroll", KayaSceneModel.scrolls)' \
+        "scrollTarget(spec)" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt's three scroll arms do not share target()" || exit 1
+    target_watch "Compose first-draw admission" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-start.kt" \
+        "admitSelftestOnFirstDraw(activity)" \
+        "startSelftest(activity)" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt starts the harness before first-draw admission" || exit 1
+    target_watch "Compose immediate admission" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-immediate.kt" \
+        "        decor.viewTreeObserver.addOnPreDrawListener(" \
+        "        startSelftest(activity); decor.viewTreeObserver.addOnPreDrawListener(" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt first-draw admission is not one-shot" || exit 1
+    target_watch "Compose one-shot removal" 1 kotlin \
+        "$TARGET_KOTLIN" "$TARGET_T/kotlin-repeat.kt" \
+        "                    decor.viewTreeObserver.removeOnPreDrawListener(this)" \
+        "                    Unit" \
+        "check-steps: android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt first-draw admission is not one-shot" || exit 1
+    rm -rf "$TARGET_T"
+else
+    echo "$target_out" >&2
+    status=1
+fi
+unset target_out TARGET_T
+
+if [ "$(uname -s)" = "Darwin" ]; then
+    ADMISSION_T="$(mktemp -d)"
+    python3 - "$TARGET_SWIFT" "$ADMISSION_T/admission.swift" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text()
+start = source.index("enum KayaSelftestAdmissionState: Equatable")
+end = source.index("private var kayaSelftestAdmissionState", start)
+Path(sys.argv[2]).write_text(source[start:end])
+PY
+    # shellcheck source=tools/lib/swift-toolchain.sh
+    source "$ROOT/tools/lib/swift-toolchain.sh"
+    if ! kaya_swiftc \
+        "$ADMISSION_T/admission.swift" \
+        tools/checks/swiftui-selftest-admission.swift \
+        -o "$ADMISSION_T/admission-probe"; then
+        echo "check-steps: Swift selftest-admission probe did not compile" >&2
+        rm -rf "$ADMISSION_T"
+        exit 1
+    fi
+    "$ADMISSION_T/admission-probe"
+    admission_rc=$?
+    if [ "$admission_rc" -ne 0 ]; then
+        echo "check-steps: Swift selftest-admission truth table failed" >&2
+        rm -rf "$ADMISSION_T"
+        exit 1
+    fi
+
+    admission_hits="$(python3 - "$ADMISSION_T/admission.swift" "$ADMISSION_T/admission-doctored.swift" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text()
+changes = (
+    ("if state == .started { return (.started, .none) }",
+     "if state == .started { return (.started, .start) }"),
+    ("if mounted { return (.started, .start) }",
+     "if mounted { return (.grace, .armGrace) }"),
+    ("return state == .grace ? (.started, .start) : (state, .none)",
+     "return state == .grace ? (.grace, .none) : (.started, .start)"),
+    ("if state == .waiting && hasNodes { return (.grace, .armGrace) }",
+     "if state == .waiting && hasNodes { return (.waiting, .none) }"),
+    ("return (state, .none)", "return (.started, .start)"),
+)
+counts = []
+for needle, replacement in changes:
+    count = source.count(needle)
+    counts.append(count)
+    source = source.replace(needle, replacement)
+Path(sys.argv[2]).write_text(source)
+print(" ".join(map(str, counts)))
+PY
+)"
+    echo "check-steps: Swift selftest-admission runtime negative applied $admission_hits substitutions"
+    if [ "$admission_hits" != "1 1 1 1 1" ]; then
+        echo "check-steps: SELF-TEST FAIL (Swift admission runtime shadow was not changed exactly once per branch)" >&2
+        rm -rf "$ADMISSION_T"
+        exit 1
+    fi
+    if ! kaya_swiftc \
+        "$ADMISSION_T/admission-doctored.swift" \
+        tools/checks/swiftui-selftest-admission.swift \
+        -o "$ADMISSION_T/admission-doctored-probe"; then
+        echo "check-steps: Swift selftest-admission doctored probe did not compile" >&2
+        rm -rf "$ADMISSION_T"
+        exit 1
+    fi
+    admission_out="$($ADMISSION_T/admission-doctored-probe 2>&1)"
+    admission_rc=$?
+    if [ "$admission_rc" -eq 0 ]; then
+        echo "check-steps: SELF-TEST FAIL (doctored Swift admission truth table passed)" >&2
+        rm -rf "$ADMISSION_T"
+        exit 1
+    fi
+    for diagnostic in \
+        "an empty initial model keeps waiting" \
+        "an unmounted node batch arms one grace period" \
+        "another unmounted batch does not arm a second timer" \
+        "a mounted initial batch starts immediately" \
+        "a mounted surface outranks an empty node census" \
+        "a later mount wins during grace" \
+        "grace expiry starts the diagnostic path" \
+        "a spurious expiry cannot start an empty model" \
+        "started is terminal"
+    do
+        case "$admission_out" in
+            *"$diagnostic"*) ;;
+            *)
+                echo "check-steps: SELF-TEST FAIL (Swift admission shadow did not red '$diagnostic')" >&2
+                echo "$admission_out" >&2
+                rm -rf "$ADMISSION_T"
+                exit 1
+                ;;
+        esac
+    done
+    echo "check-steps: Swift selftest-admission truth table watched red (exit $admission_rc)"
+    rm -rf "$ADMISSION_T"
+    unset ADMISSION_T admission_hits admission_out admission_rc
+else
+    echo "check-steps: Swift selftest-admission runtime truth table SKIPPED (needs Darwin swiftc)"
+fi
+
+# The opening lint: a script must OPEN with an observation, giving every
+# interpreter a bounded render retry before its first action. This is not
+# Swift's transaction-admission wall: a vacuous expect can pass against an
+# empty model, so Swift admits only after a completed mounted apply batch.
 opening_lint() {
     python3 -c '
 import sys
@@ -120,7 +943,7 @@ for line in text.splitlines():
     if verb.startswith("expect"):
         sys.exit(0)
     print(f"{path}: opens with {verb!r} — the first step must be an "
-          "expect (its bounded retry is the scene-ready wait)")
+          "expect (its bounded retry lets rendering settle)")
     sys.exit(1)
 sys.exit(0)
 ' "$1"
@@ -134,7 +957,7 @@ fi
 
 for f in tools/scenes/*.steps; do
     out="$(opening_lint "$f")" || {
-        echo "check-steps: $f must open with an expect (the retry is the scene-ready wait):" >&2
+        echo "check-steps: $f must open with an expect (the retry lets rendering settle):" >&2
         echo "$out" >&2
         status=1
     }
@@ -1887,43 +2710,181 @@ sys.exit(1 if bad else 0)
 ' "$1"
 }
 
-# AND THE PICKER MUST BE AIMABLE BEFORE ANY LEG RUNS: the FIRST document
-# picker a simulator shows after a boot opens at the app's container
-# root instead of the directory it was aimed at (docs/traps.md), and the
-# scene then fails three steps deep at file_choose on a row that
-# genuinely is not in the list. So run-sim.sh warms the document stack
-# per device and this keeps it there. Matched with an argument after the
-# name, so the definition line cannot satisfy the clause.
-picker_ios() { # path
+# THE PICKER STACK MUST CLEAN, AIM AND EXPORT before any leg runs. A live
+# FileProvider pid does not prove its LocalStorage index can materialize
+# an export (docs/traps.md), so this checks the per-phone admission wall
+# and the tiny app that supplies its result.
+picker_ios() { # runner [export-probe source]
+    local probe="${2:-tools/ios/exportprobe/main.swift}"
     python3 -c '
 import re
 import sys
 
 path = sys.argv[1]
+probe_path = sys.argv[2]
 text = sys.stdin.read() if path == "-" else open(path).read()
+probe = open(probe_path).read()
 bad = []
 
-warm_call = None
+
+def shell_function(name):
+    match = re.search(
+        rf"(?ms)^{re.escape(name)}\(\) \{{.*?(?=^[A-Za-z_][A-Za-z0-9_]*\(\) \{{|\Z)",
+        text,
+    )
+    if match is None:
+        bad.append(f"{path}: no {name}() is where the iOS picker admission check looks")
+        return ""
+    return "\n".join(
+        line for line in match.group(0).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+prepare = shell_function("picker_prepare")
+cleanup = shell_function("picker_cleanup")
+installed = shell_function("kaya_installed_apps")
+reseed = shell_function("picker_reseed")
+export = shell_function("picker_export_probe")
+prep_join = shell_function("prep_join")
+
+pool_blocks = [
+    block for block in re.findall(
+        r"(?ms)^for udid in \"\$\{UDIDS\[@\]\}\"; do\n(.*?)^done$", text
+    )
+    if "picker_prepare" in block
+]
+if len(pool_blocks) != 1 or pool_blocks[0].count("picker_prepare \"$udid\"") != 1 \
+        or "picker-$udid.rc" not in pool_blocks[0]:
+    bad.append(f"{path}: LocalStorage admission is not prepared once per phone pool UDID "
+               "with a per-device verdict")
+
+prepare_calls = []
 first_leg = None
 for n, raw in enumerate(text.splitlines(), 1):
     s = raw.strip()
     if s.startswith("#"):
         continue
-    if warm_call is None and re.match(r"picker_warm\s+\S", s):
-        warm_call = n
+    if re.match(r"picker_prepare\s+\S", s):
+        prepare_calls.append(n)
     if first_leg is None and re.match(r"queue_(pad_)?leg\s+\S", s):
         first_leg = n
-if warm_call is None:
-    bad.append(f"{path}: nothing warms the document picker — the first picker a simulator "
-               f"shows after a boot opens at the container root rather than where it was "
-               f"aimed, and the filedialog scene then fails at file_choose on a row that is "
-               f"really not there (docs/traps.md). Call picker_warm before the legs")
-elif first_leg is not None and warm_call > first_leg:
-    bad.append(f"{path}:{warm_call}: the picker is warmed AFTER the first leg is queued "
-               f"(line {first_leg}) — the leg that needs it may already have run")
+if not prepare_calls:
+    bad.append(f"{path}: nothing admits the LocalStorage export path before the legs")
+elif first_leg is not None and min(prepare_calls) > first_leg:
+    bad.append(f"{path}:{min(prepare_calls)}: LocalStorage is admitted AFTER the first leg "
+               f"is queued (line {first_leg})")
+
+probe_calls = [m.start() for m in re.finditer(
+    r"(?m)^\s*picker_export_probe \"\$udid\"", prepare
+)]
+warm_calls = [m.start() for m in re.finditer(r"(?m)^\s*picker_warm \"\$udid\"", prepare)]
+reseed_calls = [m.start() for m in re.finditer(r"(?m)^\s*picker_reseed \"\$udid\"", prepare)]
+cleanup_calls = [m.start() for m in re.finditer(
+    r"(?m)^\s*picker_cleanup \"\$udid\" \|\| return 1$", prepare
+)]
+if len(cleanup_calls) != 1 or not warm_calls or cleanup_calls[0] > warm_calls[0]:
+    bad.append(f"{path}: picker_prepare does not clean every prior-run kaya app before "
+               "warming and probing LocalStorage")
+if len(probe_calls) != 2 or len(warm_calls) != 2 or len(reseed_calls) != 1 \
+        or not (warm_calls[0] < probe_calls[0] < reseed_calls[0]
+                < warm_calls[1] < probe_calls[1]) \
+        or re.search(r"(?m)^\s*(for|while|until)\b", prepare) \
+        or "if [ \"$rc\" -ne 75 ]; then" not in prepare:
+    bad.append(f"{path}: picker_prepare must spell exactly two warmed export attempts around "
+               "one measured-failure reseed, with no open-ended retry")
+
+installed_parts = [
+    "xcrun simctl listapps \"$udid\"",
+    "plutil -convert json -o - -- -",
+    "apps = json.load(sys.stdin)",
+    "if not isinstance(apps, dict) or not apps:",
+    "prefix = sys.argv[1]",
+    "for bundle in sorted(apps):",
+    "bundle.startswith(prefix)",
+    "print(bundle)",
+]
+cleanup_parts = [
+    "listed=$(kaya_installed_apps \"$udid\") || return 1",
+    "for bundle in \"${bundles[@]}\"; do",
+    "dev.kaya.*) ;;",
+    "xcrun simctl uninstall \"$udid\" \"$bundle\"",
+    "remaining=$(kaya_installed_apps \"$udid\") || return 1",
+    "if [ -n \"$remaining\" ]; then",
+]
+if re.search(r"(?m)^KAYA_BUNDLE_PREFIX=dev\.kaya\.$", text) is None \
+        or not all(part in installed for part in installed_parts):
+    bad.append(f"{path}: prior-run app census is not scoped exactly to the dev.kaya. bundle prefix")
+cleanup_positions = [cleanup.find(part) for part in cleanup_parts]
+cleanup_lines = [line.strip() for line in cleanup.splitlines() if line.strip()]
+uninstall_lines = [line for line in cleanup_lines if re.search(r"\bsimctl\s+uninstall\b", line)]
+safe_uninstall = "timeout 60 xcrun simctl uninstall \"$udid\" \"$bundle\" >/dev/null 2>&1 || {"
+if any(at < 0 for at in cleanup_positions) or cleanup_positions != sorted(cleanup_positions) \
+        or cleanup.count("kaya_installed_apps \"$udid\"") != 2 \
+        or uninstall_lines != [safe_uninstall] \
+        or re.search(r"\bsimctl\s+(?:delete|erase|shutdown|boot|bootstatus)\b", cleanup) \
+        or re.search(r"\b(?:rm|unlink|find)\b", cleanup):
+    bad.append(f"{path}: picker_cleanup does not use bounded simctl uninstalls and verify "
+               "that no prior-run kaya app remains")
+
+reseed_steps = [
+    "xcrun simctl shutdown \"$udid\"",
+    "xcrun simctl erase \"$udid\"",
+    "xcrun simctl boot \"$udid\"",
+    "xcrun simctl bootstatus \"$udid\" -b",
+]
+positions = [reseed.find(step) for step in reseed_steps]
+if any(at < 0 for at in positions) or positions != sorted(positions) \
+        or "xcrun simctl erase \"$udid\" >/dev/null 2>&1 || return 1" not in reseed \
+        or "xcrun simctl boot \"$udid\" >/dev/null 2>&1 || return 1" not in reseed \
+        or "xcrun simctl bootstatus \"$udid\" -b >/dev/null 2>&1 || return 1" not in reseed \
+        or re.search(r"simctl (shutdown|erase|boot) (all|booted|\"?\$\{UDIDS)", reseed):
+    bad.append(f"{path}: picker_reseed is not a bounded shutdown/erase/boot of exactly $udid")
+
+export_parts = [
+    "simctl install \"$udid\" \"$EXPORT_PROBE_APP\"",
+    "savename \"$probe_name\"",
+    "savepress",
+    "if [ \"$result\" = ok ]; then",
+    "empty*|*\"FP -1005\"*|*\"Index out of sync\"*",
+    "|*\"didPickDocumentURLs called with nil or 0 URLS\"*)",
+    "return 75",
+]
+if not all(part in export for part in export_parts) \
+        or export.find("savename \"$probe_name\"") > export.find("savepress"):
+    bad.append(f"{path}: picker_export_probe no longer drives and classifies the real export "
+               "result before admitting a device")
+
+probe_parts = [
+    "UIDocumentPickerViewController(forExporting: [source], asCopy: true)",
+    "guard let destination = urls.first else",
+    "let copied = try Data(contentsOf: destination)",
+    "guard copied == payload else",
+    "func documentPickerWasCancelled",
+    "publish(\"empty documentPickerWasCancelled\")",
+]
+if not all(part in probe for part in probe_parts):
+    bad.append(f"{probe_path}: export probe no longer requires a nonempty callback and an "
+               "exact byte readback, with cancellation kept red")
+
+join_steps = [
+    prep_join.find("wait \"${PREP_PIDS[@]}\""),
+    prep_join.find("for udid in \"${UDIDS[@]}\""),
+    prep_join.find("clip_relay_check \"${UDIDS[0]}\" \"$PAD_UDID\""),
+]
+if any(at < 0 for at in join_steps) or join_steps != sorted(join_steps):
+    bad.append(f"{path}: prep_join measures clipboard isolation before device recovery has "
+               "finished and its verdicts have been checked")
+
+record_wall = """if [ -n "${KAYA_RECORD:-}" ]; then
+    prep_join || exit 1
+fi
+rec_suite_start"""
+if record_wall not in text:
+    bad.append(f"{path}: recording can start before picker recovery retires its erase/reboot")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
-' "$1"
+' "$1" "$probe"
 }
 
 # THE GUARD GUARDS ITSELF, on the REAL runner rather than a fixture
@@ -1947,6 +2908,7 @@ print(n)
 
 ios_applied() { # count label [want, default 1]
     local want="${3:-1}"
+    echo "check-steps: iOS self-test $2 applied $1 substitution(s)"
     if [ "$1" = "$want" ]; then
         return 0
     fi
@@ -2033,11 +2995,10 @@ ios_applied "$hits" "the late-check insertion half"
 ios_selftest "$IOS_T/late.sh" "measured AFTER the first leg" \
     "a runner that measures the isolation too late"
 
-# ...and the picker half, with its own refusals: a runner that never
-# warms the document stack must fail...
-picker_selftest() { # copy want-fragment label
+# ...and the picker half, with its own refusals.
+picker_selftest() { # runner-copy want-fragment label [probe-copy]
     local out
-    out="$(picker_ios "$1")" && {
+    out="$(picker_ios "$1" "${4:-tools/ios/exportprobe/main.swift}")" && {
         echo "check-steps: SELF-TEST FAIL ($3 passed)" >&2
         rm -rf "$IOS_T"
         exit 1
@@ -2053,22 +3014,157 @@ picker_selftest() { # copy want-fragment label
 }
 
 hits="$(ios_perturb tools/ios/run-sim.sh \
-    '(?m)^ *picker_warm .*\n' '' "$IOS_T/nowarm.sh")"
-ios_applied "$hits" "the picker-warm removal"
-picker_selftest "$IOS_T/nowarm.sh" "nothing warms the document picker" \
-    "a runner that never warms the picker"
+    'for udid in "\$\{UDIDS\[@\]\}"; do\n    \(\n        prep_rc=0\n        picker_prepare' \
+    'for udid in "${UDIDS[0]}"; do\n    (\n        prep_rc=0\n        picker_prepare' \
+    "$IOS_T/one-device.sh")"
+ios_applied "$hits" "the one-device picker preparation"
+picker_selftest "$IOS_T/one-device.sh" "not prepared once per phone pool UDID" \
+    "a runner that admits only one pool device"
 
-# ...and one that warms it only after the legs are queued must fail.
+# Prior-run app containers must leave before the probe judges LocalStorage.
 hits="$(ios_perturb tools/ios/run-sim.sh \
-    '(?m)^ *picker_warm (.*)\n' '' "$IOS_T/latewarm.sh")"
-ios_applied "$hits" "the late-warm removal half"
-hits="$(ios_perturb "$IOS_T/latewarm.sh" \
+    '(?m)^    picker_cleanup "\$udid" \|\| return 1\n' '' \
+    "$IOS_T/no-picker-cleanup.sh")"
+ios_applied "$hits" "the prior-run app cleanup call"
+picker_selftest "$IOS_T/no-picker-cleanup.sh" "does not clean every prior-run kaya app" \
+    "a picker admission that leaves old app containers installed"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^KAYA_BUNDLE_PREFIX=dev\.kaya\.$' 'KAYA_BUNDLE_PREFIX=dev.' \
+    "$IOS_T/broad-picker-cleanup.sh")"
+ios_applied "$hits" "the exact kaya bundle cleanup scope"
+picker_selftest "$IOS_T/broad-picker-cleanup.sh" "not scoped exactly to the dev.kaya. bundle prefix" \
+    "a cleanup broad enough to uninstall unrelated apps"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^        print\(bundle\)$' '        pass' \
+    "$IOS_T/empty-picker-census.sh")"
+ios_applied "$hits" "the prior-run app census emitter"
+picker_selftest "$IOS_T/empty-picker-census.sh" \
+    "not scoped exactly to the dev.kaya. bundle prefix" \
+    "a census that silently emits no installed kaya apps"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^prefix = sys\.argv\[1\]$' 'prefix = "dev.kaya.never."' \
+    "$IOS_T/dead-picker-prefix.sh")"
+ios_applied "$hits" "the live prior-run app prefix"
+picker_selftest "$IOS_T/dead-picker-prefix.sh" \
+    "not scoped exactly to the dev.kaya. bundle prefix" \
+    "a census that filters against an impossible prefix"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'if \[ -n "\$remaining" \]; then' 'if false; then' \
+    "$IOS_T/no-picker-cleanup-postcondition.sh")"
+ios_applied "$hits" "the cleanup postcondition"
+picker_selftest "$IOS_T/no-picker-cleanup-postcondition.sh" \
+    "does not use bounded simctl uninstalls and verify" \
+    "a cleanup that never refuses a surviving kaya app"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^(picker_cleanup\(\) \{ # udid\n)' \
+    '\1    timeout 60 xcrun simctl delete "$udid"\n' \
+    "$IOS_T/destructive-picker-cleanup.sh")"
+ios_applied "$hits" "the destructive cleanup insertion"
+picker_selftest "$IOS_T/destructive-picker-cleanup.sh" \
+    "does not use bounded simctl uninstalls and verify" \
+    "a cleanup that deletes a whole simulator"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'xcrun simctl uninstall "\$udid" "\$bundle"' \
+    'xcrun simctl uninstall booted "$bundle"' \
+    "$IOS_T/unbounded-picker-uninstall.sh")"
+ios_applied "$hits" "the bounded per-device uninstall"
+picker_selftest "$IOS_T/unbounded-picker-uninstall.sh" \
+    "does not use bounded simctl uninstalls and verify" \
+    "an uninstall aimed at the ambient booted simulator"
+
+# Exactly two attempts: taking away the post-reseed proof must fail.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    rc=0\n    picker_export_probe "\$udid" \|\| rc=\$\?\n    if \[ "\$rc" -eq 0 \]; then\n        return 0\n    fi\n    if \[ "\$rc" -eq 75 \]; then' \
+    '    rc=0\n    if [ "$rc" -eq 0 ]; then\n        return 0\n    fi\n    if [ "$rc" -eq 75 ]; then' \
+    "$IOS_T/one-attempt.sh")"
+ios_applied "$hits" "the post-reseed export removal"
+picker_selftest "$IOS_T/one-attempt.sh" "exactly two warmed export attempts" \
+    "a picker preparation that trusts its reseed without probing"
+
+# Recovery must stay on the one device that failed admission.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'xcrun simctl erase "\$udid"' 'xcrun simctl erase all' "$IOS_T/erase-all.sh")"
+ios_applied "$hits" "the broad picker reseed"
+picker_selftest "$IOS_T/erase-all.sh" 'exactly $udid' \
+    "a picker recovery that erases every simulator"
+
+# The host must drive the name field before Save; picker disappearance
+# alone cannot prove the intended destination was materialized.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    drive=\$\(KAYA_SIMDRIVE_LOG=.*\n        .* savename .*\n' '' \
+    "$IOS_T/no-savename.sh")"
+ios_applied "$hits" "the export-name drive removal"
+picker_selftest "$IOS_T/no-savename.sh" "no longer drives and classifies" \
+    "an export probe that never verifies its destination name"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '\|\*"didPickDocumentURLs called with nil or 0 URLS"\*' '' \
+    "$IOS_T/no-empty-log.sh")"
+ios_applied "$hits" "the empty-materialization log removal"
+picker_selftest "$IOS_T/no-empty-log.sh" "no longer drives and classifies" \
+    "an export probe that ignores UIKit's empty-materialization log"
+
+# Recovery may race neither the clipboard measurement nor recording.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    clip_relay_check .*\n' '' "$IOS_T/early-relay.sh")"
+ios_applied "$hits" "the final-state relay removal half"
+hits="$(ios_perturb "$IOS_T/early-relay.sh" \
+    '(?m)^    PREP_JOINED=1\n' \
+    '    PREP_JOINED=1\n    clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || return 1\n' \
+    "$IOS_T/early-relay.sh")"
+ios_applied "$hits" "the early relay insertion half"
+picker_selftest "$IOS_T/early-relay.sh" "before device recovery has finished" \
+    "clipboard isolation measured before a possible reseed"
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    prep_join \|\| exit 1\n(?=fi\nrec_suite_start)' '' \
+    "$IOS_T/record-race.sh")"
+ios_applied "$hits" "the recording join removal"
+picker_selftest "$IOS_T/record-race.sh" "recording can start before picker recovery" \
+    "a recorder started while recovery may erase its device"
+
+# The app side must export, reopen exact bytes, and keep cancel red.
+hits="$(ios_perturb tools/ios/exportprobe/main.swift \
+    'UIDocumentPickerViewController\(forExporting: \[source\], asCopy: true\)' \
+    'UIDocumentPickerViewController(forOpeningContentTypes: [UTType.item])' \
+    "$IOS_T/open-probe.swift")"
+ios_applied "$hits" "the export-initializer replacement"
+picker_selftest tools/ios/run-sim.sh "no longer requires a nonempty callback" \
+    "an admission app that opens instead of exporting" "$IOS_T/open-probe.swift"
+
+hits="$(ios_perturb tools/ios/exportprobe/main.swift \
+    'guard copied == payload else' 'guard !copied.isEmpty else' \
+    "$IOS_T/unread-probe.swift")"
+ios_applied "$hits" "the exact-byte readback replacement"
+picker_selftest tools/ios/run-sim.sh "no longer requires a nonempty callback" \
+    "an admission app that trusts any destination bytes" "$IOS_T/unread-probe.swift"
+
+hits="$(ios_perturb tools/ios/exportprobe/main.swift \
+    'publish\("empty documentPickerWasCancelled"\)' 'publish("ok")' \
+    "$IOS_T/cancel-green.swift")"
+ios_applied "$hits" "the cancel-green replacement"
+picker_selftest tools/ios/run-sim.sh "cancellation kept red" \
+    "an admission app that calls cancellation healthy" "$IOS_T/cancel-green.swift"
+
+# A preparation call moved behind the first leg must still fail even if
+# it exists somewhere in the runner.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^        picker_prepare "\$udid" \|\| prep_rc=\$\?\n' '' \
+    "$IOS_T/lateprepare.sh")"
+ios_applied "$hits" "the late-prepare removal half"
+hits="$(ios_perturb "$IOS_T/lateprepare.sh" \
     '(?m)^        drain\n        timing swiftui-build\+legs' \
-    'picker_warm "${UDIDS[0]}" || exit 1\n        drain\n        timing swiftui-build+legs' \
-    "$IOS_T/latewarm.sh")"
-ios_applied "$hits" "the late-warm insertion half"
-picker_selftest "$IOS_T/latewarm.sh" "warmed AFTER the first leg" \
-    "a runner that warms the picker too late"
+    'picker_prepare "${UDIDS[0]}" || exit 1\n        drain\n        timing swiftui-build+legs' \
+    "$IOS_T/lateprepare.sh")"
+ios_applied "$hits" "the late-prepare insertion half"
+picker_selftest "$IOS_T/lateprepare.sh" "admitted AFTER the first leg" \
+    "a runner that admits LocalStorage too late"
 
 rm -rf "$IOS_T"
 
@@ -2081,7 +3177,7 @@ out="$(clipboard_ios tools/ios/run-sim.sh)" || {
 }
 
 out="$(picker_ios tools/ios/run-sim.sh)" || {
-    echo "check-steps: the iOS lane must warm each device's document stack before its legs (docs/traps.md — the first picker after a boot opens at the container root, not where it was aimed):" >&2
+    echo "check-steps: the iOS lane must admit every phone's real LocalStorage export before its legs (docs/traps.md — a live provider can carry a stale item index):" >&2
     echo "$out" >&2
     status=1
 }

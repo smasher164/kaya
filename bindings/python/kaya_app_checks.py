@@ -205,6 +205,12 @@ with app2.window():
         check("sum for-trace raises at the lax.switch wall", False)
     except TypeError:
         check("sum for-trace raises at the lax.switch wall", True)
+    try:
+        for _ in feed.rows(grow=1):
+            pass
+        check("rows preserves the sum for-trace wall", False)
+    except TypeError:
+        check("rows preserves the sum for-trace wall", True)
 
 with app2.build():
     sig.set(2)
@@ -216,10 +222,105 @@ with app2.build():
     except TypeError:
         check("model iteration is items(), loudly", True)
     try:
+        for _ in traced.rows(grow=1):
+            pass
+        check("rows preserves the model-iteration wall", False)
+    except TypeError:
+        check("rows preserves the model-iteration wall", True)
+    try:
         escaped[0].done
         check("escaped tracer raises", False)
     except RuntimeError:
         check("escaped tracer raises", True)
+
+# Dynamic tables: the nested spelling is the flat spelling at one more
+# level, while an instance re-declaration names its copy outermost first.
+sort_calls = []
+app_table = kaya.App()
+with app_table.window():
+    accounts = kaya.collection(TracedTodo)
+    with kaya.column():
+        for account in accounts:
+            with kaya.column():
+                sleeves = kaya.collection(TracedTodo)
+                for sleeve in sleeves:
+                    with kaya.column():
+                        positions = kaya.collection(TracedTodo)
+                        before_table = len(kaya._tx)
+                        for position in positions.columns(
+                            "Name", "Done",
+                            on_sort=lambda *args: sort_calls.append(args),
+                        ):
+                            with kaya.row():
+                                kaya.label(bind=position.title)
+                                kaya.checkbox(checked=position.done)
+                        table_records = kaya._tx[before_table:]
+
+table_node = positions._for_handle
+header_records = [
+    record for record in table_records
+    if int.from_bytes(record[4:6], "little") == kaya.wire.TX_SET_COLUMN_HEADERS
+]
+check(
+    "nested columns declares a template-scoped header bar",
+    header_records == [kaya.wire.tx_set_column_headers(
+        table_node, kaya.Sort.NONE.sorted, kaya.Sort.NONE.direction,
+        2, 0, ["Name", "Done"],
+    )],
+)
+sort_key = (kaya.wire.OCC_SORT_REQUESTED, table_node)
+check(
+    "nested on_sort registers in the node table only",
+    sort_key in app_table._node_handlers
+    and sort_key not in app_table._widget_handlers,
+)
+table_occs = [
+    (kaya.wire.OCC_SORT_REQUESTED, table_node,
+     ["brokerage", "taxable"], 1),
+]
+real_next_table = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = lambda: table_occs.pop(0) if table_occs else None
+try:
+    app_table._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_table
+check(
+    "nested on_sort passes copy keys outermost first, then the column",
+    sort_calls == [("brokerage", "taxable", 1)],
+)
+
+with app_table.build():
+    before_table = len(kaya._tx)
+    positions.set_columns("Name", "Done", sort=kaya.Sort.asc(0))
+    default_header = kaya._tx[before_table:] == [
+        kaya.wire.tx_set_column_headers(
+            table_node, 0, kaya.Sort.asc(0).direction,
+            2, 0, ["Name", "Done"],
+        )
+    ]
+check(
+    "the unchanged collection spelling re-declares the template-wide header",
+    default_header,
+)
+
+with app_table.build():
+    before_table = len(kaya._tx)
+    try:
+        positions.at("brokerage", "taxable").set_columns(
+            "Name", "Done", sort=kaya.Sort.desc(1),
+        )
+        keyed_header = kaya._tx[before_table:] == [
+            kaya.wire.tx_set_column_headers(
+                table_node, 1, kaya.Sort.desc(1).direction,
+                2, 2, ["brokerage", "taxable", "Name", "Done"],
+            )
+        ]
+    except AttributeError:
+        keyed_header = False
+check(
+    "an instance re-declares its own header with keys before titles",
+    keyed_header,
+)
 
 # One-shot commands: a Widget carries clear/focus, a Node is a blueprint
 # and has neither. Commands carry no mirror state, so an aborted build's
@@ -262,6 +363,35 @@ class Avatar:
 
 def _rec_kind(rec):
     return int.from_bytes(rec[4:6], "little")
+
+
+app_rows_props = kaya.App()
+with app_rows_props.window():
+    growing_rows = kaya.collection()
+    before = len(kaya._tx)
+    for growing_row in growing_rows.rows(
+        grow=1, align="stretch", a11y_id="accounts",
+    ):
+        kaya.label(bind=growing_row)
+    rows_records = kaya._tx[before:]
+    rows_for_ids = [
+        int.from_bytes(rec[8:16], "little")
+        for rec in rows_records
+        if _rec_kind(rec) == kaya.wire.TX_CREATE_FOR
+    ]
+    rows_for = rows_for_ids[0] if len(rows_for_ids) == 1 else 0
+    check(
+        "rows(grow=) reaches its For",
+        kaya.wire.tx_set_grow(rows_for, 1.0) in rows_records,
+    )
+    check(
+        "rows(align=) reaches its For",
+        kaya.wire.tx_set_align(rows_for, kaya.wire.ALIGN_STRETCH) in rows_records,
+    )
+    check(
+        "rows(a11y_id=) reaches its For",
+        kaya.wire.tx_set_a11y_id(rows_for, "accounts") in rows_records,
+    )
 
 
 app_img = kaya.App()
@@ -2039,4 +2169,3 @@ check(
 check("this desktop reports auxiliary windows", caps.aux_windows is True)
 
 sys.exit(1 if failures else 0)
-

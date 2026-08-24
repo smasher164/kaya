@@ -37,6 +37,88 @@ enum KayaTableTierProbe {
                 failures += 1
             }
         }
+        func expectBool(_ name: String, _ got: Bool, _ want: Bool) {
+            if got != want {
+                print("swiftui-table-tier: FAIL — \(name): got \(got), wanted \(want)")
+                failures += 1
+            }
+        }
+        func expectEdges(_ name: String, _ got: [Double], _ want: [Double]) {
+            if got != want {
+                print("swiftui-table-tier: FAIL — \(name): got \(got), wanted \(want)")
+                failures += 1
+            }
+        }
+        func geometryLabel(_ geometry: KayaCurrentTableGeometry) -> String {
+            switch geometry {
+            case .missingViewport:
+                return "missing viewport"
+            case let .missingCells(got, want):
+                return "missing cells \(got)/\(want)"
+            case let .current(_, rows, columns):
+                return "current \(rows.count)/\(columns.flatMap { $0 }.count)"
+            }
+        }
+        func expectGeometry(
+            _ name: String, _ got: KayaCurrentTableGeometry, _ want: String
+        ) {
+            let label = geometryLabel(got)
+            if label != want {
+                print("swiftui-table-tier: FAIL — \(name): got \(label), wanted \(want)")
+                failures += 1
+            }
+        }
+
+        let viewport = CGRect(x: 100, y: 200, width: 300, height: 120)
+        expectBool(
+            "an exact table viewport matches its track",
+            kayaTableViewportMatchesTrack(viewport, track: 300), true)
+        expectBool(
+            "table track underfill is rejected",
+            kayaTableViewportMatchesTrack(viewport, track: 303), false)
+        expectBool(
+            "table track overflow is rejected",
+            kayaTableViewportMatchesTrack(viewport, track: 297), false)
+        expectBool(
+            "global viewport origin rejects horizontally shifted cells",
+            kayaTableFramesFitHorizontally(
+                [CGRect(x: 90, y: 220, width: 180, height: 20)], inside: viewport),
+            false)
+        expectBool(
+            "vertical row slack is accepted",
+            kayaTableFramesFitVertically(
+                [CGRect(x: 120, y: 220, width: 180, height: 20)], inside: viewport),
+            true)
+        expectBool(
+            "vertical row overflow is rejected",
+            kayaTableFramesFitVertically(
+                [CGRect(x: 120, y: 310, width: 180, height: 20)], inside: viewport),
+            false)
+        expectEdges(
+            "edge clustering is anchored to its representative",
+            kayaTableEdgeClusters([100, 102, 104]), [100, 104])
+        let borrowedCluster = [
+            [
+                CGRect(x: 100, y: 200, width: 20, height: 20),
+                CGRect(x: 200, y: 220, width: 20, height: 20),
+            ],
+            [
+                CGRect(x: 200, y: 200, width: 20, height: 20),
+                CGRect(x: 100, y: 220, width: 20, height: 20),
+            ],
+        ]
+        expectBool(
+            "column identity rejects frames borrowed from an existing cluster",
+            {
+                if case .split(_, _) = kayaTableColumnAlignment(borrowedCluster) {
+                    return true
+                }
+                return false
+            }(),
+            true)
+        expectBool(
+            "column representatives must remain distinct and increasing",
+            kayaTableColumnRepresentativesIncrease([200, 100]), false)
 
         // --- Half 1: the whole truth table. ----------------------------
         // macOS: the native Table always, at or above its floor. There is
@@ -89,6 +171,45 @@ enum KayaTableTierProbe {
             }
             table.children.append(row)
         }
+        kayaScene.columns.append(table)
+
+        expectGeometry(
+            "missing table viewport geometry is rejected",
+            kayaCurrentTableGeometry(table), "missing viewport")
+        let generation = kayaTableGeometryGeneration(table)
+        table.tableViewport = KayaTableViewportObservation(
+            generation: generation, frame: viewport, synthesized: false)
+        expectGeometry(
+            "missing current row-cell geometry is rejected",
+            kayaCurrentTableGeometry(table), "missing cells 0/4")
+        let staleGeneration = generation == Int.max ? Int.min : generation + 1
+        for row in table.children {
+            for column in table.tableColumns.indices {
+                let cell = row.children[column]
+                table.tableCellFrames["\(row.id)/\(column)/\(cell.id)"] =
+                    KayaTableCellObservation(
+                        generation: staleGeneration,
+                        frame: CGRect(
+                            x: 120 + CGFloat(column * 120), y: 220,
+                            width: 80, height: 20))
+            }
+        }
+        expectGeometry(
+            "stale row-cell geometry is rejected",
+            kayaCurrentTableGeometry(table), "missing cells 0/4")
+        for key in Array(table.tableCellFrames.keys) {
+            guard let stale = table.tableCellFrames[key] else { continue }
+            table.tableCellFrames[key] = KayaTableCellObservation(
+                generation: generation, frame: stale.frame)
+        }
+        table.tableCellFrames["stale/far-away"] = KayaTableCellObservation(
+            generation: staleGeneration,
+            frame: CGRect(x: -10_000, y: -10_000, width: 1, height: 1))
+        expectGeometry(
+            "all and only current live row-cell geometry is accepted",
+            kayaCurrentTableGeometry(table), "current 4/4")
+        table.tableCellFrames = [:]
+        table.tableViewport = nil
 
         let surface = KayaTableSurface(node: table)
         expectWidth("this host's KayaTableSurface reports its own width class",
@@ -99,6 +220,199 @@ enum KayaTableTierProbe {
         // --- Half 3: the tier that actually drew. ----------------------
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+
+        table.grow = 1
+        let geometryRoot = KayaNode(
+            id: 4, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("geometry-root".utf8))
+        geometryRoot.children.append(table)
+        let geometryWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 700),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        geometryWindow.contentView = NSHostingView(
+            rootView: KayaRender(node: geometryRoot, flexVertical: true, flexStretch: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity))
+        geometryWindow.orderFront(nil)
+
+        func awaitCurrentGeometry() -> KayaCurrentTableGeometry {
+            let deadline = Date().addingTimeInterval(5)
+            var geometry = kayaCurrentTableGeometry(table)
+            while Date() < deadline {
+                if case .current = geometry { return geometry }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                geometry = kayaCurrentTableGeometry(table)
+            }
+            return geometry
+        }
+
+        func awaitCurrentGeometryAndTrack() -> (KayaCurrentTableGeometry, Double?) {
+            let deadline = Date().addingTimeInterval(5)
+            var geometry = kayaCurrentTableGeometry(table)
+            var track = kayaCurrentTableTrackWidth(table)
+            while Date() < deadline {
+                if case .current = geometry, track != nil { return (geometry, track) }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                geometry = kayaCurrentTableGeometry(table)
+                track = kayaCurrentTableTrackWidth(table)
+            }
+            return (geometry, track)
+        }
+
+        let liveState = awaitCurrentGeometryAndTrack()
+        let liveGeometry = liveState.0
+        switch liveGeometry {
+        case let .current(liveViewport, rows, columns):
+            let frames = columns.flatMap { $0 }
+            expectBool("live native row-cell geometry is present", rows.isEmpty, false)
+            expectBool(
+                "live native cells stay inside the recorded viewport horizontally",
+                kayaTableFramesFitHorizontally(frames, inside: liveViewport), true)
+            expectBool(
+                "live native rows stay inside the recorded viewport vertically",
+                kayaTableFramesFitVertically(rows, inside: liveViewport), true)
+            expectBool(
+                "live native columns align by identity with increasing representatives",
+                {
+                    guard case let .aligned(representatives) =
+                        kayaTableColumnAlignment(columns)
+                    else { return false }
+                    return representatives.count == 2
+                        && kayaTableColumnRepresentativesIncrease(representatives)
+                }(),
+                true)
+            expectBool(
+                "the table viewport spans its recorded track width",
+                liveState.1.map {
+                    kayaTableViewportMatchesTrack(liveViewport, track: $0)
+                } ?? false,
+                true)
+        default:
+            let detail = geometryLabel(liveGeometry)
+            print(
+                "swiftui-table-tier: FAIL — live native row-cell geometry is present: "
+                    + detail)
+            failures += 1
+        }
+
+        func rejectsPreviousGeometry(_ previous: Int?) -> Bool {
+            guard case .current = kayaCurrentTableGeometry(table) else { return true }
+            return table.tableViewport?.generation != previous
+        }
+        func rejectsPreviousTrack(_ previous: Int?) -> Bool {
+            guard kayaCurrentTableTrackWidth(table) != nil else { return true }
+            return kayaTableTrackSizes[table.id]?.generation != previous
+        }
+
+        let initialGeneration = table.tableViewport?.generation
+        let initialTrackGeneration = kayaTableTrackSizes[table.id]?.generation
+        kayaInvalidateTableGeometry()
+        expectBool(
+            "a layout invalidation rejects the previous generation",
+            rejectsPreviousGeometry(initialGeneration), true)
+        expectBool(
+            "a layout invalidation rejects the previous track",
+            rejectsPreviousTrack(initialTrackGeneration), true)
+        let invalidationState = awaitCurrentGeometryAndTrack()
+        expectBool(
+            "a same-size layout invalidation republishes geometry and track",
+            {
+                guard case let .current(viewport, _, _) = invalidationState.0,
+                    let track = invalidationState.1,
+                    let generation = table.tableViewport?.generation,
+                    let trackGeneration = kayaTableTrackSizes[table.id]?.generation,
+                    let initialGeneration,
+                    let initialTrackGeneration
+                else { return false }
+                return generation != initialGeneration
+                    && trackGeneration != initialTrackGeneration
+                    && kayaTableViewportMatchesTrack(viewport, track: track)
+            }(),
+            true)
+
+        let preLayoutGeneration = table.tableViewport?.generation
+        let preLayoutTrackGeneration = kayaTableTrackSizes[table.id]?.generation
+        let preLayoutWidth: CGFloat? = {
+            guard case let .current(viewport, _, _) = invalidationState.0 else { return nil }
+            return viewport.width
+        }()
+        kayaSetWindowContentSize(geometryWindow, NSSize(width: 520, height: 700))
+        expectBool(
+            "a resize never accepts the previous generation",
+            rejectsPreviousGeometry(preLayoutGeneration), true)
+        expectBool(
+            "a resize never accepts the previous track",
+            rejectsPreviousTrack(preLayoutTrackGeneration), true)
+        let layoutRefreshedState = awaitCurrentGeometryAndTrack()
+        let layoutRefreshedGeometry = layoutRefreshedState.0
+        expectBool(
+            "a resized table records a fresh live generation",
+            {
+                guard case .current = layoutRefreshedGeometry,
+                    let refreshed = table.tableViewport?.generation,
+                    let preLayoutGeneration
+                else { return false }
+                return refreshed != preLayoutGeneration
+            }(),
+            true)
+        expectBool(
+            "a resized table refreshes its viewport and assigned track",
+            {
+                guard case let .current(viewport, _, _) = layoutRefreshedGeometry,
+                    let preLayoutWidth,
+                    let track = layoutRefreshedState.1
+                else { return false }
+                return viewport.width > preLayoutWidth + 100
+                    && kayaTableViewportMatchesTrack(viewport, track: track)
+            }(),
+            true)
+
+        let resizedGeneration = table.tableViewport?.generation
+        let resizedTrackGeneration = kayaTableTrackSizes[table.id]?.generation
+        let sameSize = geometryWindow.contentRect(forFrameRect: geometryWindow.frame).size
+        kayaSetWindowContentSize(geometryWindow, sameSize)
+        expectBool(
+            "a same-size resize never accepts the previous generation",
+            rejectsPreviousGeometry(resizedGeneration), true)
+        expectBool(
+            "a same-size resize never accepts the previous track",
+            rejectsPreviousTrack(resizedTrackGeneration), true)
+        let sameSizeState = awaitCurrentGeometryAndTrack()
+        expectBool(
+            "a same-size layout invalidation republishes geometry and track",
+            {
+                guard case let .current(viewport, _, _) = sameSizeState.0,
+                    let track = sameSizeState.1,
+                    let generation = table.tableViewport?.generation,
+                    let trackGeneration = kayaTableTrackSizes[table.id]?.generation,
+                    let resizedTrackGeneration,
+                    let resizedGeneration
+                else { return false }
+                return generation != resizedGeneration
+                    && trackGeneration != resizedTrackGeneration
+                    && kayaTableViewportMatchesTrack(viewport, track: track)
+            }(),
+            true)
+
+        let firstGeneration = table.tableViewport?.generation
+        table.children[0].children[0].text = "row zero changed"
+        expectBool(
+            "a mutated table immediately refuses the previous generation",
+            {
+                if case .current = kayaCurrentTableGeometry(table) { return false }
+                return true
+            }(),
+            true)
+        let refreshedGeometry = awaitCurrentGeometry()
+        expectBool(
+            "a mutated table records a fresh live generation",
+            {
+                guard case .current = refreshedGeometry,
+                    let refreshed = table.tableViewport?.generation,
+                    let firstGeneration
+                else { return false }
+                return refreshed != firstGeneration
+            }(),
+            true)
+        geometryWindow.orderOut(nil)
 
         /// True once an NSTableView exists under `view` — SwiftUI's Table
         /// on macOS is one, and nothing kaya draws by hand is.
@@ -161,7 +475,7 @@ enum KayaTableTierProbe {
             "a widget tree with no table draws no NSTableView (the finder discriminates)")
 
         if failures == 0 {
-            print("swiftui-table-tier: OK — 11 rule cells, this host's branch, "
+            print("swiftui-table-tier: OK — rule, geometry, this host's branch, "
                 + "and the rendered tier")
         }
         exit(failures == 0 ? 0 : 1)

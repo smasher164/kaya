@@ -198,7 +198,13 @@ in docs/deferred.md.
    that bites — every gate script on disk is either in the sweep or in
    gates.sh's EXCLUDED table WITH A REASON — and it is what would have
    caught the four gates this paragraph was missing while the lane ran
-   them),
+   them. It also pins validate-all's launch order: ALL FIVE platform lanes
+   start together before the runner waits for Android's recorded lane pid;
+   the one gate sweep starts at niceness 10 after Android exits while any
+   longer lanes continue. It holds the runner and environment probe to the
+   same four-phone pool; its self-tests watch lane count, pool width,
+   concurrent platform launch, pid provenance, single-sweep shape and
+   niceness red),
    `tools/check-ledger.sh` (docs/deferred.md may not disagree with
    itself: an UNSTRUCK headline over an entry that records a terminal
    resolution, or a STRUCK one with no resolution note. Two entries
@@ -360,8 +366,13 @@ in docs/deferred.md.
    (mac native, iOS compact synthesized at ANY availability, iOS regular
    native only at or above TableColumnForEach's floor) plus a REAL
    KayaTableSurface in an NSWindow with the NSTableView the native tier
-   is made of found in its view tree. What no gate holds is whether a
-   PHYSICAL device reports the size class the simulator did),
+   is made of found in its view tree. The same probe holds the geometry
+   half too: viewport, cells and assigned track share the current table
+   generation; every batch and native resize invalidates it before
+   acting; and a generation-keyed reporter republishes even after a
+   same-size resize. The watched shadows remove each link separately.
+   What no gate holds is whether a PHYSICAL device reports the size class
+   the simulator did),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside
@@ -560,10 +571,11 @@ in docs/deferred.md.
    SwiftUI interpreter, the one macOS backend (opens windows briefly;
    needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:
-   `tools/validate-all.sh` — ALL FIVE lanes concurrently by default
-   (bounded by the slowest lane — ~7 minutes warm as of 2026-08-17,
-   growing with the scene roster; ratified 2026-07-22). `--serial` for the special cases: single-lane
-   benchmarking, debugging under contention, recording mode. The
+   `tools/validate-all.sh` — ALL FIVE platform lanes run concurrently by
+   default (ratified 2026-07-22). After Android exits, the one
+   `nice -n 10` gate sweep overlaps whichever longer lanes remain.
+   `--serial` is for the special cases: single-lane benchmarking,
+   debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.sh`,
    `tools/ios/run-sim.sh`, `tools/android/run-emulator.sh`,
    `tools/deploy-win.sh akhil@192.168.64.2 all`;

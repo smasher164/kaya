@@ -20,6 +20,7 @@ class KayaHarnessAccessibility : AccessibilityService() {
         super.onServiceConnected()
         live = this
         android.util.Log.i("kaya", "KAYA_A11Y: harness accessibility service connected")
+        watchWindowHealth()
     }
 
     override fun onDestroy() {
@@ -29,16 +30,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
         super.onDestroy()
     }
 
-    // The service stays DRIVEN for reads — the scene says when to look —
-    // but events are consumed as FRESHNESS SIGNALS since 2026-08-22:
-    // the window list getWindows() answers is a snapshot that lags
-    // reality in both directions, and the straggler-back family's ninth
-    // sighting measured a press slipping through a 65ms gap no polled
-    // read could see (the WATCH entry in docs/deferred.md). A
-    // WINDOWS_CHANGE_REMOVED event names the window that ACTUALLY left,
-    // straight from the system, and the epoch says the system processed
-    // something since the last press. Neither makes the service
-    // reactive: nothing here initiates.
+    // The service stays DRIVEN for reads — the scene says when to look.
+    // A WINDOWS_CHANGE_REMOVED event names a window that ACTUALLY left,
+    // straight from the system; nothing here initiates from an event.
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED &&
@@ -47,10 +41,34 @@ class KayaHarnessAccessibility : AccessibilityService() {
         ) {
             noteRemoved(event.windowId)
         }
-        windowEpoch += 1
     }
 
     override fun onInterrupt() = Unit
+
+    private fun watchWindowHealth() {
+        Thread {
+            repeat(50) {
+                if (live !== this) return@Thread
+                val snapshot = windows.orEmpty()
+                val readable = snapshot.count { it.root?.packageName != null }
+                if (readable > 0) {
+                    android.util.Log.i(
+                        "kaya",
+                        "KAYA_A11Y_WINDOWS: READY total=${snapshot.size} readable=$readable",
+                    )
+                    return@Thread
+                }
+                Thread.sleep(100)
+            }
+            if (live === this) {
+                android.util.Log.w("kaya", "KAYA_A11Y_WINDOWS: BLIND ${windowCensus()}")
+            }
+        }.apply {
+            name = "kaya-a11y-window-health"
+            isDaemon = true
+            start()
+        }
+    }
 
     companion object {
         /**
@@ -77,16 +95,6 @@ class KayaHarnessAccessibility : AccessibilityService() {
         internal var appResumed: Boolean = false
 
         /**
-         * Bumped on EVERY accessibility event, on the service's main
-         * looper (single writer). [dismiss] presses again only after
-         * this has moved since its last press: a system that has
-         * processed nothing since the previous back cannot have needed
-         * another one yet.
-         */
-        @Volatile
-        internal var windowEpoch: Long = 0
-
-        /**
          * Window ids the system announced REMOVED (capped; cleared at
          * each dialog present by [clearRemovals]). Fresh where the
          * window list is stale: the list held a dismissed picker long
@@ -111,6 +119,7 @@ class KayaHarnessAccessibility : AccessibilityService() {
         /** Called at each dialog present, so a reused id cannot lie. */
         fun clearRemovals() {
             synchronized(removedWindows) { removedWindows.clear() }
+            pickerBackGate.clear()
         }
 
         /**
@@ -184,6 +193,88 @@ class KayaHarnessAccessibility : AccessibilityService() {
 
         /** How long the picker is given to leave once it has been answered. */
         private const val GONE_TRIES = 15
+
+        private data class PickerBackState(
+            val windowId: Int,
+            val breadcrumbs: List<String>,
+        )
+
+        /**
+         * One BACK per exact picker path, after two matching reads.
+         * docs/traps.md, "A changed event is not a changed picker path."
+         */
+        private class PickerBackGate {
+            private val spent = mutableSetOf<PickerBackState>()
+            private var candidate: PickerBackState? = null
+            private var matchingReads = 0
+            private var lastPressed: PickerBackState? = null
+            private var closingAction = false
+
+            @Synchronized
+            fun clear() {
+                spent.clear()
+                candidate = null
+                matchingReads = 0
+                lastPressed = null
+                closingAction = false
+            }
+
+            @Synchronized
+            fun observe(state: PickerBackState?): Boolean {
+                if (state == null) {
+                    candidate = null
+                    matchingReads = 0
+                    return false
+                }
+                if (state != candidate) {
+                    candidate = state
+                    matchingReads = 1
+                    return false
+                }
+                matchingReads += 1
+                if (matchingReads < 2 || closingAction || spent.contains(state)) return false
+                val previous = lastPressed
+                if (previous != null &&
+                    (state.windowId != previous.windowId ||
+                        state.breadcrumbs.size >= previous.breadcrumbs.size ||
+                        previous.breadcrumbs.take(state.breadcrumbs.size) != state.breadcrumbs)
+                ) {
+                    return false
+                }
+                spent.add(state)
+                lastPressed = state
+                return true
+            }
+
+            @Synchronized
+            fun noteClosingAction(state: PickerBackState?) {
+                if (state != null) spent.add(state)
+                closingAction = true
+            }
+        }
+
+        private val pickerBackGate = PickerBackGate()
+
+        private fun pickerBackGateSelftest() {
+            val gate = PickerBackGate()
+            val folder = PickerBackState(17, listOf("device", "Documents", "folder"))
+            val documents = PickerBackState(17, listOf("device", "Documents"))
+            val root = PickerBackState(17, listOf("device"))
+            val sequence = listOf(folder, folder, folder, documents, documents, root, root, root)
+            check(sequence.count(gate::observe) == 3) {
+                "kaya: picker BACK gate did not admit exactly one press per shortening path"
+            }
+            check(!gate.observe(null)) { "kaya: an unreadable picker path admitted a BACK" }
+            val oscillating = PickerBackGate()
+            check(listOf(folder, documents, folder, documents).none(oscillating::observe)) {
+                "kaya: an unstable picker path admitted a BACK"
+            }
+            val closing = PickerBackGate()
+            closing.noteClosingAction(folder)
+            check(listOf(documents, documents, root, root).none(closing::observe)) {
+                "kaya: cleanup admitted a BACK while a picker action was closing"
+            }
+        }
     }
 
     /** Which picker build is on screen, or null when none of them is. */
@@ -252,6 +343,18 @@ class KayaHarnessAccessibility : AccessibilityService() {
         return Pair(breadcrumb(nodes), rows(nodes).map { it.first })
     }
 
+    private fun pickerBackState(
+        window: android.view.accessibility.AccessibilityWindowInfo,
+    ): PickerBackState? {
+        val root = window.root ?: return null
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        collect(root, nodes)
+        val trail = nodes
+            .filter { it.viewIdResourceName?.endsWith(BREADCRUMB_ID) == true }
+            .mapNotNull { it.text?.toString()?.takeIf { text -> text.isNotEmpty() } }
+        return if (trail.isEmpty()) null else PickerBackState(window.id, trail)
+    }
+
     /**
      * What the live SAVE panel is REALLY showing: the directory it is
      * in, and the name in its name field. Null when no save panel is up.
@@ -303,7 +406,10 @@ class KayaHarnessAccessibility : AccessibilityService() {
         val button = nodes.firstOrNull {
             it.viewIdResourceName?.endsWith(SAVE_BUTTON_ID) == true
         } ?: return false
-        return button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val closingState = pickerWindow()?.let(::pickerBackState)
+        val accepted = button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (accepted) pickerBackGate.noteClosingAction(closingState)
+        return accepted
     }
 
     /**
@@ -388,7 +494,10 @@ class KayaHarnessAccessibility : AccessibilityService() {
             ?.firstOrNull { it.first == name }
             ?.second
             ?: return false
-        return row.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val closingState = pickerWindow()?.let(::pickerBackState)
+        val accepted = row.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (accepted) pickerBackGate.noteClosingAction(closingState)
+        return accepted
     }
 
     /**
@@ -417,31 +526,18 @@ class KayaHarnessAccessibility : AccessibilityService() {
             "kaya: the picker drive must not run on the main thread — getWindows() " +
                 "is refreshed there and would never see the picker leave"
         }
-        // BACK IS PRESSED ONLY WHILE THE PICKER HOLDS INPUT FOCUS AND
-        // THE APP'S OWN ACTIVITY IS NOT RESUMED. Both halves guard one
-        // failure: the window list LAGS a dismissal, a stale entry buys
-        // one extra press, and that STRAGGLER BACK lands on the app and
-        // finish()es the scene's activity — after which a dialog's
-        // result has no live destination and vanishes with no line
-        // anywhere. Focus is read from the lagging snapshot and cannot
-        // see the app take over; [appResumed] is in-process and lags
-        // nothing, and in both 2026-08-21 traces the straggler was
-        // injected ~130ms AFTER the app's own onResume. The WATCH entry
-        // in docs/deferred.md holds the timestamps.
-        //
-        // THE RESUMED READ COMES LAST, after the window read that can
-        // itself cost hundreds of milliseconds under load: hoisting it
-        // hands the press a value measured before the wait.
+        pickerBackGateSelftest()
+        // Three walls admit BACK: picker focus, the app still paused,
+        // and one stable strictly-shorter breadcrumb path. See
+        // docs/traps.md, "A changed event is not a changed picker path."
+        // The resumed read stays after the window/path reads, which can
+        // themselves cost hundreds of milliseconds under load.
         var backs = 0
         var waits = 0
         var absent = 0
         var refused = 0
         var withheld = 0
-        // The epoch at the LAST press: pressing again before it moves
-        // would be racing a system that has processed nothing since —
-        // and the ninth sighting's straggler slipped through exactly
-        // such a race (the WATCH entry; ruled 2026-08-22, remedy A).
-        var epochAtPress = -1L
+        var unreadable = 0
         while (waits < GONE_TRIES * 2) {
             waits += 1
             val picker = pickerWindow()
@@ -465,14 +561,14 @@ class KayaHarnessAccessibility : AccessibilityService() {
             }
             absent = 0
             if (picker.isFocused && backs < MAX_BACKS) {
+                val backState = pickerBackState(picker)
                 if (appResumed) {
                     refused += 1
-                } else if (windowEpoch == epochAtPress) {
-                    // The handshake: nothing has happened since the last
-                    // press — the previous back is still in flight.
+                } else if (backState == null) {
+                    unreadable += 1
+                } else if (!pickerBackGate.observe(backState)) {
                     withheld += 1
                 } else {
-                    epochAtPress = windowEpoch
                     performGlobalAction(GLOBAL_ACTION_BACK)
                     backs += 1
                 }
@@ -482,7 +578,8 @@ class KayaHarnessAccessibility : AccessibilityService() {
         if (pickerPackage() == null) return null
         return "the picker would not dismiss after $backs backs in $waits looks " +
             "($refused refused while the app's own activity was resumed, " +
-            "$withheld withheld waiting for the previous press to be processed); " +
+            "$withheld withheld until a new stable picker path, " +
+            "$unreadable with no readable picker path); " +
             windowCensus()
     }
 

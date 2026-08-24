@@ -1,8 +1,6 @@
-"""The portfolio dashboard, v1 skeleton (docs/portfolio-plan.md): the
-second forcing app, in Python. One table driven by account selection —
-the repopulation handler below is exactly the code the dynamic-tables
-landing deletes — a deterministic "Day tick", and money as integer
-cents so the byte-frozen scene asserts exact strings.
+"""The portfolio dashboard (docs/portfolio-plan.md): one positions table
+per account, a deterministic "Day tick", and integer-cent money so the
+byte-frozen scene asserts exact strings.
 
 Build the library first (cargo build), then:
     KAYA_SELFTEST=portfolio python3 guests/python/portfolio.py
@@ -22,6 +20,12 @@ class Position:
     value: str
 
 
+@dataclass
+class Account:
+    name: str
+    total: str
+
+
 # The book: fixed holdings, prices in integer cents, and the tick's
 # fixed per-ticker delta. Every number the scene asserts derives from
 # these by arithmetic, never by observation.
@@ -34,7 +38,7 @@ TICK = {"AAPL": 250, "NVDA": -1000, "VTI": 75, "BND": -10, "VXUS": 60, "CASH": 0
 ACCOUNT_ORDER = ["brokerage", "retirement", "savings"]
 
 prices = {t: cents for _, holdings in BOOK.values() for t, _, cents in holdings}
-state = {"account": "brokerage", "sorted": None}
+sorted_accounts = {}
 
 
 def money(cents):
@@ -50,121 +54,95 @@ def portfolio_total():
     return sum(account_total(a) for a in ACCOUNT_ORDER)
 
 
-def fill_positions():
-    """Writes only — legal at build time, where Python's mirror-read
-    guard forbids collection reads (the window-block strictness)."""
-    _, holdings = BOOK[state["account"]]
+def position(account, ticker, qty):
+    return Position(
+        ticker=ticker,
+        qty=str(qty),
+        price=money(prices[ticker]),
+        value=money(qty * prices[ticker]),
+    )
+
+
+def fill_positions(account):
+    _, holdings = BOOK[account]
+    table = positions.at(account)
     for ticker, qty, _ in holdings:
-        positions.insert(
-            ticker,
-            Position(
-                ticker=ticker,
-                qty=str(qty),
-                price=money(prices[ticker]),
-                value=money(qty * prices[ticker]),
-            ),
-        )
-    positions.set_columns("Ticker", "Qty", "Price", "Value")
+        table.insert(ticker, position(account, ticker, qty))
 
 
-def repopulate():
-    """The selected account's rows, rebuilt — the workaround for the
-    fenced dynamic-tables shape (plan §1): one collection, its contents
-    swapped on selection, the sort indicator reset with them. HANDLERS
-    ONLY: the clearing loop reads the mirror."""
-    for key, _ in positions.items():
-        positions.remove(key)
-    state["sorted"] = None
-    fill_positions()
-
-
-def refresh_labels():
-    name, _ = BOOK[state["account"]]
-    account_name.set(name)
-    account_value.set(f"Account total: {money(account_total(state['account']))}")
-    portfolio_value.set(f"Portfolio: {money(portfolio_total())}")
-
-
-def select(key):
-    state["account"] = key
-    repopulate()
-    refresh_labels()
-
-
-def on_sort(column):
-    current = state["sorted"]
-    descending = current is not None and current[0] == column and not current[1]
-    state["sorted"] = (column, descending)
-    _, holdings = BOOK[state["account"]]
-    qty_of = {t: q for t, q, _ in holdings}
-    # Numeric keys for numeric columns — cents and counts, never the
-    # money string (plan §3).
+def apply_order(account, column, descending):
+    table = positions.at(account)
+    _, holdings = BOOK[account]
+    qty_of = {ticker: qty for ticker, qty, _ in holdings}
     key_of = {
-        0: lambda e: e[0],
-        1: lambda e: qty_of[e[0]],
-        2: lambda e: prices[e[0]],
-        3: lambda e: qty_of[e[0]] * prices[e[0]],
+        0: lambda entry: entry[0],
+        1: lambda entry: qty_of[entry[0]],
+        2: lambda entry: prices[entry[0]],
+        3: lambda entry: qty_of[entry[0]] * prices[entry[0]],
     }[column]
-    entries = positions.items()
-    entries.sort(key=lambda e: key_of(e), reverse=descending)
+    entries = table.items()
+    entries.sort(key=key_of, reverse=descending)
     for key, _ in entries:
-        positions.move_to_end(key)
+        table.move_to_end(key)
     indicator = kaya.Sort.desc(column) if descending else kaya.Sort.asc(column)
-    positions.set_columns("Ticker", "Qty", "Price", "Value", sort=indicator)
+    table.set_columns("Ticker", "Qty", "Price", "Value", sort=indicator)
+
+
+def on_sort(account, column):
+    current = sorted_accounts.get(account)
+    descending = current is not None and current[0] == column and not current[1]
+    sorted_accounts[account] = (column, descending)
+    apply_order(account, column, descending)
 
 
 def tick():
     for ticker, delta in TICK.items():
         prices[ticker] += delta
-    repopulate()
-    refresh_labels()
+    for account in ACCOUNT_ORDER:
+        table = positions.at(account)
+        _, holdings = BOOK[account]
+        for ticker, qty, _ in holdings:
+            table.update(ticker, position(account, ticker, qty))
+        accounts.patch(account, total=f"Account total: {money(account_total(account))}")
+        if account in sorted_accounts:
+            apply_order(account, *sorted_accounts[account])
+    portfolio_value.set(f"Portfolio: {money(portfolio_total())}")
 
 
 app = kaya.App()
 
-with app.window(title="portfolio"):
+with app.window(title="portfolio", width=800, height=600):
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
-    account_name = kaya.signal("Brokerage")
-    account_value = kaya.signal(f"Account total: {money(account_total('brokerage'))}")
     with kaya.row():
         with kaya.column():
             kaya.label(bind=portfolio_value)  # label#0
             kaya.button("Day tick", on_click=tick)  # button#0
-            accounts = kaya.collection(Position)  # name field only; a button per row
-            for row in accounts:  # column#1 (the accounts For)
-                with kaya.row():
-                    # A stamped handler's first arguments are the copy's
-                    # keys — the keys ARE the noun.
-                    kaya.button(bind=row.ticker, on_click=select)
-        # grow: the table's own grow divides THIS column's leftover, and
-        # a hugging column has none; stretch: align defaults to start,
-        # under which the table hugs the widest label's breadth and
-        # clips its columns (tables-plan §8's class: every model
-        # observable green, only pixels disagree).
+        accounts = kaya.collection(Account)
         with kaya.column(grow=1, align="stretch") as detail:  # the detail column
             detail.a11y_id("detail")
-            kaya.label(bind=account_name)  # label#1
-            positions = kaya.collection(Position)
-            # The table IS the For (docs/tables-plan.md); a table is a
-            # viewport, so the scene says it fills (grow).
-            # a11y_id is the harness's stable handle (column@positions)
-            # AND the platform automation key — one authored prop.
-            for item in positions.columns(
-                "Ticker", "Qty", "Price", "Value",
-                on_sort=on_sort, grow=1, a11y_id="positions",
+            for account in accounts.rows(
+                grow=1, align="stretch", a11y_id="accounts",
             ):
-                with kaya.row():
-                    kaya.label(bind=item.ticker)
-                    kaya.label(bind=item.qty)
-                    kaya.label(bind=item.price)
-                    kaya.label(bind=item.value)
-            kaya.label(bind=account_value)  # label#2
-    # Inserts after every declaration, so the stamped account buttons
-    # index AFTER the live tick button: button#0 tick, then #1..#3 in
-    # ACCOUNT_ORDER.
+                with kaya.column(grow=1, align="stretch"):
+                    kaya.label(bind=account.name)
+                    positions = kaya.collection(Position)
+                    for item in positions.columns(
+                        "Ticker", "Qty", "Price", "Value",
+                        on_sort=on_sort, grow=1, a11y_id="positions",
+                    ):
+                        with kaya.row():
+                            kaya.label(bind=item.ticker)
+                            kaya.label(bind=item.qty)
+                            kaya.label(bind=item.price)
+                            kaya.label(bind=item.value)
+                    kaya.label(bind=account.total)
     for account in ACCOUNT_ORDER:
         name, _ = BOOK[account]
-        accounts.insert(account, Position(ticker=name, qty="", price="", value=""))
-    fill_positions()
+        accounts.insert(
+            account,
+            Account(name=name, total=f"Account total: {money(account_total(account))}"),
+        )
+    for account in ACCOUNT_ORDER:
+        fill_positions(account)
 
 sys.exit(app.run())
