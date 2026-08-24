@@ -2,8 +2,9 @@
 
 Status: the Rust/Python depth slice and its post-capture visual fixes are
 green. The dynamic-tables milestone remains open for Go, C#, Java, Swift,
-OCaml and Haskell binding breadth. A newly noticed macOS native-table
-appearance question is research first, not an authorized visual change.
+OCaml and Haskell binding breadth. The macOS native-table appearance
+question below was researched and RULED 2026-08-24 — see the resolution
+note ahead of that section.
 
 Written 2026-08-24 while the implementation and validation evidence were
 still warm. Read, in order:
@@ -78,6 +79,14 @@ inspected GTK/X11 and macOS captures plus current Python/Rust excerpts.
 
 ## Open visual research: macOS grey bands below the data
 
+RESOLVED 2026-08-24: the bands are NSTableView's native alternating
+empty-row striping in a viewport taller than its content. The maintainer
+ruled option 2 — an ungrown native table hugs header + rows, a grown one
+stays the fill-and-scroll viewport. Implementation, watched-red record
+and the cross-platform contract live in docs/tables-plan.md decision 8
+(the 2026-08-24 amendment); the section below stays as the question that
+was asked.
+
 The inspected macOS capture shows light-grey blank bands after the last
 populated row in each native table — most visibly below VTI, below VXUS,
 and twice below CASH. This is measured only as pixels. It has not been
@@ -114,7 +123,7 @@ implement an aesthetic guess. If the ruling changes behavior, add a
 toolkit-derived observable or compiled real-window probe, watch its
 negative fail, then run the proportional ladder.
 
-Relevant seams:
+Relevant files:
 
 - `swift/KayaSwiftUI.swift`: `KayaTableSurface`, `KayaNativeTable`, table
   viewport/cell/track observations, and `expect_fills` /

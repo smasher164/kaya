@@ -4656,3 +4656,14 @@ build/deploy/unit-test phases and 310s in 191 green legs, none over 26s.
 Android is now positively measured below 310s, but there is still no
 accepted ALL PASS record on these removals. Thermal state and unrelated
 application load were uncontrolled variables, not measured causes.
+
+
+## `grep -q` under pipefail can read a SUCCESSFUL match as a failure (2026-08-24)
+
+`-q` exits at the first match, the upstream command takes SIGPIPE
+(141), and `set -o pipefail` promotes it — so the pipeline fails
+BECAUSE the grep succeeded. The staged install's `pm list packages`
+postcondition uses `grep -x ... >/dev/null` for that reason.
+cliphelper_prepare's older `-q` shape survives because `pm list
+packages` fits the pipe buffer — a property of the output size, not of
+the code, so do not copy it.

@@ -291,12 +291,14 @@ if fills_case is not None:
         "kayaCurrentTableGeometry(container)",
         "kayaTableFramesFitVertically(rows, inside: viewport)",
         ".missingViewport",
-        ".missingCells",
+        ".partialRow",
+        ".unrealized",
     )
     if any(item not in fills_case for item in required):
-        bad.append(f"{path}: expect_fills' table arm must refuse absent/currently incomplete "
-                   "geometry and contain live rows vertically in the recorded viewport; "
-                   "vertical slack remains valid. One of those checks is absent from the arm.")
+        bad.append(f"{path}: expect_fills' table arm must refuse absent geometry, a "
+                   "PARTIALLY recorded row and rows a tier owes but has not realized, and "
+                   "contain live rows vertically in the recorded viewport; vertical slack "
+                   "remains valid. One of those checks is absent from the arm.")
 
 TIERS = ("KayaNativeTable", "KayaSynthesizedTable")
 
@@ -451,29 +453,106 @@ PY
 }
 
 # --- The self-test: every clause above WATCHED GOING RED. ------------
-# Perturbations are applied to COPIES; the substitution count is printed
-# and an unchanged copy is a FAILED self-test.
+# Perturbations are applied to COPIES; the substitution count AND THE
+# SITE are printed, and every negative NAMES the declaration it must land
+# in. A count alone cannot tell two perturbations apart: the chained
+# shadow's "stale cell generations" negative spent a milestone re-hitting
+# kayaCurrentTableTrackWidth — the same line the standalone unversioned-
+# track negative already perturbs — because its pattern had no trailing
+# comma and re.subn(count=1) takes the first match. It printed "1", the
+# honesty check passed, and the cell filter it was named for was never
+# touched (the review of 01dd633).
 perturb() {
-    # <src> <python-regex> <replacement> <dest>; prints the count.
+    # <src> <python-regex> <replacement> <dest>; prints
+    # "<count> <line> <enclosing declarations>".
     python3 - "$1" "$2" "$3" "$4" <<'PY'
 import re
 import sys
+
 src, pat, repl, dest = sys.argv[1:5]
 text = open(src, encoding="utf-8").read()
+match = re.compile(pat).search(text)
 out, n = re.subn(pat, repl.replace("\\", "\\\\"), text, count=1)
 open(dest, "w", encoding="utf-8").write(out)
-print(n)
+
+# Scope-introducing declarations only: a `let` binding two lines up names
+# nothing a second perturbation could not also sit under.
+DECLS = (
+    re.compile(r"^(\s*)(?:@[\w.]+(?:\([^)]*\))?\s+)*"
+               r"(?:(?:public|private|internal|fileprivate|open|static|final"
+               r"|override|mutating|nonisolated|convenience|required)\s+)*"
+               r"(func|struct|class|enum|extension|protocol|init|subscript)"
+               r"\s+(`?\w+`?)"),
+    re.compile(r"^(\s*)(?:(?:public|private|internal|fileprivate|static)\s+)*"
+               r"(var|let)\s+(\w+)\s*:[^=]*\{\s*$"),
+    re.compile(r'^(\s*)(case)\s+("[^"]*")\s*:'),
+)
+
+
+def named(raw):
+    for decl in DECLS:
+        m = decl.match(raw)
+        if m:
+            return f"{m.group(2)} {m.group(3)}"
+    return None
+
+
+def site(offset):
+    before = text[:offset].split("\n")
+    start = len(text[:offset]) - len(before[-1])
+    here = text[start:text.find("\n", start)]
+    # The INDENT OF THE LINE, not of the match: a pattern that carries its
+    # own leading whitespace starts at column 0 and would otherwise close
+    # the walk before it began.
+    limit = len(here) - len(here.lstrip())
+    chain = []
+    if named(here):
+        chain.append(named(here))
+    for raw in reversed(before[:-1]):
+        if not raw.strip():
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if indent >= limit:
+            continue
+        name = named(raw)
+        if name:
+            chain.append(name)
+            limit = indent
+        if limit == 0:
+            break
+    return len(before), " > ".join(reversed(chain)) or "<file scope>"
+
+
+line, where = site(match.start()) if match else (0, "<no match>")
+print(n, line, where)
 PY
 }
 
 applied() {
-    # <count> <what>: the count is PRINTED, because "the negative passed"
-    # and "it never touched the file" look identical otherwise.
-    echo "check-table-tier: self-test — $2 applied (${1:-0} substitution)"
-    if [ "${1:-0}" -lt 1 ]; then
+    # <perturb-output> <what> <declaration it must land in>: the count and
+    # the site are both PRINTED, because "the negative passed", "it never
+    # touched the file" and "it perturbed some other negative's site" look
+    # identical otherwise.
+    local count line where
+    read -r count line where <<<"${1:-0 0 <nothing>}"
+    echo "check-table-tier: self-test — $2 applied (${count:-0} substitution)" \
+        "at line ${line:-?} in ${where:-<unknown>}"
+    if [ "${count:-0}" -lt 1 ]; then
         echo "check-table-tier: SELF-TEST BROKEN — $2 changed nothing." \
             "The pattern no longer matches the file, so the red below would" \
             "have been a green about an unperturbed copy." >&2
+        exit 1
+    fi
+    if [ -z "${3:-}" ]; then
+        echo "check-table-tier: SELF-TEST BROKEN — $2 names no site. Every negative" \
+            "names the declaration it must land in, or a count of 1 is all the" \
+            "evidence there is that it landed anywhere in particular." >&2
+        exit 1
+    fi
+    if [ "$where" != "$3" ]; then
+        echo "check-table-tier: SELF-TEST BROKEN — $2 landed in '$where', not the" \
+            "'$3' it names. A perturbation that lands somewhere else proves that" \
+            "site twice over and its own not at all." >&2
         exit 1
     fi
 }
@@ -498,13 +577,15 @@ refuses() {
 
 hits="$(perturb "$SWIFTUI" '        hasher\.combine\(node\.tableGeometryEpoch\)\n' \
     '' "$T/no-layout-epoch.swift")"
-applied "$hits" "the layout epoch removed from table geometry generations"
+applied "$hits" "the layout epoch removed from table geometry generations" \
+    "func kayaTableGeometryGeneration > func visit"
 refuses "$T/no-layout-epoch.swift" "must include tableGeometryEpoch" \
     "model-only geometry generations accepting a pre-layout snapshot"
 
 hits="$(perturb "$SWIFTUI" '        table\.tableGeometryEpoch &\+= 1\n' \
     '' "$T/no-layout-invalidation.swift")"
-applied "$hits" "the live-table layout invalidation removed"
+applied "$hits" "the live-table layout invalidation removed" \
+    "func kayaInvalidateTableGeometry"
 refuses "$T/no-layout-invalidation.swift" "must bump every live declared" \
     "an invalidator that changes no reporter task id"
 
@@ -512,7 +593,8 @@ hits="$(perturb "$SWIFTUI" \
     'private func kayaApply\(_ batch: Data, _ blobs: \[UInt64: Data\]\) \{\n    kayaInvalidateTableGeometry\(\)' \
     'private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {' \
     "$T/no-apply-invalidation.swift")"
-applied "$hits" "the transaction-boundary layout invalidation removed"
+applied "$hits" "the transaction-boundary layout invalidation removed" \
+    "func kayaApply"
 refuses "$T/no-apply-invalidation.swift" "kayaApply must invalidate table geometry" \
     "a sibling mutation retaining old table geometry"
 
@@ -520,7 +602,8 @@ hits="$(perturb "$SWIFTUI" \
     'func kayaSetWindowContentSize\(_ window: NSWindow, _ size: NSSize\) \{\n    kayaInvalidateTableGeometry\(\)' \
     'func kayaSetWindowContentSize(_ window: NSWindow, _ size: NSSize) {' \
     "$T/no-resize-helper-invalidation.swift")"
-applied "$hits" "the native resize helper invalidation removed"
+applied "$hits" "the native resize helper invalidation removed" \
+    "func kayaSetWindowContentSize"
 refuses "$T/no-resize-helper-invalidation.swift" \
     "kayaSetWindowContentSize must invalidate table geometry" \
     "a native content-size change retaining the previous snapshot"
@@ -529,64 +612,74 @@ hits="$(perturb "$SWIFTUI" \
     'kayaSetWindowContentSize\(\n                                window, NSSize\(width: rw, height: rh\)\)' \
     'window.setContentSize(NSSize(width: rw, height: rh))' \
     "$T/no-resize-invalidation.swift")"
-applied "$hits" "the resize harness bypassed the invalidating helper"
+applied "$hits" "the resize harness bypassed the invalidating helper" \
+    "func kayaRunScript > case \"resize_window\""
 refuses "$T/no-resize-invalidation.swift" "resize_window must route through" \
     "resize_window accepting the previous green snapshot"
 
 hits="$(perturb "$SWIFTUI" 'observation\.generation == generation,' \
     'true,' "$T/unversioned-table-track.swift")"
-applied "$hits" "the table-track generation check bypassed"
+applied "$hits" "the table-track generation check bypassed" \
+    "func kayaCurrentTableTrackWidth"
 refuses "$T/unversioned-table-track.swift" "must accept only a positive track" \
     "an old assigned track accepted as current"
 
 hits="$(perturb "$SWIFTUI" '\.task\(id: tableGeneration\)' \
     '.task(id: 0)' "$T/unkeyed-table-track-task.swift")"
-applied "$hits" "the table-track republish task keyed to a constant"
+applied "$hits" "the table-track republish task keyed to a constant" \
+    "struct KayaTrackReader > var body"
 refuses "$T/unkeyed-table-track-task.swift" "must tag table tracks and republish" \
     "a same-size invalidation unable to refresh its track"
 
 hits="$(perturb "$SWIFTUI" \
     'tableGeneration: child\.tableColumns\.isEmpty\n                                        \? nil : kayaTableGeometryGeneration\(child\)' \
     'tableGeneration: nil' "$T/untagged-flex-track.swift")"
-applied "$hits" "one flex path stopped handing table generations to its track reader"
+applied "$hits" "one flex path stopped handing table generations to its track reader" \
+    "struct KayaRender > var body"
 refuses "$T/untagged-flex-track.swift" "wanted the table-generation handoff" \
     "one flex orientation recording untagged table tracks"
 
 hits="$(perturb "$SWIFTUI" 'struct KayaFlex: Layout \{' \
     'let kayaEscapedTier = KayaNativeTable(node: node)
 struct KayaFlex: Layout {' "$T/escaped-tier.swift")"
-applied "$hits" "a tier view constructed outside the routing"
+applied "$hits" "a tier view constructed outside the routing" \
+    "struct KayaFlex"
 refuses "$T/escaped-tier.swift" "is constructed outside" \
     "a second construction site for the native tier"
 
 hits="$(perturb "$SWIFTUI" 'kayaCurrentTableTrackWidth\(node\)' \
     'kayaMainExtents[node.id]' "$T/edge-main-axis.swift")"
-applied "$hits" "the table width replaced by its parent main-axis extent"
+applied "$hits" "the table width replaced by its parent main-axis extent" \
+    "func kayaRunScript > case \"expect_column_edges\""
 refuses "$T/edge-main-axis.swift" "expect_column_edges must read current cell geometry" \
     "column-edge containment reading height as width"
 
 hits="$(perturb "$SWIFTUI" 'abs\(Double\(viewport\.width\) - track\) <= tolerance' \
     'Double(viewport.width) >= track - tolerance' "$T/one-sided-track.swift")"
-applied "$hits" "the table-track comparison made one-sided"
+applied "$hits" "the table-track comparison made one-sided" \
+    "func kayaTableViewportMatchesTrack"
 refuses "$T/one-sided-track.swift" "must reject BOTH a viewport" \
     "an oversized native table accepted inside a narrower assigned track"
 
 hits="$(perturb "$SWIFTUI" 'kayaTableFramesFitVertically\(rows, inside: viewport\)' \
     'kayaTableFramesFitHorizontally(rows, inside: viewport)' "$T/fills-horizontal.swift")"
-applied "$hits" "expect_fills checking rows on the horizontal axis"
+applied "$hits" "expect_fills checking rows on the horizontal axis" \
+    "func kayaRunScript > case \"expect_fills\""
 refuses "$T/fills-horizontal.swift" "expect_fills' table arm must refuse" \
     "table fill accepting vertical row overflow"
 
 hits="$(perturb "$SWIFTUI" '    var widthClass: KayaTableWidth \{' \
     '    var escapedTier: some View { KayaNativeTable(node: node) }
     var widthClass: KayaTableWidth {' "$T/escaped-in-surface.swift")"
-applied "$hits" "a tier view constructed in the surface but outside its body"
+applied "$hits" "a tier view constructed in the surface but outside its body" \
+    "struct KayaTableSurface > var widthClass"
 refuses "$T/escaped-in-surface.swift" "but outside its \`body\`" \
     "a second construction site beside the routing"
 
 hits="$(perturb "$SWIFTUI" 'switch kayaTableTier\(width: widthClass, dynamicColumns: true\)' \
     'switch KayaTableTier.native' "$T/unconsulted.swift")"
-applied "$hits" "the body deciding without the rule"
+applied "$hits" "the body deciding without the rule" \
+    "struct KayaTableSurface > var body"
 refuses "$T/unconsulted.swift" "never calls \`kayaTableTier\`" \
     "a body that routes without consulting the rule"
 
@@ -597,27 +690,31 @@ hits="$(perturb "$SWIFTUI" 'case \.native: KayaNativeTable\(node: node\)' \
                 } else {
                     KayaNativeTable(node: node)
                 }' "$T/rederived.swift")"
-applied "$hits" "a second size-class reading in the body"
+applied "$hits" "a second size-class reading in the body" \
+    "struct KayaTableSurface > var body"
 refuses "$T/rederived.swift" "outside \`widthClass\`" \
     "a body that re-derives the tier from the environment"
 
 hits="$(perturb "$SWIFTUI" 'return kayaTableWidth\(sizeClass: horizontalSizeClass\)' \
     'return .regular' "$T/ios-arm.swift")"
-applied "$hits" "the iOS arm of widthClass deriving a width of its own"
+applied "$hits" "the iOS arm of widthClass deriving a width of its own" \
+    "struct KayaTableSurface > var widthClass"
 refuses "$T/ios-arm.swift" "the non-macOS arm of \`widthClass\`" \
     "the one arm no host here executes, answering something else"
 
 hits="$(perturb "$SWIFTUI" '    var widthClass: KayaTableWidth \{' \
     '    var isCompactPhone: Bool { horizontalSizeClass == .compact }
     var widthClass: KayaTableWidth {' "$T/second-reading.swift")"
-applied "$hits" "a second reading of the size class in the surface"
+applied "$hits" "a second reading of the size class in the surface" \
+    "struct KayaTableSurface > var widthClass"
 refuses "$T/second-reading.swift" "outside \`widthClass\`" \
     "a second reading of the environment beside the mapped one"
 
 hits="$(perturb "$SWIFTUI" 'does not compile\.\n            KayaSynthesizedTable\(node: node\)' \
     'does not compile.
             KayaNativeTable(node: node)' "$T/below-floor-native.swift")"
-applied "$hits" "the below-floor branch taking the native tier"
+applied "$hits" "the below-floor branch taking the native tier" \
+    "struct KayaTableSurface > var body"
 refuses "$T/below-floor-native.swift" "the below-floor branch of KayaTableSurface's body" \
     "a below-floor branch that disagrees with the rule"
 
@@ -625,7 +722,8 @@ hits="$(perturb "$SWIFTUI" 'if #available\(macOS 14\.4, iOS 17\.4, \*\) \{
             switch kayaTableTier' \
     'if true {
             switch kayaTableTier' "$T/no-floor.swift")"
-applied "$hits" "the availability check removed from the routing"
+applied "$hits" "the availability check removed from the routing" \
+    "struct KayaTableSurface > var body"
 refuses "$T/no-floor.swift" "body has no \`if #available" \
     "a routing whose availability floor this gate can no longer see"
 
@@ -634,13 +732,15 @@ hits="$(perturb "$SWIFTUI" 'guard dynamicColumns else \{ return \.synthesized \}
         return .native
     #endif
     guard dynamicColumns else { return .synthesized }' "$T/per-platform.swift")"
-applied "$hits" "a per-platform arm inside the rule"
+applied "$hits" "a per-platform arm inside the rule" \
+    "func kayaTableTier"
 refuses "$T/per-platform.swift" "must be one function on both platforms" \
     "a rule the mac probe could not drive"
 
 hits="$(perturb "$SWIFTUI" 'struct KayaTableSurface: View \{' \
     'struct KayaTableSurfaceRenamed: View {' "$T/renamed.swift")"
-applied "$hits" "the surface renamed out from under the gate"
+applied "$hits" "the surface renamed out from under the gate" \
+    "struct KayaTableSurface"
 refuses "$T/renamed.swift" "no \`struct KayaTableSurface: View\`" \
     "a surface this gate can no longer find"
 
@@ -734,32 +834,45 @@ runtime_refuses "$T/unkeyed-table-track-task.swift" "unkeyed-table-track-task" \
 # is printed before the one doctored interpreter is compiled.
 hits="$(perturb "$SWIFTUI" 'abs\(Double\(viewport\.width\) - track\) <= tolerance' \
     'Double(viewport.width) >= track - tolerance' "$T/overflowing-track.swift")"
-applied "$hits" "an oversized table viewport accepted against its track"
+applied "$hits" "an oversized table viewport accepted against its track" \
+    "func kayaTableViewportMatchesTrack"
 hits="$(perturb "$T/overflowing-track.swift" 'edge - representative <= tolerance' \
     'edge - representative <= tolerance * 2' "$T/chained-clusters.swift")"
-applied "$hits" "representative edge clustering replaced by a drift chain"
+applied "$hits" "representative edge clustering replaced by a drift chain" \
+    "func kayaTableEdgeClusters"
 hits="$(perturb "$T/chained-clusters.swift" 'guard clusters\.count == 1 else \{' \
     'guard !clusters.isEmpty else {' "$T/unkeyed-columns.swift")"
-applied "$hits" "a column borrowing another column's cluster accepted"
+applied "$hits" "a column borrowing another column's cluster accepted" \
+    "func kayaTableColumnAlignment"
 hits="$(perturb "$T/unkeyed-columns.swift" \
     'if next - previous <= tolerance \{ return false \}' \
     'if next == previous { return false }' "$T/unordered-columns.swift")"
-applied "$hits" "descending column representatives accepted"
+applied "$hits" "descending column representatives accepted" \
+    "func kayaTableColumnRepresentativesIncrease"
 hits="$(perturb "$T/unordered-columns.swift" 'let frame = geo\.frame\(in: \.global\)' \
     'let frame = geo.frame(in: .global).offsetBy(dx: 1000, dy: 1000)' \
     "$T/displaced-cells.swift")"
-applied "$hits" "live cell geometry displaced outside its viewport"
+applied "$hits" "live cell geometry displaced outside its viewport" \
+    "struct KayaEdgeReporter > var body"
+# The ROW-CELL filter, anchored on the lookup above it: the bare
+# `observation.generation == generation` matches the TRACK filter first,
+# which the standalone unversioned-table-track negative already owns.
 hits="$(perturb "$T/displaced-cells.swift" \
-    'observation\.generation == generation' \
-    'observation.generation == generation || true' "$T/stale-cells.swift")"
-applied "$hits" "stale cell generations accepted as current"
+    'if let observation = table\.tableCellFrames\[key\],\n                observation\.generation == generation\n' \
+    'if let observation = table.tableCellFrames[key],
+                observation.generation == generation || true
+' "$T/stale-cells.swift")"
+applied "$hits" "stale cell generations accepted as current" \
+    "func kayaCurrentTableGeometry"
 hits="$(perturb "$T/stale-cells.swift" 'viewport\.generation == generation,' \
     'viewport.generation == generation || true,' "$T/stale-viewport.swift")"
-applied "$hits" "a stale viewport generation accepted as current"
+applied "$hits" "a stale viewport generation accepted as current" \
+    "func kayaCurrentTableGeometry"
 hits="$(perturb "$T/stale-viewport.swift" \
-    'guard gotRows == wantedRows, gotColumns == wantedColumns else \{' \
-    'if gotRows < 0 {' "$T/incomplete-geometry.swift")"
-applied "$hits" "incomplete current cell geometry accepted"
+    'if realized\.isEmpty, !table\.children\.isEmpty \{' \
+    'if false {' "$T/incomplete-geometry.swift")"
+applied "$hits" "a table with no realized row accepted as current" \
+    "func kayaCurrentTableGeometry"
 if ! build_probe "$T/incomplete-geometry.swift" "$T/table-geometry-doctored"; then
     echo "check-table-tier: SELF-TEST BROKEN — the doctored geometry probe did not" \
         "compile, so the runtime negative proved nothing" >&2
@@ -800,7 +913,8 @@ echo "check-table-tier: self-test — identity, generation, and containment guar
 # is the arm no device can assert and the one the traps entry is about.
 hits="$(perturb "$SWIFTUI" 'case \.compact, \.unknown: return \.synthesized' \
     'case .compact, .unknown: return .native' "$T/compact-native.swift")"
-applied "$hits" "the compact arm flipped to the native tier"
+applied "$hits" "the compact arm flipped to the native tier" \
+    "func kayaTableTier"
 if ! build_probe "$T/compact-native.swift" "$T/table-tier-doctored"; then
     echo "check-table-tier: SELF-TEST BROKEN — the doctored interpreter did not" \
         "compile, so the runtime negative proved nothing" >&2

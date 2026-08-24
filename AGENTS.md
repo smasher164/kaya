@@ -573,7 +573,9 @@ in docs/deferred.md.
 4. The cross-platform matrix, before any feature is called landed:
    `tools/validate-all.sh` — ALL FIVE platform lanes run concurrently by
    default (ratified 2026-07-22). After Android exits, the one
-   `nice -n 10` gate sweep overlaps whichever longer lanes remain.
+   `nice -n 10` gate sweep runs, so the wall is Android plus the sweep
+   IN SERIES, not the slowest lane: on the accepted 2026-08-24 run the
+   sweep's last ~83s ran with every lane already done (619s wall).
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.sh`,

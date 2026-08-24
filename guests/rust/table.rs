@@ -40,10 +40,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     t.label(Item::size());
                 });
             }
-            // A table is a viewport: like the scroll scene, the SCENE
-            // says it fills — an ungrown table sizes to nothing
-            // (measured by screenshot; the model-side observables
-            // cannot see geometry).
+            // Grown on purpose: this scene asserts the fill-and-scroll
+            // viewport, the grown half of the empty-row ruling — ungrown
+            // would hug its rows (tables-plan decision 8).
             tx.grow(table, 1.0);
         })
         .id();

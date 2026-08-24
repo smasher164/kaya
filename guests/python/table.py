@@ -48,8 +48,9 @@ with app.window():
     # column-kind widget (the reorder scene's rule). The table IS the
     # For, with headers on the same loop that stamps the rows.
     with kaya.row():
-        # A table is a viewport: like the scroll scene, the scene says
-        # it fills (grow) — an ungrown table sizes to nothing.
+        # Grown on purpose: this scene asserts the fill-and-scroll
+        # viewport, the grown half of the empty-row ruling — ungrown
+        # would hug its rows (tables-plan decision 8).
         for item in items.columns("Name", "Size", on_sort=on_sort, grow=1):
             with kaya.row():
                 kaya.label(bind=item.name)

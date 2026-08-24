@@ -106,8 +106,9 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 
 - The whole matrix: `tools/validate-all.sh` — all five platform lanes run
   CONCURRENTLY by default. When Android finishes, one `nice -n 10` gate
-  sweep starts and overlaps any longer lanes still running; the per-lane
-  ceilings below are the live budgets. `--serial` is for single-lane
+  sweep starts, so the wall is Android plus the sweep in series, not the
+  slowest lane (the sweep's tail runs alone once the other lanes end);
+  the per-lane ceilings below are the live budgets. `--serial` is for single-lane
   benchmarking, contention-free debugging, or recording mode. Per-lane
   logs print for any FAIL.
 - macOS: `tools/validate-mac.sh` (KAYA_JOBS=n for pool width, =1 for
@@ -166,8 +167,10 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 - Pool widths: `KAYA_JOBS` (mac/linux legs), `KAYA_ANDROID_EMUS`
   (emulators, default 4), `KAYA_IOS_SIMS` (simulators, default 3),
   `KAYA_WIN_JOBS` (windows legs, default 4). `tools/probe-env.sh
-  --warm` boots the simulator, emulator and VM instead of only
-  reporting them.
+  --warm` boots the independent surfaces — the iOS simulator pool and
+  the Windows VM — and refuses (exit 1) naming any surface it was asked
+  to warm and did not; the coupled Android emulator pool is deliberately
+  not its job, tools/android/run-emulator.sh owns those boots.
 - Scene selection everywhere: KAYA_SELFTEST=<scene> names the SCRIPT,
   never the app — two scenes can share one guest, and `split` and
   `listdetail` do. KAYA_SCENES_DIR overrides where the .steps files are

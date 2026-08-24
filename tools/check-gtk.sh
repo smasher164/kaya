@@ -36,53 +36,123 @@ if [ -z "$(docker image ls -q kaya-linux 2>/dev/null)" ]; then
     exit 1
 fi
 
-gtk_layout_test_counts="$(python3 - <<'PY'
+# THE LAYOUT CENSUS. gtk::flex::tests exercise the PURE arithmetic
+# (main_axis_measure, grow_shares, required_grow_pool,
+# table_horizontal_issue) and would stay green while the harness stopped
+# CALLING it, called it with the wrong extremes, or stopped measuring
+# what it passes — so the production callsites are held here by name.
+#
+# EVERY entry is watched, in tools/check-steps.sh's target_watch shape:
+# a doctored COPY on disk, the substitution count printed, the REAL
+# census re-run against that copy, and the exact finding demanded. The
+# perturbation is the change that would otherwise be silent, never the
+# deletion of the counted string — deleting the string the census counts
+# and asserting the count moved proves only that str.count works, which
+# is what this replaced (the review of 01dd633).
+if ! python3 - <<'PY'
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 
-source = Path("crates/kaya/src/gtk.rs").read_text()
-tests = (
-    "fn gtk_flex_measure_holds_grower_requirements()",
-    "fn gtk_flex_allocator_never_negative()",
-    "fn gtk_table_viewport_rejects_overflow()",
-    "let rounding_error = (growers.len().saturating_sub(1) as f64) / 2.0;",
-    "(minimum, natural) = main_axis_measure(&main_children, self.spacing.get());",
-    "c.measure(self.orientation.get(), cross_total).1",
-    "let min_start = edges[0];",
-    "min_drawn = min_drawn.min(end);",
-    "max_drawn = max_drawn.max(end);",
-    "min_start > 2.0",
-    "min_start < -2.0",
-    "let assigned = table_horizontal_track(&column);",
-    "match table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned) {",
+GTK = "crates/kaya/src/gtk.rs"
+
+# (label, needle, the perturbation that would otherwise be silent)
+ENTRIES = (
+    ("grower-requirement measure test",
+     "fn gtk_flex_measure_holds_grower_requirements()",
+     "fn gtk_flex_measure_holds_grower_requirements_disabled()"),
+    ("never-negative allocator test",
+     "fn gtk_flex_allocator_never_negative()",
+     "fn gtk_flex_allocator_never_negative_disabled()"),
+    ("table viewport overflow test",
+     "fn gtk_table_viewport_rejects_overflow()",
+     "fn gtk_table_viewport_rejects_overflow_disabled()"),
+    ("allocator rounding dust",
+     "let rounding_error = (growers.len().saturating_sub(1) as f64) / 2.0;",
+     "let rounding_error = 0.0;"),
+    ("main-axis measure call",
+     "(minimum, natural) = main_axis_measure(&main_children, self.spacing.get());",
+     "(minimum, natural) = main_children.iter().fold((0, 0), "
+     "|(mi, na), (_, cmin, cnat)| (mi + cmin, na + cnat));"),
+    ("cross-axis natural read",
+     "c.measure(self.orientation.get(), cross_total).1",
+     "c.measure(self.orientation.get(), cross_total).0"),
+    ("leading-edge collection",
+     "let min_start = edges[0];",
+     "let min_start = 0.0;"),
+    ("nearest drawn edge",
+     "min_drawn = min_drawn.min(end);",
+     "min_drawn = min_drawn.max(end);"),
+    ("furthest drawn edge",
+     "max_drawn = max_drawn.max(end);",
+     "max_drawn = max_drawn.min(end);"),
+    ("leading-edge underfill refusal",
+     "min_start > 2.0",
+     "false"),
+    ("leading-edge overflow refusal",
+     "min_start < -2.0",
+     "false"),
+    ("assigned-track read",
+     "let assigned = table_horizontal_track(&column);",
+     "let assigned = viewport;"),
+    ("classifier wired into the harness arm",
+     "match table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned) {",
+     "match table_horizontal_issue(0.0, min_drawn, max_drawn, viewport, viewport) {"),
 )
 
-def census(text):
-    return [text.count(test) for test in tests]
 
-expected = [1] * len(tests)
-for label, needle in (
-    ("left-edge collection", "let min_start = edges[0];"),
-    ("left-edge underfill refusal", "min_start > 2.0"),
-    ("left-edge overflow refusal", "min_start < -2.0"),
-):
-    applied = source.count(needle)
-    print(
-        f"check-gtk: {label} self-test applied {applied} substitution(s)",
-        file=sys.stderr,
-    )
-    if applied != 1:
-        raise SystemExit(f"check-gtk: {label} self-test changed {applied} sites, wanted 1")
-    shadow = source.replace(needle, "", 1)
-    if census(shadow) == expected:
-        raise SystemExit(f"check-gtk: {label} self-test was accepted")
+def census(path):
+    """The REAL predicate: one sentence per entry that is not present
+    exactly once, naming the entry rather than a column of counts."""
+    text = Path(path).read_text(encoding="utf-8")
+    return [
+        f"check-gtk: {path}: {label} appears {text.count(needle)} time(s), "
+        f"wanted exactly 1 (`{needle}`)"
+        for label, needle, _ in ENTRIES
+        if text.count(needle) != 1
+    ]
 
-print(" ".join(map(str, census(source))))
+
+offenders = census(GTK)
+for line in offenders:
+    print(line, file=sys.stderr)
+if offenders:
+    raise SystemExit(1)
+print(f"check-gtk: GTK layout census — {len(ENTRIES)} entries present exactly once")
+
+work = tempfile.mkdtemp()
+shadow = f"{work}/gtk.rs"
+source = Path(GTK).read_text(encoding="utf-8")
+try:
+    for label, needle, replacement in ENTRIES:
+        applied = source.count(needle)
+        print(f"check-gtk: census self-test — {label} applied {applied} substitution(s)")
+        if applied != 1:
+            raise SystemExit(
+                f"check-gtk: SELF-TEST BROKEN — {label} matched {applied} sites in "
+                f"{GTK}, wanted 1. The red below would be a green about an "
+                "unperturbed copy."
+            )
+        Path(shadow).write_text(source.replace(needle, replacement, 1), encoding="utf-8")
+        got = census(shadow)
+        want = [
+            f"check-gtk: {shadow}: {label} appears 0 time(s), "
+            f"wanted exactly 1 (`{needle}`)"
+        ]
+        if got != want:
+            print(f"check-gtk: SELF-TEST FAILED — {label} was not refused as demanded.",
+                  file=sys.stderr)
+            print("wanted:", file=sys.stderr)
+            print("\n".join(want) or "  (nothing)", file=sys.stderr)
+            print("got:", file=sys.stderr)
+            print("\n".join(got) or "  (nothing — the census accepted it)", file=sys.stderr)
+            raise SystemExit(1)
+finally:
+    shutil.rmtree(work, ignore_errors=True)
 PY
-)"
-echo "check-gtk: GTK layout measurement test counts: $gtk_layout_test_counts"
-if [ "$gtk_layout_test_counts" != "1 1 1 1 1 1 1 1 1 1 1 1 1" ]; then
-    echo "check-gtk: expected each GTK layout test and production call exactly once" >&2
+then
+    echo "check-gtk: FAIL — the GTK layout census is not where this gate holds it." >&2
     exit 1
 fi
 

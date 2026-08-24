@@ -887,6 +887,67 @@ for serial in "${SERIALS[@]}" "$TABLET_SERIAL"; do
     a11y_hygiene "$serial" || exit 1
 done
 
+# THE STAGED INSTALLS HAVE A WALL. tools/validate-all.sh starts the gate
+# sweep only after this lane's pid exits, so an `adb install` into a
+# wedged emulator no longer costs one leg — it costs the whole matrix its
+# verdict, at t0 of the suite, with no partial record for any of the six
+# units. The deadline sits on the JOIN and not in front of adb because
+# tools/lib/android-leg-order.py pins the disarm/install chain
+# byte-for-byte. 300s against a measured per-install band of 0.73-0.88s
+# median / 1.0-1.7s mean (docs/traps.md's install census): it cannot fire
+# on a device that is merely slow.
+STAGE_DEADLINE="${KAYA_STAGE_DEADLINE:-300}"
+
+stage_join() { # label deadline stage_dir serial:pid...
+    local label="$1" deadline="$2" stage_dir="$3"
+    shift 3
+    local waited=0 live pair serial pid kid
+    local kids=()
+    # Fifths of a second, not seconds: this poll sits between the
+    # installs and the first leg of every suite, so its granularity is
+    # added to the lane three times a run (invariant 8). `kill -0` is a
+    # builtin; only the sleep forks.
+    local ticks=$((deadline * 5))
+    while [ "$waited" -lt "$ticks" ]; do
+        live=0
+        for pair in "$@"; do
+            if kill -0 "${pair#*:}" 2>/dev/null; then
+                live=$((live + 1))
+            fi
+        done
+        if [ "$live" -eq 0 ]; then
+            return 0
+        fi
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    for pair in "$@"; do
+        serial="${pair%%:*}"
+        pid="${pair#*:}"
+        kill -0 "$pid" 2>/dev/null || continue
+        echo "run-emulator: $label APK staging on $serial passed ${deadline}s without" >&2
+        echo "  reaching a verdict — the staging phase, before any $label leg ran." >&2
+        # WHICH HALF is stuck it does not guess: the shell runs a disarm
+        # and an install, and nothing here can tell them apart. It prints
+        # what is actually alive under that shell (CLAUDE.md invariant 3).
+        kids=()
+        while IFS= read -r kid; do
+            kids+=("$kid")
+        done < <(pgrep -P "$pid" 2>/dev/null || true)
+        if [ "${#kids[@]}" -gt 0 ]; then
+            echo "  still running under it:" >&2
+            ps -o pid=,command= -p "${kids[@]}" >&2 || true
+            kill -9 "${kids[@]}" 2>/dev/null || true
+        else
+            echo "  nothing is running under it; the staging shell itself is stuck." >&2
+        fi
+        kill -9 "$pid" 2>/dev/null || true
+        [ -f "$stage_dir/$serial.verdict" ] \
+            || printf '%s\n' TIMEOUT >"$stage_dir/$serial.verdict"
+    done
+    return 1
+}
+
 stage_suite_apk() { # label apk package target...
     local label="$1" apk="$2" package="$3"
     shift 3
@@ -894,6 +955,7 @@ stage_suite_apk() { # label apk package target...
     local expected=0 i=0 j serial launched observed=0 passed=0 verdict
     local stage_dir="$LEGS_DIR/stage-$label"
     local stage_pids=()
+    local stage_pairs=()
     case "$label" in
         compose) expected=$((POOL + 1)) ;;
         jvm|go) expected=$POOL ;;
@@ -927,13 +989,30 @@ stage_suite_apk() { # label apk package target...
             local target_verdict=FAIL
             if a11y_disarm "$serial" "$package" "$a11y" \
                 && adb -s "$serial" install -r "$apk" >/dev/null; then
-                target_verdict=OK
+                # AN INSTALL THAT REPORTED SUCCESS IS RE-READ, the same
+                # postcondition cliphelper_prepare keeps 470 lines up. A
+                # silent miss surfaces a whole suite later as `am start`
+                # "Activity class does not exist", which reads as a
+                # manifest or gradle defect and not as a lost install.
+                # NOT `grep -q`: it exits on the first match, SIGPIPEs
+                # tr, and pipefail reads that as a failed check.
+                if adb -s "$serial" shell pm list packages 2>/dev/null | tr -d '\r' \
+                    | grep -x "package:$package" >/dev/null; then
+                    target_verdict=OK
+                else
+                    echo "run-emulator: $package is not on $serial after an install that" >&2
+                    echo "  reported success — every $label leg on this device would start nothing" >&2
+                fi
             fi
             printf '%s\n' "$target_verdict" >"$stage_dir/$serial.verdict"
         ) >"$stage_dir/$serial.log" 2>&1 &
         stage_pids+=($!)
+        stage_pairs+=("$serial:$!")
     done
     launched=${#stage_pids[@]}
+    # The rc is dropped here and not lost: a timed-out target carries a
+    # TIMEOUT verdict, so the refusal below names it after its log prints.
+    stage_join "$label" "$STAGE_DEADLINE" "$stage_dir" "${stage_pairs[@]}" || true
     wait "${stage_pids[@]}" 2>/dev/null || true
     for serial in "${targets[@]}"; do
         echo "== stage-$label-$serial =="

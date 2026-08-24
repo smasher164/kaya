@@ -245,9 +245,13 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /**
      * The table's assigned horizontal track, laid-out viewport, and raw
      * content span, in dp (-1 before layout; track -1 when unbounded).
-     * The raw span stays unbounded by the viewport so expect_column_edges
-     * can distinguish overflow from a correctly filled table. Volatile:
-     * written at layout, read by the harness thread.
+     *
+     * [tableDrawnW] is COERCED into the incoming constraints and so can
+     * never exceed [tableTrackW]; [tableContentW] is the same measure
+     * before that coerce, and is therefore the only field in which a
+     * resolved-column overflow is visible at all. kayaTableHorizontalIssue
+     * separates the two causes; expect_column_edges reads both.
+     * Volatile: written at layout, read by the harness thread.
      */
     @Volatile var tableTrackW = -1f
     @Volatile var tableDrawnW = -1f
@@ -5323,6 +5327,7 @@ object KayaCompose {
                         // content-hugging layout slips past every
                         // model-side observable.
                         val want = parts.getOrNull(2)?.toIntOrNull() ?: -1
+                        val truthTable = kayaTableHorizontalSelftest()
                         data class EdgeRead(
                             val clusters: List<Float>,
                             val aligned: Boolean,
@@ -5335,6 +5340,7 @@ object KayaCompose {
                             val viewportRight: Float,
                             val track: Float,
                             val drawn: Float,
+                            val content: Float,
                         )
                         val read = onUi(activity) {
                             target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
@@ -5373,10 +5379,12 @@ object KayaCompose {
                                     node.tableViewportRightX,
                                     node.tableTrackW,
                                     node.tableDrawnW,
+                                    node.tableContentW,
                                 )
                             }
                         }
                         when {
+                            truthTable != null -> failures.add(truthTable)
                             read == null ->
                                 failures.add("no such target ${parts[1]}")
                             read.found != read.expected || read.expected == 0 ->
@@ -5389,22 +5397,26 @@ object KayaCompose {
                                         read.clusters.map { it.toInt() } +
                                         ", wanted ${parts.getOrNull(2)} columns"
                                 )
-                            read.track <= 0f || read.drawn <= 0f ||
+                            read.track <= 0f || read.drawn <= 0f || read.content <= 0f ||
                                 read.viewportRight <= read.viewportLeft ->
                                 failures.add("${parts[1]} has no live table viewport geometry")
-                            read.drawn < read.track - 2 ->
-                                failures.add(
-                                    "${parts[1]} draws ${read.drawn.toInt()}dp of a " +
-                                        "${read.track.toInt()}dp track"
+                            else -> {
+                                // The ink in the TABLE's own space, which
+                                // is the frame the sentences below name.
+                                val complaint = kayaTableHorizontalComplaint(
+                                    read.drawn,
+                                    read.content,
+                                    read.track,
+                                    read.viewportRight - read.viewportLeft,
+                                    read.left - read.viewportLeft,
+                                    read.right - read.viewportLeft,
                                 )
-                            read.left < read.viewportLeft - 2 ||
-                                read.right > read.viewportRight + 2 ->
-                                failures.add(
-                                    "${parts[1]} cells span " +
-                                        "${(read.right - read.left).toInt()}dp inside a " +
-                                        "${(read.viewportRight - read.viewportLeft).toInt()}dp viewport"
-                                )
-                            else -> observed.add("${parts[1]} column edges $want")
+                                if (complaint == null) {
+                                    observed.add("${parts[1]} column edges $want")
+                                } else {
+                                    failures.add("${parts[1]} $complaint")
+                                }
+                            }
                         }
                     }
                     "header_click" -> {
@@ -7344,15 +7356,149 @@ internal fun kayaCoreRedo() {
 }
 
 /**
- * The context-menu anchor (DESIGN.md, Menus): a node carrying a
- * context catalog renders inside a long-press wrapper — the platform's
- * own gesture — anchoring an M3 DropdownMenu with the attached rows.
- * The open state is the MODEL's ([KayaSceneModel.openContextWidget]):
- * the gesture and the harness's context_open drive the same route, and
- * a leaf firing or a dismissal closes it. Stamped rows carry their
- * copy's key path as the noun of every emission (the keys ARE the
- * noun).
+ * ONE CAUSE PER SENTENCE for expect_column_edges' horizontal half — the
+ * gtk.rs / winui `TableHorizontalIssue` in this backend's spelling. A
+ * disjunction here would print one sentence for several causes and the
+ * numbers in it would read compliant on a red leg (invariant 3).
+ *
+ * The same four causes WinUI has; GTK's two UNDERFILL directions are
+ * unswept here as there.
  */
+private enum class KayaTableHorizontalIssue {
+    TrackUnderfill,
+    ColumnsOverflow,
+    ContentLeftOverflow,
+    ContentOverflow,
+}
+
+/**
+ * [drawn] is the table's laid-out width, [content] the resolved columns
+ * BEFORE the coerce that clamps them to the track, [track] what the
+ * parent offered, [viewport] the table's own width, [left]/[right] the
+ * cell ink in the table's own space.
+ *
+ * [content] is why the overflow cause is separable at all: KayaTableSurface
+ * coerces totalW into the incoming constraints, so [drawn] can never
+ * exceed [track] and the resolved-column overflow is invisible in it.
+ */
+private fun kayaTableHorizontalIssue(
+    drawn: Float,
+    content: Float,
+    track: Float,
+    viewport: Float,
+    left: Float,
+    right: Float,
+): KayaTableHorizontalIssue? = when {
+    drawn < track - 2 -> KayaTableHorizontalIssue.TrackUnderfill
+    content > track + 2 -> KayaTableHorizontalIssue.ColumnsOverflow
+    left < -2 -> KayaTableHorizontalIssue.ContentLeftOverflow
+    right > viewport + 2 -> KayaTableHorizontalIssue.ContentOverflow
+    else -> null
+}
+
+/** The convicting sentence for each cause, or null when there is none. */
+private fun kayaTableHorizontalComplaint(
+    drawn: Float,
+    content: Float,
+    track: Float,
+    viewport: Float,
+    left: Float,
+    right: Float,
+): String? = when (kayaTableHorizontalIssue(drawn, content, track, viewport, left, right)) {
+    KayaTableHorizontalIssue.TrackUnderfill ->
+        "draws ${drawn.toInt()}dp of a ${track.toInt()}dp track"
+    KayaTableHorizontalIssue.ColumnsOverflow ->
+        "columns resolve to ${content.toInt()}dp in a ${track.toInt()}dp track"
+    KayaTableHorizontalIssue.ContentLeftOverflow ->
+        "cells start at ${left.toInt()}dp outside a ${viewport.toInt()}dp viewport"
+    KayaTableHorizontalIssue.ContentOverflow ->
+        "cells end at ${right.toInt()}dp outside a ${viewport.toInt()}dp viewport"
+    null -> null
+}
+
+/**
+ * THE TRUTH TABLE, ON THE UNAVOIDABLE PATH: expect_column_edges runs
+ * this before it reads any geometry, so a backend whose sentences have
+ * stopped discriminating reddens the leg it was about to lie to rather
+ * than being believed. pickerBackGateSelftest's shape, one file over —
+ * a sentence and not a throw, because runScript's thread has no catch
+ * and a dead thread is a lane that hangs instead of losing.
+ *
+ * Null when every claim holds. Each sentence is read off six PAIRWISE
+ * DISTINCT numbers, so an arm printing the wrong one of the six is a
+ * failure and not a coincidence.
+ */
+private fun kayaTableHorizontalSelftest(): String? {
+    fun issue(d: Float, c: Float, t: Float, v: Float, l: Float, r: Float) =
+        kayaTableHorizontalIssue(d, c, t, v, l, r)
+    fun say(d: Float, c: Float, t: Float, v: Float, l: Float, r: Float) =
+        kayaTableHorizontalComplaint(d, c, t, v, l, r)
+    val claims = listOf(
+        "a table filling its track, its viewport and its ink is silent" to
+            (issue(100f, 100f, 100f, 100f, 0f, 100f) == null &&
+                say(100f, 100f, 100f, 100f, 0f, 100f) == null),
+        // Both sides of every 2dp slack — the slack is what keeps a
+        // subpixel arrange from reddening a correct table.
+        "2dp short of the track is inside the slack" to
+            (issue(98f, 98f, 100f, 100f, 0f, 98f) == null),
+        "any further short of the track is a track underfill" to
+            (issue(97.9f, 97.9f, 100f, 100f, 0f, 97.9f) ==
+                KayaTableHorizontalIssue.TrackUnderfill),
+        "columns 2dp over the track are inside the slack" to
+            (issue(100f, 102f, 100f, 100f, 0f, 100f) == null),
+        "columns any further over the track are a columns overflow" to
+            (issue(100f, 102.1f, 100f, 100f, 0f, 100f) ==
+                KayaTableHorizontalIssue.ColumnsOverflow),
+        "cells 2dp left of the viewport are inside the slack" to
+            (issue(100f, 100f, 100f, 100f, -2f, 100f) == null),
+        "cells any further left are a leading-edge overflow" to
+            (issue(100f, 100f, 100f, 100f, -2.1f, 100f) ==
+                KayaTableHorizontalIssue.ContentLeftOverflow),
+        "cells 2dp past the viewport are inside the slack" to
+            (issue(100f, 100f, 100f, 100f, 0f, 102f) == null),
+        "cells any further past are a trailing-edge overflow" to
+            (issue(100f, 100f, 100f, 100f, 0f, 102.1f) ==
+                KayaTableHorizontalIssue.ContentOverflow),
+        // The four sentences, each naming the number that convicts it.
+        "the track-underfill sentence names the drawn width and the track" to
+            (say(80f, 85f, 120f, 100f, 0f, 70f) == "draws 80dp of a 120dp track"),
+        "the columns-overflow sentence names the resolved columns and the track" to
+            (say(119f, 140f, 120f, 110f, 0f, 130f) ==
+                "columns resolve to 140dp in a 120dp track"),
+        "the leading-edge sentence names the cell start and the viewport" to
+            (say(98f, 95f, 99f, 100f, -40f, 90f) ==
+                "cells start at -40dp outside a 100dp viewport"),
+        "the trailing-edge sentence names the cell end and the viewport" to
+            (say(98f, 95f, 99f, 100f, 5f, 140f) ==
+                "cells end at 140dp outside a 100dp viewport"),
+        // Precedence where several hold at once, which is the ordinary
+        // case: the ROOT is reported, never its symptom.
+        "a table short of its track is convicted of that first" to
+            (issue(80f, 200f, 120f, 100f, -40f, 200f) ==
+                KayaTableHorizontalIssue.TrackUnderfill),
+        "a columns overflow outranks the ink overflow it causes" to
+            (issue(100f, 140f, 100f, 100f, 0f, 140f) ==
+                KayaTableHorizontalIssue.ColumnsOverflow),
+        "a table shifted left is not convicted of overflowing right" to
+            (issue(100f, 100f, 100f, 100f, -40f, 140f) ==
+                KayaTableHorizontalIssue.ContentLeftOverflow),
+        // The shape the WinUI half was MEASURED failing on: 310dp of
+        // columns in a 300dp track whose ink runs 5..295, so the
+        // pre-split sentence printed "cells span 290dp inside a 300dp
+        // viewport" — two numbers asserting the opposite of the
+        // failure. THIS backend's ink and its resolved columns move
+        // together today (the last cell's right edge IS the unclamped
+        // span), so the split's worth here is that the sentence names
+        // the ROOT rather than its symptom; the input is held anyway,
+        // because the two backends answer one rule.
+        "an overflowing table names its columns, not a compliant-looking span" to
+            (say(300f, 310f, 300f, 300f, 5f, 295f) ==
+                "columns resolve to 310dp in a 300dp track"),
+    )
+    val broken = claims.firstOrNull { !it.second } ?: return null
+    return "the table containment truth table broke: ${broken.first}"
+}
+
 /**
  * The declared table's surface (docs/tables-plan.md): the synthesized
  * header — Material dropped its data-table component, so this is the

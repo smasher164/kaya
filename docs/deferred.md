@@ -4734,8 +4734,20 @@ nevertheless exited 1 on the Linux 470s and Windows 520s duration guards
 alone. This supports the resolved visual finding; it is not a replacement
 ALL PASS matrix record.
 
-## RESEARCH — macOS native portfolio tables show grey empty-row bands (noticed 2026-08-24)
+## ~~RESEARCH — macOS native portfolio tables show grey empty-row bands (noticed 2026-08-24)~~
 KEY: macOS table filler rows, grey bands, VTI, NSTableView, SwiftUI Table, scrollability, empty viewport
+
+RESOLVED 2026-08-24, same day: the bands are NSTableView's native
+alternating empty-row striping inside a viewport taller than its
+content — the grown For handed every account table the window's
+leftover. Maintainer ruling (option 2 of the researched three): an
+ungrown native table hugs header + rows; a grown one stays the
+fill-and-scroll viewport. Implemented as the interpreter's
+content-height frame, the portfolio guest dropping grow on its nested
+tables, and the expect_fills table arm's grow split plus hug clause,
+each watched red. The full record is docs/tables-plan.md decision 8
+(the 2026-08-24 amendment); docs/handoff-dynamic-tables.md's open
+question is closed by it.
 
 The inspected macOS capture shows light-grey blank bands after each
 table's authored rows — below VTI, below VXUS and twice below CASH. That
@@ -4751,7 +4763,7 @@ or kaya placeholders; establish the actual vertical scrolling behavior;
 then bring the native-preserve / content-height / suppress-striping options
 and their independently-scrollable-table tradeoffs to the maintainer for
 a ruling. Do not implement an aesthetic guess. The continuation and exact
-code/test seams are in docs/handoff-dynamic-tables.md.
+code/test locations are in docs/handoff-dynamic-tables.md.
 
 ## ~~GAP — a nested SwiftUI container cannot fill its track, so the mac dashboard clips its table (found 2026-08-22, by the first capture)~~
 KEY: KayaFlex fillCross, align stretch scene, nested container hugs cross, portfolio table clips, flexStretch textarea-only
@@ -5922,3 +5934,50 @@ windows 420 contended, matrix 422 — the three bound lanes are within
 25s of each other, and the next second comes from real work on all
 three fronts at once (per docs/clipboard-plan.md the iOS prompt dance
 is semantic), or from a Windows VM with more cores.
+
+
+## GAP — the leading-edge UNDERFILL clause is GTK-only (found 2026-08-24, by the review of 01dd633)
+KEY: ContentLeftUnderfill, ContentUnderfill, table_horizontal_issue, kayaTableHorizontalIssue, expect_column_edges, leading edge
+
+gtk.rs convicts ContentLeftUnderfill (min_start > 2.0, cells indented
+inside their own viewport); winui and Compose convict only the OVERFLOW
+direction, and SwiftUI convicts neither edge. A table whose cells start
+40px inside their viewport is RED on Linux and GREEN on Windows,
+Android and macOS off the same byte-shared expect_column_edges line.
+GTK's ContentUnderfill (a line ending short of the viewport) is
+GTK-only for a different reason: winui's column_edges collects one
+global max right edge, not a per-line end, so the instrument is absent
+rather than the clause. Closing this changes verdicts on four backends,
+so it is a do/can't/defer sweep per language and backend, not a
+diagnostics fix.
+
+NOTE (the diagnostics half closed 2026-08-24): winui and Compose now
+discriminate their horizontal-containment causes the way gtk.rs does —
+a pure classifier, one sentence per cause, each naming the number that
+convicts it, with a truth table pinned in winui::tests (the windows
+lane's derived count forces it to run) and in
+kayaTableHorizontalSelftest (called from expect_column_edges, so every
+android table leg runs it). KayaNode.tableContentW, written and never
+read, IS that separation on Compose: tableDrawnW is coerced into the
+incoming constraints and cannot exceed the track, so a resolved-column
+overflow was invisible in every field the verb read. No scene yet
+builds an overflowing table, so no lane has printed one of these
+sentences live; a scene that narrows a table below its content would
+turn the arithmetic-level watched reds into live ones on two lanes.
+
+## ~~HANG — one wedged emulator at t0 of a staged install cost the matrix its verdict~~
+KEY: stage_suite_apk, stage_join, STAGE_DEADLINE, staged install, pm list packages postcondition, matrix wall, gate sweep
+
+FIXED 2026-08-24: stage_suite_apk's join was unbounded over an
+unbounded `adb install -r`, and since the gate sweep waits on the
+Android lane's pid, one wedged emulator cost the whole matrix its
+verdict at t0 of a suite, with no partial record for any of the six
+units. stage_join bounds it at 300s, names the device and the staging
+phase, prints the processes actually alive under the stuck staging
+shell (it cannot tell a hung disarm from a hung install, so it does
+not claim to), kills them, and writes a TIMEOUT verdict the existing
+refusal reports. The install's `pm list packages` postcondition — the
+one cliphelper_prepare keeps — is restored: an install that reported
+success is re-read before it is believed. Watched both ways: the
+pre-fix join still running after 12s, the pre-fix subshell staging a
+lost install as OK.

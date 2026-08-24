@@ -2295,6 +2295,84 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
     content <= viewport + 2.0
 }
 
+/// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half — the
+/// gtk.rs sibling of the same name. A disjunction here would print one
+/// sentence for four causes and three of them would read compliant
+/// (invariant 3).
+///
+/// NOT GTK's variant set: `ColumnsOverflow` reads a resolved
+/// ColumnDefinition sum GTK never sees, GTK's `ContentUnderfill` wants
+/// a per-line end this read does not collect, and its leading-edge
+/// UNDERFILL direction is unswept on this backend.
+#[cfg(any(feature = "harness", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableHorizontalIssue {
+    TrackUnderfill,
+    ColumnsOverflow,
+    ContentLeftOverflow,
+    ContentOverflow,
+}
+
+/// `drawn` is the resolved column tracks plus their spacing plus both
+/// pads, `track` what the parent gave the table, `viewport` the table
+/// surface's own width, `left`/`right` the cell ink in that surface's
+/// space.
+#[cfg(any(feature = "harness", test))]
+fn table_horizontal_issue(
+    drawn: f64,
+    track: f64,
+    viewport: f64,
+    left: f64,
+    right: f64,
+) -> Option<TableHorizontalIssue> {
+    if drawn < track - 2.0 {
+        Some(TableHorizontalIssue::TrackUnderfill)
+    } else if drawn > viewport + 2.0 {
+        Some(TableHorizontalIssue::ColumnsOverflow)
+    } else if left < -2.0 {
+        Some(TableHorizontalIssue::ContentLeftOverflow)
+    } else if right > viewport + 2.0 {
+        Some(TableHorizontalIssue::ContentOverflow)
+    } else {
+        None
+    }
+}
+
+/// The convicting sentence for each cause, or empty when there is none.
+/// PURE and separate from the read, because the sentence is the thing
+/// the next reader chases and `mod tests` has to be able to pin it.
+#[cfg(any(feature = "harness", test))]
+fn table_horizontal_complaint(
+    drawn: f64,
+    track: f64,
+    viewport: f64,
+    left: f64,
+    right: f64,
+) -> String {
+    let dip = |x: f64| x.round() as i64;
+    match table_horizontal_issue(drawn, track, viewport, left, right) {
+        Some(TableHorizontalIssue::TrackUnderfill) => {
+            format!("draws {}dip of a {}dip track", dip(drawn), dip(track))
+        }
+        Some(TableHorizontalIssue::ColumnsOverflow) => format!(
+            "columns resolve to {}dip in a {}dip viewport",
+            dip(drawn),
+            dip(viewport)
+        ),
+        Some(TableHorizontalIssue::ContentLeftOverflow) => format!(
+            "cells start at {}dip outside a {}dip viewport",
+            dip(left),
+            dip(viewport)
+        ),
+        Some(TableHorizontalIssue::ContentOverflow) => format!(
+            "cells end at {}dip outside a {}dip viewport",
+            dip(right),
+            dip(viewport)
+        ),
+        None => String::new(),
+    }
+}
+
 /// Write one table's tracks onto the header and every row, if they moved.
 /// Idempotent BY DESIGN, because it runs from a layout callback: a write
 /// invalidates layout, and a pass that wrote unconditionally would never
@@ -14439,23 +14517,10 @@ impl crate::harness::Stage for WinUiStage {
             let track = assigned_track(core, &grid)?;
             let viewport = grid.ActualWidth()?;
             let left = edges.first().copied().unwrap_or(f64::INFINITY);
-            Ok(if track <= 0.0 || viewport <= 0.0 {
-                "no live table viewport geometry".to_owned()
-            } else if drawn < track - 2.0 {
-                format!(
-                    "draws {}dip of a {}dip track",
-                    drawn.round() as i64,
-                    track.round() as i64
-                )
-            } else if drawn > viewport + 2.0 || left < -2.0 || right > viewport + 2.0 {
-                format!(
-                    "cells span {}dip inside a {}dip viewport",
-                    (right - left).round() as i64,
-                    viewport.round() as i64
-                )
-            } else {
-                String::new()
-            })
+            if track <= 0.0 || viewport <= 0.0 {
+                return Ok("no live table viewport geometry".to_owned());
+            }
+            Ok(table_horizontal_complaint(drawn, track, viewport, left, right))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
@@ -16244,6 +16309,96 @@ mod tests {
     fn table_viewport_rejects_overflow() {
         assert!(table_content_fits(102.0, 100.0));
         assert!(!table_content_fits(102.1, 100.0));
+    }
+
+    /// FOUR CAUSES, FOUR SENTENCES, and the precedence between them —
+    /// the half a refactor loses. Both sides of every 2.0 boundary are
+    /// pinned, because that slack is what keeps a subpixel arrange from
+    /// reddening a correct table.
+    ///
+    /// The last case is the measured one this exists for: before the
+    /// split, a table whose resolved columns overflowed a 300dip
+    /// viewport while its ink stayed inside printed "cells span 290dip
+    /// inside a 300dip viewport" — two numbers asserting the opposite of
+    /// the failure, on a red leg.
+    #[test]
+    fn table_horizontal_issue_convicts_one_cause() {
+        use TableHorizontalIssue as Issue;
+        let issue = table_horizontal_issue;
+        let say = table_horizontal_complaint;
+        // drawn, track, viewport, left, right — a table filling its
+        // track and its viewport, ink flush inside: silent.
+        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 100.0), None);
+        assert_eq!(say(100.0, 100.0, 100.0, 0.0, 100.0), "");
+
+        // Every sentence below is read off five PAIRWISE DISTINCT
+        // numbers, so an arm that prints the wrong one of the five is a
+        // red rather than a coincidence.
+        assert_eq!(issue(98.0, 100.0, 100.0, 0.0, 98.0), None);
+        assert_eq!(
+            issue(97.9, 100.0, 100.0, 0.0, 97.9),
+            Some(Issue::TrackUnderfill)
+        );
+        assert_eq!(
+            say(80.0, 120.0, 100.0, 0.0, 70.0),
+            "draws 80dip of a 120dip track"
+        );
+
+        assert_eq!(issue(102.0, 100.0, 100.0, 0.0, 100.0), None);
+        assert_eq!(
+            issue(102.1, 100.0, 100.0, 0.0, 100.0),
+            Some(Issue::ColumnsOverflow)
+        );
+        assert_eq!(
+            say(140.0, 120.0, 100.0, 0.0, 110.0),
+            "columns resolve to 140dip in a 100dip viewport"
+        );
+
+        assert_eq!(issue(100.0, 100.0, 100.0, -2.0, 100.0), None);
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, -2.1, 100.0),
+            Some(Issue::ContentLeftOverflow)
+        );
+        assert_eq!(
+            say(98.0, 99.0, 100.0, -40.0, 90.0),
+            "cells start at -40dip outside a 100dip viewport"
+        );
+
+        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 102.0), None);
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, 0.0, 102.1),
+            Some(Issue::ContentOverflow)
+        );
+        assert_eq!(
+            say(98.0, 99.0, 100.0, 5.0, 140.0),
+            "cells end at 140dip outside a 100dip viewport"
+        );
+
+        // PRECEDENCE where several hold at once, which is the ordinary
+        // case: the root is reported, never its symptom.
+        assert_eq!(
+            issue(80.0, 100.0, 100.0, -40.0, 200.0),
+            Some(Issue::TrackUnderfill)
+        );
+        assert_eq!(
+            issue(140.0, 100.0, 100.0, 0.0, 140.0),
+            Some(Issue::ColumnsOverflow)
+        );
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, -40.0, 140.0),
+            Some(Issue::ContentLeftOverflow)
+        );
+
+        // The reproduction: 310dip of columns in a 300dip viewport, ink
+        // from 5 to 295 — a 290dip span that reads compliant.
+        assert_eq!(
+            issue(310.0, 300.0, 300.0, 5.0, 295.0),
+            Some(Issue::ColumnsOverflow)
+        );
+        assert_eq!(
+            say(310.0, 300.0, 300.0, 5.0, 295.0),
+            "columns resolve to 310dip in a 300dip viewport"
+        );
     }
 
     /// One theme dictionary's markup, from its key to its close.

@@ -121,14 +121,18 @@ with app.window(title="portfolio", width=800, height=600):
         with kaya.column(grow=1, align="stretch") as detail:  # the detail column
             detail.a11y_id("detail")
             for account in accounts.rows(
-                grow=1, align="stretch", a11y_id="accounts",
+                align="stretch", a11y_id="accounts",
             ):
-                with kaya.column(grow=1, align="stretch"):
+                with kaya.column(align="stretch"):
                     kaya.label(bind=account.name)
                     positions = kaya.collection(Position)
+                    # UNGROWN since the empty-row ruling: a summary
+                    # table hugs its rows (docs/tables-plan.md); grow is
+                    # the fill-and-scroll opt-in this dashboard no longer
+                    # wants.
                     for item in positions.columns(
                         "Ticker", "Qty", "Price", "Value",
-                        on_sort=on_sort, grow=1, a11y_id="positions",
+                        on_sort=on_sort, a11y_id="positions",
                     ):
                         with kaya.row():
                             kaya.label(bind=item.ticker)

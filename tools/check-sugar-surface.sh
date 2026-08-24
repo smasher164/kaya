@@ -658,60 +658,267 @@ echo "check-sugar-surface: dynamic-table perturbations applied:"
 echo "$tpl_table_probe"
 unset tpl_table_probe want_table_probe
 
-portfolio_table_probe=$(python3 - <<'PROBE'
-from pathlib import Path
+# (c2) AND THE GUEST THAT SPELLS THEM. The census above says Python CAN
+#      spell the dynamic-table geometry; the portfolio guest is what
+#      spells it, and invariant 5 is why the example is the exerciser.
+#
+#      STRUCTURAL, over the guest's AST. Byte-exact needles carrying
+#      newlines and indentation used to stand here, and a pure reformat
+#      reddened them with a sentence naming a property that was present
+#      (the review of 01dd633, D6). Every probe below reformats the guest
+#      through ast.unparse, so each one re-measures that: `reflow`
+#      removes nothing and must come back GREEN, and the count of
+#      byte-exact declaration segments surviving the reformat is printed
+#      beside it.
+#
+#      Watched exactly like (d) and (e): a staged tree where one file
+#      differs, the REAL census re-run as a SUBPROCESS against that root,
+#      rc AND the exact sentence demanded. The clause it replaces
+#      perturbed its own helper's input and asked the SAME helper —
+#      nothing else observed it, so only str.count could fail.
+portfolio_probe=$(python3 - <<'PROBE'
+import ast, os, shutil, subprocess, sys, tempfile
+
+PATH = "guests/python/portfolio.py"
+
+CENSUS = r'''
+import ast
 import sys
 
-source = Path("guests/python/portfolio.py").read_text(encoding="utf-8")
-rules = (
-    (
-        "outer For grow/align/id",
-        'for account in accounts.rows(\n'
-        '                grow=1, align="stretch", a11y_id="accounts",\n'
-        '            ):',
-    ),
-    (
-        "account card grow",
-        'with kaya.column(grow=1, align="stretch"):',
-    ),
-    (
-        "nested table grow",
-        'on_sort=on_sort, grow=1, a11y_id="positions",',
-    ),
-)
+PATH = "guests/python/portfolio.py"
+tree = ast.parse(open(f"{sys.argv[1]}/{PATH}", encoding="utf-8").read(), PATH)
+bad = []
 
 
-def missing(text):
-    return [name for name, needle in rules if text.count(needle) != 1]
+def is_call(node, attr):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attr)
 
 
-failed = False
-baseline = missing(source)
-if baseline:
-    print("check-sugar-surface: portfolio is missing " + ", ".join(baseline))
-    failed = True
-for name, needle in rules:
-    count = source.count(needle)
-    doctored = source.replace(needle, "", 1) if count == 1 else source
-    fired = missing(doctored)
-    print(
-        f"check-sugar-surface: portfolio {name} self-test applied "
-        f"{count} substitution(s)"
-    )
-    if count != 1 or fired != [name]:
-        print(
-            f"check-sugar-surface: SELF-TEST FAIL ({name} fired {fired!r})"
-        )
-        failed = True
-sys.exit(1 if failed else 0)
+def columns_with(node, holds=None):
+    return [n for n in ast.walk(node) if isinstance(n, ast.With)
+            and any(is_call(i.context_expr, "column") for i in n.items)
+            and (holds is None or holds in n.body)]
+
+
+def opener(with_node):
+    return next(i.context_expr for i in with_node.items
+                if is_call(i.context_expr, "column"))
+
+
+def sole(what, shape, found):
+    if len(found) == 1:
+        return found[0]
+    bad.append(f"check-sugar-surface: cannot find portfolio's {what} — {len(found)} "
+               f"{shape} in {PATH}, wanted exactly 1. A reader that cannot find "
+               "its subject agrees with anything.")
+    return None
+
+
+def declares(call, what, name, want=None):
+    """`want=None`: present, any expression — a handler is not a literal."""
+    node = next((k.value for k in call.keywords if k.arg == name), None)
+    if node is None:
+        bad.append(f"check-sugar-surface: portfolio's {what} does not declare "
+                   f"`{name}` ({PATH})")
+        return
+    if want is None:
+        return
+    try:
+        value = ast.literal_eval(node)
+    except (ValueError, SyntaxError):
+        value = None
+    if value != want:
+        bad.append(f"check-sugar-surface: portfolio's {what} declares {name}="
+                   f"{value!r}, wanted {want!r} ({PATH})")
+
+
+rows = sole("account-row For", "`for … in ….rows(…)` loops",
+            [n for n in ast.walk(tree)
+             if isinstance(n, ast.For) and is_call(n.iter, "rows")])
+if rows is not None:
+    declares(rows.iter, "account-row For", "align", "stretch")
+    declares(rows.iter, "account-row For", "a11y_id", "accounts")
+    detail = sole("detail column", "`with ….column(…)` statements holding it",
+                  columns_with(tree, holds=rows))
+    if detail is not None:
+        declares(opener(detail), "detail column", "grow", 1)
+        declares(opener(detail), "detail column", "align", "stretch")
+    card = sole("account card", "`with ….column(…)` statements inside it",
+                columns_with(rows))
+    if card is not None:
+        declares(opener(card), "account card", "align", "stretch")
+        table = sole("positions table", "`for … in ….columns(…)` loops inside it",
+                     [n for n in ast.walk(card)
+                      if isinstance(n, ast.For) and is_call(n.iter, "columns")])
+        if table is not None:
+            declares(table.iter, "positions table", "on_sort")
+            declares(table.iter, "positions table", "a11y_id", "positions")
+
+if bad:
+    print("\n".join(bad))
+sys.exit(1 if bad else 0)
+'''
+
+WORK = tempfile.mkdtemp()
+CENSUS_PY = f"{WORK}/portfolio-census.py"
+open(CENSUS_PY, "w", encoding="utf-8").write(CENSUS)
+
+
+def stage(perturb):
+    """A temp repo root where exactly `perturb` (path -> text) differs."""
+    root = tempfile.mkdtemp()
+    dirs = {}
+    for path in perturb:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            dirs.setdefault("/".join(parts[:i]), True)
+    for top in os.listdir("."):
+        if top not in dirs:
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for d in sorted(dirs):
+        os.makedirs(f"{root}/{d}", exist_ok=True)
+        for entry in os.listdir(d):
+            child = f"{d}/{entry}"
+            if child not in dirs and child not in perturb:
+                os.symlink(os.path.abspath(child), f"{root}/{child}")
+    for path, text in perturb.items():
+        open(f"{root}/{path}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def census(root):
+    return subprocess.run([sys.executable, CENSUS_PY, root],
+                          capture_output=True, text=True)
+
+
+source = open(PATH, encoding="utf-8").read()
+real = census(os.getcwd())
+sys.stdout.write(real.stdout)
+if real.stderr:
+    sys.stderr.write(real.stderr)
+
+
+def is_call(node, attr):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attr)
+
+
+def sites(tree):
+    """The four declarations, by the structure the census reads them by."""
+    found = {}
+    rows = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.For) and is_call(n.iter, "rows")), None)
+    if rows is None:
+        return found
+    found["rows"] = rows.iter
+    withs = [n for n in ast.walk(tree) if isinstance(n, ast.With)
+             and any(is_call(i.context_expr, "column") for i in n.items)]
+    inside = list(ast.walk(rows))
+    detail = next((n for n in withs if rows in n.body), None)
+    card = next((n for n in withs if n in inside), None)
+    if detail is not None:
+        found["detail"] = next(i.context_expr for i in detail.items
+                               if is_call(i.context_expr, "column"))
+    if card is not None:
+        found["card"] = next(i.context_expr for i in card.items
+                             if is_call(i.context_expr, "column"))
+        columns = next((n for n in ast.walk(card) if isinstance(n, ast.For)
+                        and is_call(n.iter, "columns")), None)
+        if columns is not None:
+            found["columns"] = columns.iter
+    return found
+
+
+# THE EXACT BYTES of the declarations as the guest writes them today —
+# what a needle-based clause would have to carry. Counted after each
+# reformat, never asserted.
+declarations = [ast.get_source_segment(source, node)
+                for node in sites(ast.parse(source, PATH)).values()]
+
+
+def reformatted(site=None, keyword=None):
+    """The guest through ast.unparse, optionally with one keyword dropped
+    from one declaration. Returns (text, keywords removed)."""
+    tree = ast.parse(source, PATH)
+    removed = 0
+    if site is not None:
+        call = sites(tree).get(site)
+        if call is None:
+            return None, 0
+        keep = [k for k in call.keywords if k.arg != keyword]
+        removed = len(call.keywords) - len(keep)
+        call.keywords = keep
+    return ast.unparse(tree), removed
+
+
+def probe(name, site, keyword, want):
+    text, removed = reformatted(site, keyword)
+    if text is None or removed != 1:
+        print(f"{name}=SELFTEST-BROKEN(removed {removed} `{keyword}` from {site})")
+        return
+    root = stage({PATH: text})
+    r = census(root)
+    shutil.rmtree(root)
+    survivors = sum(1 for d in declarations if d and d in text)
+    print(f"{name}=removed:1 rc:{r.returncode} named:{want in r.stdout} "
+          f"byte-exact-declarations-surviving:{survivors}/{len(declarations)}")
+
+
+probe("p1-rows-align", "rows", "align",
+      "portfolio's account-row For does not declare `align`")
+probe("p2-detail-grow", "detail", "grow",
+      "portfolio's detail column does not declare `grow`")
+probe("p3-card-align", "card", "align",
+      "portfolio's account card does not declare `align`")
+probe("p4-table-id", "columns", "a11y_id",
+      "portfolio's positions table does not declare `a11y_id`")
+
+# The reader must REFUSE when it cannot find its subject, never report a
+# guest with no declarations as clean.
+refusal = "cannot find portfolio's account-row For"
+renamed = source.replace("accounts.rows(", "accounts.rowsRenamed(", 1)
+root = stage({PATH: renamed})
+r = census(root)
+shutil.rmtree(root)
+print(f"p5-renamed-rows=removed:{source.count('accounts.rows(')} rc:{r.returncode} "
+      f"named:{refusal in r.stdout} byte-exact-declarations-surviving:-")
+
+# The D6 control, and the only one that must come back GREEN: the guest
+# reformatted, nothing removed.
+text, _ = reformatted()
+root = stage({PATH: text})
+r = census(root)
+shutil.rmtree(root)
+survivors = sum(1 for d in declarations if d and d in text)
+print(f"reflow=removed:0 rc:{r.returncode} "
+      f"findings:{len([l for l in r.stdout.splitlines() if l])} "
+      f"byte-exact-declarations-surviving:{survivors}/{len(declarations)}")
+shutil.rmtree(WORK, ignore_errors=True)
+sys.exit(real.returncode)
 PROBE
 )
-portfolio_table_rc=$?
-echo "$portfolio_table_probe"
-if [ "$portfolio_table_rc" -ne 0 ]; then
+portfolio_rc=$?
+portfolio_watched="$(printf '%s\n' "$portfolio_probe" | grep -E '^(p[0-9]|reflow)')"
+want_portfolio_probe="p1-rows-align=removed:1 rc:1 named:True byte-exact-declarations-surviving:0/4
+p2-detail-grow=removed:1 rc:1 named:True byte-exact-declarations-surviving:0/4
+p3-card-align=removed:1 rc:1 named:True byte-exact-declarations-surviving:0/4
+p4-table-id=removed:1 rc:1 named:True byte-exact-declarations-surviving:0/4
+p5-renamed-rows=removed:1 rc:1 named:True byte-exact-declarations-surviving:-
+reflow=removed:0 rc:0 findings:0 byte-exact-declarations-surviving:0/4"
+if [ "$portfolio_watched" != "$want_portfolio_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the portfolio guest census did not" \
+        "catch a perturbation it must catch, or reddened on a pure reformat). Wanted:" >&2
+    echo "$want_portfolio_probe" >&2
+    echo "Got:" >&2
+    echo "$portfolio_probe" >&2
+    exit 1
+fi
+echo "$portfolio_probe"
+if [ "$portfolio_rc" -ne 0 ]; then
     status=1
 fi
-unset portfolio_table_probe portfolio_table_rc
+unset portfolio_probe portfolio_watched want_portfolio_probe portfolio_rc
 
 # (d) THE PROP CENSUS IS WATCHED THE SAME WAY, in three perturbations.
 #     Each stages a temp repo root in which ONE file differs and

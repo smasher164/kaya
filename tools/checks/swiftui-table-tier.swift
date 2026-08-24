@@ -53,8 +53,10 @@ enum KayaTableTierProbe {
             switch geometry {
             case .missingViewport:
                 return "missing viewport"
-            case let .missingCells(got, want):
-                return "missing cells \(got)/\(want)"
+            case let .partialRow(got, want):
+                return "partial row \(got)/\(want)"
+            case let .unrealized(realized, declared):
+                return "unrealized \(realized)/\(declared)"
             case let .current(_, rows, columns):
                 return "current \(rows.count)/\(columns.flatMap { $0 }.count)"
             }
@@ -181,7 +183,7 @@ enum KayaTableTierProbe {
             generation: generation, frame: viewport, synthesized: false)
         expectGeometry(
             "missing current row-cell geometry is rejected",
-            kayaCurrentTableGeometry(table), "missing cells 0/4")
+            kayaCurrentTableGeometry(table), "unrealized 0/2")
         let staleGeneration = generation == Int.max ? Int.min : generation + 1
         for row in table.children {
             for column in table.tableColumns.indices {
@@ -196,7 +198,7 @@ enum KayaTableTierProbe {
         }
         expectGeometry(
             "stale row-cell geometry is rejected",
-            kayaCurrentTableGeometry(table), "missing cells 0/4")
+            kayaCurrentTableGeometry(table), "unrealized 0/2")
         for key in Array(table.tableCellFrames.keys) {
             guard let stale = table.tableCellFrames[key] else { continue }
             table.tableCellFrames[key] = KayaTableCellObservation(

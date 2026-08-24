@@ -38,9 +38,10 @@ static class TableScene
                         row.Label(row.Size);
                     });
                 });
-                // A table is a viewport: like the scroll scene, the
-                // scene says it fills — an ungrown table sizes to
-                // nothing (measured by screenshot).
+                // Grown on purpose: this scene asserts the
+                // fill-and-scroll viewport, the grown half of the
+                // empty-row ruling — ungrown would hug its rows
+                // (tables-plan decision 8).
                 tx.SetGrow(table, 1);
                 tx.Columns(table, new[] { "Name", "Size" }, Sort.None);
                 app.OnSort(table, (t, column) =>

@@ -86,8 +86,14 @@ status=0
 T0=$SECONDS
 if [ "$MODE" = parallel ]; then
     # ALL FIVE PLATFORM LANES START TOGETHER. The one gate sweep waits
-    # for Android's recorded pid, then runs at niceness 10 while longer
-    # lanes continue; docs/traps.md records the contention measurement.
+    # for Android's recorded pid, then runs at niceness 10.
+    # THE WALL IS THEREFORE ANDROID PLUS THE SWEEP, IN SERIES, and no
+    # longer the slowest lane: on the accepted 2026-08-24 run Android
+    # ended at 268s and the sweep took 348s more (619s wall), while the
+    # longest other lane — Windows, 533s — was already done, so the
+    # sweep's last ~83s ran with nothing beside it. docs/traps.md
+    # records the contention measurements; the gates ceiling below owns
+    # what that band means for the anomaly guard.
     # The token is a t0 fingerprint of every keyed gate's inputs: it
     # attests SAME-TREE, not swept-and-passed, so the mac lane can skip
     # its own sweep while the matrix still owns the later sweep's rc.
@@ -248,13 +254,30 @@ if [ "$MODE" = parallel ]; then
             android) budget=310 ;;
             # 490 since 2026-08-23: dynamic tables added 17 watched
             # copy-target perturbations to check-steps and 12 surface/
-            # forcing-app perturbations to check-sugar-surface. Three contended
-            # sweeps on that tree measured 378, 387 and 391s; 490 restores
-            # ~1.25x over the new observed band's top.
+            # forcing-app perturbations to check-sugar-surface.
             #
-            # The sweep remains its own matrix unit. It begins after
-            # Android and overlaps whichever longer lanes remain, so its
-            # compile-heavy gates still soak variable contended host share.
+            # THE 378/387/391s BAND IT WAS SET AGAINST IS NOT THIS
+            # SCHEDULE'S. Those three sweeps ran from t0 at ordinary
+            # priority, alongside all five lanes for their whole length
+            # (docs/tables-plan.md, docs/deferred.md). On the tree that
+            # changed the schedule, that same from-t0 shape measured
+            # 427s at ordinary priority and 467s niced (docs/traps.md) —
+            # so "1.25x over the band's top", which this arm used to
+            # claim, was never true of 490 here.
+            #
+            # What 490 guards is the DELAYED-plus-NICED band, which has
+            # one accepted sample: 348s (2026-08-24), with 218s and 208s
+            # from the barrier-only and delayed-only experiments beside
+            # it. That is ~1.4x. It deliberately does NOT cover 467:
+            # that reading is from a schedule this file no longer runs,
+            # and a ceiling raised to clear an abandoned schedule stops
+            # guarding the live one.
+            #
+            # The sweep is its own matrix unit AND half the wall (see
+            # the launch block above): it starts only after Android
+            # exits, so its tail runs at a host share no other reading
+            # has. A second delayed-and-niced sample is the number this
+            # arm most needs.
             gates) budget=490 ;;
             *) budget=0 ;;
         esac

@@ -12,9 +12,12 @@ expect label#6 "Account total: $500.00"
 expect_window_size 800x600
 expect_aligned column@detail "stretch"
 expect_aligned column@accounts "stretch"
-# The detail has zero remainder; a table is a viewport, so its sibling
-# assertion permits empty row space but refuses content beyond the edge.
-expect_fills column@detail
+# No expect_fills on column@detail: the breadth rule maximizes this
+# column's height while the hugging dashboard legitimately leaves slack
+# under its content (the empty-row ruling, docs/tables-plan.md).
+# The hug half of that ruling: an ungrown summary table's viewport sits
+# within a row-pitch of its last row — watched failing both ways
+# (content-height frame removed, then inflated 100pt).
 expect_fills column@positions[brokerage]
 expect_column_edges column@positions[brokerage] 4
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
@@ -32,6 +35,7 @@ expect_column_edges column@positions[retirement] 4
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
 expect_rows column@positions[retirement] "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
+expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
 header_click column@positions[retirement] 3
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
 expect_column_edges column@positions[retirement] 4

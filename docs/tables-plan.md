@@ -171,6 +171,24 @@ is a separate admission if a real app ever needs one).
    `expect_column_edges` assertions repeat after every sort
    re-declaration, as does the portfolio's per-copy geometry, so a
    first-frame-only measurement cannot answer for later header bars.
+   AMENDED 2026-08-24, the empty-row ruling: grow is the opt-in half.
+   A GROWN table keeps everything above — a fill-and-scroll viewport
+   whose native empty area may stripe. An UNGROWN native table hugs
+   header + rows at the platform's measured metrics (macOS, probe-
+   measured: header 28, 5pt top inset, 24pt rows, NO bottom inset —
+   the next alternating stripe begins at the last row's edge, so any
+   height past it shows that stripe's top as a sliver; both viewed on
+   portfolio captures). The expect_fills table arm splits on the same
+   bit: a grown table skips vertical containment (NSTableView
+   legitimately realizes an overscan row past the clip), an ungrown
+   one keeps containment plus the hug clause — viewport within 30pt of
+   its last row — watched red in both directions (content-height frame
+   removed: collapse; height inflated 100pt: "leaves 109pt below its
+   last row"). The portfolio dashboard is the ungrown consumer and
+   asserts the hug on column@positions[brokerage]; table.steps' grown
+   table is the other half. GTK's and Compose's synthesized tiers are
+   content-height by construction; iOS ungrown native metrics stay
+   unpinned until a scene exercises one.
 
 ## The wire (append-only ids)
 

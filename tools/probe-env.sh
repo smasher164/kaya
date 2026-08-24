@@ -15,7 +15,9 @@ fi
 # and owned by tools/android/run-emulator.sh, including its snapshot identity.
 #
 #   tools/probe-env.sh          report readiness of every surface
-#   tools/probe-env.sh --warm   also boot independent simulator / VM surfaces
+#   tools/probe-env.sh --warm   also boot independent simulator / VM
+#                               surfaces, and REFUSE (exit 1) naming any
+#                               surface it was asked to warm and could not
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,10 +26,20 @@ cd "$ROOT" || exit 1
 WARM=0
 [ "${1:-}" = --warm ] && WARM=1
 status=0
+# Surfaces `--warm` was asked to warm and did not. A warm that skips one
+# in silence is worse than no warm: the next run pays the boot inside the
+# number it is measuring, and nothing said so. Retired at the foot of the
+# file, where --warm refuses rather than exiting 0.
+warm_skipped=""
 
 report() { # name state detail
     printf '%-12s %-6s %s\n' "$1" "$2" "$3"
     [ "$2" = DOWN ] && status=1
+}
+
+warm_skip() { # surface
+    [ "$WARM" = 1 ] && warm_skipped="$warm_skipped $1"
+    return 0
 }
 
 # --- dev shell tools -------------------------------------------------
@@ -104,7 +116,12 @@ if ! xcrun simctl help >/dev/null 2>&1; then
         fi
     done
 fi
-IOS_POOL="${KAYA_IOS_SIMS:-2}"
+# THE SAME DEFAULT tools/ios/run-sim.sh USES. It read 2 against the
+# runner's 3 from 2026-07-17 (28b48c5) until 2026-08-24: the probe called
+# a two-sim pool warm and run-sim.sh then created and booted the third
+# inside whatever run followed. check-gates holds this agreement for the
+# Android pool and not yet for this one.
+IOS_POOL="${KAYA_IOS_SIMS:-3}"
 if xcrun simctl list devices >/dev/null 2>&1; then
     booted=$(xcrun simctl list devices booted 2>/dev/null | grep -c "kaya-sim-.*Booted" || true)
     if [ "$booted" -ge "$IOS_POOL" ]; then
@@ -125,7 +142,16 @@ if xcrun simctl list devices >/dev/null 2>&1; then
         for u in $(xcrun simctl list devices 2>/dev/null | grep "kaya-sim-" | grep -oE '[0-9A-F-]{36}'); do
             timeout 180 xcrun simctl bootstatus "$u" -b >/dev/null 2>&1 || true
         done
-        report ios OK "sim pool booted (warmed now)"
+        # COUNTED AGAIN, not asserted: every create/boot/bootstatus above
+        # is deliberately non-fatal, so "warmed now" was a claim this arm
+        # had never measured.
+        booted=$(xcrun simctl list devices booted 2>/dev/null | grep -c "kaya-sim-.*Booted" || true)
+        if [ "$booted" -ge "$IOS_POOL" ]; then
+            report ios OK "sim pool booted ($booted/$IOS_POOL, warmed now)"
+        else
+            warm_skip ios
+            report ios COLD "sim pool is still $booted/$IOS_POOL after --warm booted what it could — this arm discards simctl's output, so boot a missing kaya-sim-N by hand to see the error"
+        fi
     else
         report ios COLD "sim pool cold ($booted/$IOS_POOL booted; --warm boots it)"
     fi
@@ -182,6 +208,7 @@ case "$ANDROID_POOL" in
                             android_snapshot_stale="${android_snapshot_stale:+$android_snapshot_stale and }tablet"
                         fi
                         if [ -n "$android_snapshot_stale" ]; then
+                            warm_skip android
                             report android COLD "$android_snapshot_stale snapshot stale — tools/android/run-emulator.sh reseeds both before readers"
                         else
                             android_phone_up=0
@@ -206,7 +233,8 @@ case "$ANDROID_POOL" in
                                 && [ "$android_tablet_up" -eq 1 ]; then
                                 report android OK "current phone pool ($android_phone_up/$ANDROID_POOL) and tablet (1/1)"
                             elif [ "$WARM" -eq 1 ]; then
-                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — --warm delegates this coupled pool to tools/android/run-emulator.sh"
+                                warm_skip android
+                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — --warm does NOT boot this coupled pool; tools/android/run-emulator.sh owns it"
                             else
                                 report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — tools/android/run-emulator.sh owns the coupled pool"
                             fi
@@ -264,6 +292,20 @@ elif [ "$WARM" = 1 ]; then
     fi
 else
     report windows COLD "unreachable (deploy-win auto-starts it, or --warm)"
+fi
+
+# --- what --warm did not do ------------------------------------------
+# `--warm` USED TO BOOT THE ANDROID POOL and cannot any more: the pool is
+# coupled (phones + the tablet + a snapshot identity) and
+# tools/android/run-emulator.sh owns it. Until this refusal, --warm
+# reported the pool COLD and still exited 0, so a standalone benchmark
+# warmed first and paid 60-90s of emulator boot inside the number it was
+# measuring, with nothing saying the warm had not happened.
+if [ -n "$warm_skipped" ]; then
+    echo "probe-env: --warm did not warm:$warm_skipped — the report line for each" >&2
+    echo "  says what it needs. This exits 1 rather than 0 so a benchmark started" >&2
+    echo "  behind it does not pay a boot inside the number it is measuring." >&2
+    status=1
 fi
 
 exit "$status"

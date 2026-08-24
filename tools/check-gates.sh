@@ -138,6 +138,8 @@ ANDROID_PID = 'android_lane_pid="${lane_pids[${#lane_pids[@]} - 1]}"'
 ANDROID_WAIT = 'wait "$android_lane_pid" 2>/dev/null || true'
 ANDROID_RUNNER_POOL = 'POOL="${KAYA_ANDROID_EMUS:-4}"'
 ANDROID_PROBE_POOL = 'ANDROID_POOL="${KAYA_ANDROID_EMUS:-4}"'
+IOS_RUNNER_POOL = 'POOL="${KAYA_IOS_SIMS:-3}"'
+IOS_PROBE_POOL = 'IOS_POOL="${KAYA_IOS_SIMS:-3}"'
 
 
 def matrix_parallel_problem(text):
@@ -182,6 +184,18 @@ def android_pool_problem(runner, probe):
     return None
 
 
+# The probe defaulted to 2 sims against the runner's 3 for five weeks —
+# the exact drift the Android clause guards, unguarded one platform over.
+def ios_pool_problem(runner, probe):
+    if runner.count(IOS_RUNNER_POOL) != 1:
+        return ("tools/ios/run-sim.sh must default to the three-simulator "
+                "iOS pool")
+    if probe.count(IOS_PROBE_POOL) != 1:
+        return ("tools/probe-env.sh must probe the same three-simulator "
+                "iOS pool the runner uses")
+    return None
+
+
 # ---------------------------------------------------------------- data
 
 out = subprocess.run([str(root / "tools" / "gates.sh"), "--list"],
@@ -199,6 +213,7 @@ mac_text = (root / "tools" / "validate-mac.sh").read_text(encoding="utf-8")
 matrix_text = (root / "tools" / "validate-all.sh").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.sh").read_text(
     encoding="utf-8")
+ios_text = (root / "tools" / "ios" / "run-sim.sh").read_text(encoding="utf-8")
 probe_text = (root / "tools" / "probe-env.sh").read_text(encoding="utf-8")
 block = rung2(claude_text)
 if block is None:
@@ -402,6 +417,45 @@ if n != 1:
 elif matrix_parallel_problem(doctored) is None:
     fail("self-test N12: an ordinary-priority delayed sweep passed")
 
+# N13 — narrowing the iOS runner's pool must be reported.
+doctored, n = re.subn(
+    re.escape(IOS_RUNNER_POOL),
+    'POOL="${KAYA_IOS_SIMS:-2}"',
+    ios_text,
+    count=1,
+)
+print("check-gates: self-test N13 narrowed the runner's sim pool to two, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N13 did not change exactly one iOS runner default — "
+         "the sim-pool clause is not reading the real file")
+else:
+    problem = ios_pool_problem(doctored, probe_text)
+    if problem is None:
+        fail("self-test N13: a two-simulator runner passed")
+    elif "three-simulator iOS pool" not in problem:
+        fail("self-test N13 failed for another reason: " + problem)
+
+# N14 — the probe describing a narrower sim pool than the runner uses is
+# the measured five-week drift, and must be reported.
+doctored, n = re.subn(
+    re.escape(IOS_PROBE_POOL),
+    'IOS_POOL="${KAYA_IOS_SIMS:-2}"',
+    probe_text,
+    count=1,
+)
+print("check-gates: self-test N14 restored the probe's two-sim default, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N14 did not change exactly one iOS probe default — "
+         "the sim-pool clause is not reading the real file")
+else:
+    problem = ios_pool_problem(ios_text, doctored)
+    if problem is None:
+        fail("self-test N14: a probe for the wrong iOS pool passed")
+    elif "same three-simulator" not in problem:
+        fail("self-test N14 failed for another reason: " + problem)
+
 # ------------------------------------------------------- 1. the clauses
 
 only_listed, only_doc = drift(known, doc_names)
@@ -446,6 +500,9 @@ if problem is not None:
 problem = android_pool_problem(android_text, probe_text)
 if problem is not None:
     fail(problem)
+problem = ios_pool_problem(ios_text, probe_text)
+if problem is not None:
+    fail(problem)
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.
@@ -460,7 +517,7 @@ if proof.returncode != 0:
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
           f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
-          "delayed niced sweep, four-phone Android pool)")
+          "delayed niced sweep, four-phone Android pool, three-sim iOS pool)")
 else:
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)
 sys.exit(status)

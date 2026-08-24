@@ -38,9 +38,9 @@ main = kayaMain $ \app -> do
           [ label (field @"name" @TableItem),
             label (field @"size" @TableItem)
           ]
-    -- A table is a viewport: like the scroll scene, the scene says it
-    -- fills — an ungrown table sizes to nothing (measured by
-    -- screenshot).
+    -- Grown on purpose: this scene asserts the fill-and-scroll
+    -- viewport, the grown half of the empty-row ruling — ungrown
+    -- would hug its rows (tables-plan decision 8).
     setGrow table 1
     columns table ["Name", "Size"] sortNone
     root <- row [pure table]

@@ -40,9 +40,10 @@ final class Table {
                         row.label(row.size);
                     });
                 });
-                // A table is a viewport: like the scroll scene, the
-                // scene says it fills — an ungrown table sizes to
-                // nothing (measured by screenshot).
+                // Grown on purpose: this scene asserts the
+                // fill-and-scroll viewport, the grown half of the
+                // empty-row ruling — ungrown would hug its rows
+                // (tables-plan decision 8).
                 tx.setGrow(table, 1);
                 tx.columns(table, new String[] { "Name", "Size" }, KayaApp.Sort.none());
                 app.onSort(table, (t, column) -> {

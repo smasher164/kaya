@@ -11,6 +11,7 @@ enum KayaSelftestAdmissionProbe {
             mounted: Bool,
             hasNodes: Bool,
             graceExpired: Bool,
+            startupExpired: Bool = false,
             _ wantState: KayaSelftestAdmissionState,
             _ wantEffect: KayaSelftestAdmissionEffect
         ) {
@@ -18,7 +19,8 @@ enum KayaSelftestAdmissionProbe {
                 state,
                 mounted: mounted,
                 hasNodes: hasNodes,
-                graceExpired: graceExpired)
+                graceExpired: graceExpired,
+                startupExpired: startupExpired)
             if got.0 != wantState || got.1 != wantEffect {
                 print("swiftui-selftest-admission: FAIL — \(name)")
                 failures += 1
@@ -29,6 +31,21 @@ enum KayaSelftestAdmissionProbe {
             "an empty initial model keeps waiting",
             .waiting, mounted: false, hasNodes: false, graceExpired: false,
             .waiting, .none)
+        expect(
+            "the startup deadline rescues a batchless guest from silence",
+            .waiting, mounted: false, hasNodes: false, graceExpired: false,
+            startupExpired: true,
+            .started, .start)
+        expect(
+            "the startup deadline also closes an expired-less grace wait",
+            .grace, mounted: false, hasNodes: true, graceExpired: false,
+            startupExpired: true,
+            .started, .start)
+        expect(
+            "a started run ignores the late startup deadline",
+            .started, mounted: false, hasNodes: false, graceExpired: false,
+            startupExpired: true,
+            .started, .none)
         expect(
             "an unmounted node batch arms one grace period",
             .waiting, mounted: false, hasNodes: true, graceExpired: false,

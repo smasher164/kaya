@@ -662,10 +662,19 @@ func kayaSelftestAdmissionTransition(
     _ state: KayaSelftestAdmissionState,
     mounted: Bool,
     hasNodes: Bool,
-    graceExpired: Bool
+    graceExpired: Bool,
+    startupExpired: Bool = false
 ) -> (KayaSelftestAdmissionState, KayaSelftestAdmissionEffect) {
     if state == .started { return (.started, .none) }
     if mounted { return (.started, .start) }
+    // THE STARTUP RESCUE: a guest that never sends a node-bearing batch
+    // used to time out its whole leg in silence — measured 2026-08-24
+    // (the review of 01dd633): the pre-admission interpreter answered
+    // "FAILED (no such target label#0)" in 6s, the admission one said
+    // nothing for 120s, because .waiting armed no timer. The deadline
+    // forces the start; the script's own expects then produce the
+    // honest sentence.
+    if startupExpired { return (.started, .start) }
     if graceExpired {
         return state == .grace ? (.started, .start) : (state, .none)
     }
@@ -675,6 +684,23 @@ func kayaSelftestAdmissionTransition(
 
 private var kayaSelftestAdmissionState = KayaSelftestAdmissionState.waiting
 private let kayaSelftestUnmountedGrace: TimeInterval = 5.0
+/// The startup rescue's deadline: generous against slow guests (whose
+/// batches admit them far earlier anyway), tiny against the 120s leg
+/// timeout the silence used to burn whole.
+private let kayaSelftestStartupDeadline: TimeInterval = 10.0
+private var kayaSelftestStartupArmed = false
+
+/// Armed ONCE from the root's appear — batch-independent, so a guest
+/// that never sends one still reaches a verdict.
+func kayaArmSelftestStartupDeadline() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !kayaSelftestStartupArmed else { return }
+    kayaSelftestStartupArmed = true
+    guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + kayaSelftestStartupDeadline) {
+        kayaDriveSelftestAdmission(startupExpired: true)
+    }
+}
 
 /// Absolute timestamps on stderr so a leg log correlates with `log show`.
 func kayaDiag(_ msg: String) {
@@ -3970,15 +3996,19 @@ private func kayaWindowHasMountedContent(_ window: KayaWindowModel) -> Bool {
     }
 }
 
-private func kayaDriveSelftestAdmission(graceExpired: Bool = false) {
+private func kayaDriveSelftestAdmission(graceExpired: Bool = false, startupExpired: Bool = false) {
     dispatchPrecondition(condition: .onQueue(.main))
     guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
+    if startupExpired, kayaSelftestAdmissionState != .started {
+        kayaDiag("selftest startup deadline fired with admission still waiting")
+    }
     let mounted = kayaScene.windows.values.contains(where: kayaWindowHasMountedContent)
     let (next, effect) = kayaSelftestAdmissionTransition(
         kayaSelftestAdmissionState,
         mounted: mounted,
         hasNodes: !kayaScene.nodes.isEmpty,
-        graceExpired: graceExpired)
+        graceExpired: graceExpired,
+        startupExpired: startupExpired)
     kayaSelftestAdmissionState = next
     switch effect {
     case .none:
@@ -5504,9 +5534,14 @@ private func kayaRunScript(_ script: String) {
                 switch got.0 {
                 case .missingViewport:
                     failures.append("\(parts[1]) has no current table viewport geometry")
-                case let .missingCells(seen, expected):
+                case let .partialRow(seen, expected):
                     failures.append(
-                        "\(parts[1]) records \(seen) of \(expected) current table cells")
+                        "\(parts[1]) has a partially recorded row: \(seen) of \(expected) "
+                            + "cells current — a row renders whole or not at all")
+                case let .unrealized(realized, declared):
+                    failures.append(
+                        "\(parts[1]) realizes \(realized) of \(declared) declared rows "
+                            + "on a tier that owes them")
                 case let .current(viewport, rows, columns):
                     guard !rows.isEmpty else {
                         failures.append("\(parts[1]) has no current row-cell geometry")
@@ -6606,10 +6641,27 @@ private func kayaRunScript(_ script: String) {
                         switch kayaCurrentTableGeometry(container) {
                         case .missingViewport:
                             return "no current table viewport geometry"
-                        case let .missingCells(got, want):
-                            return "records \(got) of \(want) current table cells"
+                        case let .partialRow(got, want):
+                            return
+                                "has a partially recorded row: \(got) of \(want) cells "
+                                + "current — a row renders whole or not at all"
+                        case let .unrealized(realized, declared):
+                            return
+                                "realizes \(realized) of \(declared) declared rows on a "
+                                + "tier that owes them"
                         case let .current(viewport, rows, _):
                             guard !rows.isEmpty else { return "" }
+                            // THE GROW SPLIT (the empty-row ruling,
+                            // docs/tables-plan.md): a GROWN table is the
+                            // scroll viewport — realized rows legitimately
+                            // extend past the clip (the overscan row was
+                            // measured 13pt below it on a healthy table),
+                            // so containment would fail every scrollable
+                            // state. An UNGROWN table hugs its content:
+                            // rows contained AND the viewport within one
+                            // row-pitch of the content span, or the hug
+                            // rule is not holding.
+                            if container.grow > 0 { return "" }
                             guard kayaTableFramesFitVertically(rows, inside: viewport) else {
                                 guard let bounds = kayaTableBounds(rows) else {
                                     return "has no current row-cell geometry"
@@ -6618,6 +6670,14 @@ private func kayaRunScript(_ script: String) {
                                     "rows occupy \(Int(bounds.minY.rounded()))...\(Int(bounds.maxY.rounded()))pt "
                                     + "outside viewport \(Int(viewport.minY.rounded()))..."
                                     + "\(Int(viewport.maxY.rounded()))pt"
+                            }
+                            if let bounds = kayaTableBounds(rows) {
+                                let slack = viewport.maxY - bounds.maxY
+                                if slack > 30 {
+                                    return
+                                        "an ungrown table leaves \(Int(slack.rounded()))pt "
+                                        + "below its last row — the hug rule is not holding"
+                                }
                             }
                             return ""
                         }
@@ -7749,7 +7809,15 @@ func kayaTableFramesFitVertically(
 
 enum KayaCurrentTableGeometry {
     case missingViewport
-    case missingCells(got: Int, want: Int)
+    /// A row with SOME current cells but not all: incoherence on any
+    /// tier — a row is rendered whole or not at all.
+    case partialRow(got: Int, want: Int)
+    /// Rows short of the declaration where the tier owes them all: the
+    /// synthesized tier lays out every row; the native tier owes at
+    /// least one (NSTableView realizes only visible rows — measured
+    /// 2026-08-24, 20 declared rows in a short window recorded 10 of
+    /// 40 cells on a CORRECTLY drawn table; the review of 01dd633).
+    case unrealized(realized: Int, declared: Int)
     case current(viewport: CGRect, rows: [CGRect], columns: [[CGRect]])
 }
 
@@ -7761,37 +7829,49 @@ func kayaCurrentTableGeometry(_ table: KayaNode) -> KayaCurrentTableGeometry {
         viewport.frame.height > 0
     else { return .missingViewport }
 
-    var rowKeys = Array(repeating: [String](), count: table.tableColumns.count)
-    let wantedRows = table.children.count * table.tableColumns.count
+    // PER-ROW realization: the native NSTableView materializes only the
+    // visible rows, so a declared row is either observed WHOLE or
+    // legitimately absent — a partial row is incoherence on any tier,
+    // and the synthesized tier (which lays out everything) still owes
+    // every row.
+    let columnCount = table.tableColumns.count
+    var realized: [[CGRect]] = []
     for row in table.children {
+        var cells: [CGRect] = []
         for column in table.tableColumns.indices where row.children.indices.contains(column) {
-            rowKeys[column].append(kayaTableCellKey(row, column, row.children[column]))
+            let key = kayaTableCellKey(row, column, row.children[column])
+            if let observation = table.tableCellFrames[key],
+                observation.generation == generation
+            {
+                cells.append(observation.frame)
+            }
+        }
+        if cells.count == columnCount {
+            realized.append(cells)
+        } else if !cells.isEmpty {
+            return .partialRow(got: cells.count, want: columnCount)
         }
     }
-    var columnKeys = rowKeys
+    if viewport.synthesized, realized.count != table.children.count {
+        return .unrealized(realized: realized.count, declared: table.children.count)
+    }
+    if realized.isEmpty, !table.children.isEmpty {
+        return .unrealized(realized: 0, declared: table.children.count)
+    }
+    var columnFrames: [[CGRect]] = (0..<columnCount).map { column in
+        realized.map { $0[column] }
+    }
     if viewport.synthesized {
         for column in table.tableColumns.indices {
-            columnKeys[column].insert("h/\(column)", at: 0)
-        }
-    }
-    func frames(_ keys: [String]) -> [CGRect] {
-        keys.compactMap { key -> CGRect? in
+            let key = "h/\(column)"
             guard let observation = table.tableCellFrames[key],
                 observation.generation == generation
-            else { return nil }
-            return observation.frame
+            else { return .partialRow(got: 0, want: columnCount) }
+            columnFrames[column].insert(observation.frame, at: 0)
         }
     }
-    let rowFrames = rowKeys.map(frames)
-    let columnFrames = columnKeys.map(frames)
-    let gotRows = rowFrames.reduce(0) { $0 + $1.count }
-    let gotColumns = columnFrames.reduce(0) { $0 + $1.count }
-    let wantedColumns = wantedRows + (viewport.synthesized ? table.tableColumns.count : 0)
-    guard gotRows == wantedRows, gotColumns == wantedColumns else {
-        return .missingCells(got: gotColumns, want: wantedColumns)
-    }
     return .current(
-        viewport: viewport.frame, rows: rowFrames.flatMap { $0 }, columns: columnFrames)
+        viewport: viewport.frame, rows: realized.flatMap { $0 }, columns: columnFrames)
 }
 
 @available(macOS 14.4, iOS 17.4, *)
@@ -7880,6 +7960,25 @@ struct KayaTableSurface: View {
     }
 }
 
+/// The native macOS Table's fixed metrics, MEASURED 2026-08-24 by a
+/// real-window probe (inset-style NSTableView under SwiftUI Table:
+/// rowHeight 24, intercell 0, header 28, 5pt content insets above and
+/// below) — the content-height ruling: an UNGROWN table hugs
+/// header + rows, a GROWN one stays the fill-and-scroll viewport
+/// (docs/tables-plan.md, the empty-row ruling). No bottom inset: the
+/// next alternating stripe begins at the last row's edge, so any
+/// height past it shows that stripe's top as a sliver (viewed on the
+/// 2026-08-24 capture — grey under odd-parity last rows, invisible
+/// under even). iOS metrics are unpinned until a scene exercises an
+/// ungrown native table there.
+private func kayaNativeTableContentHeight(rows: Int) -> CGFloat {
+    #if os(macOS)
+        return 28 + 5 + CGFloat(rows) * 24
+    #else
+        return 28 + 5 + CGFloat(rows) * 44
+    #endif
+}
+
 @available(macOS 14.4, iOS 17.4, *)
 private struct KayaNativeTable: View {
     let node: KayaNode
@@ -7936,6 +8035,11 @@ private struct KayaNativeTable: View {
                 }
             }
         }
+        .frame(
+            height: node.grow > 0
+                ? nil : kayaNativeTableContentHeight(rows: node.children.count),
+            alignment: .top
+        )
         .background(
             KayaTableViewportReporter(
                 node: node, generation: generation, synthesized: false))
@@ -14314,6 +14418,11 @@ struct KayaRoot: View {
             #if os(macOS)
                 kayaDiag("primaryRoot appear pending=\(kayaPendingOpens) \(kayaDiagAppState())")
             #endif
+            // Batch-independent: the one start path a guest that never
+            // sends a node-bearing batch still reaches (measured — this
+            // appear fires for an empty window; the content branch's
+            // does not).
+            kayaArmSelftestStartupDeadline()
             kayaOpenWindow = { openWindow(value: $0) }
             kayaDismissWindow = { dismissWindow(value: $0) }
             for id in kayaPendingOpens {
