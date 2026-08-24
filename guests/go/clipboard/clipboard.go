@@ -193,7 +193,7 @@ func App() *kaya.App {
 			// empty through the paste, and that is the assertion.
 			tx.Label(rowStatus).A11yID("row-status") // label#1
 			notes := tx.Collection()
-			for row := range notes.Rows(tx) {
+			for row := range tx.Rows(notes).All() {
 				note := row.Entry() // entry#2, one stamped copy
 				row.SetAccepts(note, kaya.AcceptText)
 				app.OnPasteNode(note, func(tx *kaya.Tx, keys []any, clip kaya.Representation) {

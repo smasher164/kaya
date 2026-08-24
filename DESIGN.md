@@ -358,6 +358,31 @@ child declarations follow the same ownership: sections and the command
 catalog begin from that window construct, never from app-global state
 or API.
 
+**The sugar tier speaks each language's current idiom** (audited
+2026-08-24, all eight, maintainer-ratified): a For's template trace is
+a LOOP where the language loops — Rust's `for row in rows(tx)`,
+Python's `for item in coll.columns(...)`, Go's range-over-func
+(`for row := range rows.All()`, go >= 1.23), Java's enhanced-for over
+a one-shot Iterable (which also freed locals from effectively-final
+capture) — and a CLOSURE where the platform's own DSL is one (Swift's
+trailing closures beside SwiftUI's ForEach, C#'s lambdas, OCaml's
+combinators, Haskell's do-blocks). One name spans both zones wherever
+the language can dispatch it (C#/Java/Swift overloads, Rust/Haskell
+types, Go/OCaml paired names). A handler registers where the
+binding's own click does: at the declaration in the keyword / labelled
+/ chained family (Python, OCaml, Go, Rust), on the app in the registry
+family (C#, Java, Swift, Haskell) — the handle names the creator either
+way. The body runs ONCE to trace the template in every spelling; the
+loop is the fiction that reads as the intent.
+
+**One id space for widgets and template nodes.** Every binding mints
+live widget ids and template node ids from ONE monotone counter per app
+— signals, collections, alerts/dialogs and menu items keep their own —
+so no number ever names both a widget and a node; the teeth are
+scene.rs's two "already exists" walls (`kaya: widget id … already
+exists`, `kaya: template node id … already exists`), which a binding's
+own allocator can then never trip.
+
 **Line separators.** Guest-visible text uses LF (`\n`) as its line
 separator on every platform — occurrence payloads, harness reads, and
 scene output strings are compared byte-for-byte across all languages,
@@ -3381,8 +3406,9 @@ feature rather than reconstructed per backend afterward.
   table exists in any guest. Template bodies are declarations, not
   creations: the For/When record opens a template scope, the records
   inside describe a blueprint, and nothing renders until data arrives.
-  Template nodes take their own id space, so a widget id always names
-  exactly one live widget. An instance — the copy stamped per entry — is
+  Template nodes and live widgets share one id space (Binding
+  conventions), so a number always names exactly one of them. An
+  instance — the copy stamped per entry — is
   named (template node, key path), one key per enclosing For; the
   variable length is the address's intrinsic dimensionality (a depth-2
   widget has two degrees of freedom), encoded once as a length-prefixed

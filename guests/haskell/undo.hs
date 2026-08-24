@@ -188,7 +188,7 @@ main = kayaMain $ \app -> do
 
   -- Not an undoable group: an ordinary edit is the platform's step, not
   -- the ledger's.
-  onChangeNode app noteNode $ \path text -> do
+  onChange app noteNode $ \path text -> do
     modifyIORef' notesRef (noteAt (rowKey path) text)
     noted <- noteList <$> readIORef notesRef
     submitTx app (writeSignal notes (VStr noted))

@@ -91,10 +91,10 @@ final class Menus {
                         .symbol(KayaApp.Symbol.EDIT)
                         .onActivate(t -> t.write(status, "renamed"));
 
-                for (var g : groups.rows()) {
+                for (var g : tx.rows(groups)) {
                     g.column(() -> {
                         items = g.collection();
-                        for (var row : items.rows()) {
+                        for (var row : g.rows(items)) {
                             // label#2 once g2/a stamps
                             row.contextMenu(row.label(row.value()), catalog);
                         }

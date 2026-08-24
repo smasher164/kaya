@@ -19,7 +19,7 @@ func App() *kaya.App {
 	app.Build(func(tx *kaya.Tx) {
 		tx.Mount(tx.Column(func() {
 			notes := tx.Collection()
-			for row := range notes.Rows(tx) {
+			for row := range tx.Rows(notes).All() {
 				field := row.Entry()
 				// BOTH PROPS ELEMENT-SOURCED. The ID is forced: expect_ax
 				// searches the REAL tree by the authored identifier, so copies
@@ -34,7 +34,7 @@ func App() *kaya.App {
 			// a scalar row has exactly one field to spend on an id. Both
 			// props are CONST — facts about the prototype, not the row.
 			heads := tx.Collection()
-			for head := range heads.Rows(tx) {
+			for head := range tx.Rows(heads).All() {
 				var title kaya.Node
 				bar := head.Row(func() {
 					title = head.Label(head.Value())

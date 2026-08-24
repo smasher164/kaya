@@ -63,7 +63,8 @@ KAYA_CHECK=abort dotnet exec guests/csharp/bin/Debug/net10.0/kaya-guests.dll \
 # transactions always abort (AbortCheck.java's header has the shape).
 rm -rf "$TMP/java"
 javac -encoding UTF-8 -d "$TMP/java" bindings/java-desktop/dev/kaya/KayaRing.java \
-    bindings/java/dev/kaya/*.java tools/checks/java-abort/AbortCheck.java \
+    bindings/java/dev/kaya/*.java tools/checks/java-abort/dev/kaya/IdSpaceCheck.java \
+    tools/checks/java-abort/AbortCheck.java \
     >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java-build; }
 java -cp "$TMP/java" AbortCheck >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java; }
 

@@ -3,7 +3,11 @@
 
 package table
 
-import kaya "dev.kaya/bindings/go"
+import (
+	"iter"
+
+	kaya "dev.kaya/bindings/go"
+)
 
 // ItemCollection declares the record collection; the struct is the
 // schema.
@@ -30,15 +34,6 @@ func (p itemPatchBuilder) Name(v string) itemPatchBuilder {
 func (p itemPatchBuilder) Size(v string) itemPatchBuilder {
 	p.p.Set(func(t *Item) *string { return &t.Size }, v)
 	return p
-}
-
-// ItemEach is the record template: the body runs once, authoring the
-// blueprint with the typed row surface (exact-index tokens, no
-// probes); stamping is the core's replay.
-func ItemEach(tx *kaya.Tx, c kaya.RecordCollection[string, Item], body func(itemRow)) kaya.Widget {
-	return tx.ForEach(c.Collection, func(t *kaya.Tpl) {
-		body(itemRow{t: t, c: c})
-	})
 }
 
 // The row surface: one token per wire field, and the template
@@ -87,14 +82,37 @@ func (r itemRow) SetRole(n kaya.Node, role int64) { r.t.SetRole(n, role) }
 
 func (r itemRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }
 
-// ItemRows traces the record template as a for statement: the loop
-// body runs once, authoring the blueprint, and the close is
-// structural — range-over-func regains control even on break. The
-// For parents into the enclosing container scope.
-func ItemRows(tx *kaya.Tx, c kaya.RecordCollection[string, Item]) func(func(itemRow) bool) {
+// ItemRows opens the record template as a for statement: the For is
+// minted here, the chain declares the table, and the loop body runs
+// once with the typed row surface (exact-index tokens, no probes);
+// stamping is the core's replay.
+func ItemRows(tx *kaya.Tx, c kaya.RecordCollection[string, Item]) *itemRowsFor {
+	return &itemRowsFor{tx.Rows(c.Collection), c}
+}
+
+// The embedded *kaya.Rows carries Widget(); the two chain methods
+// are re-spelled only to keep the typed All() reachable through them.
+type itemRowsFor struct {
+	*kaya.Rows
+	c kaya.RecordCollection[string, Item]
+}
+
+func (f *itemRowsFor) Columns(titles []string, sort kaya.Sort) *itemRowsFor {
+	f.Rows.Columns(titles, sort)
+	return f
+}
+
+func (f *itemRowsFor) OnSort(fn func(*kaya.Tx, uint32)) *itemRowsFor {
+	f.Rows.OnSort(fn)
+	return f
+}
+
+func (f *itemRowsFor) All() iter.Seq[itemRow] {
 	return func(yield func(itemRow) bool) {
-		t, done := kaya.BeginRowTrace(tx, c.Collection)
-		yield(itemRow{t: t, c: c})
-		done()
+		for row := range f.Rows.All() {
+			if !yield(itemRow{t: row.Tpl, c: f.c}) {
+				return
+			}
+		}
 	}
 }

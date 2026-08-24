@@ -151,7 +151,7 @@ final class Clipboard {
                 // registered, dispatched and unable to fire
                 // (docs/tpl-props-plan.md §1).
                 tx.label(rowStatus).a11yId("row-status"); // label#1
-                for (var row : notes.rows()) {
+                for (var row : tx.rows(notes)) {
                     KayaApp.Node note = row.entry(); // entry#2, one stamped copy
                     row.setAccepts(note, KayaApp.ACCEPT_TEXT);
                     app.onPaste(note, (t, keys, clip) -> {

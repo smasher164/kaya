@@ -59,12 +59,12 @@ func App() *kaya.App {
 			tx.When(extras, func(t *kaya.Tpl) {
 				t.LabelText("extras on")
 			})
-			for group := range groups.Rows(tx) {
+			for group := range tx.Rows(groups).All() {
 				group.Column(func() {
 					group.Label(group.Value())
 
 					items = group.Collection()
-					for item := range items.Rows(tx) {
+					for item := range group.Rows(items).All() {
 						item.Column(func() {
 							item.Label(item.Value())
 							removeButton = item.Button("remove")

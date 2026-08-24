@@ -22,7 +22,7 @@ final class A11yRows {
             KayaApp.Collection heads = tx.collection();
 
             tx.mount(tx.column(() -> {
-                for (var note : notes.rows()) {
+                for (var note : tx.rows(notes)) {
                     KayaApp.Node field = note.entry();
                     // Both props element-sourced. The id has to be:
                     // expect_ax addresses the real tree BY identifier
@@ -36,7 +36,7 @@ final class A11yRows {
                                 // scalar row has one field to spend on an id. Java's
                                 // container body is a Runnable that receives nothing, so
                                 // role and inset are both spelled on the row surface.
-                for (var head : heads.rows()) {
+                for (var head : tx.rows(heads)) {
                     KayaApp.Node bar = head.row(() -> {
                         KayaApp.Node title = head.label(head.value());
                         head.setRole(title, KayaApp.Role.HEADING);

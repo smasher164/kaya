@@ -30,8 +30,8 @@ type Key interface {
 }
 
 // RecordCollection is a Collection whose entries are T records keyed by
-// K. The plain Collection rides along embedded, so ForEach and At take
-// it unchanged.
+// K. The plain Collection rides along embedded, so Rows and At take it
+// unchanged.
 type RecordCollection[K Key, T any] struct {
 	Collection
 	info *recordInfo

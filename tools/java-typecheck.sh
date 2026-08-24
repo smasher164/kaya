@@ -39,73 +39,81 @@ trap 'rm -rf "$TMP"; rm -f "$ROOT"/javac.*.args' EXIT
 # THE NESTED-TABLE EXERCISER, this language's answer to Rust's
 # doc-tests (docs/tables-plan.md, dynamic tables). No Java guest
 # declares a table inside a row template yet, so without this the
-# spelling would ship compiled by nothing. Both surfaces are here: the
-# expression form's Tpl and the for-statement form's RowSurface.
+# spelling would ship compiled by nothing. Both zones are here: the
+# untyped Collection's rows and the generated record surface's.
+#
+# NO SMUGGLE ANYWHERE IN IT, and that is the point of the shape it
+# checks: the nested For is a VALUE the loop is written over, so the
+# node its header bar and sort handler name is an ordinary local. The
+# callback form could not hand one out of a lambda — this file carried a
+# Stamped<Widget, Node> and a one-slot array to get it out.
 mkdir -p "$TMP/probe"
 cat >"$TMP/probe/NestedTableCheck.java" <<'PROBE'
+// IN THE GUESTS' PACKAGE so the generated record surface is in reach:
+// the emitted <Rec>Kaya classes are package-private, and the nested
+// overload is what this file exists to compile.
+package dev.kaya.milestone2kt;
+
 import dev.kaya.KayaApp;
-import dev.kaya.KayaRecords;
 
 /** A table per row: the header bar declared on a nested For, one sort
  * handler for every stamped copy, and a re-declaration that names ONE
  * copy by its keys. Compiled by tools/java-typecheck.sh, never run. */
 public final class NestedTableCheck {
     private static final String[] TITLES = { "Symbol", "Value" };
-    private static final KayaRecords.Field<String> CELL = KayaRecords.fieldAt(0);
 
-    /** The expression form: forEach hands back the template node. */
-    static void expressionForm(KayaApp app) {
+    /** The nested For, through the row surface a scalar rows() yields. */
+    static void nestedTable(KayaApp app) {
         app.build(tx -> {
             KayaApp.Collection accounts = tx.collection();
-            KayaApp.Stamped<KayaApp.Widget, KayaApp.Node> outer =
-                    tx.forEach(accounts, account -> {
-                        // The nested collection is declared INSIDE the
-                        // template scope (the own-scope wall).
-                        KayaApp.Collection positions = account.collection();
-                        KayaApp.Node table = account.forEach(positions, row -> {
-                            row.row(() -> {
-                                row.label(CELL);
-                                row.label(CELL);
-                            });
-                        });
-                        account.setGrow(table, 1);
-                        account.columns(table, TITLES, KayaApp.Sort.none());
-                        return table;
+            KayaApp.Rows<KayaApp.Widget, KayaApp.Row> outer = tx.rows(accounts);
+            for (KayaApp.Row account : outer) {
+                account.label(account.value());
+                // The nested collection is declared INSIDE the template
+                // scope (the own-scope wall).
+                KayaApp.Collection positions = account.collection();
+                KayaApp.Rows<KayaApp.Node, KayaApp.Row> inner = account.rows(positions);
+                for (KayaApp.Row position : inner) {
+                    position.row(() -> {
+                        position.label(position.value());
+                        position.label(position.value());
                     });
+                }
+                account.setGrow(inner.handle, 1);
+                inner.columns(TITLES, KayaApp.Sort.none());
+                // The handler scopes to the For that made it, and the
+                // copy's key path comes back with the column, so the
+                // re-declaration moves THIS copy's arrow and no
+                // sibling's.
+                app.onSort(inner.handle, (t, keys, column) -> {
+                    t.columnsAt(inner.handle, keys, TITLES, KayaApp.Sort.asc(column));
+                });
+            }
             tx.mount(outer.handle);
-            KayaApp.Node table = outer.out;
-            // The handler scopes to the For that made it, and the copy's
-            // key path comes back with the column, so the re-declaration
-            // moves THIS copy's arrow and no sibling's.
-            app.onSort(table, (t, keys, column) -> {
-                t.columnsAt(table, keys, TITLES, KayaApp.Sort.asc(column));
-            });
             return null;
         });
     }
 
-    /** The for-statement form, over the same façade a generated row
-     * surface inherits. */
-    static void statementForm(KayaApp app) {
+    /** The same nesting through a GENERATED record surface: the rows
+     * value takes the row it is nested in, and hands back that zone's
+     * template node. */
+    static void nestedRecordTable(KayaApp app) {
         app.build(tx -> {
             KayaApp.Collection accounts = tx.collection();
-            KayaApp.Node[] table = new KayaApp.Node[1];
-            tx.mount(tx.column(() -> {
-                for (KayaApp.Row account : accounts.rows()) {
-                    account.label(account.value());
-                    KayaApp.Collection positions = account.collection();
-                    table[0] = account.forEach(positions, row -> {
-                        row.row(() -> {
-                            row.label(CELL);
-                            row.label(CELL);
-                        });
+            for (KayaApp.Row account : tx.rows(accounts)) {
+                KayaApp.Rows<KayaApp.Node, TableItemKaya.Row> inner =
+                        TableItemKaya.rows(account, TableItemKaya.collection(tx));
+                for (TableItemKaya.Row position : inner) {
+                    position.row(() -> {
+                        position.label(position.name);
+                        position.label(position.size);
                     });
-                    account.columns(table[0], TITLES, KayaApp.Sort.none());
                 }
-            }));
-            app.onSort(table[0], (t, keys, column) -> {
-                t.columnsAt(table[0], keys, TITLES, KayaApp.Sort.desc(column));
-            });
+                inner.columns(TITLES, KayaApp.Sort.none());
+                app.onSort(inner.handle, (t, keys, column) -> {
+                    t.columnsAt(inner.handle, keys, TITLES, KayaApp.Sort.desc(column));
+                });
+            }
             return null;
         });
     }
@@ -147,7 +155,33 @@ if run_javac -encoding UTF-8 -cp "$TMP/classes" -d "$TMP/rejected" \
     echo "java-typecheck: FAIL — a nested onSort that DROPS the stamped copy's" \
         "key path compiled. The handler must take (Tx, List<Object> keys, int" \
         "column): without the keys a re-declaration cannot name the copy that" \
-        "was clicked (docs/tables-plan.md)."
+        "was clicked (the tables plan's per-copy identity rule)."
+    exit 1
+fi
+
+# ITS SIBLING: a rows value carries the handle of the zone it opened in,
+# and the TYPE is the wall. A nested For's container is a template Node —
+# read as a live Widget it would reach the live onSort, whose handler
+# takes no key path, and every stamped copy's header would answer as one.
+cat >"$TMP/probe/RowsWrongZone.java" <<'PROBE'
+import dev.kaya.KayaApp;
+
+public final class RowsWrongZone {
+    static void cannotReadANestedForAsLive(KayaApp.Row account, KayaApp.Collection c) {
+        KayaApp.Widget live = account.rows(c).handle;
+    }
+
+    private RowsWrongZone() {}
+}
+PROBE
+
+if run_javac -encoding UTF-8 -cp "$TMP/classes" -d "$TMP/rejected" \
+        "$TMP/probe/RowsWrongZone.java" >"$TMP/rejectedzone.log" 2>&1; then
+    echo "java-typecheck: FAIL — a NESTED rows value's handle read as a live" \
+        "Widget compiled. A For inside a row template declares a template" \
+        "node, one stamped container per copy; typing it live would reach the" \
+        "live onSort, whose handler has no key path to name a copy with" \
+        "(the tables plan's per-copy identity rule)."
     exit 1
 fi
 

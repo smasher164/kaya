@@ -99,6 +99,62 @@ func TestTemplateEntrySugarRecordsWhatTheFloorRecorded(t *testing.T) {
 	}
 }
 
+// ONE ID SPACE: a template node draws from the WIDGET counter, so an app
+// hands out one number sequence and the core's two "already exists" walls
+// can never fire on an id this binding minted (DESIGN.md, Binding
+// conventions). The CONTIGUOUS RUN is the assertion, not inequality — a
+// private node counter restarted at 1 sits under the live ids an app has
+// already spent and passes a `!=` while being exactly the defect.
+func TestWidgetsAndTemplateNodesDrawFromOneCounter(t *testing.T) {
+	app := NewApp()
+	var live, site, node, after uint64
+	app.Build(func(tx *Tx) {
+		live = tx.Widget(KindLabel).id
+		items := tx.Collection()
+		// The For's own container is a live widget; the node is inside
+		// it. The container's number is spent when the rows OPEN, which
+		// is where the callback form spent it too.
+		rows := tx.Rows(items)
+		site = rows.Widget().id
+		for row := range rows.All() {
+			node = row.Widget(KindLabel).id
+		}
+		after = tx.Widget(KindLabel).id
+	})
+	if got := [4]uint64{live, site, node, after}; got != [4]uint64{1, 2, 3, 4} {
+		t.Fatalf("ids %v, want [1 2 3 4] — widgets and template nodes must run "+
+			"through one counter", got)
+	}
+}
+
+// A rows value traces ONE template. Ranging it twice would pop the
+// scope stacks twice, and every widget declared after the second loop
+// would land in whatever scope the underflow left behind — silently, in
+// the middle of a build. The guard is the panic; this is the negative
+// that has watched it fire.
+func TestARowsValueRefusesASecondTrace(t *testing.T) {
+	app := NewApp()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a second range over one rows value did not panic")
+		}
+		if msg, _ := r.(string); !strings.Contains(msg, "traces one template") {
+			t.Fatalf("panicked with %v, want the one-trace refusal", r)
+		}
+	}()
+	app.Build(func(tx *Tx) {
+		items := tx.Collection()
+		rows := tx.Rows(items)
+		for row := range rows.All() {
+			row.LabelText("once")
+		}
+		for row := range rows.All() {
+			row.LabelText("twice")
+		}
+	})
+}
+
 // templateRecords queues one collection and one For over it, runs body
 // as the template, and returns the frames. A FRESH App per call, so both
 // runs allocate from the same id counters.
@@ -108,7 +164,9 @@ func templateRecords(t *testing.T, body func(*Tpl)) [][]byte {
 	var out [][]byte
 	app.Build(func(tx *Tx) {
 		items := tx.Collection()
-		tx.ForEach(items, body)
+		for row := range tx.Rows(items).All() {
+			body(row.Tpl)
+		}
 		out = append(out, tx.records...)
 	})
 	return out
@@ -177,16 +235,16 @@ func propWrite(t *testing.T, write func(*Tx, *Tpl, Node) setProp) (setProp, setP
 	var props [][]byte
 	app.Build(func(tx *Tx) {
 		items := tx.Collection()
-		tx.ForEach(items, func(tp *Tpl) {
-			n := tp.Widget(KindEntry)
+		for row := range tx.Rows(items).All() {
+			n := row.Widget(KindEntry)
 			before := len(tx.records)
-			want = write(tx, tp, n)
+			want = write(tx, row.Tpl, n)
 			for _, rec := range tx.records[before:] {
 				if binary.LittleEndian.Uint16(rec[4:]) == txSetProperty {
 					props = append(props, rec)
 				}
 			}
-		})
+		}
 	})
 	if len(props) != 1 {
 		t.Fatalf("the prop write queued %d set_property records, want exactly 1",
@@ -294,15 +352,15 @@ func TestRecordSurfaceResolvesAPropProjectionToItsOwnField(t *testing.T) {
 	var props []setProp
 	app.Build(func(tx *Tx) {
 		c := CollectionOf[string, propRec](tx)
-		tx.ForEach(c.Collection, func(tp *Tpl) {
-			n := tp.Widget(KindEntry)
+		for row := range tx.Rows(c.Collection).All() {
+			n := row.Widget(KindEntry)
 			before := len(tx.records)
-			c.A11yLabel(tp, n, func(r *propRec) *string { return &r.Note })
-			c.A11yID(tp, n, "row")
+			c.A11yLabel(row.Tpl, n, func(r *propRec) *string { return &r.Note })
+			c.A11yID(row.Tpl, n, "row")
 			for _, rec := range tx.records[before:] {
 				props = append(props, decodeSetProp(t, rec))
 			}
-		})
+		}
 	})
 	if len(props) != 2 {
 		t.Fatalf("the typed prop writes queued %d records, want 2", len(props))

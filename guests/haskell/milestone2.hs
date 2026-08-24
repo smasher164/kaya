@@ -4,7 +4,8 @@
 
    WHAT THIS SCENE DOCUMENTS IS HOW A STAMPED WIDGET'S CLICK COMES BACK.
    The remove button is ONE declaration, so its handler is registered
-   CENTRALLY after the build ('onClickNode app removeButton'), and each
+   CENTRALLY after the build ('onClick app removeButton' — one name, and
+   the Node instance is what adds the keys), and each
    click arrives naming the copy by its key path. Both Fors therefore
    keep their results: 'forEach' hands the body's result back, where
    'each' discards it.
@@ -72,7 +73,7 @@ main = kayaMain $ \app -> do
     mount root
     return (status, items, removeButton)
 
-  onClickNode app removeButton $ \keys -> case keys of
+  onClick app removeButton $ \keys -> case keys of
     [VStr group, VStr item] ->
       submitTx app $ do
         let todos = items `at` VStr group

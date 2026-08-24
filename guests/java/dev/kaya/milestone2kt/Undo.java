@@ -145,14 +145,14 @@ final class Undo {
                 // the cursor on its own, so the SCRIPT decides focus.
                 tx.button("focus", t -> t.focus(field[0])); // button#2
                 tx.button("remove", t -> remove(t, status, keys, todos)); // button#3
-                UndoTodoKaya.each(tx, todos, tpl -> {
-                    tpl.row(() -> {
-                        tpl.label(UndoTodoKaya.TITLE);
+                for (var row : UndoTodoKaya.rows(tx, todos)) {
+                    row.row(() -> {
+                        row.label(row.title);
                         // UNBOUND on purpose: the copy owns its text and
                         // the app folds it, where the seeded
                         // entry(field) overload would re-push into the
                         // field being typed in.
-                        KayaApp.Node note = tpl.entry();
+                        KayaApp.Node note = row.entry();
                         // Names no group: the field's own typing undo is
                         // the platform's (D6).
                         app.onChange(note, (t, path, text) -> {
@@ -160,7 +160,7 @@ final class Undo {
                             t.write(notes, noteList());
                         });
                     });
-                });
+                }
             });
             // The scene types with REAL keystrokes, so something has to
             // hold focus when it starts.

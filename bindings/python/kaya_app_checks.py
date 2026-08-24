@@ -54,6 +54,23 @@ with app.window():
                 check("guard trips in a When body", True)
             kaya.label("empty")
 
+# ONE ID SPACE: a template node draws from the WIDGET counter, so an app
+# hands out one number sequence and the core's two "already exists" walls
+# can never fire on an id the binding minted (DESIGN.md, Binding
+# conventions). The contiguous run is the assertion — a private node
+# counter passes "all different" while restarting at 1.
+with app.build():
+    with kaya.column():
+        live = kaya.label("live")
+        with kaya.for_each(c) as el:
+            node = kaya.label(bind=el)
+        after = kaya.label("live")
+ids = [live.id, node.id, after.id]
+check("a template node never shares a number with a live widget",
+      len(set(ids)) == 3)
+check("widget and node ids run through one counter",
+      node.id == live.id + 2 and after.id == node.id + 1)
+
 with app.build():
     s.set(2)
     check("derived recomputes on source write", derived._mirror is True)

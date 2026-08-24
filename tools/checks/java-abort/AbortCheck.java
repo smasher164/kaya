@@ -15,6 +15,7 @@
 //     bindings/java/dev/kaya/KayaSums.java \
 //     bindings/java/dev/kaya/KayaWire.java \
 //     bindings/java/dev/kaya/KayaGen.java \
+//     tools/checks/java-abort/dev/kaya/IdSpaceCheck.java \
 //     tools/checks/java-abort/AbortCheck.java
 //   java -cp /tmp/java-abort-check AbortCheck
 
@@ -23,6 +24,9 @@ import java.util.function.Consumer;
 
 public final class AbortCheck {
     public static void main(String[] args) {
+        // First, on its own app, so the id run starts at 1.
+        dev.kaya.IdSpaceCheck.run();
+
         KayaApp app = new KayaApp();
         KayaApp.Collection[] todos = new KayaApp.Collection[1];
 
@@ -82,7 +86,8 @@ public final class AbortCheck {
         // once and replays, so a read baked into it is dead data.
         // Live-zone and build reads stay legal, pinned below.
         Consumer<KayaApp.Tx> guarded = tx -> {
-            tx.forEach(todos[0], t -> {
+            for (KayaApp.Row row : tx.rows(todos[0])) {
+                row.label(row.value());
                 boolean threw = false;
                 try {
                     tx.items(todos[0]);
@@ -101,7 +106,7 @@ public final class AbortCheck {
                 if (!threw) {
                     throw new AssertionError("count() inside a For body did not throw");
                 }
-            });
+            }
             // The When arm: openFors tracks Fors only — when() pushes
             // nothing there — so this pins the counter's When arm.
             KayaApp.Signal<Boolean> visible = tx.signal(true);

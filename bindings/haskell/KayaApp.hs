@@ -15,6 +15,13 @@
 -- silently does nothing. -Wincomplete-patterns is not in GHC's default
 -- set and this package sets no -Wall.
 {-# OPTIONS_GHC -Werror=incomplete-patterns #-}
+-- KEEP THIS ONE TOO: 'Declare' is how one name spans both zones, and a
+-- method left out of ONE instance is a WARNING in GHC's default set —
+-- it compiles, ships, and dies at the use site with "No instance
+-- nor default method". That is exactly how 'collectionOf' could be
+-- live-zone-only again (docs/deferred.md, the nested RECORD collection
+-- entry).
+{-# OPTIONS_GHC -Werror=missing-methods #-}
 
 -- kaya's idiomatic surface for Haskell: scene declaration as a builder
 -- monad, with When and For as combinators taking do-blocks.
@@ -28,6 +35,14 @@
 -- NODES so it cannot share a name at all (rowOf, columnOf, scrollOf,
 -- gridOf). That makes the zone enumerable — `grep '-> Tpl Node'` is its
 -- whole surface, which is what tools/tpl-surfaces.py reads.
+--
+-- A DISPATCHING NAME IS THE ONE EXCEPTION TO THAT GREP, and there are
+-- three: 'Declare''s methods (the element is `El m`, so the zone is the
+-- INSTANCE the arm sits in), 'HandlerTarget''s six registrars (dispatching
+-- on the element, since `App -> e -> … -> IO ()` mentions no monad to
+-- pin) and 'CollectionHandle''s 'at'. For those the zone is a SCOPE, not a
+-- result type, and tools/tpl-surfaces.py reads them by scope for that
+-- reason.
 module KayaApp
   ( App,
     Build,
@@ -51,26 +66,16 @@ module KayaApp
     UndoEntry (..),
     UndoOrder (..),
     dispatch,
-    onClick,
-    onClickNode,
-    onSort,
-    onSortNode,
-    columns,
-    columnsNode,
+    HandlerTarget (..),
+    -- `columns` rides 'Declare (..)' above: it stands in both zones.
     columnsAt,
     Sort (..),
     sortNone,
     sortAsc,
     sortDesc,
-    onChange,
-    onChangeNode,
-    onToggle,
-    onToggleNode,
-    onValueChanged,
-    onValueChangedNode,
     signal,
     writeSignal,
-    at,
+    CollectionHandle (..),
     insert,
     update,
     remove,
@@ -152,7 +157,7 @@ module KayaApp
     KField,
     RecordCollection,
     recordHandle,
-    collectionOf,
+    -- `collectionOf` rides 'Declare (..)' above: it stands in both zones.
     field,
     element,
     insertRecord,
@@ -254,8 +259,7 @@ module KayaApp
     Representation (..),
     readClipboard,
     setAccepts,
-    onPaste,
-    onPasteNode,
+    -- `onPaste` rides 'HandlerTarget (..)' above: it stands in both zones.
     acceptText,
     acceptHtml,
     acceptImage,
@@ -339,10 +343,22 @@ newtype Node = Node Word64
 -- one stamped copy's table.
 data Collection = Collection Word64 [W.Value]
 
--- | The instance of this collection inside the copy keyed by @key@ of
--- the next enclosing For; chain for deeper nesting.
-at :: Collection -> W.Value -> Collection
-at (Collection cid path) key = Collection cid (path ++ [key])
+-- | A collection handle that can be narrowed to one stamped copy. ONE
+-- NAME DISPATCHING ON THE HANDLE (the module header's rule): appending a
+-- key is the same operation either way, and a record handle that lost its
+-- type here could not be handed to insertRecord\/patch\/recordItems at
+-- all — which is what "Haskell cannot address a nested record instance"
+-- meant.
+class CollectionHandle c where
+  -- | The instance of this collection inside the copy keyed by @key@ of
+  -- the next enclosing For; chain for deeper nesting.
+  at :: c -> W.Value -> c
+
+instance CollectionHandle Collection where
+  at (Collection cid path) key = Collection cid (path ++ [key])
+
+instance CollectionHandle (RecordCollection a) where
+  at (RecordCollection c) key = RecordCollection (at c key)
 
 -- A For binds the collection itself — its template stamps per entry of
 -- every instance — so handing it an 'at' handle is a bug.
@@ -441,9 +457,11 @@ assetClose = R.assetClose
 
 data Counters = Counters
   { cSignal :: !Word64,
+    -- Live widgets AND template nodes, one sequence (DESIGN.md, Binding
+    -- conventions). No cNode: without the field, a second node counter does
+    -- not compile.
     cWidget :: !Word64,
     cCollection :: !Word64,
-    cNode :: !Word64,
     cAlert :: !Word64,
     cFileDialog :: !Word64,
     cClipboardRead :: !Word64,
@@ -657,8 +675,8 @@ allocW = Build $ \s ->
 allocN :: Tpl Word64
 allocN = Tpl $ \s ->
   let c = bCounters s
-      n = cNode c + 1
-   in (n, s {bCounters = c {cNode = n}})
+      n = cWidget c + 1
+   in (n, s {bCounters = c {cWidget = n}})
 
 -- Menu items get their OWN id space (the c_menu_item counter) — never a
 -- widget, node, or surface id.
@@ -685,6 +703,22 @@ bracketTpl alloc opener forCid (Tpl body) s0 =
         }
    in ((self, a), s4)
 
+-- One collection's birth, both zones and both schemas: the counter, the
+-- teardown edge, and the CreateCollection record. The variant list is the
+-- only thing a record table does differently, which is why 'collectionOf'
+-- can stand in the same class as 'collection'.
+newCollection :: [[Word32]] -> BuildState -> (Collection, BuildState)
+newCollection variants s =
+  let c = bCounters s
+      n = cCollection c + 1
+      s' = registerCollection n s {bCounters = c {cCollection = n}}
+   in (Collection n [], s' {bRecords = bRecords s' <> pure (W.txCreateCollection n variants)})
+
+newRecordCollection ::
+  KayaRecord a => Proxy a -> BuildState -> (RecordCollection a, BuildState)
+newRecordCollection p s =
+  let (c, s') = newCollection [kayaSchema p] s in (RecordCollection c, s')
+
 -- | The declaration vocabulary, shared by both zones. El names the
 -- zone's element type: live Widgets or template Nodes.
 class Monad m => Declare m where
@@ -710,9 +744,27 @@ class Monad m => Declare m where
   setIndeterminate :: El m -> Bool -> m ()
   addChild :: El m -> El m -> m ()
   collection :: m Collection
+  -- | A collection of a-records; the type is the schema. IN BOTH ZONES
+  -- because a NESTED collection must be declared inside the template
+  -- scope (docs/tables-plan.md, MEASURED IN SLICE 1), and a table whose
+  -- rows carry fields needs it there.
+  collectionOf :: KayaRecord a => Proxy a -> m (RecordCollection a)
   -- | A For over a collection: the do-block declares the template;
   -- returns the For itself alongside the block's result.
   forEach :: Collection -> Tpl a -> m (El m, a)
+  -- | Declare the column header bar on a For's container — the element
+  -- 'forEach' returns. One title per column; the row template's root
+  -- must be a row of exactly one cell per column, refused loudly
+  -- otherwise. Re-call after sorting to move the indicator
+  -- (docs\/tables-plan.md).
+  --
+  -- IN BOTH ZONES because a nested table's bar must be declared in the
+  -- parent TEMPLATE scope, where the core can still see the inner For
+  -- (docs\/tables-plan.md, dynamic tables): the live arm carries a For
+  -- CONTAINER and declares the flat table's bar, the template arm
+  -- carries a template NODE and declares the bar of every stamped copy.
+  -- Per-copy indicators are 'columnsAt'.
+  columns :: El m -> [String] -> Sort -> m ()
   -- | A When over a Bool signal: stamps on true, unstamps on false.
   when_ :: Signal -> Tpl a -> m (El m, a)
 
@@ -726,20 +778,29 @@ instance Declare Build where
   setTextProp (Widget n) text = emitB (W.txSetText n text)
   setChecked (Widget n) checked = emitB (W.txSetChecked n checked)
   setGrow (Widget n) weight = emitB (W.txSetGrow n weight)
-  setColumns (Widget n) columns = emitB (W.txSetColumns n (fromIntegral columns))
+  setColumns (Widget n) tracks = emitB (W.txSetColumns n (fromIntegral tracks))
   setIndeterminate (Widget n) on = emitB (W.txSetIndeterminate n on)
   addChild (Widget p) (Widget child) = emitB (W.txAddChild p child)
-  collection = Build $ \s ->
-    let c = bCounters s
-        n = cCollection c + 1
-        s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> pure (W.txCreateCollection n [[W.valueStr]])})
+  collection = Build (newCollection [[W.valueStr]])
+  collectionOf p = Build (newRecordCollection p)
   forEach coll body =
     Build $ \s ->
       let cid = assertRoot coll
           ((self, a), s') =
             bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
        in ((Widget self, a), s')
+  -- pathLen 0 against a LIVE container: the flat table's bar (the
+  -- template arm's pathLen 0 is every copy's).
+  columns (Widget n) titles sort =
+    emitB
+      ( W.txSetColumnHeaders
+          n
+          (sortColumn sort)
+          (sortDirection sort)
+          (fromIntegral (length titles))
+          0
+          (map W.VStr titles)
+      )
   when_ (Signal sid) body =
     Build $ \s ->
       let ((self, a), s') =
@@ -755,20 +816,28 @@ instance Declare Tpl where
   setTextProp (Node n) text = emitT (W.txSetText n text)
   setChecked (Node n) checked = emitT (W.txSetChecked n checked)
   setGrow (Node n) weight = emitT (W.txSetGrow n weight)
-  setColumns (Node n) columns = emitT (W.txSetColumns n (fromIntegral columns))
+  setColumns (Node n) tracks = emitT (W.txSetColumns n (fromIntegral tracks))
   setIndeterminate (Node n) on = emitT (W.txSetIndeterminate n on)
   addChild (Node p) (Node child) = emitT (W.txAddChild p child)
-  collection = Tpl $ \s ->
-    let c = bCounters s
-        n = cCollection c + 1
-        s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> pure (W.txCreateCollection n [[W.valueStr]])})
+  collection = Tpl (newCollection [[W.valueStr]])
+  collectionOf p = Tpl (newRecordCollection p)
   forEach coll body =
     Tpl $ \s ->
       let cid = assertRoot coll
           ((self, a), s') =
             bracketTpl (unTpl allocN) (`W.txCreateFor` cid) (Just cid) body s
        in ((Node self, a), s')
+  -- pathLen 0 against a TEMPLATE NODE: every copy's bar.
+  columns (Node n) titles sort =
+    emitT
+      ( W.txSetColumnHeaders
+          n
+          (sortColumn sort)
+          (sortDirection sort)
+          (fromIntegral (length titles))
+          0
+          (map W.VStr titles)
+      )
   when_ (Signal sid) body =
     Tpl $ \s ->
       let ((self, a), s') =
@@ -2077,9 +2146,9 @@ button text = bothish (captionedButton text)
 
 -- | An uncontrolled single-line field, in either zone. Handler-free by
 -- construction: the field owns its text and reports each edit, live
--- through 'onChange' (or co-located with 'entryOn'), stamped through
--- 'onChangeNode' with the copy's key path. A template copy that should
--- OPEN holding the row's own text is 'entryBound'.
+-- through 'onChange' (or co-located with 'entryOn'), stamped through the
+-- same 'onChange' at the Node, which adds the copy's key path. A template
+-- copy that should OPEN holding the row's own text is 'entryBound'.
 entry :: (BothZones r) => r
 entry = bothish (widget W.kindEntry)
 
@@ -2358,7 +2427,7 @@ data TplAttr where
   -- CONSTANT LIST AND NOT A SOURCE: an accept list describes the
   -- PROTOTYPE, and the root's domain check runs on the const branch
   -- alone. Every backend gates the paste occurrence on the focused
-  -- widget's accept list, so without this 'onPasteNode' could never
+  -- widget's accept list, so without this 'onPaste' at a Node could never
   -- fire (docs\/tpl-props-plan.md §1).
   TplAccepts :: [String] -> TplAttr
 
@@ -2531,56 +2600,10 @@ sortAsc column = Sort (fromIntegral column) 0
 sortDesc :: Int -> Sort
 sortDesc column = Sort (fromIntegral column) 1
 
--- | Declare the column header bar on a For's container — the Widget
--- 'forEach' returns. One title per column; the row template's root
--- must be a row of exactly one cell per column, refused loudly
--- otherwise. Re-call after sorting to move the indicator
--- (docs/tables-plan.md).
-columns :: Widget -> [String] -> Sort -> Build ()
-columns (Widget n) titles sort =
-  Build $ \s ->
-    ( (),
-      s
-        { bRecords =
-            bRecords s
-              <> pure
-                -- pathLen 0: no key path, so the values are titles
-                -- alone (docs/tables-plan.md, dynamic tables).
-                ( W.txSetColumnHeaders
-                    n
-                    (sortColumn sort)
-                    (sortDirection sort)
-                    (fromIntegral (length titles))
-                    0
-                    (map W.VStr titles)
-                )
-        }
-    )
-
--- | Declare the header bar of a NESTED table — the Node an inner
--- 'forEach' returns — for every stamped copy of the enclosing template.
--- Call it in the parent template scope, after the inner 'forEach'
--- returns: the core finds the For in the scope that is still open, so a
--- grandparent scope cannot reach it (docs/tables-plan.md, dynamic
--- tables). Per-copy indicators are 'columnsAt'.
-columnsNode :: Node -> [String] -> Sort -> Tpl ()
-columnsNode (Node n) titles sort =
-  -- pathLen 0 against a TEMPLATE NODE: every copy's bar (the live arm's
-  -- pathLen 0 against a live container is the flat table).
-  emitT
-    ( W.txSetColumnHeaders
-        n
-        (sortColumn sort)
-        (sortDirection sort)
-        (fromIntegral (length titles))
-        0
-        (map W.VStr titles)
-    )
-
 -- | Re-declare ONE stamped copy's header bar: the table's template Node
--- plus that copy's keys, outermost first — the keys 'onSortNode' hands
--- the handler. An empty key list re-declares the bar for every copy.
--- The core walls the template bar being declared first.
+-- plus that copy's keys, outermost first — the keys the node arm of
+-- 'onSort' hands the handler. An empty key list re-declares the bar for
+-- every copy. The core walls the template bar being declared first.
 columnsAt :: Node -> [W.Value] -> [String] -> Sort -> Build ()
 columnsAt (Node n) keys titles sort =
   emitB
@@ -2898,16 +2921,6 @@ newtype RecordCollection a = RecordCollection Collection
 recordHandle :: RecordCollection a -> Collection
 recordHandle (RecordCollection c) = c
 
--- | Declare a collection of a-records; the type is the schema.
-collectionOf :: forall a. KayaRecord a => Proxy a -> Build (RecordCollection a)
-collectionOf p = Build $ \s ->
-  let c = bCounters s
-      n = cCollection c + 1
-      s' = registerCollection n s {bCounters = c {cCollection = n}}
-   in ( RecordCollection (Collection n []),
-        s' {bRecords = bRecords s' <> pure (W.txCreateCollection n [kayaSchema p])}
-      )
-
 insertRecord :: forall a. KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
   let vals = toValues value
@@ -3223,82 +3236,82 @@ absorbUndo app delta = modifyIORef' (appModel app) fold
            in i {iEntries = named ++ rest}
       | otherwise = i
 
--- | Register the table's header-click handler at its For — the handler
--- receives the 0-based column of a sort REQUEST: nothing has changed
--- on screen; reorder the collection by key and re-declare the header
--- with 'columns' (docs/tables-plan.md).
-onSort :: App -> Widget -> (Int -> IO ()) -> IO ()
-onSort app (Widget n) handler =
-  modifyIORef' (appSortHandlers app) (Map.insert n handler)
+-- | The registration vocabulary, shared by both zones: a handler is
+-- registered at the element that produced the occurrence. ONE NAME
+-- DISPATCHING ON THE ELEMENT (the module header's rule) — 'Declare''s
+-- @El m@ cannot serve here, since nothing in @App -> e -> … -> IO ()@
+-- could pin the zone monad.
+--
+-- ONE CLASS, NOT ONE PER VERB, and the reason is the guard:
+-- -Werror=missing-methods fires for a method missing from an EXISTING
+-- instance, so every verb in one class means a zone that skips one is a
+-- red at the instance. Six one-method classes would move that to a
+-- MISSING INSTANCE, which is an error only where a guest calls it —
+-- exactly how 'collectionOf' and the header bar came to be live-zone-only
+-- (docs/deferred.md, the nested RECORD collection entry).
+class HandlerTarget e where
+  -- | What this zone hands a handler ahead of the payload @p@: nothing in
+  -- the live zone, the stamped copy's key path (outermost first) in a
+  -- template. ONE STATEMENT OF THAT RULE for every verb — a handler type
+  -- written out per verb can promise the template arm the LIVE shape and
+  -- still compile, which is the silent divergence this family forecloses.
+  type Keyed e p
 
--- | The nested table's header-click handler, registered at the Node its
--- inner 'forEach' returned: the handler receives the CLICKED COPY's key
--- path, outermost first, and then the 0-based column. Re-declare that
--- copy's indicator with 'columnsAt' and those same keys, so a sibling
--- table's arrows do not move (docs/tables-plan.md, dynamic tables).
-onSortNode :: App -> Node -> ([W.Value] -> Int -> IO ()) -> IO ()
-onSortNode app (Node n) handler =
-  modifyIORef' (appNodeSorts app) (Map.insert n handler)
+  onClick :: App -> e -> Keyed e (IO ()) -> IO ()
 
-onClick :: App -> Widget -> IO () -> IO ()
-onClick app (Widget n) handler =
-  modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
+  -- | The field owns its text and reports each edit here; the app folds
+  -- the text into its own state — there is no read-back, by doctrine.
+  onChange :: App -> e -> Keyed e (String -> IO ()) -> IO ()
 
-onClickNode :: App -> Node -> ([W.Value] -> IO ()) -> IO ()
-onClickNode app (Node n) handler =
-  modifyIORef' (appNodeHandlers app) (Map.insert n handler)
+  -- | The box owns its checked bit and reports each flip here; the app
+  -- folds it into its own state.
+  onToggle :: App -> e -> Keyed e (Bool -> IO ()) -> IO ()
 
--- | Register a change handler for a live entry: the widget owns its
--- text and reports each edit here; the app folds the text into its own
--- state — there is no read-back, by doctrine.
-onChange :: App -> Widget -> (String -> IO ()) -> IO ()
-onChange app (Widget n) handler =
-  modifyIORef' (appWidgetChanges app) (Map.insert n handler)
+  -- | A slider, select or radio reports each move with the new value —
+  -- the entry's uncontrolled contract, with a Double.
+  onValueChanged :: App -> e -> Keyed e (Double -> IO ()) -> IO ()
 
--- | Take pasted content at a live widget. COSTS NOTHING ON ANY PLATFORM,
--- unlike 'readClipboard': a paste is a user gesture, so it is its own
--- authorisation.
-onPaste :: App -> Widget -> (Representation -> IO ()) -> IO ()
-onPaste app (Widget n) handler =
-  modifyIORef' (appWidgetPastes app) (Map.insert n handler)
+  -- | Take pasted content. COSTS NOTHING ON ANY PLATFORM, unlike
+  -- 'readClipboard': a paste is a user gesture, so it is its own
+  -- authorisation.
+  onPaste :: App -> e -> Keyed e (Representation -> IO ()) -> IO ()
 
--- | A paste onto a stamped copy: the handler also receives the copy's key
--- path, outermost first.
-onPasteNode :: App -> Node -> ([W.Value] -> Representation -> IO ()) -> IO ()
-onPasteNode app (Node n) handler =
-  modifyIORef' (appNodePastes app) (Map.insert n handler)
+  -- | The table's header-click handler, registered at its For; the
+  -- payload is the 0-based column of a sort REQUEST. Nothing has changed
+  -- on screen: reorder the collection by key and re-declare the header —
+  -- 'columns' live, 'columnsAt' with the keys a template copy hands back,
+  -- so a sibling table's arrows do not move (docs\/tables-plan.md).
+  onSort :: App -> e -> Keyed e (Int -> IO ()) -> IO ()
 
--- | Register a change handler for a template entry; it also receives
--- the stamped copy's keys, outermost first.
-onChangeNode :: App -> Node -> ([W.Value] -> String -> IO ()) -> IO ()
-onChangeNode app (Node n) handler =
-  modifyIORef' (appNodeChanges app) (Map.insert n handler)
+instance HandlerTarget Widget where
+  type Keyed Widget p = p
+  onClick app (Widget n) handler =
+    modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
+  onChange app (Widget n) handler =
+    modifyIORef' (appWidgetChanges app) (Map.insert n handler)
+  onToggle app (Widget n) handler =
+    modifyIORef' (appWidgetToggles app) (Map.insert n handler)
+  onValueChanged app (Widget n) handler =
+    modifyIORef' (appWidgetValues app) (Map.insert n handler)
+  onPaste app (Widget n) handler =
+    modifyIORef' (appWidgetPastes app) (Map.insert n handler)
+  onSort app (Widget n) handler =
+    modifyIORef' (appSortHandlers app) (Map.insert n handler)
 
--- | Register a toggle handler for a live checkbox: the box owns its
--- checked bit and reports each flip here; the app folds it into its
--- own state.
--- | Register a change handler for a live slider: the bar owns its
--- position and reports each move with the new value — the entry's
--- uncontrolled contract, with a Double.
-onValueChanged :: App -> Widget -> (Double -> IO ()) -> IO ()
-onValueChanged app (Widget n) handler =
-  modifyIORef' (appWidgetValues app) (Map.insert n handler)
-
-onToggle :: App -> Widget -> (Bool -> IO ()) -> IO ()
-onToggle app (Widget n) handler =
-  modifyIORef' (appWidgetToggles app) (Map.insert n handler)
-
--- | Register a toggle handler for a template checkbox; it also
--- receives the stamped copy's keys, outermost first.
-onToggleNode :: App -> Node -> ([W.Value] -> Bool -> IO ()) -> IO ()
-onToggleNode app (Node n) handler =
-  modifyIORef' (appNodeToggles app) (Map.insert n handler)
-
--- | Register a change handler for a template slider, select or radio; it also
--- receives the stamped copy's keys, outermost first.
-onValueChangedNode :: App -> Node -> ([W.Value] -> Double -> IO ()) -> IO ()
-onValueChangedNode app (Node n) handler =
-  modifyIORef' (appNodeValues app) (Map.insert n handler)
+instance HandlerTarget Node where
+  type Keyed Node p = [W.Value] -> p
+  onClick app (Node n) handler =
+    modifyIORef' (appNodeHandlers app) (Map.insert n handler)
+  onChange app (Node n) handler =
+    modifyIORef' (appNodeChanges app) (Map.insert n handler)
+  onToggle app (Node n) handler =
+    modifyIORef' (appNodeToggles app) (Map.insert n handler)
+  onValueChanged app (Node n) handler =
+    modifyIORef' (appNodeValues app) (Map.insert n handler)
+  onPaste app (Node n) handler =
+    modifyIORef' (appNodePastes app) (Map.insert n handler)
+  onSort app (Node n) handler =
+    modifyIORef' (appNodeSorts app) (Map.insert n handler)
 
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
 -- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
@@ -3335,7 +3348,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar [] -- appPosted
-    <*> newIORef (Counters 0 0 0 0 0 0 0 0) -- appCounters
+    <*> newIORef (Counters 0 0 0 0 0 0 0) -- appCounters
     <*> newIORef (Map.empty, Map.empty) -- appModel
     <*> newIORef Map.empty -- appFresh
     <*> newIORef Map.empty -- appDerived

@@ -106,18 +106,20 @@ func TestNestedColumnsDeclareTheTemplateNodesBarForEveryCopy(t *testing.T) {
 	var positions Node
 	recs := queued(t, app, func(tx *Tx) {
 		accounts := tx.Collection()
-		tx.ForEach(accounts, func(tp *Tpl) {
-			tp.Column(func() {
-				holdings := tp.Collection()
-				positions = tp.ForEach(holdings, func(row *Tpl) {
+		for account := range tx.Rows(accounts).All() {
+			account.Column(func() {
+				holdings := account.Collection()
+				nested := account.Rows(holdings).
+					Columns([]string{"Name", "Size"}, SortNone())
+				positions = nested.Node()
+				for row := range nested.All() {
 					row.Row(func() {
 						row.LabelText("name")
 						row.LabelText("size")
 					})
-				})
-				tp.Columns(positions, []string{"Name", "Size"}, SortNone())
+				}
 			})
-		})
+		}
 	})
 
 	bars := recordsOfKind(recs, txSetColumnHeaders)
@@ -213,16 +215,18 @@ func TestACopysSortHandlerIsRegisteredAtItsForAndKeepsTheKeyPath(t *testing.T) {
 	var positions Node
 	app.Build(func(tx *Tx) {
 		accounts := tx.Collection()
-		tx.ForEach(accounts, func(tp *Tpl) {
-			holdings := tp.Collection()
-			positions = tp.ForEach(holdings, func(row *Tpl) {
+		for account := range tx.Rows(accounts).All() {
+			holdings := account.Collection()
+			nested := account.Rows(holdings).
+				Columns([]string{"Name"}, SortNone()).
+				OnSort(func(tx *Tx, keys []any, column uint32) {
+					tx.ColumnsAt(positions, keys, []string{"Name"}, SortAsc(column))
+				})
+			positions = nested.Node()
+			for row := range nested.All() {
 				row.Row(func() { row.LabelText("name") })
-			})
-			tp.Columns(positions, []string{"Name"}, SortNone())
-			app.OnSortNode(positions, func(tx *Tx, keys []any, column uint32) {
-				tx.ColumnsAt(positions, keys, []string{"Name"}, SortAsc(column))
-			})
-		})
+			}
+		}
 	})
 
 	if len(app.sortHandlers) != 0 {

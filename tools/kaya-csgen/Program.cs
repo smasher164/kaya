@@ -218,6 +218,15 @@ static class Program
         b.AppendLine($"        System.Action<{rec}Row> body) =>");
         b.AppendLine($"        tx.Each(c.Collection, t => body(new {rec}Row(t)));");
         b.AppendLine();
+        b.AppendLine("    /// <summary>The same, for a For opened INSIDE a template body —");
+        b.AppendLine("    /// the nested table's shape, \"for every account, a positions");
+        b.AppendLine("    /// table\". Without it the nested body holds the raw Tpl and");
+        b.AppendLine("    /// spells its cells with the static tokens rather than the row's");
+        b.AppendLine("    /// own (docs/deferred.md, the closed C# façade entry).</summary>");
+        b.AppendLine($"    public static Node Each(Tpl t, RecordCollection<{rec}> c,");
+        b.AppendLine($"        System.Action<{rec}Row> body) =>");
+        b.AppendLine($"        t.Each(c.Collection, inner => body(new {rec}Row(inner)));");
+        b.AppendLine();
         b.AppendLine("    /// <summary>The foreach form: `foreach (var row in todos.Rows())`");
         b.AppendLine("    /// traces the record template — the body runs once, and the");
         b.AppendLine("    /// enumerator's Dispose closes the template, so foreach makes the");
@@ -239,12 +248,16 @@ static class Program
         b.AppendLine("/// widget-kind floor (docs/sugar-pass-plan.md S4b).");
         b.AppendLine("/// Add here whatever is added to Tpl: the prop setters below are");
         b.AppendLine("/// forwarded for the same reason the constructors are.");
-        b.AppendLine("/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,");
-        b.AppendLine("/// Collection/ForEach/When, ContextMenu — stays off deliberately: a");
-        b.AppendLine("/// row surface hands out sugar, and its Tpl is private so the floor");
-        b.AppendLine("/// is reached by opening the For yourself. Columns is off with");
-        b.AppendLine("/// them: it declares a NESTED For's header bar, and the Node it");
-        b.AppendLine("/// takes comes from the ForEach this surface does not forward.</summary>");
+        b.AppendLine("/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild —");
+        b.AppendLine("/// stays off deliberately: a row surface hands out sugar, and its");
+        b.AppendLine("/// Tpl is private so the floor is reached by opening the For");
+        b.AppendLine("/// yourself. THE NESTED-FOR VOCABULARY IS NOT PLUMBING and is");
+        b.AppendLine("/// forwarded — Collection, Each, ForEach, and the Columns that");
+        b.AppendLine("/// names the Node Each hands back — or a nested table is spellable");
+        b.AppendLine("/// through tx.Each and not through a row at all. When and");
+        b.AppendLine("/// ContextMenu are the two still off the list; Java's RowSurface");
+        b.AppendLine("/// forwards both, and that divergence is recorded in");
+        b.AppendLine("/// docs/deferred.md rather than blessed here.</summary>");
         b.AppendLine($"sealed class {rec}Row");
         b.AppendLine("{");
         b.AppendLine("    readonly Tpl t;");
@@ -268,9 +281,14 @@ static class Program
         // One forwarder, wrapped the way the hand-written Tpl wraps: a
         // trailing handler parameter goes on its own line rather than
         // running past the margin.
-        void Fwd(string name, string[] pars, string args)
+        void Fwd(string name, string[] pars, string args) =>
+            FwdAs("Node", name, pars, args);
+
+        // The same forwarder for a zone method that hands back something
+        // other than a Node: the return type is the only difference.
+        void FwdAs(string ret, string name, string[] pars, string args)
         {
-            var one = $"    public Node {name}({string.Join(", ", pars)}) => t.{name}({args});";
+            var one = $"    public {ret} {name}({string.Join(", ", pars)}) => t.{name}({args});";
             if (one.Length <= 84)
             {
                 b.AppendLine(one);
@@ -281,7 +299,7 @@ static class Program
                 // the one that moves; a lone handler leaves the open
                 // paren by itself rather than a dangling comma.
                 var head = string.Join(", ", pars[..^1]);
-                b.AppendLine($"    public Node {name}({head}{(head.Length > 0 ? "," : "")}");
+                b.AppendLine($"    public {ret} {name}({head}{(head.Length > 0 ? "," : "")}");
                 b.AppendLine($"        {pars[^1]}) =>");
                 b.AppendLine($"        t.{name}({args});");
             }
@@ -355,6 +373,16 @@ static class Program
         Fwd("Scroll", ["System.Action body"], "body");
         Fwd("Grid", ["int columns", "System.Action body"], "columns, body");
         Fwd("Spacer", [], "");
+        // THE NESTED-FOR VOCABULARY, forwarded for the reason the
+        // constructors are: a row that cannot open a For cannot name the
+        // Node whose header bar Columns declares, so the dashboard's
+        // "a table per account" was spellable through tx.Each and not
+        // through a row (docs/deferred.md). Java's RowSurface forwards
+        // the same four.
+        FwdAs("Collection", "Collection", [], "");
+        Fwd("Each", ["Collection c", "System.Action<Tpl> body"], "c, body");
+        Fwd("ForEach", ["Collection c", "System.Action<Tpl> body"], "c, body");
+        Set("Columns", ["Node n", "string[] titles", "Sort sort"], "n, titles, sort");
         // THE PROP SETTERS, for the reason the constructors are here: a
         // prop reachable through tx.Each and not through `foreach (var
         // row in c.Rows())` is a difference no guest should have to know

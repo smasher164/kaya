@@ -30,45 +30,49 @@ func App() *kaya.App {
 		items := ItemCollection(tx)
 		// The root is a row so the For's container is the scene's only
 		// column-kind widget (the reorder scene's rule). The table IS
-		// the For, headers declared on the Widget ItemEach returns.
+		// the For: the bar and the click handler ride the same
+		// construction that stamps the rows.
+		var table kaya.Widget
 		tx.Mount(tx.Row(func() {
-			table := ItemEach(tx, items, func(row itemRow) {
+			rows := ItemRows(tx, items).
+				Columns([]string{"Name", "Size"}, kaya.SortNone()).
+				OnSort(func(tx *kaya.Tx, column uint32) {
+					desc := sortedCol == int64(column) && !sortedDesc
+					sortedCol, sortedDesc = int64(column), desc
+					entries := items.Items(tx)
+					sort.SliceStable(entries, func(i, j int) bool {
+						a, b := entries[i].Value.Name, entries[j].Value.Name
+						if column != 0 {
+							a, b = entries[i].Value.Size, entries[j].Value.Size
+						}
+						if desc {
+							return a > b
+						}
+						return a < b
+					})
+					// Keys, never indices: moving each key to the end in
+					// the target order leaves the collection sorted.
+					for _, e := range entries {
+						items.MoveToEnd(tx, e.Key)
+					}
+					indicator := kaya.SortAsc(column)
+					if desc {
+						indicator = kaya.SortDesc(column)
+					}
+					tx.Columns(table, []string{"Name", "Size"}, indicator)
+				})
+			table = rows.Widget()
+			for row := range rows.All() {
 				row.Row(func() {
 					row.Label(row.Name())
 					row.Label(row.Size())
 				})
-			})
+			}
 			// Grown on purpose: this scene asserts the
 			// fill-and-scroll viewport, the grown half of the
 			// empty-row ruling — ungrown would hug its rows
 			// (tables-plan decision 8).
 			tx.SetGrow(table, 1)
-			tx.Columns(table, []string{"Name", "Size"}, kaya.SortNone())
-			app.OnSort(table, func(tx *kaya.Tx, column uint32) {
-				desc := sortedCol == int64(column) && !sortedDesc
-				sortedCol, sortedDesc = int64(column), desc
-				entries := items.Items(tx)
-				sort.SliceStable(entries, func(i, j int) bool {
-					a, b := entries[i].Value.Name, entries[j].Value.Name
-					if column != 0 {
-						a, b = entries[i].Value.Size, entries[j].Value.Size
-					}
-					if desc {
-						return a > b
-					}
-					return a < b
-				})
-				// Keys, never indices: moving each key to the end in
-				// the target order leaves the collection sorted.
-				for _, e := range entries {
-					items.MoveToEnd(tx, e.Key)
-				}
-				indicator := kaya.SortAsc(column)
-				if desc {
-					indicator = kaya.SortDesc(column)
-				}
-				tx.Columns(table, []string{"Name", "Size"}, indicator)
-			})
 		}))
 		for _, seed := range []struct{ key, name, size string }{
 			{"b", "banana", "30"}, {"a", "apple", "10"}, {"c", "cherry", "20"},

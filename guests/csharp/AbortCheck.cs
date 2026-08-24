@@ -1,7 +1,8 @@
 // The uniform-abort guard, plus every C# surface fact a SCENE cannot
 // see (menu record emission, the undo group's head-of-batch rule, the
 // mirror fold an undone/redone payload drives, the nested table's three
-// spellings). Run by tools/check-abort.sh.
+// spellings and the generated row façade's two routes to them). Run by
+// tools/check-abort.sh.
 //
 // Runs headless: the library loads (KAYA_LIB) and records submit, but
 // Run() is never entered. The bindings compile into this assembly, so
@@ -93,6 +94,48 @@ static class AbortCheck
         return found;
     }
 
+    // A set_property record: u64 widget, u32 prop, u32 source, and for an
+    // ELEMENT source u32 level then u32 field — the exact-index token a
+    // typed row surface writes, which a literal caption never carries.
+    static List<uint> BoundFields(List<byte[]> records, int from, int to)
+    {
+        var fields = new List<uint>();
+        for (int i = from; i < to; i++)
+        {
+            byte[] rec = records[i];
+            if (RecKind(rec) == KayaWire.TxKindSetProperty
+                && BitConverter.ToUInt32(rec, 20) == KayaWire.SourceElement)
+                fields.Add(BitConverter.ToUInt32(rec, 28));
+        }
+        return fields;
+    }
+
+    // The record window one template occupies: everything between the
+    // create_for that opens `node` and its own template_end, nested Fors
+    // and Whens counted so an inner end never closes the outer one. WHICH
+    // ZONE A CELL RECORDED INTO is not visible any other way — the record
+    // reads the same wherever it was queued.
+    static (int Open, int Close) TemplateWindow(List<byte[]> records, int from, ulong node)
+    {
+        int open = -1;
+        for (int i = from; i < records.Count && open < 0; i++)
+            if (RecKind(records[i]) == KayaWire.TxKindCreateFor
+                && BitConverter.ToUInt64(records[i], 8) == node)
+                open = i;
+        if (open < 0)
+            return (-1, -1);
+        int depth = 0;
+        for (int i = open + 1; i < records.Count; i++)
+        {
+            ushort kind = RecKind(records[i]);
+            if (kind == KayaWire.TxKindCreateFor || kind == KayaWire.TxKindCreateWhen)
+                depth++;
+            else if (kind == KayaWire.TxKindTemplateEnd && depth-- == 0)
+                return (open + 1, i);
+        }
+        return (open + 1, records.Count);
+    }
+
     // THE NESTED TABLE, which no C# scene reaches: the dashboard shape
     // is "for every account, a positions table", so the header bar is
     // declared on a template NODE and each stamped copy sorts on its own
@@ -148,6 +191,70 @@ static class AbortCheck
                 "path_len counts the copy's keys, count the columns");
             Check(HeaderValueCount(bar) == 3 && HeaderFirstValue(bar) == "brokerage",
                 "the copy's KEYS come first, then the titles");
+        });
+    }
+
+    // THE SAME TABLE THROUGH THE GENERATED ROW FAÇADE, which could not
+    // name one at all before 2026-08-24: `<Rec>Row` had no Each/ForEach/
+    // Collection and a private Tpl, and `<Rec>Kaya.Each` opened the LIVE
+    // zone only (docs/deferred.md, the closed C# façade entry). Both
+    // routes below are compile-time claims first — they do not build
+    // without the forwards and the twin — and decode what they queue.
+    static void FacadeNestedTable(KayaApp app)
+    {
+        string[] titles = { "Ticker", "Qty" };
+        app.Build(tx =>
+        {
+            var accounts = TableItemKaya.Collection(tx);
+
+            // ROUTE ONE: the outer body holds a TableItemRow, and every
+            // call in it is one of the façade's new forwards.
+            int before = tx.Records.Count;
+            Node table = default;
+            TableItemKaya.Each(tx, accounts, account =>
+            {
+                var holdings = account.Collection();
+                table = account.Each(holdings, row => row.Row(() =>
+                {
+                    row.Label("ticker");
+                    row.Label("qty");
+                }));
+                account.Columns(table, titles, Sort.None);
+            });
+            var bar = LastHeaderRecord(tx.Records, before);
+            Check(bar != null, "the façade's Columns queued no set_column_headers");
+            Check(HeaderTarget(bar) == table.Id,
+                "the façade's bar must target the Node its own Each handed back");
+            Check(HeaderPathLen(bar) == 0 && HeaderCount(bar) == 2,
+                "the façade's bar is path_len 0 with one value per column");
+            Check(HeaderValueCount(bar) == 2 && HeaderFirstValue(bar) == "Ticker",
+                "with no key path the values are the titles alone");
+
+            // ROUTE TWO: the Tpl twin. The NESTED For's body holds the
+            // row façade too, so its cells are `row.Label(row.Name)` —
+            // the exact-index tokens — and not the raw zone's literals.
+            before = tx.Records.Count;
+            Node typed = default;
+            tx.Each(accounts.Collection, account =>
+            {
+                var holdings = TableItemKaya.Collection(tx);
+                typed = TableItemKaya.Each(account, holdings, row => row.Row(() =>
+                {
+                    row.Label(row.Name);
+                    row.Label(row.Size);
+                }));
+                account.Columns(typed, titles, Sort.None);
+            });
+            var twin = LastHeaderRecord(tx.Records, before);
+            Check(twin != null, "the twin's nested For queued no set_column_headers");
+            Check(HeaderTarget(twin) == typed.Id,
+                "the twin hands back the nested For's TEMPLATE NODE, which the bar names");
+            var (open, close) = TemplateWindow(tx.Records, before, typed.Id);
+            Check(open > 0, "the twin queued no create_for for the nested collection");
+            var bound = BoundFields(tx.Records, open, close);
+            Check(bound.Count == 2 && bound[0] == 0 && bound[1] == 1,
+                "the twin's cells bind the row's own tokens, in wire-index order, "
+                    + "INSIDE the nested template");
         });
     }
 
@@ -213,6 +320,27 @@ static class AbortCheck
     public static void Run()
     {
         var app = new KayaApp();
+
+        // ONE ID SPACE: a template node draws from the WIDGET counter, so
+        // an app hands out one number sequence and the core's two "already
+        // exists" walls can never fire on an id this binding minted
+        // (DESIGN.md, Binding conventions). The CONTIGUOUS RUN is the
+        // assertion, not inequality — a private node counter restarted at 1
+        // sits under the live ids an app has already spent and passes a !=
+        // while being exactly the defect. First thing this check does, so
+        // the run starts at 1.
+        ulong live = 0, site = 0, node = 0, after = 0;
+        app.Build(tx =>
+        {
+            live = tx.Label("live").Id;
+            var rows = tx.Collection();
+            // The For's own container is a live widget; the node is inside.
+            site = tx.Each(rows, t => node = t.Label("row").Id).Id;
+            after = tx.Label("live").Id;
+        });
+        Check(live == 1 && site == 2 && node == 3 && after == 4,
+            $"widget/node ids {live},{site},{node},{after} — want 1,2,3,4 from one counter");
+
         Collection todos = default;
         Signal counter = default;
         app.Build(tx =>
@@ -434,6 +562,8 @@ static class AbortCheck
         app.Build(tx => tx.Menu(file, items: new[] { tx.Item("Recovered") }));
 
         NestedTable(app);
+
+        FacadeNestedTable(app);
 
         WrongThread(app);
 

@@ -43,6 +43,36 @@ let check_todo_rt =
 let check_todo_ct_pic : (check_todo, bytes) Kaya_app.field = blob_field 1
 
 let () =
+  (* ONE ID SPACE: a template node draws from the WIDGET counter, so an
+     app hands out one number sequence and the core's two "already
+     exists" walls can never fire on an id this binding minted
+     (DESIGN.md, Binding conventions). Its own app, run first, so the
+     sequence starts at 1. THE CONTIGUOUS RUN IS THE ASSERTION, not
+     inequality — a private node counter restarted at 1 sits under the
+     live ids an app has already spent and passes a [<>] while being
+     exactly the defect. *)
+  let id_app = create () in
+  let ids =
+    build id_app (fun () ->
+        let (Widget live) = label ~text:"live" () in
+        let rows = collection () in
+        let node = ref 0L in
+        (* The For's own container is a live widget; the node is inside. *)
+        let site_w, () =
+          for_each rows
+            (fun () ->
+              let (Node n) = Tpl.label ~text:"row" () in
+              node := n)
+            ()
+        in
+        let (Widget site) = site_w in
+        let (Widget after) = label ~text:"live" () in
+        [ live; site; !node; after ])
+  in
+  if ids <> [ 1L; 2L; 3L; 4L ] then
+    fail "widget/node ids [%s] — want [1; 2; 3; 4] from one counter"
+      (String.concat "; " (List.map Int64.to_string ids));
+
   let app = create () in
   let todos =
     build app
@@ -450,9 +480,10 @@ let () =
               (* After the nested For closed, inside the still-open
                  parent scope: where the template-zone header op finds
                  its For. *)
-              Tpl.columns node [ "Symbol"; "Qty" ] sort_none;
-              on_sort_node app node (fun keys column ->
-                  sorted_at := (keys, column) :: !sorted_at);
+              Tpl.columns
+                ~on_sort:(fun keys column ->
+                  sorted_at := (keys, column) :: !sorted_at)
+                node [ "Symbol"; "Qty" ] sort_none;
               ignore Tpl.(column [ w node ] ());
               node)
             ()
@@ -496,7 +527,8 @@ let () =
      needs no clause here: its value type is [int -> unit], so filing a
      copy handler there does not compile (watched 2026-08-24). *)
   (match Hashtbl.find_opt app.node_sorts node_id with
-  | None -> fail "on_sort_node registered nothing under the template node"
+  | None ->
+      fail "Tpl.columns ~on_sort registered nothing under the template node"
   | Some handler -> handler [ Str "acct-a" ] 1);
   (match !sorted_at with
   | [ ([ Str "acct-a" ], 1) ] -> ()
@@ -509,5 +541,31 @@ let () =
               (fun (keys, column) ->
                 Printf.sprintf "([%s], %d)" (show_values keys) column)
               l)));
+
+  (* The LIVE half of the same labelled argument, which no OCaml scene
+     asserts either: a bare [columns ~on_sort] files under the FOR's own
+     widget id, the table the UNKEYED sort_requested arm reads. *)
+  let live_sorted = ref [] in
+  let live_table =
+    build app (fun () ->
+        let table, () =
+          for_each accounts
+            (fun () -> ignore Tpl.(row [ label ~text:"sym"; label ~text:"qty" ] ()))
+            ()
+        in
+        columns
+          ~on_sort:(fun column -> live_sorted := column :: !live_sorted)
+          table [ "Symbol"; "Qty" ] sort_none;
+        table)
+  in
+  let (Widget live_id) = live_table in
+  (match Hashtbl.find_opt app.sort_handlers live_id with
+  | None -> fail "columns ~on_sort registered nothing at the live For"
+  | Some handler -> handler 1);
+  (match !live_sorted with
+  | [ 1 ] -> ()
+  | l ->
+      fail "the live sort handler saw [%s], wanted one request on column 1"
+        (String.concat ", " (List.map string_of_int l)));
 
   print_endline "ocaml abort check: OK"

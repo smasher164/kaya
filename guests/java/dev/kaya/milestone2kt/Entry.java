@@ -44,7 +44,7 @@ final class Entry {
                 field[0] = tx.entry(); // entry#0
                 add[0] = tx.button("add"); // button#0
                 tx.label(status); // label#0
-                for (var row : todos.rows()) {
+                for (var row : tx.rows(todos)) {
                     row.label(row.value());
                 }
             }));

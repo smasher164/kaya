@@ -16,17 +16,21 @@ func PostCollection(tx *kaya.Tx) kaya.SumCollection[string, Post] {
 // constructor — a call must supply every argument, so totality is
 // a compile error here, and the scene checks it again. An arm of
 // `func(_ kaya.SumCase[...]) {}` renders its constructor as
-// nothing, explicitly.
+// nothing, explicitly. A CALL AND NOT A FOR STATEMENT, because the
+// arms are what make it total; the For underneath is the same
+// one-pass trace.
 func PostEachSum(
 	tx *kaya.Tx,
 	c kaya.SumCollection[string, Post],
 	note func(kaya.SumCase[string, Note]),
 	todo func(kaya.SumCase[string, Todo]),
 ) kaya.Widget {
-	return tx.ForEach(c.Collection, func(t *kaya.Tpl) {
-		c.Case[Note](t, note)
-		c.Case[Todo](t, todo)
-	})
+	rows := tx.Rows(c.Collection)
+	for row := range rows.All() {
+		c.Case[Note](row.Tpl, note)
+		c.Case[Todo](row.Tpl, todo)
+	}
+	return rows.Widget()
 }
 
 // PostAsNote re-eliminates at call time: the comma-ok is the

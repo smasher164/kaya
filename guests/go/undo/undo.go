@@ -200,7 +200,7 @@ func App() *kaya.App {
 				tx.Write(status, fmt.Sprintf("removed %s, %d total", title, total))
 				tx.Write(keys, keyList(tx, todos))
 			})
-			for row := range todos.Rows(tx) {
+			for row := range tx.Rows(todos).All() {
 				row.Row(func() {
 					row.Label(row.Value())
 					// THE ROW'S OWN FIELD: nothing binds it — the

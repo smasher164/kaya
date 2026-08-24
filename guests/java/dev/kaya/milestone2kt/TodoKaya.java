@@ -40,24 +40,21 @@ final class TodoKaya {
         }
     }
 
-    /** The record template, expression form: the body runs once,
-     * authoring the blueprint with the typed row surface
-     * (exact-index tokens, no probes); stamping is the core's
-     * replay. */
-    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<Long, Todos.Todo> c,
-            java.util.function.Consumer<Row> body) {
-        // A block body: an expression lambda is ambiguous between
-        // the Consumer and Function forEach overloads.
-        return tx.forEach(c.handle, t -> {
-            body.accept(new Row(t, c));
-        });
+    /** The record template: `for (var row : TodoKaya.rows(tx, c))`
+     * traces it with the typed row surface (exact-index tokens, no
+     * probes) — the body runs once, stamping is the core's replay,
+     * and `rows.handle` is the live For container the header bar and
+     * sort handler name. */
+    static KayaApp.Rows<KayaApp.Widget, Row> rows(
+            KayaApp.Tx tx, KayaRecords.Collection<Long, Todos.Todo> c) {
+        return KayaRecords.rowTrace(tx, c, t -> new Row(t, c));
     }
 
-    /** The for-each form: `for (var row : TodoKaya.rows(c))` traces
-     * the record template — the body runs once, and a break is
-     * caught at submit. */
-    static Iterable<Row> rows(KayaRecords.Collection<Long, Todos.Todo> c) {
-        return KayaRecords.rowTrace(c, t -> new Row(t, c));
+    /** The same template NESTED in a row: `rows.handle` is a template
+     * node, one stamped container per copy. */
+    static KayaApp.Rows<KayaApp.Node, Row> rows(
+            KayaApp.RowSurface row, KayaRecords.Collection<Long, Todos.Todo> c) {
+        return KayaRecords.rowTrace(row, c, t -> new Row(t, c));
     }
 
     /** The row surface: one token per wire field, plus the typed

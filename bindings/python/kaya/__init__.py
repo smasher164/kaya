@@ -1349,8 +1349,9 @@ class _ForTrace:
 
 
 def _alloc_widget_or_node():
+    # One counter for both (DESIGN.md, Binding conventions).
     if _tpl_depth > 0:
-        return Node(_app._next("node"))
+        return Node(_app._next("widget"))
     return Widget(_app._next("widget"))
 
 
@@ -3435,11 +3436,13 @@ class _TxScope:
 class App:
     def __init__(self):
         global _app
-        self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0,
+        # No "node" space: template nodes draw from "widget" (DESIGN.md,
+        # Binding conventions).
+        self._counters = {"signal": 0, "widget": 0, "collection": 0,
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
                           "clipboard": 0}
-        # Dispatch tables: (occurrence kind, id) per space — widget ids
-        # and template-node ids collide numerically, so two dicts.
+        # Dispatch tables: (occurrence kind, id) per space — the wire
+        # routes by path_len, not by number, so two dicts.
         self._widget_handlers = {}
         self._alert_handlers = {}
         self._file_dialog_handlers = {}

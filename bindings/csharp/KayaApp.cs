@@ -463,7 +463,9 @@ sealed class KayaApp
     // mutations, written into the same transaction.
     internal readonly Dictionary<ulong, List<Action<Tx>>> Derived = new();
 
-    ulong signals, widgets, collections, nodes, menuItems;
+    // No `nodes`: template nodes draw from `widgets`, one sequence per
+    // app (DESIGN.md, Binding conventions).
+    ulong signals, widgets, collections, menuItems;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
@@ -560,7 +562,7 @@ sealed class KayaApp
 
     internal MenuItem NextMenuItem() => new(++menuItems);
 
-    internal Node NextNode() => new(++nodes);
+    internal Node NextNode() => new(++widgets);
 
     internal Collection NextCollection() => new(++collections, Array.Empty<object>());
 

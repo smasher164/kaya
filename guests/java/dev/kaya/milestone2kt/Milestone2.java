@@ -62,12 +62,12 @@ final class Milestone2 {
                 tx.when(extras, t -> {
                     t.label("extras on");
                 });
-                for (var group : groups.rows()) {
+                for (var group : tx.rows(groups)) {
                     group.column(() -> {
                         group.label(group.value());
 
                         items[0] = group.collection();
-                        for (var item : items[0].rows()) {
+                        for (var item : group.rows(items[0])) {
                             item.column(() -> {
                                 item.label(item.value());
                                 remove[0] = item.button("remove");

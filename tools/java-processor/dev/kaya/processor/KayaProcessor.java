@@ -301,25 +301,22 @@ public final class KayaProcessor extends AbstractProcessor {
         }
         w(b, "    }");
         w(b, "");
-        w(b, "    /** The record template, expression form: the body runs once,");
-        w(b, "     * authoring the blueprint with the typed row surface");
-        w(b, "     * (exact-index tokens, no probes); stamping is the core's");
-        w(b, "     * replay. */");
-        w(b, "    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<%s, %s> c,",
-                key, recRef);
-        w(b, "            java.util.function.Consumer<Row> body) {");
-        w(b, "        // A block body: an expression lambda is ambiguous between");
-        w(b, "        // the Consumer and Function forEach overloads.");
-        w(b, "        return tx.forEach(c.handle, t -> {");
-        w(b, "            body.accept(new Row(t, c));");
-        w(b, "        });");
+        w(b, "    /** The record template: `for (var row : %sKaya.rows(tx, c))`", simple);
+        w(b, "     * traces it with the typed row surface (exact-index tokens, no");
+        w(b, "     * probes) — the body runs once, stamping is the core's replay,");
+        w(b, "     * and `rows.handle` is the live For container the header bar and");
+        w(b, "     * sort handler name. */");
+        w(b, "    static KayaApp.Rows<KayaApp.Widget, Row> rows(");
+        w(b, "            KayaApp.Tx tx, KayaRecords.Collection<%s, %s> c) {", key, recRef);
+        w(b, "        return KayaRecords.rowTrace(tx, c, t -> new Row(t, c));");
         w(b, "    }");
         w(b, "");
-        w(b, "    /** The for-each form: `for (var row : %sKaya.rows(c))` traces", simple);
-        w(b, "     * the record template — the body runs once, and a break is");
-        w(b, "     * caught at submit. */");
-        w(b, "    static Iterable<Row> rows(KayaRecords.Collection<%s, %s> c) {", key, recRef);
-        w(b, "        return KayaRecords.rowTrace(c, t -> new Row(t, c));");
+        w(b, "    /** The same template NESTED in a row: `rows.handle` is a template");
+        w(b, "     * node, one stamped container per copy. */");
+        w(b, "    static KayaApp.Rows<KayaApp.Node, Row> rows(");
+        w(b, "            KayaApp.RowSurface row, KayaRecords.Collection<%s, %s> c) {",
+                key, recRef);
+        w(b, "        return KayaRecords.rowTrace(row, c, t -> new Row(t, c));");
         w(b, "    }");
         w(b, "");
         w(b, "    /** The row surface: one token per wire field, plus the typed");

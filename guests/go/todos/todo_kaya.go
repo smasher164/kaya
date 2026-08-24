@@ -3,7 +3,11 @@
 
 package todos
 
-import kaya "dev.kaya/bindings/go"
+import (
+	"iter"
+
+	kaya "dev.kaya/bindings/go"
+)
 
 // TodoCollection declares the record collection; the struct is the
 // schema.
@@ -28,15 +32,6 @@ func (p todoPatchBuilder) Title(v string) todoPatchBuilder {
 func (p todoPatchBuilder) Done(v bool) todoPatchBuilder {
 	p.p.Set(func(t *Todo) *bool { return &t.Done }, v)
 	return p
-}
-
-// TodoEach is the record template: the body runs once, authoring the
-// blueprint with the typed row surface (exact-index tokens, no
-// probes); stamping is the core's replay.
-func TodoEach(tx *kaya.Tx, c kaya.RecordCollection[int64, Todo], body func(todoRow)) kaya.Widget {
-	return tx.ForEach(c.Collection, func(t *kaya.Tpl) {
-		body(todoRow{t: t, c: c})
-	})
 }
 
 // The row surface: one token per wire field, and the template
@@ -85,14 +80,37 @@ func (r todoRow) SetRole(n kaya.Node, role int64) { r.t.SetRole(n, role) }
 
 func (r todoRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }
 
-// TodoRows traces the record template as a for statement: the loop
-// body runs once, authoring the blueprint, and the close is
-// structural — range-over-func regains control even on break. The
-// For parents into the enclosing container scope.
-func TodoRows(tx *kaya.Tx, c kaya.RecordCollection[int64, Todo]) func(func(todoRow) bool) {
+// TodoRows opens the record template as a for statement: the For is
+// minted here, the chain declares the table, and the loop body runs
+// once with the typed row surface (exact-index tokens, no probes);
+// stamping is the core's replay.
+func TodoRows(tx *kaya.Tx, c kaya.RecordCollection[int64, Todo]) *todoRowsFor {
+	return &todoRowsFor{tx.Rows(c.Collection), c}
+}
+
+// The embedded *kaya.Rows carries Widget(); the two chain methods
+// are re-spelled only to keep the typed All() reachable through them.
+type todoRowsFor struct {
+	*kaya.Rows
+	c kaya.RecordCollection[int64, Todo]
+}
+
+func (f *todoRowsFor) Columns(titles []string, sort kaya.Sort) *todoRowsFor {
+	f.Rows.Columns(titles, sort)
+	return f
+}
+
+func (f *todoRowsFor) OnSort(fn func(*kaya.Tx, uint32)) *todoRowsFor {
+	f.Rows.OnSort(fn)
+	return f
+}
+
+func (f *todoRowsFor) All() iter.Seq[todoRow] {
 	return func(yield func(todoRow) bool) {
-		t, done := kaya.BeginRowTrace(tx, c.Collection)
-		yield(todoRow{t: t, c: c})
-		done()
+		for row := range f.Rows.All() {
+			if !yield(todoRow{t: row.Tpl, c: f.c}) {
+				return
+			}
+		}
 	}
 }

@@ -3849,15 +3849,26 @@ instance it came from. A When has no keys — `register_when_site` in
 scene.rs is handed the enclosing path, and in the LIVE zone that path is
 empty — so its stamped copy's occurrences go out with path_len 0 and a
 TEMPLATE NODE id sitting in the field the decoder has just decided is a
-widget id. The two spaces are separate counters that both start at 1
-(the `counters` struct in each binding, e.g. bindings/go/app.go), so the
-ids collide from the very first widget.
+widget id. WHEN THIS WAS MEASURED the two spaces were separate counters
+that both started at 1 (the `counters` struct in each binding, e.g.
+bindings/go/app.go), so the ids collided from the very first widget.
 
 What that looked like: typing in a When-stamped find field arrived at
 the TEXTAREA's change handler — template node 2 read as widget 2 — and
 the document went dirty with text nobody had typed into it. The bar's
 three buttons landed on widgets that had no click handler at all and
 simply vanished. Nothing errors anywhere on this path.
+
+WHAT CHANGED, AND WHAT DID NOT: widget ids and template node ids now
+come from ONE counter per app (DESIGN.md, Binding conventions), so a
+node id can no longer BE a live widget's id. The misrouting mechanism
+above is untouched — a live-zone When still ships its body's
+occurrences with path_len 0 and a node id in the widget field — so the
+trap stands and so does the workaround. What nobody has re-measured is
+where those occurrences land now; by the id rule the number belongs to
+no widget, which would make the failure a silent DROP rather than a
+silent wrong target. Reasoned, not measured: do not quote it as a
+measurement.
 
 Why four milestones missed it: the only `When` any guest declares
 (guests/go/milestone2) holds a STATIC LABEL, which produces no
@@ -4680,3 +4691,17 @@ must build the record and abandon it (assert on the bytes it queued),
 never submit it. The core's abort is correct — a malformed record is a
 generator bug, not a runtime input — the trap is only in where a test
 can stand to watch it.
+
+
+## A C# `Tpl` carries no scope, so "the body got the WRONG zone handle" is unobservable (2026-08-24)
+
+Every `Tpl` is a bare alias for the transaction: the scope stack
+(`App.Parents`, `App.OpenFors`, `App.TplDepth`) lives on the App, and
+`ForEach` hands the body `new Tpl(tx)` over the same `tx`. So a nested
+For's body handed the ENCLOSING zone handle instead of its own records
+byte-identically — measured while watching the generated façade's twin
+fail: the perturbation `body(new <Rec>Row(t))` for `(inner)` compiled,
+ran, and stayed GREEN through a check that decoded the nested
+template's whole record window. Watch such a twin with something the
+records can disagree about (a shifted exact-index token) instead of
+with which handle it passed.

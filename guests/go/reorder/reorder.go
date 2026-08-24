@@ -11,6 +11,7 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
+//go:generate go run dev.kaya/cmd/kaya-gen -type Item -key string
 type Item struct {
 	Title string
 }
@@ -34,7 +35,7 @@ func App() *kaya.App {
 				entries := items.Items(tx)
 				items.MoveToFront(tx, entries[len(entries)-1].Key)
 			})
-			for row := range ItemRows(tx, items) {
+			for row := range ItemRows(tx, items).All() {
 				row.Label(row.Title())
 			}
 		}))

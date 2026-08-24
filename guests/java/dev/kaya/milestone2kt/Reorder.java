@@ -38,7 +38,7 @@ final class Reorder {
                     List<KayaRecords.Entry<String, Item>> entries = items.items(t);
                     items.moveToFront(t, entries.get(entries.size() - 1).key);
                 });
-                for (var row : ItemKaya.rows(items)) {
+                for (var row : ItemKaya.rows(tx, items)) {
                     row.label(row.title);
                 }
             }));

@@ -48,6 +48,26 @@ func entryKeys(_ tx: KayaAppTx, _ c: KayaCollection) -> [KayaValue] {
 }
 
 let app = KayaApp()
+
+// ONE ID SPACE: a template node draws from the WIDGET counter, so an app
+// hands out one number sequence and the core's two "already exists" walls
+// can never fire on an id this binding minted (DESIGN.md, Binding
+// conventions). FIRST, so the run starts at 1. THE CONTIGUOUS RUN IS THE
+// ASSERTION, not inequality — a private node counter restarted at 1 sits
+// under the live ids an app has already spent and passes a `!=` while
+// being exactly the defect.
+var idRun: [UInt64] = []
+app.build { tx in
+    idRun.append(tx.label("live").id)
+    let rows = tx.collection()
+    // The For's own container is a live widget; the node is inside it.
+    let (site, node) = tx.forEach(rows) { t in t.label("row").id }
+    idRun.append(site.id)
+    idRun.append(node)
+    idRun.append(tx.label("live").id)
+}
+precondition(idRun == [1, 2, 3, 4], "widget/node ids \(idRun) — want [1, 2, 3, 4] from one counter")
+
 var todos: KayaCollection!
 var counter: KayaSignal!
 app.build { tx in

@@ -553,10 +553,12 @@ pub struct AppCtx {
     // in `occurrences.recv()`, so the wake has to arrive there.
     wake: Sender<Inbox>,
     next_signal: Cell<u64>,
+    // Live widgets AND template nodes, one sequence (DESIGN.md, Binding
+    // conventions): scene.rs's two "already exists" walls then have
+    // nothing an allocator can hand them.
     next_widget: Cell<u64>,
     next_alert: Cell<u64>,
     next_collection: Cell<u64>,
-    next_node: Cell<u64>,
     // Menu items get their OWN id space (the c_menu_item discipline):
     // dispatch tables key by item id, separate from every other table.
     next_menu_item: Cell<u64>,
@@ -589,7 +591,6 @@ impl AppCtx {
             next_widget: Cell::new(1),
             next_alert: Cell::new(1),
             next_collection: Cell::new(1),
-            next_node: Cell::new(1),
             next_menu_item: Cell::new(1),
             model: RefCell::new(HashMap::new()),
             children: RefCell::new(HashMap::new()),
@@ -793,8 +794,8 @@ impl AppCtx {
     }
 
     fn alloc_node(&self) -> TemplateNodeId {
-        let id = self.next_node.get();
-        self.next_node.set(id + 1);
+        let id = self.next_widget.get();
+        self.next_widget.set(id + 1);
         TemplateNodeId(id)
     }
 
@@ -2918,8 +2919,8 @@ mod for_scope {
 /// statement one level in.
 ///
 /// The zones differ in exactly one thing: a For declared inside a template
-/// is itself a template node, and template nodes are a separate id space
-/// from live widgets.
+/// is itself a template node rather than a live widget. The id comes from
+/// the same counter either way (DESIGN.md, Binding conventions).
 ///
 /// Taking a scope does NOT hand the transaction back to the guest — the
 /// one method that could is sealed away. Pinned here rather than trusted:
@@ -3141,8 +3142,8 @@ impl Drop for Row<'_, '_> {
 /// dead_code lint. Unmapped occurrences fold into nothing; Shutdown ends
 /// the stream. The raw loop over `ctx.next()` stays the floor.
 pub struct Messages<M> {
-    // Widget ids and template-node ids collide numerically — two id
-    // spaces, two tables.
+    // Two tables, though the ids no longer collide: the wire routes by
+    // path_len, not by number (wire.rs, the click-tag block).
     widgets: RefCell<HashMap<u64, Mapper<M>>>,
     nodes: RefCell<HashMap<u64, Mapper<M>>>,
     // Menu items are their own id space — their own table ("two
@@ -6111,13 +6112,38 @@ mod tests {
         );
     }
 
+    /// ONE ID SPACE: a template node draws from the widget counter, so an
+    /// app hands out ONE number sequence and scene.rs's two "already
+    /// exists" walls can never fire on an id kaya minted (DESIGN.md,
+    /// Binding conventions). The exact run is the assertion — a private
+    /// node counter passes `assert_ne` while restarting at 1.
+    #[test]
+    fn widgets_and_template_nodes_draw_from_one_counter() {
+        use crate::protocol::WidgetKind;
+
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let live = tx.widget(WidgetKind::Label).0;
+        let todos = tx.collection::<Todo>();
+        let mut node = 0;
+        let (site, ()) = tx.for_each(&todos, |t| node = t.widget(WidgetKind::Label).0);
+        let after = tx.widget(WidgetKind::Label).0;
+        assert_ne!(node, live);
+        assert_ne!(node, site.0);
+        assert_ne!(node, after);
+        assert_eq!((live, site.0, node, after), (1, 2, 3, 4));
+    }
+
     /// THE NESTED TRACE AND THE TEMPLATE-ZONE BUTTON ARE SPELLING:
     /// milestone2's shape built at the explicit floor and built in the
-    /// sugar emits the same records in the same order. IDS INCLUDED, which
-    /// is the clause that can actually break — the two zones allocate from
-    /// separate counters, so a nested For that took a widget id instead of
-    /// a template-node id would renumber everything after it while still
-    /// rendering something plausible.
+    /// sugar emits the same records in the same order. IDS INCLUDED —
+    /// one allocation more or fewer on either side renumbers everything
+    /// after it while still rendering something plausible. It no longer
+    /// sees a zone taking the wrong allocator: both draw the same number
+    /// now (one id space), and in Rust the newtypes hold that anyway.
     #[test]
     fn nested_row_trace_matches_the_floor_records() {
         use crate::protocol::{Prop, WidgetKind};

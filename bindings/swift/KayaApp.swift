@@ -891,7 +891,8 @@ final class KayaApp {
     private var signals: UInt64 = 0
     private var widgets: UInt64 = 0
     private var collections: UInt64 = 0
-    private var nodes: UInt64 = 0
+    // No `nodes`: template nodes draw from `widgets`, one sequence per
+    // app (DESIGN.md, Binding conventions).
     private var menuItems: UInt64 = 0
     private var widgetHandlers: [UInt64: (KayaAppTx) throws -> Void] = [:]
     /// Table sort requests, keyed by the For container's widget id
@@ -1238,8 +1239,8 @@ final class KayaApp {
     }
 
     func nextNode() -> KayaNodeHandle {
-        nodes += 1
-        return KayaNodeHandle(id: nodes)
+        widgets += 1
+        return KayaNodeHandle(id: widgets)
     }
 
     func nextCollection() -> KayaCollection {

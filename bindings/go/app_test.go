@@ -147,14 +147,18 @@ func TestMirrorReadsPoisonInsideTemplateBodies(t *testing.T) {
 		body func(tx *Tx, c Collection)
 	}{
 		{"for body", func(tx *Tx, c Collection) {
-			tx.ForEach(c, func(*Tpl) { tx.Items(c) })
+			for range tx.Rows(c).All() {
+				tx.Items(c)
+			}
 		}},
 		{"when body", func(tx *Tx, c Collection) {
 			s := tx.Signal(true)
 			tx.When(s, func(*Tpl) { tx.Len(c) })
 		}},
-		{"row trace", func(tx *Tx, c Collection) {
-			_, _ = BeginRowTrace(tx, c)
+		// Opening the rows is what enters the zone: the trace has not
+		// begun and the read is already poisoned.
+		{"opened rows", func(tx *Tx, c Collection) {
+			tx.Rows(c)
 			tx.Items(c)
 		}},
 	}

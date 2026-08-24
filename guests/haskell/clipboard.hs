@@ -132,7 +132,7 @@ main = kayaMain $ \app -> do
 
   -- The stamped copy's paste, against the node the template handed out;
   -- the copy's own key arrives with the payload.
-  onPasteNode app note $ \keys clip ->
+  onPaste app note $ \keys clip ->
     let key = case keys of
           VStr k : _ -> k
           other -> show other

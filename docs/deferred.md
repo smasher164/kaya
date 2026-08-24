@@ -4623,8 +4623,9 @@ COMPLETE 2026-08-24: the six-binding breadth closed — Go, C#, Java,
 Swift, OCaml and Haskell each spell the template-zone bar, nested
 on_sort carrying the copy's key path, and keyed re-declaration, DO on
 every point with zero carve-outs; every spelling joined the
-tpl-surfaces/check-sugar census in the same change (53 watched
-perturbations run on every invocation) and compiles under a gate that
+tpl-surfaces/check-sugar census in the same change (every language's
+watched perturbations run on every invocation; the count grows with
+the surface, so the gate's own output is the number) and compiles under a gate that
 already runs. Three dispatch loops (C#, Java, Haskell) had silently
 dropped keyed sort_requested; each gained its keyed arm. The fan-out
 also surfaced and same-day-fixed a core defect: a widget-id/
@@ -6024,30 +6025,136 @@ inspected. DEFERRED by the maintainer until after the six-binding
 breadth fan-out.
 
 
-## GAP — Haskell cannot declare a nested RECORD collection (found 2026-08-24, by the breadth fan-out)
-KEY: collectionOf Build-only, RecordCollection, nested record rows, Tpl collection, haskell dynamic tables
+## ~~GAP — Haskell cannot declare a nested RECORD collection (found 2026-08-24, by the breadth fan-out)~~ — CLOSED 2026-08-24
+KEY: collectionOf Build-only, RecordCollection, nested record rows, Tpl collection, haskell dynamic tables, CollectionHandle
 
-Haskell's `collectionOf` lives in `Build` alone and `at` yields no
-`RecordCollection`, while Rust's `Tpl::collection<T>` is typed — so a
-Haskell dynamic table's rows cannot carry record fields yet; its
-breadth exerciser uses plain value rows. The spelling gap is
-surface-only (the wire and core support it); closing it is a Haskell
-binding slice with its own census teeth.
+**Done, both halves, no carve-out.** `collectionOf` is a method of
+`Declare` now, so it stands in the TEMPLATE zone as well as the live one
+(`collectionOf :: KayaRecord a => Proxy a -> m (RecordCollection a)`) —
+which is what a nested collection needs, since it may only be declared
+inside the template scope. And `at` is a method of `CollectionHandle`
+with instances for `Collection` and `RecordCollection a`, so narrowing a
+handle to one stamped copy keeps the element type and
+insertRecord/updateRecord/patch/recordItems can address it. Rust's
+`Collection<T>::at` and Python's `Collection.at` preserve the type under
+one name; a class is Haskell's spelling of the same thing, and it is what
+this file's own header asks for ("a constructor identical in both zones
+keeps one name and dispatches on it"). No existing call site moved: all
+42 Haskell guests typecheck unchanged.
 
-## GAP — C#'s generated row facade cannot spell a nested table (found 2026-08-24, by the breadth fan-out)
+tools/checks/haskell-table/NestedTable.hs now builds a nested table whose
+cells are `field @"symbol" @Position` / `field @"shares" @Position` and
+fills one copy through `positions \`at\` VStr "brokerage"` — the comment
+that named this gap is gone with it.
+
+THE WALL IS ON THE BUILD, not only in a gate: KayaApp.hs carries
+`-Werror=missing-methods` beside `-Werror=incomplete-patterns`, because a
+`Declare` method left out of ONE instance is a warning in GHC's default
+set — it compiles, ships, and dies at the use site. That is exactly how
+`collectionOf` could become live-zone-only again. Beside it,
+check-sugar-surface's haskell blocks grew five watched reds the compiler
+cannot give (a record collection born with the SCALAR schema and a key
+silently dropped on the way to the copy both typecheck) plus two more
+fixture typechecks; tpl-surfaces' haskell table reader gained the two
+points `nested record collection` and `record instance addressing`.
+
+## GAP — five more bindings cannot declare a nested RECORD collection either (found 2026-08-24, closing the Haskell one)
+KEY: CollectionOf Tx-only, collection_of, collection(of:), RecordCollection At, typed instance addressing, nested record rows
+
+The Haskell entry above was written as a Haskell gap. It is not: the
+sweep its fix required found the SAME two halves in five more bindings,
+each read in the source rather than assumed.
+- Go: `CollectionOf[K, T](tx *Tx)` (bindings/go/records.go:129) takes a
+  `*Tx`, and `Tpl.tx` is unexported, so a template body cannot reach it;
+  `RecordCollection[K, T]` EMBEDS `Collection`, so `rc.At(key)` returns
+  the untyped `Collection` and T is gone. Go methods take no type
+  parameters, so the fix is a free `TplCollectionOf[K, T](t *Tpl)` beside
+  the existing one, plus a type-preserving `At` on RecordCollection.
+- C#: `KayaRecords.CollectionOf<T>(this Tx tx)` (KayaRecords.cs:279) is a
+  `Tx` extension; `RecordCollection<T>` has no `At`.
+- Java: `KayaRecords.collectionOf(KayaApp.Tx tx, Class<T>)`
+  (KayaRecords.java:480); `KayaRecords.Collection<K, T>` (:229) has no
+  `at` — only the untyped `KayaApp.Collection.at` (KayaApp.java:2169).
+- Swift: `collection(of:)` is an `extension KayaAppTx`
+  (KayaRecords.swift:253); `KayaRecordCollection<T>` (:117) has no `at`.
+- OCaml: HALF ONE IS ALREADY THERE — `collection_of` (kaya_app.ml:1198)
+  runs on the ambient `the_tx ()` and records the open-For edge, so it
+  stands in the template zone as it is. Half two is missing: nothing
+  yields a record collection at a key path, and a guest would have to
+  rebuild the record by hand from `record_handle rc`.
+Rust (`Tpl::collection<T>` + `Collection<T>::at`), Python
+(`kaya.collection(Record)` in both zones + `Collection.at`) and now
+Haskell have both halves. Nothing is BLOCKED by this — the untyped
+spelling reaches the wire in every language — but a nested table's rows
+carry named fields in three of eight, which is invariant 1's question and
+not a spelling difference. The Haskell close shows what the census teeth
+look like (tpl-surfaces' two new points, and the compile wall that makes
+a zone-missing method a build error rather than a warning).
+
+## ~~GAP — C#'s generated row facade cannot spell a nested table (found 2026-08-24, by the breadth fan-out)~~
 KEY: <Rec>Row facade, kaya-csgen typed row sugar, nested typed For, NOT_FORWARDED_CSHARP
 
-Two pre-existing halves, both recorded with one-line fixes in the
-breadth agent's report: the generated `<Rec>Row` foreach facade has no
-Each/ForEach/Collection and a private Tpl, so a nested table cannot be
-spelled through it at all; and `kaya-csgen` emits typed row sugar for
+FIXED 2026-08-24, both halves in one slice. tools/kaya-csgen emits the
+nested-For vocabulary onto every `<Rec>Row` — `Collection()`, `Each`,
+`ForEach` and the `Columns` that names the Node `Each` hands back — and
+a `Each(Tpl t, RecordCollection<T> c, Action<<Rec>Row> body)` twin
+beside the live `Each(Tx, …)`, so a nested typed For's body holds the
+row façade rather than the raw zone. Those four names left
+NOT_FORWARDED_CSHARP, exactly as `forEach` left NOT_FORWARDED_JAVA when
+dynamic tables landed and for the same reason. THE CENSUS GREW TWO
+TEETH: facade_csharp now reads `Collection`-returning members too
+(`Collection()` was invisible on BOTH sides, so a façade missing it read
+LEVEL — the name-set-blindness trap keyed by return type instead of
+arity), and `twins_csharp` demands `<Rec>Kaya.Each` for BOTH zones in
+every generated file carrying a row façade, refusing a verdict below
+three surfaces. Seven watched census reds (check-sugar-surface's (c4)
+block) and six watched exerciser reds — four of them COMPILE-TIME, since
+guests/csharp/AbortCheck.cs's FacadeNestedTable spells the dashboard
+shape through the façade alone and does not build without the forwards.
+WHAT IS STILL OFF THE LIST, now with a reason of its own rather than a
+grouping: `When` and `ContextMenu`, both of which Java's `RowSurface`
+forwards. Neither is the nested-table vocabulary; the divergence is
+recorded here and in the generated header rather than blessed.
+STILL OPEN IN C#, one step up: a typed OUTER For cannot open a typed
+NESTED one — the twin takes a `Tpl` and the façade's is private, so from
+a `<Rec>Row` the nested body is the raw zone.
+JAVA'S HALF CLOSED 2026-08-24 (the idiom ruling: the callback `forEach`
+died and the one For form is the eager `rows` Iterable), and the shape
+that closed it is available to C# rather than being a maintainer's call
+after all: the generated nested overload takes THE ROW SURFACE, not the
+zone — `<Rec>Kaya.rows(KayaApp.RowSurface row, Collection c)` — and the
+protected `tpl()` is read by `KayaRecords`, which sits in the row
+surface's OWN package and so needs nothing published. C# wants the same
+move (an `Each(<Rec>Row, …)` overload reaching the façade's private
+`Tpl` from inside the assembly) and the entry stays open until it has
+one. tpl-surfaces' `twins_java` holds Java's two zones the way
+`twins_csharp` holds C#'s.
+
+As filed: two pre-existing halves, both recorded with one-line fixes in
+the breadth agent's report: the generated `<Rec>Row` foreach facade has
+no Each/ForEach/Collection and a private Tpl, so a nested table cannot
+be spelled through it at all; and `kaya-csgen` emits typed row sugar for
 the live zone only, so a nested typed For's body falls back to the raw
 `Tpl`. The hand-written `Tpl` spelling works — this gap is about the
 generated sugar tier reaching parity. `Columns` sits in
 NOT_FORWARDED_CSHARP with its reachability reason until then.
 
-## DECISION — one id space for widgets and template nodes? (raised 2026-08-24)
+## ~~DECISION — one id space for widgets and template nodes? (raised 2026-08-24)~~
 KEY: id collision, next_node, separate counters, set_column_headers target, sort_requested tag, one id space
+
+CLOSED 2026-08-24 — decided and built the same day (maintainer: "i agree with
+your recommendation so go ahead"): one number sequence per app. The
+core's Rust surface and all seven hand-written bindings mint template
+nodes from the widget counter; six bindings deleted the node-counter
+FIELD outright, so a second sequence no longer compiles. Each binding
+carries a contiguous-run proof (1,2,3,4 — not mere inequality, which a
+pre-advanced counter satisfies vacuously; measured in Python), watched
+red once by construction. Haskell's proof is the deleted field failing
+the build — its handles export abstractly, so no runtime probe can see
+an id. scene.rs's collision walls stay as the backstop that should
+never fire. DESIGN.md's Binding conventions now state the rule. The C
+floor's hand-authored guests still overlap the spaces (chore entry
+below).
 
 The Haskell breadth probe manufactured a widget-id/template-node-id
 collision and showed set_column_headers resolving the wrong space.
@@ -6061,3 +6168,16 @@ always one allocation away and only the wall stands between. Unifying
 the counters (one id space per app) would delete the class; it touches
 every binding's allocator and is the maintainer's call. Until then the
 walls hold.
+
+
+## CHORE — the C floor's hand-authored ids still overlap the two spaces (2026-08-24)
+KEY: C guests renumber, id space overlap, explicit floor, template-declaring guests
+
+The one-id-space rule (DESIGN.md Binding conventions) is enforced in
+every binding's allocator; the eight template-declaring C guests
+hand-author their numbers and overlap the spaces. The lanes are green —
+none of the overlaps is the walled live-For/template-node kind — so
+this is documentation debt, not a defect: the C floor exists to teach
+the explicit calls, and it currently teaches the pre-rule numbering.
+Renumbering is mechanical, only the lanes verify it, and it should ride
+the next C-floor touch rather than its own matrix run.

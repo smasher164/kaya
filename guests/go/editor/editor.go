@@ -517,7 +517,7 @@ func App() *kaya.App {
 			// SetInset on the STAMPED row is what lets the bar keep its
 			// margin under a full-bleed window.
 			findRows = tx.Collection()
-			for row := range findRows.Rows(tx) {
+			for row := range tx.Rows(findRows).All() {
 				bar := row.Row(func() {
 					query = row.Entry() // entry#0
 					prev = row.Button("prev")          // button#0

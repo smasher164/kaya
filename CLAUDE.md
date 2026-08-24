@@ -285,10 +285,12 @@ in docs/deferred.md.
    all eight: a table is not a KIND but a For with a header, so neither
    the constructor sweep nor the window-prop sweep can see it while the
    wire records reach every binding through the generator whether or
-   not a guest can spell either. Python's `on_sort` is a KEYWORD on
-   `columns`, its ambient transaction having no app-level handler
-   surface, which is why the eight patterns are written out rather than
-   derived from one casing rule),
+   not a guest can spell either. The handler rides the declaration
+   wherever the binding's own click does — Python's `on_sort` is a
+   KEYWORD on `columns`, OCaml's a labelled argument, Go's and Rust's a
+   chained call — and is app-registered in the registry family (C#,
+   Java, Swift, Haskell), which is why the eight patterns are written
+   out rather than derived from one casing rule),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

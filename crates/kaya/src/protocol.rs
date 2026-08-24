@@ -402,8 +402,10 @@ pub struct CollectionId(pub u64);
 
 /// A template node: a blueprint entry, declared inside a For/When
 /// template scope. Never on screen and never addressable alone — an
-/// instance is named (template node, key path). Its own id space, so a
-/// WidgetId always names exactly one live widget.
+/// instance is named (template node, key path). Shares the WidgetId
+/// counter (DESIGN.md, Binding conventions), so a number names exactly
+/// one of the two; the wire tells them apart by path_len, never by
+/// number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TemplateNodeId(pub u64);
 

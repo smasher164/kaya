@@ -276,9 +276,13 @@ fi
 #
 # PYTHON'S on_sort IS A KEYWORD, not a registration call: its ambient
 # transaction has no app-level handler surface, so `columns(...,
-# on_sort=f)` carries it. Same observable semantics, different spelling
-# — which is why the eight patterns are written out rather than derived
-# from one casing rule.
+# on_sort=f)` carries it. OCAML'S IS A LABELLED ARGUMENT on that same
+# declaration, for the reason its click is one (`button ?on_click ()`):
+# a binding registers a handler where its OWN click convention does
+# (the maintainer's ruling, 2026-08-24), so its pattern reads `columns`'
+# header and there is no `let on_sort` to find. Same observable
+# semantics, different spelling — which is why the eight patterns are
+# written out rather than derived from one casing rule.
 want_table() {
     if ! grep -qE "$4" "$2"; then
         echo "check-sugar-surface: $1 has no sugar for the table's '$3'" \
@@ -296,7 +300,14 @@ check_table_columns() {
     want_table csharp  bindings/csharp/KayaApp.cs          "$snake" "public void ${pascal}\\("
     want_table java    bindings/java/dev/kaya/KayaApp.java "$snake" "public void ${camel}\\("
     want_table swift   bindings/swift/KayaApp.swift        "$snake" "func ${camel}\\("
-    want_table haskell bindings/haskell/KayaApp.hs         "$snake" "^${camel} ::"
+    # HASKELL'S IS A CLASS METHOD, indented: `columnsNode` died when the
+    # module's header rule reached the table, and one name now dispatches
+    # over the zone through 'Declare'. Keyed on the whole SIGNATURE, since
+    # `El m -> … -> m ()` is the half that says it stands in both zones —
+    # a live-only `Widget -> … -> Build ()` under the same name is exactly
+    # what this must not accept.
+    want_table haskell bindings/haskell/KayaApp.hs         "$snake" \
+        "^  ${camel} :: El m -> \\[String\\] -> Sort -> m \\(\\)"
     want_table ocaml   bindings/ocaml/kaya_app.ml          "$snake" "^let ${snake} "
 }
 check_table_columns columns Columns columns
@@ -312,8 +323,19 @@ check_table_on_sort() {
     want_table csharp  bindings/csharp/KayaApp.cs          "$snake" "public void ${pascal}\\("
     want_table java    bindings/java/dev/kaya/KayaApp.java "$snake" "public void ${camel}\\("
     want_table swift   bindings/swift/KayaApp.swift        "$snake" "func ${camel}\\("
-    want_table haskell bindings/haskell/KayaApp.hs         "$snake" "^${camel} ::"
-    want_table ocaml   bindings/ocaml/kaya_app.ml          "$snake" "^let ${snake} "
+    # ALSO A CLASS METHOD, and the handler's own type is the class's
+    # associated family: the zone decides what a click hands the handler,
+    # so `Keyed e` in the signature is what makes one name serve both
+    # (bindings/haskell/KayaApp.hs, class HandlerTarget — one class for
+    # all six registrars, so a verb missing from a zone is a
+    # -Werror=missing-methods red rather than an absent instance).
+    want_table haskell bindings/haskell/KayaApp.hs         "$snake" \
+        "^  ${camel} :: App -> e -> Keyed e \\(Int -> IO \\(\\)\\) -> IO \\(\\)"
+    # The LIVE zone's, keyed on the whole labelled argument: the type is
+    # what separates it from the template zone's own `?(on_sort :
+    # (Kaya_wire.value list -> int -> unit) option)` one module over.
+    want_table ocaml   bindings/ocaml/kaya_app.ml          "$snake" \
+        "^let columns \\?\\(${snake} : \\(int -> unit\\) option\\)"
 }
 check_table_on_sort on_sort OnSort onSort
 
@@ -585,9 +607,6 @@ def run_swift(name, app_text, text, count, want):
     print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
 
 
-    return root
-
-
 def stage_ocaml(app_text, ml_text):
     root = stage(app_text)
     os.unlink(f"{root}/bindings")
@@ -674,28 +693,34 @@ n = src.count(old)
 run("rust-keyed", src.replace(old, "    pub fn columns_at_removed(") if n == 1 else src,
     n, "rust's TEMPLATE-zone table cannot spell keyed re-declaration")
 
-# GO. The zone marker is the RECEIVER — `func (t *Tpl) Columns` and
-# `func (tx *Tx) Columns` are two surfaces spelled the same — so every
-# needle below carries one, and each is unique in the file.
+# GO. The zone marker is the RECEIVER — `func (r *Rows) Columns` and
+# `func (r *NodeRows) Columns` are two surfaces spelled the same — so
+# every needle below carries one, and each is unique in the file.
 go = open("bindings/go/app.go", encoding="utf-8").read()
 go_points = (
     ("go-columns", "columns",
-     "func (t *Tpl) Columns(n Node, titles []string, sort Sort) {",
-     "func (t *Tpl) ColumnsRemoved(n Node, titles []string, sort Sort) {"),
+     "func (r *NodeRows) Columns(titles []string, sort Sort) *NodeRows {",
+     "func (r *NodeRows) ColumnsRemoved(titles []string, sort Sort) *NodeRows {"),
     ("go-columns-path", "columns",
-     "\tt.tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,\n"
-     "\t\tuint32(len(titles)), 0, values))",
-     "\tt.tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,\n"
-     "\t\tuint32(len(titles)), 1, values))"),
+     "\t\ttx.emit(TxSetColumnHeaders(st.id, st.bar.sort.sorted, st.bar.sort.direction,\n"
+     "\t\t\tuint32(len(st.bar.titles)), 0, titleValues(st.bar.titles)))",
+     "\t\ttx.emit(TxSetColumnHeaders(st.id, st.bar.sort.sorted, st.bar.sort.direction,\n"
+     "\t\t\tuint32(len(st.bar.titles)), 1, titleValues(st.bar.titles)))"),
     ("go-nested-for", "columns",
-     "func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {",
-     "func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) {"),
+     "func (t *Tpl) Rows(c Collection) *NodeRows {",
+     "func (t *Tpl) RowsRemoved(c Collection) *NodeRows {"),
     ("go-sort", "on_sort",
      "func (a *App) OnSortNode(n Node, fn func(*Tx, []any, uint32)) {",
      "func (a *App) OnSortNode(n Node, fn func(*Tx, uint32)) {"),
+    ("go-sort-chain", "on_sort",
+     "\tr.st.tx.app.OnSortNode(r.Node(), fn)",
+     "\tr.st.tx.app.OnSortNode(Node{}, fn)"),
     ("go-sort-dispatch", "on_sort",
      "a.dispatch(func(tx *Tx) { fn(tx, keys, column) })",
      "a.dispatch(func(tx *Tx) { fn(tx, nil, column) })"),
+    ("go-node-handle", "keyed re-declaration",
+     "func (r *NodeRows) Node() Node {",
+     "func (r *NodeRows) NodeRemoved() Node {"),
     ("go-keyed", "keyed re-declaration",
      "func (tx *Tx) ColumnsAt(n Node, keys []any, titles []string, sort Sort) {",
      "func (tx *Tx) ColumnsAtRemoved(n Node, keys []any, titles []string, sort Sort) {"),
@@ -774,17 +799,20 @@ run_csharp("csharp-reader", src,
            n, "cannot find csharp's dynamic-table zones")
 
 # OCaml namespaces the template zone by SCOPE, so each half is deleted
-# on the side it must live on: the declaration inside `module Tpl`, the
-# keyed re-declaration and the node registrar outside it.
+# on the side it must live on: the declaration AND its ~on_sort inside
+# `module Tpl`, the keyed re-declaration outside it. The handler is a
+# LABELLED ARGUMENT on the declaration since 2026-08-24 (the binding
+# spells a click that way), so the sort clauses perturb the same block
+# the bar's do — never the name, which the live `columns` also carries.
 ml = open("bindings/ocaml/kaya_app.ml", encoding="utf-8").read()
-TPL = ("module Tpl = struct", "let on_sort app (Widget id)")
+TPL = ("module Tpl = struct", "let on_click app (Widget id)")
 columns_want = "ocaml's TEMPLATE-zone table cannot spell columns"
 sort_want = "ocaml's TEMPLATE-zone table cannot spell on_sort"
 keyed_want = "ocaml's TEMPLATE-zone table cannot spell keyed re-declaration"
 
 text, n = scoped(ml, *TPL,
-                 "  let columns (Node id) titles sort =",
-                 "  let columns_removed (Node id) titles sort =")
+                 "  let columns\n      ?(on_sort :",
+                 "  let columns_removed\n      ?(on_sort :")
 run_ocaml("ocaml-columns", src, text or ml, n, columns_want)
 
 text, n = scoped(ml, *TPL,
@@ -794,11 +822,19 @@ run_ocaml("ocaml-columns-pathlen", src, text or ml, n, columns_want)
 
 # menu_selected_node is the one table with the same value type, so it is
 # the only wrong table the compiler would let through.
-text, n = scoped(ml, "let on_sort_node app (Node id)",
-                 "let on_click app (Widget id)",
-                 "Hashtbl.replace app.node_sorts id handler",
-                 "Hashtbl.replace app.menu_selected_node id handler")
+text, n = scoped(ml, *TPL,
+                 "Hashtbl.replace tx.app.node_sorts id handler",
+                 "Hashtbl.replace tx.app.menu_selected_node id handler")
 run_ocaml("ocaml-sort-table", src, text or ml, n, sort_want)
+
+# And the argument itself: a `columns` that takes no handler declares a
+# bar nothing can answer, which is precisely the surface this zone had
+# before the labelled argument arrived.
+text, n = scoped(ml, *TPL,
+                 "  let columns\n      ?(on_sort : (Kaya_wire.value list -> "
+                 "int -> unit) option)\n      (Node id) titles sort =",
+                 "  let columns (Node id) titles sort =")
+run_ocaml("ocaml-sort-arg", src, text or ml, n, sort_want)
 
 text, n = scoped(ml, "if kind = Kaya_wire.occ_kind_sort_requested then",
                  "else if kind = Kaya_wire.occ_kind_text_changed then",
@@ -949,25 +985,62 @@ n = sw.count(old)
 run_swift("swift-reader", src,
           sw.replace(old, "final class KayaTplRemoved {") if n == 1 else sw,
           n, "cannot find swift's dynamic-table zones")
-# HASKELL'S ZONE IS ITS TYPE (KayaApp.hs is one flat namespace), so the
-# first perturbation of each pair moves the SIGNATURE into the live zone
-# with the name left alone: a reader that keyed on the name would stay
-# green there, which is the defect tools/tpl-surfaces.py exists to avoid.
+# HASKELL'S ZONE IS ITS TYPE (KayaApp.hs is one flat namespace), and
+# since the module's header rule reached every paired registrar — the
+# `*Node` twins are gone, one name dispatches on the handle — the zone is
+# WHICH SCOPE the arm sits in. So the first perturbation of each pair
+# takes the signature's zone away with the NAME LEFT ALONE: a reader that
+# keyed on the name, or one that read the LIVE arm one scope up, would
+# stay green there, which is the defect tools/tpl-surfaces.py exists to
+# avoid.
 hs = open("bindings/haskell/KayaApp.hs", encoding="utf-8").read()
 haskell_want = "haskell's TEMPLATE-zone table cannot spell "
 
-text, n = scoped(hs, "columnsNode :: Node", "-- | Re-declare ONE stamped copy",
-                 "-> Sort -> Tpl ()", "-> Sort -> Build ()")
+# `columns` back to a live-only signature inside `Declare` itself: the
+# name still stands in the class, and both instances still spell it.
+text, n = scoped(hs, "class Monad m => Declare m where", "instance Declare Build where",
+                 "  columns :: El m -> [String] -> Sort -> m ()",
+                 "  columns :: Widget -> [String] -> Sort -> Build ()")
 run_haskell("haskell-columns-zone", src, text or hs, n, haskell_want + "columns")
 
-text, n = scoped(hs, "columnsNode :: Node", "-- | Re-declare ONE stamped copy",
-                 "(fromIntegral (length titles))\n        0\n",
-                 "(fromIntegral (length titles))\n        1\n")
+# The TEMPLATE instance's arm deleted outright — the shape the live arm
+# hides, since `instance Declare Build` keeps spelling `columns`.
+text, n = scoped(hs, "instance Declare Tpl where", "-- Live-zone-only vocabulary.",
+                 "  -- pathLen 0 against a TEMPLATE NODE: every copy's bar.\n"
+                 "  columns (Node n) titles sort =\n",
+                 "  columnsRemoved (Node n) titles sort =\n")
+run_haskell("haskell-columns-tpl", src, text or hs, n, haskell_want + "columns")
+
+text, n = scoped(hs, "instance Declare Tpl where", "-- Live-zone-only vocabulary.",
+                 "(fromIntegral (length titles))\n          0\n",
+                 "(fromIntegral (length titles))\n          1\n")
 run_haskell("haskell-columns-path", src, text or hs, n, haskell_want + "columns")
 
-text, n = scoped(hs, "onSortNode :: App -> Node", "onClick :: App -> Widget",
+text, n = scoped(hs, "instance HandlerTarget Node where",
+                 "representationOf :: Maybe W.ClipValues",
                  "(appNodeSorts app)", "(appSortHandlers app)")
 run_haskell("haskell-sort-registrar", src, text or hs, n, haskell_want + "on_sort")
+
+# The SORT ARM alone taken out of the node instance, with the other five
+# registrars and appNodeSorts' neighbours left standing: one class holds
+# all six now, so a clause that only asked whether the instance exists
+# would read green here.
+text, n = scoped(hs, "instance HandlerTarget Node where",
+                 "representationOf :: Maybe W.ClipValues",
+                 "  onSort app (Node n) handler =\n"
+                 "    modifyIORef' (appNodeSorts app) (Map.insert n handler)\n",
+                 "")
+run_haskell("haskell-sort-arm", src, text or hs, n, haskell_want + "on_sort")
+
+# The copy's keys taken out of the ASSOCIATED TYPE: the node instance
+# still exists, still registers in appNodeSorts, and now promises the
+# live zone's handler — for every verb at once, since `Keyed` states that
+# rule ONCE for all six.
+text, n = scoped(hs, "instance HandlerTarget Node where",
+                 "representationOf :: Maybe W.ClipValues",
+                 "  type Keyed Node p = [W.Value] -> p",
+                 "  type Keyed Node p = p")
+run_haskell("haskell-sort-handler", src, text or hs, n, haskell_want + "on_sort")
 
 text, n = scoped(
     hs,
@@ -1003,7 +1076,9 @@ go-columns=applied:1 rc:1 named:True
 go-columns-path=applied:1 rc:1 named:True
 go-nested-for=applied:1 rc:1 named:True
 go-sort=applied:1 rc:1 named:True
+go-sort-chain=applied:1 rc:1 named:True
 go-sort-dispatch=applied:1 rc:1 named:True
+go-node-handle=applied:1 rc:1 named:True
 go-keyed=applied:1 rc:1 named:True
 go-keyed-order=applied:1 rc:1 named:True
 go-keyed-pathlen=applied:1 rc:1 named:True
@@ -1018,6 +1093,7 @@ csharp-reader=applied:1 rc:1 named:True
 ocaml-columns=applied:1 rc:1 named:True
 ocaml-columns-pathlen=applied:1 rc:1 named:True
 ocaml-sort-table=applied:1 rc:1 named:True
+ocaml-sort-arg=applied:1 rc:1 named:True
 ocaml-sort-dispatch=applied:1 rc:1 named:True
 ocaml-keyed-order=applied:1 rc:1 named:True
 ocaml-keyed-len=applied:1 rc:1 named:True
@@ -1043,8 +1119,11 @@ swift-keyed-order=applied:1 rc:1 named:True
 swift-keyed-swap=applied:1 rc:1 named:True
 swift-reader=applied:1 rc:1 named:True
 haskell-columns-zone=applied:1 rc:1 named:True
+haskell-columns-tpl=applied:1 rc:1 named:True
 haskell-columns-path=applied:1 rc:1 named:True
 haskell-sort-registrar=applied:1 rc:1 named:True
+haskell-sort-arm=applied:1 rc:1 named:True
+haskell-sort-handler=applied:1 rc:1 named:True
 haskell-sort-dispatch=applied:1 rc:1 named:True
 haskell-keyed-len=applied:1 rc:1 named:True
 haskell-keyed-order=applied:1 rc:1 named:True
@@ -1093,24 +1172,47 @@ print(f"fixture=rc:{rc}")
 if rc != 0:
     print(log)
 
-# Each is a mistake the types are the wall for: calling the LIVE bar on a
-# nested For's node, a handler that drops the copy's keys, and a
-# re-declaration that drops them.
+# Each is a mistake the types are the wall for: declaring the nested
+# bar in the parent's LIVE scope, a handler that drops the copy's keys,
+# and a re-declaration that drops them.
 for module, old, new in (
+    # ONE NAME, TWO ZONES, so the zone wall is no longer a wrong NAME —
+    # it is the same call moved out of the template scope, where `m` is
+    # Build and `El Build` is Widget while the inner For handed back a
+    # Node. The move is the mistake this is here to stop: the core finds
+    # the For in the scope that is still open.
     ("ZoneWall",
-     'columnsNode t ["Symbol", "Shares"] sortNone',
-     'columns t ["Symbol", "Shares"] sortNone'),
+     '      columns t ["Symbol", "Shares"] sortNone\n'
+     '      _ <- columnOf [label element, pure t]\n'
+     '      return (t, positions)\n'
+     '    root <- row [pure accountList]\n',
+     '      _ <- columnOf [label element, pure t]\n'
+     '      return (t, positions)\n'
+     '    columns table ["Symbol", "Shares"] sortNone\n'
+     '    root <- row [pure accountList]\n'),
     # The whole handler, so the perturbation is a TYPE error and not a
     # `keys` left dangling out of scope: dropping the copy's keys binds
     # the path where the column belongs.
     ("HandlerPath",
-     '  onSortNode app table $ \\keys column ->\n'
+     '  onSort app table $ \\keys column ->\n'
      '    submitTx app (columnsAt table keys ["Symbol", "Shares"] (sortAsc column))\n',
-     '  onSortNode app table $ \\column ->\n'
+     '  onSort app table $ \\column ->\n'
      '    submitTx app (columnsAt table [] ["Symbol", "Shares"] (sortAsc column))\n'),
     ("RedeclarePath",
      'columnsAt table keys ["Symbol", "Shares"]',
      'columnsAt table ["Symbol", "Shares"]'),
+    # The rows go SCALAR: a nested plain `collection` reaches forEach but
+    # not recordHandle, which is the shape this fixture used to have
+    # (docs/deferred.md, the nested RECORD collection entry).
+    ("ScalarNested",
+     "      positions <- collectionOf (Proxy :: Proxy Position)",
+     "      positions <- collection"),
+    # The key path taken on the UNTYPED handle: the copy is addressed and
+    # the element type is gone with it, so no record mutation can reach
+    # one stamped table's rows.
+    ("UntypedInstance",
+     "    insertRecord (positions ",
+     "    insertRecord (recordHandle positions "),
 ):
     n = src.count(old)
     if n != 1:
@@ -1125,7 +1227,9 @@ PROBE
 want_hs_table_probe="fixture=rc:0
 ZoneWall=applied:1 rc:1 type-error:True
 HandlerPath=applied:1 rc:1 type-error:True
-RedeclarePath=applied:1 rc:1 type-error:True"
+RedeclarePath=applied:1 rc:1 type-error:True
+ScalarNested=applied:1 rc:1 type-error:True
+UntypedInstance=applied:1 rc:1 type-error:True"
 if [ "$hs_table_probe" != "$want_hs_table_probe" ]; then
     echo "check-sugar-surface: SELF-TEST FAIL (the haskell dynamic-table typecheck)." \
         "Wanted:" >&2
@@ -1137,6 +1241,269 @@ fi
 echo "check-sugar-surface: haskell dynamic-table typecheck:"
 echo "$hs_table_probe"
 unset hs_table_probe want_hs_table_probe
+
+# (c2c) THE ROW'S OWN FIELDS, watched from the BINDING side. A nested
+#       table whose rows cannot carry record fields is the gap this
+#       closes (docs/deferred.md, "GAP — Haskell cannot declare a nested
+#       RECORD collection"): `collectionOf` must stand in the TEMPLATE
+#       zone, since that is the only scope a nested collection may be
+#       declared in, and narrowing the handle to one stamped copy must
+#       keep the element type, since every record mutation takes
+#       RecordCollection.
+#
+#       BOTH KINDS OF WALL ARE WATCHED, because neither sees the other's
+#       failure: the census catches what a typecheck cannot (a record
+#       collection born with the SCALAR schema, a key silently dropped on
+#       the way to the copy — both compile), and ghc catches what text
+#       cannot say (a Declare method left out of ONE instance is a
+#       warning in GHC's default set; KayaApp.hs's -Werror=missing-methods
+#       is what turns that into a red).
+#
+#       A block of its own, additive: these two files are merged by hand
+#       across parallel worktrees.
+hs_record_probe=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+
+APP = "bindings/haskell/KayaApp.hs"
+FIXTURE = "tools/checks/haskell-table/NestedTable.hs"
+TABLE = "haskell's TEMPLATE-zone table cannot spell "
+
+app = open(APP, encoding="utf-8").read()
+fixture = open(FIXTURE, encoding="utf-8").read()
+tmp = tempfile.mkdtemp()
+
+
+def stage(text):
+    """A temp repo root where only KayaApp.hs differs."""
+    root = tempfile.mkdtemp()
+    for top in os.listdir("."):
+        if top != "bindings":
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for parent, keep in (("bindings", "haskell"),
+                         ("bindings/haskell", "KayaApp.hs")):
+        os.makedirs(f"{root}/{parent}", exist_ok=True)
+        for entry in os.listdir(parent):
+            if entry != keep:
+                os.symlink(os.path.abspath(f"{parent}/{entry}"),
+                           f"{root}/{parent}/{entry}")
+    open(f"{root}/{APP}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def census(name, old, new, point):
+    n = app.count(old)
+    if n != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {n}, expected 1)")
+        return
+    root = stage(app.replace(old, new))
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{TABLE + point in r.stdout}")
+
+
+def library(name, text):
+    """The three-module binding with one doctored KayaApp.hs."""
+    lib = f"{tmp}/{name}-lib"
+    os.makedirs(lib, exist_ok=True)
+    for module in ("KayaWire.hs", "KayaRuntime.hs"):
+        shutil.copy(f"bindings/haskell/{module}", lib)
+    open(f"{lib}/KayaApp.hs", "w", encoding="utf-8").write(text)
+    return lib
+
+
+def ghc(name, lib, target):
+    out = f"{tmp}/{name}-out"
+    os.makedirs(out, exist_ok=True)
+    r = subprocess.run(
+        ["ghc", "-fno-code", "-XGHC2021", "-i" + lib,
+         "-hidir", out, "-odir", out, target],
+        capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def compiles(name, old, new, markers, through_fixture):
+    """A red is only a red if it is the RIGHT error, so each row names
+    substrings the log must carry — a module whose name is not a Haskell
+    identifier also exits 1, and did while this was being written."""
+    n = app.count(old)
+    if n != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {n}, expected 1)")
+        return
+    module = "".join(part.capitalize() for part in name.split("-"))
+    lib = library(module, app.replace(old, new))
+    target = f"{lib}/KayaApp.hs"
+    if through_fixture:
+        target = f"{tmp}/{module}.hs"
+        open(target, "w", encoding="utf-8").write(
+            fixture.replace("module NestedTable", f"module {module}"))
+    rc, log = ghc(module, lib, target)
+    print(f"{name}=applied:1 rc:{rc} named:{all(m in log for m in markers)}")
+
+
+# The census half. Each is a shape that compiles and lies.
+census("haskell-record-zone",
+       "  collectionOf :: KayaRecord a => Proxy a -> m (RecordCollection a)",
+       "  collectionOf :: KayaRecord a => Proxy a -> Build (RecordCollection a)",
+       "nested record collection")
+# Watched here AS WELL AS by the compiler below: this census runs where
+# no ghc does, so its own reading of the Tpl instance has to be seen red.
+census("haskell-record-tpl",
+       "  collection = Tpl (newCollection [[W.valueStr]])\n"
+       "  collectionOf p = Tpl (newRecordCollection p)\n",
+       "  collection = Tpl (newCollection [[W.valueStr]])\n",
+       "nested record collection")
+census("haskell-record-schema",
+       "  let (c, s') = newCollection [kayaSchema p] s in (RecordCollection c, s')",
+       "  let (c, s') = newCollection [[W.valueStr]] s in (RecordCollection c, s')",
+       "nested record collection")
+census("haskell-at-record",
+       "  at (RecordCollection c) key = RecordCollection (at c key)",
+       "  at (RecordCollection c) _ = RecordCollection c",
+       "record instance addressing")
+
+# The compiler half. The first is the pre-fix state exactly: the template
+# zone without the record constructor.
+compiles("haskell-tpl-method-gone",
+         "  collection = Tpl (newCollection [[W.valueStr]])\n"
+         "  collectionOf p = Tpl (newRecordCollection p)\n",
+         "  collection = Tpl (newCollection [[W.valueStr]])\n",
+         ("Werror=missing-methods", "Declare Tpl"), False)
+compiles("haskell-record-at-gone",
+         "instance CollectionHandle (RecordCollection a) where\n"
+         "  at (RecordCollection c) key = RecordCollection (at c key)\n",
+         "",
+         ("No instance for", "CollectionHandle (RecordCollection"), True)
+
+shutil.rmtree(tmp)
+PROBE
+)
+want_hs_record_probe="haskell-record-zone=applied:1 rc:1 named:True
+haskell-record-tpl=applied:1 rc:1 named:True
+haskell-record-schema=applied:1 rc:1 named:True
+haskell-at-record=applied:1 rc:1 named:True
+haskell-tpl-method-gone=applied:1 rc:1 named:True
+haskell-record-at-gone=applied:1 rc:1 named:True"
+if [ "$hs_record_probe" != "$want_hs_record_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the haskell nested-record walls" \
+        "did not catch their watched deletions). Wanted:" >&2
+    echo "$want_hs_record_probe" >&2
+    echo "Got:" >&2
+    echo "$hs_record_probe" >&2
+    exit 1
+fi
+echo "check-sugar-surface: haskell nested-record perturbations applied:"
+echo "$hs_record_probe"
+unset hs_record_probe want_hs_record_probe
+
+# (c2d) THE ZONE-SPANNING SURFACES, watched from the COMPILER side. Every
+#       `*Node` twin is gone — one name dispatches on the handle (the
+#       module header's rule) — so what used to be a distinct NAME per
+#       zone is now an arm inside a per-zone instance, and the wall that
+#       keeps a template zone's arm from going missing is KayaApp.hs's
+#       -Werror=missing-methods.
+#
+#       ALL SIX REGISTRARS SIT IN ONE CLASS for exactly that wall: a verb
+#       in a class of its own could ship with the Node instance absent
+#       and nothing here would compile red, because missing-methods sees
+#       an incomplete instance and never a missing one. So the watch is
+#       per zone rather than per verb — one deleted arm on each side.
+#
+#       THE ASSOCIATED TYPE IS A DIFFERENT RED, and that is why it is
+#       watched beside them: dropping `type Keyed Node p` is a plain type
+#       error, NOT a missing-methods one, so a session that goes looking
+#       for the missing-methods sentence would not find it.
+#
+#       A block of its own, additive: these two files are merged by hand
+#       across parallel worktrees.
+hs_zone_probe=$(python3 - <<'PROBE'
+import os, shutil, subprocess, tempfile
+
+APP = "bindings/haskell/KayaApp.hs"
+app = open(APP, encoding="utf-8").read()
+tmp = tempfile.mkdtemp()
+
+TPL_COLUMNS = """  -- pathLen 0 against a TEMPLATE NODE: every copy's bar.
+  columns (Node n) titles sort =
+    emitT
+      ( W.txSetColumnHeaders
+          n
+          (sortColumn sort)
+          (sortDirection sort)
+          (fromIntegral (length titles))
+          0
+          (map W.VStr titles)
+      )
+"""
+
+NODE_SORT = """  onSort app (Node n) handler =
+    modifyIORef' (appNodeSorts app) (Map.insert n handler)
+"""
+
+WIDGET_PASTE = """  onPaste app (Widget n) handler =
+    modifyIORef' (appWidgetPastes app) (Map.insert n handler)
+"""
+
+
+def compiles(name, old, new, markers):
+    """A red is only a red if it is the RIGHT error, so each row names
+    substrings the log must carry."""
+    n = app.count(old)
+    if n != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {n}, expected 1)")
+        return
+    module = "".join(part.capitalize() for part in name.split("-"))
+    lib = f"{tmp}/{module}-lib"
+    out = f"{tmp}/{module}-out"
+    os.makedirs(lib, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
+    for module_file in ("KayaWire.hs", "KayaRuntime.hs"):
+        shutil.copy(f"bindings/haskell/{module_file}", lib)
+    with open(f"{lib}/KayaApp.hs", "w", encoding="utf-8") as fh:
+        fh.write(app.replace(old, new))
+    r = subprocess.run(
+        ["ghc", "-fno-code", "-XGHC2021", "-i" + lib,
+         "-hidir", out, "-odir", out, f"{lib}/KayaApp.hs"],
+        capture_output=True, text=True)
+    log = r.stdout + r.stderr
+    print(f"{name}=applied:1 rc:{r.returncode} named:{all(m in log for m in markers)}")
+
+
+# The header bar's TEMPLATE arm gone, with the live arm one scope up
+# still spelling the name: the pre-unification `columnsNode`-only state.
+compiles("haskell-tpl-columns-gone", TPL_COLUMNS, "",
+         ("Werror=missing-methods", "columns", "Declare Tpl"))
+# The node registrar gone, with the live one still there.
+compiles("haskell-node-sort-gone", NODE_SORT, "",
+         ("Werror=missing-methods", "onSort", "HandlerTarget Node"))
+# AND THE OTHER DIRECTION, because the class spans both zones and only a
+# per-zone watch can say so: the LIVE arm of a different verb gone, with
+# the template arm still there.
+compiles("haskell-widget-paste-gone", WIDGET_PASTE, "",
+         ("Werror=missing-methods", "onPaste", "HandlerTarget Widget"))
+# The handler's SHAPE gone: not missing-methods, a stuck family.
+compiles("haskell-keyed-node-gone",
+         "  type Keyed Node p = [W.Value] -> p\n", "",
+         ("Couldn", "Keyed Node"))
+
+shutil.rmtree(tmp)
+PROBE
+)
+want_hs_zone_probe="haskell-tpl-columns-gone=applied:1 rc:1 named:True
+haskell-node-sort-gone=applied:1 rc:1 named:True
+haskell-widget-paste-gone=applied:1 rc:1 named:True
+haskell-keyed-node-gone=applied:1 rc:1 named:True"
+if [ "$hs_zone_probe" != "$want_hs_zone_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the haskell zone-spanning" \
+        "walls did not catch their watched deletions). Wanted:" >&2
+    echo "$want_hs_zone_probe" >&2
+    echo "Got:" >&2
+    echo "$hs_zone_probe" >&2
+    exit 1
+fi
+echo "check-sugar-surface: haskell zone-spanning perturbations applied:"
+echo "$hs_zone_probe"
+unset hs_zone_probe want_hs_zone_probe
 
 # (c3) JAVA'S DYNAMIC-TABLE READER, watched at each of its three points
 #      and at the façade half that lets the for-statement form reach
@@ -1229,15 +1596,18 @@ whole("java-keyed-len", src,
       TABLE + "keyed re-declaration")
 
 # The façade half: a forward deleted from RowSurface leaves the nested
-# table reachable through forEach and not through `for (var row : …)`.
+# table unspellable from a row at all — `rows` is the only For form.
+# THE READER HAD TO LEARN THE RETURN TYPE FIRST: read for Node and void
+# alone it saw `rows` on NEITHER side and called the façade level, which
+# was measured passing with this exact forward deleted (2026-08-24).
 whole("java-facade-columns", src,
       "        public void columns(Node n, String[] titles, Sort sort) {\n"
       "            t.columns(n, titles, sort);\n        }\n", "",
       "does not forward: columns(Node, String[], Sort)")
-whole("java-facade-foreach", src,
-      "        public Node forEach(Collection c, Consumer<Tpl> body) {\n"
-      "            return t.forEach(c, body);\n        }\n", "",
-      "does not forward: forEach(Collection, Consumer<Tpl>)")
+whole("java-facade-rows", src,
+      "        public Rows<Node, Row> rows(Collection c) {\n"
+      "            return t.rows(c);\n        }\n", "",
+      "does not forward: rows(Collection)")
 
 # And the refusal: a reader that can no longer find the zone must say so
 # rather than report a binding with nothing missing.
@@ -1252,7 +1622,7 @@ java-sort-route=applied:1 rc:1 named:True
 java-keyed-order=applied:1 rc:1 named:True
 java-keyed-len=applied:1 rc:1 named:True
 java-facade-columns=applied:1 rc:1 named:True
-java-facade-foreach=applied:1 rc:1 named:True
+java-facade-rows=applied:1 rc:1 named:True
 java-reader=applied:1 rc:1 named:True"
 if [ "$tpl_table_java" != "$want_table_java" ]; then
     echo "check-sugar-surface: SELF-TEST FAIL (the Java dynamic-table census did" \
@@ -1265,6 +1635,116 @@ fi
 echo "check-sugar-surface: java dynamic-table perturbations applied:"
 echo "$tpl_table_java"
 unset tpl_table_java want_table_java
+
+# (c4) C#'S GENERATED FAÇADE AND ITS TWIN. Both halves are emitted by
+#      tools/kaya-csgen into every guests/csharp/*Kaya.cs at once, so a
+#      perturbation lands in ONE staged file and the census must still
+#      name it: the nested-For vocabulary the façade forwards (a row that
+#      cannot open a For cannot name the Node whose bar Columns
+#      declares), and the `Each(Tpl, …)` twin without which a nested
+#      typed For's body holds the raw zone. docs/deferred.md, closed
+#      2026-08-24. An additive block for the reason (c3) is one.
+tpl_facade_csharp=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+
+GEN = "guests/csharp/TableItemKaya.cs"
+
+
+def stage(perturb):
+    """A temp repo root where exactly `perturb` (path -> text) differs."""
+    root = tempfile.mkdtemp()
+    dirs = {}
+    for path in perturb:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            dirs.setdefault("/".join(parts[:i]), True)
+    for top in os.listdir("."):
+        if top not in dirs:
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for d in sorted(dirs):
+        os.makedirs(f"{root}/{d}", exist_ok=True)
+        for entry in os.listdir(d):
+            child = f"{d}/{entry}"
+            if child not in dirs and child not in perturb:
+                os.symlink(os.path.abspath(child), f"{root}/{child}")
+    for path, text in perturb.items():
+        open(f"{root}/{path}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def run(name, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage({GEN: text})
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def cut(name, old, want):
+    n = src.count(old)
+    run(name, src.replace(old, "") if n == 1 else src, n, want)
+
+
+src = open(GEN, encoding="utf-8").read()
+
+cut("csharp-facade-collection",
+    "    public Collection Collection() => t.Collection();\n",
+    "does not forward: Collection()")
+cut("csharp-facade-each",
+    "    public Node Each(Collection c, System.Action<Tpl> body) => t.Each(c, body);\n",
+    "does not forward: Each(Collection, Action<Tpl>)")
+cut("csharp-facade-foreach",
+    "    public Node ForEach(Collection c,\n"
+    "        System.Action<Tpl> body) =>\n        t.ForEach(c, body);\n",
+    "does not forward: ForEach(Collection, Action<Tpl>)")
+cut("csharp-facade-columns",
+    "    public void Columns(Node n, string[] titles, Sort sort) =>\n"
+    "        t.Columns(n, titles, sort);\n",
+    "does not forward: Columns(Node, string[], Sort)")
+
+# The typed sugar's two zones, one at a time.
+cut("csharp-twin-nested",
+    "    public static Node Each(Tpl t, RecordCollection<TableItem> c,\n"
+    "        System.Action<TableItemRow> body) =>\n"
+    "        t.Each(c.Collection, inner => body(new TableItemRow(inner)));\n",
+    "has no Tpl-zone `Each` handing out `TableItemRow`")
+cut("csharp-twin-live",
+    "    public static Widget Each(Tx tx, RecordCollection<TableItem> c,\n"
+    "        System.Action<TableItemRow> body) =>\n"
+    "        tx.Each(c.Collection, t => body(new TableItemRow(t)));\n",
+    "has no Tx-zone `Each` handing out `TableItemRow`")
+
+# And the reader: with the row surface renamed, the twin census must
+# report that it read FEWER generated surfaces than the tree carries
+# rather than agreeing with a file it stopped seeing.
+n = src.count("sealed class TableItemRow\n")
+run("csharp-twin-reader",
+    src.replace("sealed class TableItemRow\n", "sealed class TableItemRowGone\n")
+    if n == 1 else src,
+    n, "typed-row reader found only 2")
+PROBE
+)
+want_facade_csharp="csharp-facade-collection=applied:1 rc:1 named:True
+csharp-facade-each=applied:1 rc:1 named:True
+csharp-facade-foreach=applied:1 rc:1 named:True
+csharp-facade-columns=applied:1 rc:1 named:True
+csharp-twin-nested=applied:1 rc:1 named:True
+csharp-twin-live=applied:1 rc:1 named:True
+csharp-twin-reader=applied:1 rc:1 named:True"
+if [ "$tpl_facade_csharp" != "$want_facade_csharp" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the C# generated-façade census" \
+        "did not catch its watched deletions). Wanted:" >&2
+    echo "$want_facade_csharp" >&2
+    echo "Got:" >&2
+    echo "$tpl_facade_csharp" >&2
+    exit 1
+fi
+echo "check-sugar-surface: csharp generated-façade perturbations applied:"
+echo "$tpl_facade_csharp"
+unset tpl_facade_csharp want_facade_csharp
 
 # (c2) AND THE GUEST THAT SPELLS THEM. The census above says Python CAN
 #      spell the dynamic-table geometry; the portfolio guest is what
@@ -1821,8 +2301,14 @@ check haskell bindings/haskell/KayaApp.hs \
     "template a11y hint"  "TplA11yHint ::"
 check haskell bindings/haskell/KayaApp.hs \
     "template accepts"    "TplAccepts ::"
+# HASKELL'S IS AN INSTANCE ARM, receiver-keyed on the Node pattern:
+# `onPasteNode` died with the rest of the `*Node` twins, and a bare
+# `onPaste` would be satisfied by the class signature and by the LIVE arm
+# alike (bindings/haskell/KayaApp.hs, instance HandlerTarget Node). The
+# arm's PRESENCE is also held by -Werror=missing-methods, which is the
+# wall on the path nobody can avoid; this is the sweep's copy of it.
 check haskell bindings/haskell/KayaApp.hs \
-    "node paste registrar" "^onPasteNode ::"
+    "node paste registrar" "^  onPaste app \(Node n\) handler ="
 
 # Python's, by CLASS STRUCTURE rather than grep — the reader walks
 # `class Node` and its bases with `ast` and requires each prop method
@@ -2050,7 +2536,12 @@ check go      bindings/go/app.go                  on_paste "func \(a \*App\) OnP
 check csharp  bindings/csharp/KayaApp.cs          on_paste "public void OnPaste\("
 check java    bindings/java/dev/kaya/KayaApp.java on_paste "public void onPaste\("
 check swift   bindings/swift/KayaApp.swift        on_paste "func onPaste\("
-check haskell bindings/haskell/KayaApp.hs         on_paste "^onPaste ::"
+# The LIVE ARM, not the class signature: an arm cannot exist without the
+# method, so this reads the stronger half (bindings/haskell/KayaApp.hs,
+# instance HandlerTarget Widget). The template arm is the "node paste
+# registrar" clause above; both arms are also held by the file's own
+# -Werror=missing-methods.
+check haskell bindings/haskell/KayaApp.hs         on_paste "^  onPaste app \(Widget n\) handler ="
 check ocaml   bindings/ocaml/kaya_app.ml          on_paste "^let on_paste "
 
 # The menu construction surface (DESIGN.md, Menus): menu items are not
@@ -3085,8 +3576,9 @@ scene_rules=(
     # (docs/tpl-props-plan.md F3).
     "*" go "the generic BindText" '\.BindText\(' \
         '        tx.BindText(statusLabel, status)'
-    "*" go "the ForEach combinator" '\.ForEach\(' \
-        '        todoList := tx.ForEach(todos, nil)'
+    # NO ForEach ROW: Go's callback For is gone (the idiom sweep,
+    # 2026-08-24) — a For is a for statement over Rows.All(), and there
+    # is no floor spelling of it left for a scene to fall back to.
     "*" go "BindTextElement by index" '\.BindTextElement\(' \
         '        t.BindTextElement(label, 0)'
     "*" go "the AddChild chain" '\.AddChild\(' \
@@ -3107,8 +3599,13 @@ scene_rules=(
         '            KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);'
     "*" java "the generic bindText" '\.bindText\(' \
         '            tx.bindText(statusLabel, status);'
-    "*" java "the forEach combinator" '\.forEach\(' \
-        '            KayaApp.Widget todoList = tx.forEach(todos, null);'
+    # JAVA'S CALLBACK For DIED 2026-08-24 (the one form is the eager
+    # `rows` Iterable), so `.forEach(` names nothing this binding
+    # exports and the compiler is that wall. What is still reachable is
+    # the tier BELOW the for statement: KayaRecords.rowTrace, public
+    # because the generated surfaces call it from the guests' package.
+    "*" java "the rowTrace machinery" 'KayaRecords\.rowTrace\(' \
+        '            KayaRecords.rowTrace(tx, todos, t -> t);'
     "*" java "bindTextElement by index" '\.bindTextElement\(' \
         '            t.bindTextElement(label, 0);'
     "*" java "the addChild chain" '\.addChild\(' \

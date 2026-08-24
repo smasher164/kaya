@@ -31,21 +31,23 @@ final class Table {
             var items = TableItemKaya.collection(tx);
             // The root is a row so the For's container is the scene's
             // only column-kind widget (the reorder scene's rule). The
-            // table IS the For, headers declared on the Widget the
-            // template form returns.
+            // table IS the For, headers declared on the rows value that
+            // opened it.
             tx.mount(tx.row(() -> {
-                var table = TableItemKaya.each(tx, items, row -> {
+                var rows = TableItemKaya.rows(tx, items);
+                for (var row : rows) {
                     row.row(() -> {
                         row.label(row.name);
                         row.label(row.size);
                     });
-                });
+                }
+                var table = rows.handle;
                 // Grown on purpose: this scene asserts the
                 // fill-and-scroll viewport, the grown half of the
                 // empty-row ruling — ungrown would hug its rows
                 // (tables-plan decision 8).
                 tx.setGrow(table, 1);
-                tx.columns(table, new String[] { "Name", "Size" }, KayaApp.Sort.none());
+                rows.columns(new String[] { "Name", "Size" }, KayaApp.Sort.none());
                 app.onSort(table, (t, column) -> {
                     boolean desc = sortedCol == column && !sortedDesc;
                     sortedCol = column;

@@ -16,6 +16,7 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
+//go:generate go run dev.kaya/cmd/kaya-gen -type Todo -key int64
 type Todo struct {
 	Title string
 	Done  bool
@@ -73,7 +74,7 @@ func App() *kaya.App {
 				})
 			})
 			tx.Label(itemsLeft)
-			for row := range TodoRows(tx, todos) {
+			for row := range TodoRows(tx, todos).All() {
 				row.Row(func() {
 					row.Checkbox(row.Done(),
 						func(tx *kaya.Tx, key int64, checked bool) {

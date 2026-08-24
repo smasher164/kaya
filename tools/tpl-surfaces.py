@@ -129,14 +129,40 @@ def zone_rust(_):
     return set(re.findall(r"^\s{4}pub fn ([a-z_0-9]+)", body, re.M))
 
 
+def go_tpl_methods(src):
+    """Every `func (t *Tpl) …` paired with the type it returns.
+
+    A generic method's signature spans lines (`[S interface {` … `}](…)
+    Node {`), so the return type is read off the line that OPENS THE
+    BODY rather than off the header.
+    """
+    out = []
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        head = re.match(r"^func \(t \*Tpl\) ([A-Z][A-Za-z0-9]*)\s*[\(\[]", line)
+        if not head:
+            continue
+        returns = ""
+        for probe in lines[i:i + 12]:
+            end = re.search(r"\)\s*(\**[A-Za-z0-9_]*)\s*\{$", probe)
+            if end:
+                returns = end.group(1)
+                break
+        out.append((head.group(1), returns))
+    return out
+
+
 def zone_go(_):
     # DIGITS AND GENERICS BOTH COUNT: `SetA11yID` has a digit in the name
     # and `BindA11yID[` a type parameter before its arguments.
+    #
+    # AND THE RETURN TYPE IS PART OF THE PATTERN, for the reason
+    # TABLE_POINTS states below: `offers` is prefix-loose, so the zone's
+    # table opener `Rows` would answer for the `row` KIND and hide a
+    # missing Row constructor. A constructor hands back a Node; Rows
+    # hands back *NodeRows.
     src = read("bindings/go/app.go")
-    return {
-        m.lower()
-        for m in re.findall(r"^func \(t \*Tpl\) ([A-Z][A-Za-z0-9]*)\s*[\(\[]", src, re.M)
-    }
+    return {name.lower() for name, returns in go_tpl_methods(src) if returns == "Node"}
 
 
 def zone_csharp(_):
@@ -315,7 +341,13 @@ TABLE_POINTS = {
     "csharp": ("columns", "on_sort", "keyed re-declaration"),
     "swift": ("columns", "on_sort", "keyed re-declaration"),
     "ocaml": ("columns", "on_sort", "keyed re-declaration"),
-    "haskell": ("columns", "on_sort", "keyed re-declaration"),
+    "haskell": (
+        "columns",
+        "on_sort",
+        "keyed re-declaration",
+        "nested record collection",
+        "record instance addressing",
+    ),
     "python": (
         "columns",
         "on_sort",
@@ -393,30 +425,44 @@ def table_go(_):
 
     got = set()
 
-    # The nested For's handle, then the bar declared against it with an
-    # empty path: the template-scoped declaration, every copy's bar.
+    # The nested For's opener, the bar the chain RECORDS against it, and
+    # the one emitter that writes it: after template_end, with an empty
+    # path, against the For's own id.
     nested_for = re.search(
-        r"^func \(t \*Tpl\) ForEach\(c Collection, fn func\(\*Tpl\)\) Node \{",
+        r"^func \(t \*Tpl\) Rows\(c Collection\) \*NodeRows \{",
         src,
         re.M,
     )
     tpl_columns = go_func_body(
-        src, r"^func \(t \*Tpl\) Columns\(n Node, titles \[\]string, sort Sort\) \{"
+        src,
+        r"^func \(r \*NodeRows\) Columns\(titles \[\]string, sort Sort\) \*NodeRows \{",
+    )
+    emitter = go_func_body(
+        src, r"^func \(st \*rowsState\) all\(yield func\(Row\) bool\) \{"
     )
     if (
         nested_for
         and tpl_columns
+        and "r.st.bar = &headerBar{titles, sort}" in tpl_columns
+        and emitter
         and re.search(
-            r"TxSetColumnHeaders\(n\.id,.*?uint32\(len\(titles\)\),\s*0,",
-            tpl_columns,
+            r"TxSetColumnHeaders\(st\.id,.*?"
+            r"uint32\(len\(st\.bar\.titles\)\),\s*0,",
+            emitter,
             re.S,
         )
     ):
         got.add("columns")
 
-    # Handlers scope to their creator: the registration is keyed by the
-    # For's NODE and its callback takes the copy's keys, and the dispatch
-    # arm that reads that map hands them over.
+    # Handlers scope to their creator: the chain registers at the For it
+    # opened, the registration is keyed by that NODE and its callback
+    # takes the copy's keys, and the dispatch arm that reads the map
+    # hands them over.
+    chain_sort = go_func_body(
+        src,
+        r"^func \(r \*NodeRows\) OnSort\(fn func\(\*Tx, \[\]any, uint32\)\) "
+        r"\*NodeRows \{",
+    )
     on_sort_node = go_func_body(
         src,
         r"^func \(a \*App\) OnSortNode\(n Node, "
@@ -428,17 +474,26 @@ def table_go(_):
         r"\s*a\.dispatch\(func\(tx \*Tx\) \{ fn\(tx, keys, column\) \}\)",
         serve,
     )
-    if on_sort_node and "a.nodeSorts[n.id] = fn" in on_sort_node and routed:
+    if (
+        chain_sort
+        and "r.st.tx.app.OnSortNode(r.Node(), fn)" in chain_sort
+        and on_sort_node
+        and "a.nodeSorts[n.id] = fn" in on_sort_node
+        and routed
+    ):
         got.add("on_sort")
 
-    # One copy's bar: the template node, then its keys OUTERMOST FIRST
-    # ahead of the titles, and path_len counting the keys.
+    # One copy's bar: the nested For's handle, then its keys OUTERMOST
+    # FIRST ahead of the titles, and path_len counting the keys.
+    node_handle = re.search(
+        r"^func \(r \*NodeRows\) Node\(\) Node \{", src, re.M
+    )
     columns_at = go_func_body(
         src,
         r"^func \(tx \*Tx\) ColumnsAt\(n Node, keys \[\]any, "
         r"titles \[\]string, sort Sort\) \{",
     )
-    if columns_at and re.search(
+    if node_handle and columns_at and re.search(
         r"values = append\(values, keys\.\.\.\).*?"
         r"for _, title := range titles \{\s*\n"
         r"\s*values = append\(values, title\).*?"
@@ -584,15 +639,19 @@ def table_ocaml(_):
     tpl = keyword_block(src, r"^module Tpl = struct\b", r"^end")
     if tpl is None:
         return None
-    # The live `columns` and `on_sort` are top-level lets spelled with
-    # the same words, so each half is read from the side it must live
-    # on: the template declaration from inside module Tpl, the keyed
-    # re-declaration and the node registrar from the file with that
-    # module cut out.
+    # The live `columns` is a top-level let spelled with the same words,
+    # so each half is read from the side it must live on: the template
+    # declaration and ITS OWN ~on_sort from inside module Tpl, the keyed
+    # re-declaration from the file with that module cut out.
     outside = src.replace(tpl, "")
 
     got = set()
-    tpl_columns = ocaml_binding(tpl, r"^  let columns \(Node id\) titles sort =", "  ")
+    # THE HANDLER RIDES THE DECLARATION since 2026-08-24 — a labelled
+    # argument where this binding's ?on_click sits — so both clauses read
+    # ONE block, found by its header inside module Tpl. The live
+    # `columns` carries a labelled argument of the same name, which is
+    # why nothing here is keyed on that name alone.
+    tpl_columns = ocaml_binding(tpl, r"^  let columns\b", "  ")
     if tpl_columns and re.search(
         r"Kaya_wire\.tx_set_column_headers id\b.*?\(List\.length titles\) 0\b",
         tpl_columns,
@@ -600,13 +659,12 @@ def table_ocaml(_):
     ):
         got.add("columns")
 
-    registrar = ocaml_binding(
-        outside, r"^let on_sort_node app \(Node id\)", ""
-    )
-    registered = registrar and re.search(
-        r"handler : Kaya_wire\.value list -> int -> unit.*?"
-        r"Hashtbl\.replace app\.node_sorts id handler",
-        registrar,
+    # The TYPE is the half that says which zone the handler serves: the
+    # live one takes the column alone, this one the copy's key path first.
+    registered = tpl_columns and re.search(
+        r"\?\(on_sort : \(Kaya_wire\.value list -> int -> unit\) option\).*?"
+        r"Hashtbl\.replace tx\.app\.node_sorts id handler",
+        tpl_columns,
         re.S,
     )
     # A registration nothing dispatches answers no copy: the keyed arm
@@ -667,6 +725,29 @@ def haskell_decl(src, name):
     return "\n".join(out)
 
 
+def haskell_scope(src, header_re):
+    """A `class`/`instance` header line and the indented body under it.
+
+    The zone-spanning half of the surface lives in scopes rather than in
+    top-levels — `Declare`'s methods, and the instance that gives ONE of
+    them to ONE zone — and a method's signature there is indented, so
+    'haskell_decl' cannot see it. Reading the SCOPE is also what keeps a
+    clause honest: `instance Declare Build`'s implementation spells the
+    same method name as `instance Declare Tpl`'s.
+    """
+    lines = src.split("\n")
+    start = next((i for i, ln in enumerate(lines) if re.match(header_re, ln)), None)
+    if start is None:
+        return None
+    out = [lines[start]]
+    for line in lines[start + 1:]:
+        if line == "" or line.startswith((" ", "\t")):
+            out.append(line)
+        else:
+            break
+    return "\n".join(out)
+
+
 # --- one reader per binding -------------------------------------------
 #
 # Each returns the set of widget-kind constructor names its template zone
@@ -675,45 +756,74 @@ def haskell_decl(src, name):
 
 def table_haskell(_):
     src = read("bindings/haskell/KayaApp.hs")
-    # The LOCATORS are the two the file cannot lose while still being
-    # KayaApp.hs: the live bar and the occurrence loop. The three points
-    # below are then present-or-missing on their own, so a deleted
-    # spelling names ITSELF rather than reporting a broken reader.
-    if haskell_decl(src, "columns") is None or haskell_decl(src, "dispatchLoop") is None:
+    # THE ZONE IS THE SCOPE NOW, not the name: every `*Node` twin died
+    # when the module's own header rule reached them (a constructor
+    # identical in both zones keeps ONE name and dispatches on it), so
+    # the template half of each point is the arm inside the TEMPLATE
+    # instance — read by its scope, never by its name, since the live arm
+    # spells the same name one scope up.
+    #
+    # The LOCATORS are the three the file cannot lose while still being
+    # KayaApp.hs: the vocabulary class, its template instance, and the
+    # occurrence loop. The points below are then present-or-missing on
+    # their own, so a deleted spelling names ITSELF rather than reporting
+    # a broken reader.
+    declare = haskell_scope(src, r"^class Monad m => Declare m where")
+    tpl_zone = haskell_scope(src, r"^instance Declare Tpl where")
+    loop = haskell_decl(src, "dispatchLoop")
+    if declare is None or tpl_zone is None or loop is None:
         return None
 
     got = set()
-    nested = haskell_decl(src, "columnsNode")
-    if nested and re.search(
-        r"^columnsNode\s*::\s*Node\s*->\s*\[String\]\s*->\s*Sort\s*->\s*Tpl \(\)",
-        nested,
+    # BOTH HALVES, and each is a lie on its own: the class signature is
+    # what makes the bar zone-spanning rather than live-only (`El m ->
+    # … -> m ()`, the collectionOf clause's shape), and the template
+    # instance's arm is what proves the TEMPLATE zone actually got it —
+    # pathLen 0 against a template node is every stamped copy's bar.
+    if re.search(
+        r"^\s+columns\s*::\s*El m\s*->\s*\[String\]\s*->\s*Sort\s*->\s*m \(\)",
+        declare,
         re.M,
     ) and re.search(
-        r"emitT\b.*?W\.txSetColumnHeaders\b.*?"
+        r"^\s+columns \(Node n\) titles sort =.*?emitT\b.*?W\.txSetColumnHeaders\b.*?"
         r"\(fromIntegral \(length titles\)\)\s*0\s*\(map W\.VStr titles\)",
-        nested,
-        re.S,
+        tpl_zone,
+        re.M | re.S,
     ):
         got.add("columns")
 
-    registrar = haskell_decl(src, "onSortNode")
+    # The registrar is an INSTANCE ARM too, and its signature is the
+    # associated type: `Keyed Node` is where "the copy's keys reach the
+    # handler" is written down — ONCE, for all six registrars — so a node
+    # arm that took the live handler shape would be caught here rather
+    # than at a name.
+    sort_class = haskell_scope(src, r"^class HandlerTarget e where")
+    node_sort = haskell_scope(src, r"^instance HandlerTarget Node where")
     arm = re.search(
-        r"kind == W\.occKindSortRequested ->(.*?)(?=\|\s*kind ==)",
-        haskell_decl(src, "dispatchLoop"),
-        re.S,
+        r"kind == W\.occKindSortRequested ->(.*?)(?=\|\s*kind ==)", loop, re.S
     )
     routed = arm and re.search(
         r"readIORef \(appNodeSorts app\).*?h keys column", arm.group(1), re.S
     )
     if (
-        registrar
+        sort_class
+        and node_sort
         and re.search(
-            r"^onSortNode\s*::\s*App\s*->\s*Node\s*->\s*"
-            r"\(\[W\.Value\]\s*->\s*Int\s*->\s*IO \(\)\)\s*->\s*IO \(\)",
-            registrar,
+            r"^\s+onSort\s*::\s*App\s*->\s*e\s*->\s*"
+            r"Keyed e \(Int -> IO \(\)\)\s*->\s*IO \(\)",
+            sort_class,
             re.M,
         )
-        and "appNodeSorts" in registrar
+        and re.search(
+            r"^\s+type Keyed Node p\s*=\s*\[W\.Value\]\s*->\s*p\s*$",
+            node_sort,
+            re.M,
+        )
+        # The class holds six verbs, so the SORT arm has to be named: the
+        # instance mentioning appNodeSorts anywhere is what a five-verb
+        # instance would also satisfy.
+        and re.search(r"^\s+onSort app \(Node n\) handler =", node_sort, re.M)
+        and "appNodeSorts" in node_sort
         and routed
     ):
         got.add("on_sort")
@@ -731,6 +841,45 @@ def table_haskell(_):
         re.S,
     ):
         got.add("keyed re-declaration")
+
+    # THE ROW'S OWN FIELDS, which is what a table nested in a template is
+    # FOR. Two halves, and either one missing leaves the rows scalar:
+    # the record-schema constructor must stand in the TEMPLATE zone (a
+    # nested collection may only be declared there), and narrowing the
+    # handle to one stamped copy must keep the element type, since every
+    # record mutation takes RecordCollection.
+    birth = haskell_decl(src, "newRecordCollection")
+    if (
+        birth
+        and re.search(
+            r"^\s+collectionOf\s*::\s*KayaRecord a\s*=>\s*Proxy a\s*->\s*"
+            r"m \(RecordCollection a\)",
+            declare,
+            re.M,
+        )
+        and re.search(r"^\s+collectionOf\b.*\bnewRecordCollection\b", tpl_zone, re.M)
+        and "kayaSchema p" in birth
+    ):
+        got.add("nested record collection")
+
+    handle = haskell_scope(src, r"^class CollectionHandle c where")
+    record_at = haskell_scope(
+        src, r"^instance CollectionHandle \(RecordCollection a\) where"
+    )
+    if (
+        handle
+        and record_at
+        and re.search(r"^\s+at\s*::\s*c\s*->\s*W\.Value\s*->\s*c", handle, re.M)
+        # The KEY THREADED THROUGH, not just a RecordCollection handed
+        # back: `at (RecordCollection c) _ = RecordCollection c` typechecks
+        # everywhere and addresses the parent instead of the copy.
+        and re.search(
+            r"^\s+at \(RecordCollection c\) key = RecordCollection \(at c key\)",
+            record_at,
+            re.M,
+        )
+    ):
+        got.add("record instance addressing")
     return got
 
 
@@ -876,7 +1025,8 @@ TABLE_ZONES = [
     (
         "go",
         table_go,
-        "Tpl.Columns + App.OnSortNode + Tx.ColumnsAt (bindings/go/app.go)",
+        "Tpl.Rows's NodeRows chain + App.OnSortNode + Tx.ColumnsAt "
+        "(bindings/go/app.go)",
     ),
     (
         "csharp",
@@ -904,13 +1054,15 @@ TABLE_ZONES = [
     (
         "ocaml",
         table_ocaml,
-        "module Tpl's own `columns` + top-level columns_at/on_sort_node "
+        "module Tpl's own `columns` (bar AND ~on_sort) + top-level columns_at "
         "(bindings/ocaml/kaya_app.ml)",
     ),
     (
         "haskell",
         table_haskell,
-        "columnsNode/onSortNode/columnsAt, read by their own signatures "
+        "Declare's columns and HandlerTarget's onSort, read in their "
+        "TEMPLATE instances, plus the columnsAt top-level, Declare's "
+        "collectionOf and CollectionHandle's RecordCollection instance "
         "(bindings/haskell/KayaApp.hs)",
     ),
 ]
@@ -1124,29 +1276,28 @@ SOURCE_ZONES = [
 # excludes); `addChild` is the parenting floor; `onToggleNode` is the
 # bridge the generated typed sugar reaches through `tpl()`.
 #
-# `forEach` LEFT THIS LIST with dynamic tables (docs/tables-plan.md).
-# `collection()` used to cover it — a nested For has a statement form,
-# `for (var p : positions.rows())` — but that form hands back no handle,
-# and a nested table's header bar and sort handler have nothing to name
-# without one.
+# `forEach` joined this list, then left it with dynamic tables, and is
+# now GONE from the binding: the callback form died 2026-08-24 and the
+# one For form is `rows(Collection)`, an eager Iterable whose value
+# carries the handle a nested table's header bar and sort handler name.
+# So the façade forwards `rows` and the exemption has nothing left to
+# describe (docs/tables-plan.md).
 NOT_FORWARDED_JAVA = {
     "widget", "addChild", "onToggleNode",
 }
 
 # C#'s façade documents its own exclusions in its generated header
-# (guests/csharp/*Kaya.cs). ContextMenu is on this list and off Rust's —
-# a real divergence between two façades over one zone, recorded and
-# ledgered rather than silently blessed.
+# (guests/csharp/*Kaya.cs). ContextMenu and When are on this list and off
+# Java's RowSurface — a real divergence between two façades over one
+# zone, recorded and ledgered rather than silently blessed.
 #
-# `Columns` is off it for a REACHABILITY reason rather than a taste one:
-# it declares a NESTED For's header bar and takes the Node Each hands
-# back, and Each/ForEach/Collection are already off the façade, so a
-# forward would take an argument this surface cannot produce. Widening
-# the façade to the whole nested-For vocabulary would be a slice of its
-# own.
+# `Collection`, `Each`, `ForEach` and `Columns` LEFT THIS LIST when the
+# generated façade closed (docs/deferred.md, 2026-08-24), for the reason
+# `forEach` left Java's: a row that cannot open a nested For cannot name
+# the Node whose header bar Columns declares, so a nested table was
+# spellable through tx.Each and not through a row at all.
 NOT_FORWARDED_CSHARP = {
-    "Widget", "AddChild", "Collection", "ForEach", "Each", "When", "ContextMenu",
-    "Columns",
+    "Widget", "AddChild", "When", "ContextMenu",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
     "BindSourceField",
 }
@@ -1230,7 +1381,14 @@ def facade_java():
     row = brace_block(src, r"^\s*public abstract static class RowSurface\b")
     if tpl is None or row is None:
         return None
-    pat = r"^\s*public\s+(?:void|Node)\s+([a-zA-Z][A-Za-z0-9]*)\s*\(([^)]*)\)"
+    # `Rows<...>` is in the return types for the reason C#'s reader keeps
+    # `Collection`: the zone's `rows()` is how a nested For gets opened,
+    # and read for Node and void alone the member is invisible on BOTH
+    # sides — a façade that dropped the forward would read level.
+    # MEASURED 2026-08-24 against this very reader: with the forward
+    # deleted and `Rows` missing from the alternation the census passed.
+    pat = (r"^\s*public\s+(?:void|Node|Rows<[^>]*>)\s+([a-zA-Z][A-Za-z0-9]*)"
+           r"\s*\(([^)]*)\)")
     zone = {m for m in _typed_members(tpl, pat) if m[0] not in NOT_FORWARDED_JAVA}
     facade = {m for m in _typed_members(row, pat) if m[0] not in NOT_FORWARDED_JAVA}
     return [(
@@ -1253,7 +1411,12 @@ def facade_csharp():
                       r"^\s*(public |internal )?sealed class Tpl\b")
     if tpl is None:
         return None
-    pat = r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)"
+    # `Collection` is in the return types because the zone's own
+    # `Collection()` is how a nested For gets something to iterate: read
+    # for Node and void alone, the member is invisible on BOTH sides and
+    # a façade missing it reads level.
+    pat = (r"^\s*public\s+(?:void|Node|Collection)\s+([A-Za-z][A-Za-z0-9]*)"
+           r"\s*\(([^)]*)\)")
     zone = {m for m in _typed_members(tpl, pat) if m[0] not in NOT_FORWARDED_CSHARP}
     out = []
     for path in sorted(glob.glob(f"{ROOT}/guests/csharp/*Kaya.cs")):
@@ -1274,6 +1437,76 @@ def facade_csharp():
         # NOT a pass: finding no generated façade means the reader has
         # stopped seeing them.
         return None
+    return out
+
+
+# --- the TYPED ROW SUGAR, held level across the two zones it opens -----
+#
+# `<Rec>Kaya.Each` opens a For and hands its body the generated `<Rec>Row`
+# façade above. It takes the LIVE zone's `Tx` for a top-level For and the
+# TEMPLATE zone's `Tpl` for a nested one, and a generator that emits only
+# the first leaves a nested typed For's body holding the raw Tpl —
+# spelling its cells with the static tokens, which is the tier the façade
+# exists to keep guests off (docs/deferred.md, closed 2026-08-24).
+#
+# The floor is the census discipline one surface over: a reader that
+# finds no generated surface agrees with everything. Sum surfaces have no
+# `<Rec>Row` and are not counted.
+CSHARP_TWIN_FLOOR = 3
+
+
+JAVA_TWIN_FLOOR = 3
+
+
+def twins_java():
+    """`(file, <Rec>, {zone parameter types})` per generated `rows`.
+
+    Java's twin joined 2026-08-24, when the callback `each` died and the
+    one For form became an eager Iterable. The zone-agnostic `rows(c)` it
+    replaced could serve both zones because it was LAZY — it read an
+    ambient app/tx at iteration time. Eager, the zone is a parameter, so
+    the generator emits one overload per zone and a generator that
+    emitted only `Tx` would leave a nested typed For unspellable: exactly
+    the defect the C# reader below exists to catch.
+    """
+    out = []
+    for path in sorted(glob.glob(f"{ROOT}/guests/java/**/*Kaya.java", recursive=True)):
+        src = open(path, encoding="utf-8").read()
+        m = re.search(r"^(?:final |public final )?class (\w+)Kaya\b", src, re.M)
+        if m is None or not re.search(r"^\s*static final class Row\b", src, re.M):
+            continue
+        rec = m.group(1)
+        zones = set()
+        for opens, rest in re.findall(
+                r"^\s*static KayaApp\.Rows<[^>]*>\s+rows\(\s*"
+                r"KayaApp\.(\w+) \w+,((?:[^;{]|\n)*?)\)\s*\{", src, re.M):
+            if "Collection<" in rest:
+                zones.add(opens)
+        rel = path[len(ROOT) + 1:] if path.startswith(ROOT + "/") else path
+        out.append((rel, rec, zones))
+    return out
+
+
+def twins_csharp():
+    """`(file, <Rec>, {zone types})` per generated typed-row `Each`."""
+    out = []
+    for path in sorted(glob.glob(f"{ROOT}/guests/csharp/*Kaya.cs")):
+        src = open(path, encoding="utf-8").read()
+        for m in re.finditer(r"^static class (\w+)Kaya\b", src, re.M):
+            rec = m.group(1)
+            if not re.search(rf"^sealed class {rec}Row\b", src, re.M):
+                continue
+            body = brace_block(src, rf"^static class {rec}Kaya\b")
+            if body is None:
+                continue
+            zones = set()
+            for opens, rest in re.findall(
+                    r"^\s*public static \w+ Each\(\s*(\w+) \w+,([^)]*)\)",
+                    body, re.S | re.M):
+                if f"{rec}Row" in rest:
+                    zones.add(opens)
+            rel = path[len(ROOT) + 1:] if path.startswith(ROOT + "/") else path
+            out.append((rel, rec, zones))
     return out
 
 
@@ -1495,6 +1728,61 @@ def main():
                     + " — a façade cannot be wider than the zone it forwards to."
                 )
                 status = 1
+
+    # AND THE TYPED ROW SUGAR ITSELF, level across both zones.
+    try:
+        twins = twins_csharp()
+    except OSError as e:
+        print(f"tpl-surfaces: cannot read C#'s generated row surfaces ({e})")
+        return 1
+    if len(twins) < CSHARP_TWIN_FLOOR:
+        print(
+            f"tpl-surfaces: the C# typed-row reader found only {len(twins)} "
+            f"generated row surfaces under guests/csharp, fewer than the "
+            f"{CSHARP_TWIN_FLOOR} the tree is known to carry — the reader has "
+            "stopped seeing the surface it exists to census and can no longer "
+            "fail. Fix the reader here rather than lowering the floor."
+        )
+        status = 1
+    for rel, rec, zones in twins:
+        missing = [z for z in ("Tx", "Tpl") if z not in zones]
+        if missing:
+            print(
+                f"check-sugar-surface: C#'s generated `{rec}Kaya` has no "
+                + " or ".join(missing)
+                + f"-zone `Each` handing out `{rec}Row` — in {rel}. A typed For "
+                "opened in the zone it is missing hands its body the raw Tpl, "
+                "which spells its cells with the static tokens instead of the "
+                "row's own. Emit it in tools/kaya-csgen."
+            )
+            status = 1
+
+    try:
+        jtwins = twins_java()
+    except OSError as e:
+        print(f"tpl-surfaces: cannot read Java's generated row surfaces ({e})")
+        return 1
+    if len(jtwins) < JAVA_TWIN_FLOOR:
+        print(
+            f"tpl-surfaces: the Java typed-row reader found only {len(jtwins)} "
+            f"generated row surfaces under guests/java, fewer than the "
+            f"{JAVA_TWIN_FLOOR} the tree is known to carry — the reader has "
+            "stopped seeing the surface it exists to census and can no longer "
+            "fail. Fix the reader here rather than lowering the floor."
+        )
+        status = 1
+    for rel, rec, zones in jtwins:
+        missing = [z for z in ("Tx", "RowSurface") if z not in zones]
+        if missing:
+            print(
+                f"check-sugar-surface: Java's generated `{rec}Kaya` has no "
+                + " or ".join(missing)
+                + f"-zone `rows` handing out `{rec}Kaya.Row` — in {rel}. Without the "
+                "RowSurface overload a table inside a row template cannot be "
+                "spelled with the typed row at all; without the Tx one a "
+                "top-level one cannot. Emit it in tools/java-processor."
+            )
+            status = 1
 
     return status
 

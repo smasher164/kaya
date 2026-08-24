@@ -191,7 +191,10 @@ public final class KayaApp {
     private static final int TYPEFACE_MASK_FONT = 1;
     private static final int IDENTITY_MASK_ICON = 1;
 
-    private long signals, widgets, collections, nodes, menuItems;
+    // No `nodes`: template nodes draw from `widgets`, one sequence per
+    // app (DESIGN.md, Binding conventions). Deleting the field is the
+    // guard — a future ++nodes does not compile.
+    private long signals, widgets, collections, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
@@ -248,11 +251,10 @@ public final class KayaApp {
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
     // body, constructors parent to the top, and 0 is the template-root
-    // sentinel. The ambient app/tx pair exists for the generated row
-    // traces — an Iterable is static code (one app per guest process).
-    static KayaApp ambient;
-    Tx currentTx;
+    // sentinel.
     final java.util.List<Long> parents = new java.util.ArrayList<>();
+    // Fors opened and not yet closed by their loop; non-zero at submit
+    // is the refusal in submitIfAny.
     int openTraces;
     // >0 while a template body is being declared (a For body, a When
     // body, or an open row trace); openFors tracks Fors only. The
@@ -2177,51 +2179,9 @@ public final class KayaApp {
         void assertRoot() {
             if (!path.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "kaya: forEach binds the collection itself, not an instance"
+                        "kaya: rows binds the collection itself, not an instance"
                                 + " — drop the at(...)");
             }
-        }
-
-        /**
-         * The for-each form over a scalar collection: {@code for (var
-         * row : items.rows())} traces the For template — the body runs
-         * once over the scalar row surface, a break is caught at submit,
-         * and the trace rides the zone it opens in, so statement traces
-         * nest. The record twin is the generated {@code <Type>Kaya.rows}.
-         */
-        public Iterable<Row> rows() {
-            Collection c = this;
-            return () -> new java.util.Iterator<Row>() {
-                int state;
-                RowTrace trace;
-
-                @Override
-                public boolean hasNext() {
-                    if (state == 0) {
-                        return true;
-                    }
-                    if (state == 1) {
-                        state = 2;
-                        trace.close();
-                    }
-                    return false;
-                }
-
-                @Override
-                public Row next() {
-                    if (state != 0) {
-                        throw new java.util.NoSuchElementException();
-                    }
-                    state = 1;
-                    KayaApp app = KayaApp.ambient;
-                    if (app == null || app.currentTx == null) {
-                        throw new IllegalStateException(
-                                "kaya: rows() iterates at record time, inside a transaction");
-                    }
-                    trace = app.currentTx.beginRowTrace(c);
-                    return new Row(trace.tpl);
-                }
-            };
         }
     }
 
@@ -2547,23 +2507,12 @@ public final class KayaApp {
 
         /**
          * A For inside this row's template, over a collection this row
-         * declared ({@link Tpl#forEach}).
-         *
-         * <p>FORWARDED BECAUSE A NESTED TABLE NEEDS THE HANDLE: the
-         * statement form {@code for (var p : positions.rows())} opens
-         * the same For and hands back nothing, so a header bar and its
-         * sort handler would have no node to name.
+         * declared ({@link Tpl#rows}). The rows value carries the
+         * template node a nested table's header bar and sort handler
+         * name.
          */
-        public Node forEach(Collection c, Consumer<Tpl> body) {
-            return t.forEach(c, body);
-        }
-
-        /** A nested For whose body returns the handles it declared, for
-         * the reason {@link #when(Signal, java.util.function.Function)}
-         * has that arity: a Java lambda cannot assign a captured local. */
-        public <R> Stamped<Node, R> forEach(
-                Collection c, java.util.function.Function<Tpl, R> body) {
-            return t.forEach(c, body);
+        public Rows<Node, Row> rows(Collection c) {
+            return t.rows(c);
         }
 
         /** The column header bar on a For declared inside this row —
@@ -2586,9 +2535,9 @@ public final class KayaApp {
             return t.when(s, body);
         }
 
-        /** A When whose body returns the handles it declared, for the
-         * same reason {@link Tpl#forEach} has that arity: a Java lambda
-         * cannot assign a captured local. */
+        /** A When whose body returns the handles it declared: a Java
+         * lambda cannot assign a captured local, and a When has no
+         * statement form to hand one back. */
         public <R> Stamped<Node, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             return t.when(s, body);
         }
@@ -2619,27 +2568,119 @@ public final class KayaApp {
         }
     }
 
-    /** An open generated row trace: the Tpl the loop body records
-     * against, and the close that ends the template. */
-    public static final class RowTrace {
-        public final Tpl tpl;
-        private final Runnable close;
+    /**
+     * A For, as a value: its container in the enclosing zone, the
+     * one-shot Iterable a {@code for} statement traces the template
+     * with, and the column header bar it declares.
+     *
+     * <p>THE FOR IS MINTED HERE, not when the loop starts: the handle
+     * exists before the body runs, which is what a nested table's header
+     * bar and sort handler have to name. The loop body runs ONCE;
+     * template_end lands when the loop asks for a second row. A rows
+     * value that is never looped leaves its scope open and the
+     * transaction refuses to submit ({@link Tx#submitIfAny}).
+     *
+     * <p>{@code H} is the zone's handle type — a live {@link Widget} at
+     * the top, a template {@link Node} inside a template — the way
+     * {@link Stamped} spells the same pair.
+     */
+    public static final class Rows<H, R> implements Iterable<R> {
+        /** The For's container in the enclosing zone. */
+        public final H handle;
 
-        RowTrace(Tpl tpl, Runnable close) {
+        private final Tx tx;
+        private final long id;
+        private final Tpl tpl;
+        private final java.util.function.Function<Tpl, R> makeRow;
+        private final BiConsumer<String[], Sort> declare;
+        private String[] titles;
+        private Sort sort;
+        private boolean traced;
+        private boolean closed;
+
+        Rows(Tx tx, long id, H handle, Tpl tpl,
+                java.util.function.Function<Tpl, R> makeRow,
+                BiConsumer<String[], Sort> declare) {
+            this.tx = tx;
+            this.id = id;
+            this.handle = handle;
             this.tpl = tpl;
-            this.close = close;
+            this.makeRow = makeRow;
+            this.declare = declare;
         }
 
-        public void close() {
-            close.run();
+        /**
+         * This For's column header bar. One title per column; the row
+         * template's root must be a Row of exactly one cell per column,
+         * refused loudly otherwise.
+         *
+         * <p>EMITTED AFTER template_end wherever it is called from: the
+         * header op finds its For in the OPEN PARENT SCOPE, which the
+         * nested For only folds into at its own TemplateEnd
+         * (docs/tables-plan.md, MEASURED IN SLICE 1). Move one stamped
+         * copy's indicator from the sort handler with
+         * {@link Tx#columnsAt}, which runs in a later transaction.
+         */
+        public void columns(String[] titles, Sort sort) {
+            if (closed) {
+                declare.accept(titles, sort);
+                return;
+            }
+            this.titles = titles;
+            this.sort = sort;
+        }
+
+        @Override
+        public java.util.Iterator<R> iterator() {
+            if (traced) {
+                throw new IllegalStateException(
+                        "kaya: this rows value already traced its template — a For"
+                                + " records its blueprint once");
+            }
+            traced = true;
+            return new java.util.Iterator<R>() {
+                int step;
+
+                @Override
+                public boolean hasNext() {
+                    if (step == 0) {
+                        return true;
+                    }
+                    // The guaranteed post-body call: the template ends
+                    // when the loop asks for a row it will not get.
+                    if (step == 1) {
+                        step = 2;
+                        close();
+                    }
+                    return false;
+                }
+
+                @Override
+                public R next() {
+                    if (step != 0) {
+                        throw new java.util.NoSuchElementException();
+                    }
+                    step = 1;
+                    return makeRow.apply(tpl);
+                }
+            };
+        }
+
+        private void close() {
+            tx.endFor(id);
+            closed = true;
+            if (titles != null) {
+                declare.accept(titles, sort);
+            }
         }
     }
 
     /**
-     * A stamped template: the For/When handle in the enclosing zone plus
-     * whatever the body chose to return — the way handles declared
-     * inside the template reach the handlers, since Java lambdas cannot
-     * assign captured locals.
+     * A stamped When: its handle in the enclosing zone plus whatever the
+     * body chose to return — the way handles declared inside the
+     * template reach the handlers, since Java lambdas cannot assign
+     * captured locals. A When has no statement form; a For does
+     * ({@link Rows}), and the smuggle went with it.
      */
     public static final class Stamped<H, R> {
         public final H handle;
@@ -2774,12 +2815,15 @@ public final class KayaApp {
         void submitIfAny() {
             if (openTraces != 0) {
                 openTraces = 0;
-                // The open trace also left the template-scope counter
-                // armed; a stuck counter would poison later reads.
+                // The open For also left the template-scope counter and
+                // the binding stack armed; stuck state would poison
+                // later reads and later Fors.
                 tplDepth = 0;
+                openFors.clear();
                 throw new IllegalStateException(
-                        "kaya: a for-each over rows was exited early (break?)"
-                                + " — the template never closed");
+                        "kaya: a For never closed its template — a rows value that"
+                                + " was never looped, or a loop left early"
+                                + " (break/return). Every rows(...) runs its one pass.");
             }
             for (Map.Entry<Long, Consumer<Tx>> entry : pendingDerived) {
                 derived.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
@@ -2811,6 +2855,7 @@ public final class KayaApp {
             // every later mirror read.
             tplDepth = 0;
             parents.clear();
+            openFors.clear();
             model.putAll(journal);
         }
 
@@ -3413,15 +3458,12 @@ public final class KayaApp {
         }
 
         /**
-         * A For over {@code c}: the body declares the template; the For
-         * itself (a live container) is returned.
-         */
-        /**
-         * Declare the column header bar on a For's container — the
-         * Widget forEach returns. One title per column; the row
-         * template's root must be a Row of exactly one cell per
-         * column, refused loudly otherwise. Re-call after sorting to
-         * move the indicator (docs/tables-plan.md).
+         * Re-declare the column header bar on a live For's container —
+         * what the sort handler calls, in the later transaction where no
+         * rows value exists; the declaration itself is
+         * {@link Rows#columns}. One title per column; the row template's
+         * root must be a Row of exactly one cell per column, refused
+         * loudly otherwise (docs/tables-plan.md).
          */
         public void columns(Widget w, String[] titles, Sort sort) {
             Object[] values = new Object[titles.length];
@@ -3451,71 +3493,58 @@ public final class KayaApp {
                 titles.length, keys.size(), values));
         }
 
-        public Widget forEach(Collection c, Consumer<Tpl> body) {
-            return forEach(c, t -> {
-                body.accept(t);
-                return null;
-            }).handle;
-        }
-
         /**
-         * A For whose body returns the handles it declared — they come
-         * back alongside the For itself.
+         * The For over {@code c} as a loop: {@code for (var row :
+         * tx.rows(items))} traces the template — the body runs once over
+         * the scalar row surface, and {@code rows.handle} is the live
+         * container the header bar and sort handler name. The record
+         * twin is the generated {@code <Type>Kaya.rows}.
          */
-        public <R> Stamped<Widget, R> forEach(
-                Collection c, java.util.function.Function<Tpl, R> body) {
-            c.assertRoot();
-            Widget w = new Widget(++widgets, this);
-            // The For parents into the enclosing scope, but the record
-            // must land after template_end — an addChild inside the
-            // blueprint would cross zones.
-            long parent = currentParent();
-            emit(KayaWire.txCreateFor(w.id, c.id));
-            openFors.add(c.id);
-            parents.add(0L);
-            // try/finally: a throwing body abandons the tx but the app
-            // survives, and a stuck counter would poison later reads.
-            tplDepth++;
-            R out;
-            try {
-                out = body.apply(new Tpl(this));
-            } finally {
-                tplDepth--;
-            }
-            parents.remove(parents.size() - 1);
-            openFors.remove(openFors.size() - 1);
-            emit(KayaWire.txTemplateEnd());
-            if (parent != 0) {
-                emit(KayaWire.txAddChild(parent, w.id));
-            }
-            return new Stamped<>(w, out);
+        public Rows<Widget, Row> rows(Collection c) {
+            return rows(c, Row::new);
         }
 
-        /** Open a For template for a generated row trace. A break leaves
-         * the trace open — caught at submit. The For rides the zone it
-         * opens in: the widget id space in the live zone, the node space
-         * inside an enclosing template. */
-        RowTrace beginRowTrace(Collection c) {
+        <R> Rows<Widget, R> rows(
+                Collection c, java.util.function.Function<Tpl, R> makeRow) {
+            long id = openFor(c);
+            Widget w = new Widget(id, this);
+            return new Rows<>(this, id, w, new Tpl(this), makeRow,
+                    (titles, sort) -> columns(w, titles, sort));
+        }
+
+        /** Open a For and hand back its container id for the zone to
+         * wrap. The For rides the zone it opens in: a live widget at the
+         * top, a template node inside an enclosing template, and one
+         * counter either way. */
+        long openFor(Collection c) {
             c.assertRoot();
-            long id = tplDepth > 0 ? ++nodes : ++widgets;
-            long parent = currentParent();
+            long id = ++widgets;
             emit(KayaWire.txCreateFor(id, c.id));
             openFors.add(c.id);
             parents.add(0L);
             openTraces++;
-            // The counter drops in close(); a break leaves it armed
-            // alongside openTraces, and submitIfAny resets both.
+            // Both counters drop in endFor; a loop left early leaves them
+            // armed, and submitIfAny refuses and resets.
             tplDepth++;
-            return new RowTrace(new Tpl(this), () -> {
-                tplDepth--;
-                parents.remove(parents.size() - 1);
-                openFors.remove(openFors.size() - 1);
-                emit(KayaWire.txTemplateEnd());
-                openTraces--;
-                if (parent != 0) {
-                    emit(KayaWire.txAddChild(parent, id));
-                }
-            });
+            return id;
+        }
+
+        /** Close the For {@code id} opened above: the blueprint ends, and
+         * only then does the container become a child of the scope the
+         * For was opened in — an addChild inside the blueprint would
+         * cross zones. */
+        void endFor(long id) {
+            tplDepth--;
+            parents.remove(parents.size() - 1);
+            openFors.remove(openFors.size() - 1);
+            emit(KayaWire.txTemplateEnd());
+            openTraces--;
+            // Popping this template's own 0 restores the enclosing
+            // scope's top: the parent the For was opened in.
+            long parent = currentParent();
+            if (parent != 0) {
+                emit(KayaWire.txAddChild(parent, id));
+            }
         }
 
         /** A When over a Bool signal: stamps on true, unstamps on false. */
@@ -4218,7 +4247,7 @@ public final class KayaApp {
         }
 
         public Node widget(int kind) {
-            Node n = new Node(++nodes);
+            Node n = new Node(++widgets);
             tx.emit(KayaWire.txCreateWidget(n.id, kind));
             tx.autoParent(n.id);
             return n;
@@ -4826,8 +4855,9 @@ public final class KayaApp {
         }
 
         /**
-         * Declare the column header bar on a NESTED For — the Node
-         * {@link #forEach} returned. One title per column; the row
+         * Re-declare the column header bar on a NESTED For — the Node a
+         * nested {@link #rows} handed back; the declaration itself is
+         * {@link Rows#columns}. One title per column; the row
          * template's root must be a Row of exactly one cell per column,
          * refused loudly otherwise. The declaration is the TEMPLATE's,
          * so every stamped copy gets this bar; move one copy's
@@ -4842,35 +4872,18 @@ public final class KayaApp {
                 n.id, sort.sorted, sort.direction, titles.length, 0, values));
         }
 
-        public Node forEach(Collection c, Consumer<Tpl> body) {
-            return forEach(c, t -> {
-                body.accept(t);
-                return null;
-            }).handle;
+        /** A For nested inside this template: {@code rows.handle} is the
+         * template node, one stamped container per copy. */
+        public Rows<Node, Row> rows(Collection c) {
+            return rows(c, Row::new);
         }
 
-        public <R> Stamped<Node, R> forEach(
-                Collection c, java.util.function.Function<Tpl, R> body) {
-            c.assertRoot();
-            Node n = new Node(++nodes);
-            long parent = tx.currentParent();
-            tx.emit(KayaWire.txCreateFor(n.id, c.id));
-            openFors.add(c.id);
-            parents.add(0L);
-            tplDepth++;
-            R out;
-            try {
-                out = body.apply(new Tpl(tx));
-            } finally {
-                tplDepth--;
-            }
-            parents.remove(parents.size() - 1);
-            openFors.remove(openFors.size() - 1);
-            tx.emit(KayaWire.txTemplateEnd());
-            if (parent != 0) {
-                tx.emit(KayaWire.txAddChild(parent, n.id));
-            }
-            return new Stamped<>(n, out);
+        <R> Rows<Node, R> rows(
+                Collection c, java.util.function.Function<Tpl, R> makeRow) {
+            long id = tx.openFor(c);
+            Node n = new Node(id);
+            return new Rows<>(tx, id, n, new Tpl(tx), makeRow,
+                    (titles, sort) -> columns(n, titles, sort));
         }
 
         public Node when(Signal<Boolean> s, Consumer<Tpl> body) {
@@ -4881,7 +4894,7 @@ public final class KayaApp {
         }
 
         public <R> Stamped<Node, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
-            Node n = new Node(++nodes);
+            Node n = new Node(++widgets);
             long parent = tx.currentParent();
             tx.emit(KayaWire.txCreateWhen(n.id, s.id));
             parents.add(0L);
@@ -4921,8 +4934,6 @@ public final class KayaApp {
     public <R> R build(java.util.function.Function<Tx, R> build) {
         requireAppThread();
         Tx tx = new Tx();
-        ambient = this;
-        currentTx = tx;
         R out;
         try {
             out = build.apply(tx);
@@ -4930,12 +4941,8 @@ public final class KayaApp {
             tx.rollback();
             throw e;
         } finally {
-            // Every exit clears the ambient slot — a stale currentTx
-            // would let the operator sugar reach a closed transaction
-            // (the divergence the other bindings never had) — and
-            // marks the transaction over, so late construction chains
-            // (Widget.grow) die loudly on either exit path.
-            currentTx = null;
+            // Marks the transaction over on either exit path, so late
+            // construction chains (Widget.grow) die loudly.
             tx.closed = true;
         }
         tx.submitIfAny();

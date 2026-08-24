@@ -7,12 +7,13 @@ docs/tpl-props-plan.md §2.
 
 WHY THE SHARPENINGS ARE SHAPES, NOT BIGGER REGEXES:
 
-- kaya's For combinator collides with every language's own iteration
-  method (`Iterable.forEach`, `List<T>.ForEach`, `Iterator::for_each`).
-  kaya's takes the COLLECTION first and the body second; every stdlib
-  form takes the body alone. So the discriminator is >= 2 top-level
-  arguments, which needs a paren-balanced scan — a comma regex breaks
-  on nested calls.
+- kaya's For combinator collides with its host language's own iteration
+  method (`List<T>.ForEach`, `Iterator::for_each`). kaya's takes the
+  COLLECTION first and the body second; every stdlib form takes the body
+  alone. So the discriminator is >= 2 top-level arguments, which needs a
+  paren-balanced scan — a comma regex breaks on nested calls. (Java left
+  this shape 2026-08-24: its callback For is gone and its floor rule is
+  a plain name.)
 - Swift's stdlib forEach is trailing-closure (`xs.forEach { .. }`);
   kaya's takes the collection in the parens. `\\.forEach\\([^{]` decides.
 - Generated files are exempt BY MARKER, not by filename glob: a glob
@@ -67,9 +68,12 @@ RULES = {
          "v.iter().for_each(drop);"),
     ],
     ".go": [
-        ("widget-kind construction", "line", r"\.Widget\(",
+        # THE ARGUMENT IS THE DISCRIMINATOR: the floor constructor takes a
+        # KIND, while `rows.Widget()` — the For container a Rows chain
+        # hands back — takes nothing and is the only way to name it.
+        ("widget-kind construction", "line", r"\.Widget\([^)]",
          "column := tx.Widget(kaya.KindColumn)",
-         "query = row.Entry()"),
+         "table = rows.Widget()"),
         ("the generic BindText", "line", r"\.BindText\(",
          "tx.BindText(statusLabel, status)",
          "tx.Label(status)"),
@@ -79,9 +83,9 @@ RULES = {
         ("the AddChild chain", "line", r"\.AddChild\(",
          "tx.AddChild(column, field)",
          "tx.Column(func() { tx.LabelText(\"x\") })"),
-        ("the ForEach combinator", "for2", r"\.ForEach\(",
-         "todoList := tx.ForEach(todos, func(t *kaya.Tpl) {})",
-         "list.ForEach(print)"),
+        # No ForEach rule: Go's callback For is gone — a For is a for
+        # statement over Rows.All(), and there is no floor spelling of it
+        # left to catch.
     ],
     ".cs": [
         ("widget-kind construction", "line", r"\.Widget\(",
@@ -113,9 +117,14 @@ RULES = {
         ("bindTextElement by index", "line", r"\.bindTextElement\(",
          "t.bindTextElement(label, 0);",
          "t.label(TodoKaya.title());"),
-        ("the forEach combinator", "for2", r"\.forEach\(",
-         "KayaApp.Widget todoList = tx.forEach(todos, t -> {});",
-         "list.forEach(System.out::println);"),
+        # Java's callback For died 2026-08-24 — the one form is the eager
+        # `rows` Iterable — so `.forEach(` names nothing the binding
+        # exports and the compiler holds that. The tier below the for
+        # statement is KayaRecords.rowTrace, public because the generated
+        # surfaces call it from the guests' own package.
+        ("the rowTrace machinery", "line", r"KayaRecords\.rowTrace\(",
+         "return KayaRecords.rowTrace(tx, c, t -> new Row(t, c));",
+         "for (var row : TodoKaya.rows(tx, todos)) {"),
     ],
     ".swift": [
         ("widget-kind construction", "line", r"\.widget\(",

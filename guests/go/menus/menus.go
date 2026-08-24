@@ -98,10 +98,10 @@ func App() *kaya.App {
 					tx.Write(status, "renamed")
 				})
 
-			for g := range groups.Rows(tx) {
+			for g := range tx.Rows(groups).All() {
 				g.Column(func() {
 					items = g.Collection()
-					for row := range items.Rows(tx) {
+					for row := range g.Rows(items).All() {
 						// label#2 once g2/a stamps
 						row.ContextMenu(row.Label(row.Value()), catalog)
 					}

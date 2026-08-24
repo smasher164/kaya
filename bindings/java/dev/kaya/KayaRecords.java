@@ -419,44 +419,23 @@ public final class KayaRecords {
     }
 
     /**
-     * The generic machinery behind the generated {@code rows()}
-     * Iterables: a one-element iterator that opens the For template on
-     * the first next() and closes it when the loop asks again. A break
-     * leaves the trace open; the transaction then refuses to submit.
+     * The generic machinery behind the generated {@code rows()}: opens
+     * the For in the zone it is handed and wraps each traced row in the
+     * generated surface. ONE PER ZONE, because the For's container is
+     * the zone's own handle — a live Widget at the top, a template Node
+     * inside a row — and a generator that emitted only the first would
+     * leave a nested typed For unspellable.
      */
-    public static <K, T, R> Iterable<R> rowTrace(
-            Collection<K, T> c, java.util.function.Function<KayaApp.Tpl, R> makeRow) {
-        return () -> new java.util.Iterator<R>() {
-            int state;
-            KayaApp.RowTrace trace;
+    public static <K, T, R> KayaApp.Rows<KayaApp.Widget, R> rowTrace(
+            KayaApp.Tx tx, Collection<K, T> c,
+            java.util.function.Function<KayaApp.Tpl, R> makeRow) {
+        return tx.rows(c.handle, makeRow);
+    }
 
-            @Override
-            public boolean hasNext() {
-                if (state == 0) {
-                    return true;
-                }
-                if (state == 1) {
-                    state = 2;
-                    trace.close();
-                }
-                return false;
-            }
-
-            @Override
-            public R next() {
-                if (state != 0) {
-                    throw new java.util.NoSuchElementException();
-                }
-                state = 1;
-                KayaApp app = KayaApp.ambient;
-                if (app == null || app.currentTx == null) {
-                    throw new IllegalStateException(
-                            "kaya: rows() iterates at record time, inside a transaction");
-                }
-                trace = app.currentTx.beginRowTrace(c.handle);
-                return makeRow.apply(trace.tpl);
-            }
-        };
+    public static <K, T, R> KayaApp.Rows<KayaApp.Node, R> rowTrace(
+            KayaApp.RowSurface row, Collection<K, T> c,
+            java.util.function.Function<KayaApp.Tpl, R> makeRow) {
+        return row.tpl().rows(c.handle, makeRow);
     }
 
     /**

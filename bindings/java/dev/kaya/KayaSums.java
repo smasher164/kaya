@@ -222,12 +222,17 @@ public final class KayaSums {
             }
             seen[arm.variant] = true;
         }
-        return tx.forEach(c.handle, t -> {
+        // The arms are the eliminator's shape, so this stays a
+        // combinator; what changed is the For under it, whose one pass
+        // now declares every arm in turn.
+        KayaApp.Rows<KayaApp.Widget, KayaApp.Tpl> rows = tx.rows(c.handle, t -> t);
+        for (KayaApp.Tpl t : rows) {
             for (Arm<K, T> arm : arms) {
                 tx.emitVariantCase(arm.variant);
                 arm.body.accept(t);
             }
-        });
+        }
+        return rows.handle;
     }
 
     private KayaSums() {}

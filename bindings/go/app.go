@@ -7,6 +7,7 @@ package kaya
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"strings"
 	"sync"
@@ -57,12 +58,15 @@ func (c Collection) At(key any) Collection {
 // every instance — so handing it an At(...) handle is a bug.
 func assertRoot(c Collection) {
 	if len(c.path) > 0 {
-		panic("kaya: ForEach binds the collection itself, not an instance — drop the At(...)")
+		panic("kaya: Rows binds the collection itself, not an instance — drop the At(...)")
 	}
 }
 
 type counters struct {
-	signal, widget, collection, node, alert, menuItem, fileDialog uint64
+	// No `node`: template nodes draw from `widget`, one sequence per app
+	// (DESIGN.md, Binding conventions). Deleting the field is the guard —
+	// a future c.node does not compile.
+	signal, widget, collection, alert, menuItem, fileDialog uint64
 	// Clipboard reads share the alert's request/result grammar, so
 	// they share its id shape: one counter, one-shot registrations.
 	clipboard uint64
@@ -976,27 +980,23 @@ func SortAsc(column uint32) Sort { return Sort{sorted: column} }
 // SortDesc puts the descending indicator on column.
 func SortDesc(column uint32) Sort { return Sort{sorted: column, direction: 1} }
 
-// Columns declares the column header bar on a For's container — the
-// Widget ForEach returns. One title per column; the row template's
-// root must be a Row of exactly one cell per column, refused loudly
-// otherwise. Re-call after sorting to move the indicator
-// (docs/tables-plan.md).
+// Columns RE-DECLARES a live For's header bar — the Widget
+// Rows.Widget hands out — after a sort request has moved the indicator.
+// The build-time declaration is Rows.Columns, which is where the arity
+// rule is stated (docs/tables-plan.md).
 func (tx *Tx) Columns(w Widget, titles []string, sort Sort) {
-	values := make([]any, len(titles))
-	for i, title := range titles {
-		values[i] = title
-	}
 	// pathLen 0: no key path, so the values are titles alone
 	// (docs/tables-plan.md, dynamic tables).
 	tx.emit(TxSetColumnHeaders(w.id, sort.sorted, sort.direction,
-		uint32(len(titles)), 0, values))
+		uint32(len(titles)), 0, titleValues(titles)))
 }
 
 // ColumnsAt re-declares ONE stamped copy's header bar: the nested For's
 // Node, then that copy's keys outermost first — the per-copy sort
 // indicator OnSortNode asks for. Empty keys re-declare the
-// template-wide bar for every copy, which is what Tpl.Columns spells at
-// build time. The core walls the rest (a template bar must exist first,
+// template-wide bar for every copy, which is what NodeRows.Columns
+// spells at build time. The core walls the rest (a template bar must
+// exist first,
 // the keys must name a live copy).
 func (tx *Tx) ColumnsAt(n Node, keys []any, titles []string, sort Sort) {
 	values := make([]any, 0, len(keys)+len(titles))
@@ -1173,65 +1173,152 @@ func (tx *Tx) Collection() Collection {
 	return c
 }
 
-// ForEach declares a For over c: fn's body declares the template, and
-// the For itself (a live container) is returned.
-func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
+// rowsState is one For traced as a for statement, shared by the value
+// Rows/NodeRows hand out and by every value their chain returns: the
+// eagerly minted id, the scope the For folds into, and the header bar
+// the chain records for the trace's end.
+type rowsState struct {
+	tx     *Tx
+	id     uint64
+	parent uint64
+	bar    *headerBar
+	traced bool
+}
+
+type headerBar struct {
+	titles []string
+	sort   Sort
+}
+
+// openRows mints the For and OPENS ITS TEMPLATE SCOPE — the id and the
+// create_for land where the callback form put them, so a rows value the
+// guest never ranges leaves the scope open and dies at submit
+// ("kaya: template scope left open at end of transaction") rather than
+// vanishing.
+func (tx *Tx) openRows(c Collection) *rowsState {
 	assertRoot(c)
 	tx.app.c.widget++
-	w := Widget{id: tx.app.c.widget, tx: tx}
 	// The For parents into the enclosing scope, but the record must land
 	// after template_end — an add_child inside the blueprint would cross
 	// zones.
-	parent := tx.currentParent()
-	tx.emit(TxCreateFor(w.id, c.id))
+	st := &rowsState{tx: tx, id: tx.app.c.widget, parent: tx.currentParent()}
+	tx.emit(TxCreateFor(st.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
 	tx.app.parents = append(tx.app.parents, 0)
 	tx.app.tplDepth++
-	fn(&Tpl{tx: tx})
+	return st
+}
+
+// all is the trace: the body runs ONCE, and closing is structural —
+// range-over-func regains control on break, so template_end and the
+// declarations deferred behind it are emitted either way.
+func (st *rowsState) all(yield func(Row) bool) {
+	if st.traced {
+		panic("kaya: a rows value traces one template — range it in exactly one for statement")
+	}
+	st.traced = true
+	tx := st.tx
+	yield(Row{&Tpl{tx: tx}})
 	tx.app.tplDepth--
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
 	tx.emit(TxTemplateEnd())
-	if parent != 0 {
-		tx.emit(TxAddChild(parent, w.id))
+	if st.parent != 0 {
+		tx.emit(TxAddChild(st.parent, st.id))
 	}
-	return w
-}
-
-// BeginRowTrace opens a For template for a generated row trace: the
-// caller runs the loop body once with the returned Tpl, then close()
-// ends the template and parents the For into the enclosing scope.
-// Range-over-func makes the close structural, even on break. The For
-// rides the zone it opens in.
-func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
-	assertRoot(c)
-	var id uint64
-	if tx.app.tplDepth > 0 {
-		tx.app.c.node++
-		id = tx.app.c.node
-	} else {
-		tx.app.c.widget++
-		id = tx.app.c.widget
-	}
-	parent := tx.currentParent()
-	tx.emit(TxCreateFor(id, c.id))
-	tx.app.openFors = append(tx.app.openFors, c.id)
-	tx.app.parents = append(tx.app.parents, 0)
-	tx.app.tplDepth++
-	return &Tpl{tx: tx}, func() {
-		tx.app.tplDepth--
-		tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
-		tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
-		tx.emit(TxTemplateEnd())
-		if parent != 0 {
-			tx.emit(TxAddChild(parent, id))
-		}
+	// After template_end, so the core holds the row template to the
+	// declared arity the moment this arrives (docs/tables-plan.md).
+	if st.bar != nil {
+		// pathLen 0: a live For's flat bar, or a nested For's
+		// template-scoped one (every copy) — the core tells them apart by
+		// the id's zone.
+		tx.emit(TxSetColumnHeaders(st.id, st.bar.sort.sorted, st.bar.sort.direction,
+			uint32(len(st.bar.titles)), 0, titleValues(st.bar.titles)))
 	}
 }
 
-// Row is the scalar-collection row surface a Rows trace yields: the
-// whole template vocabulary (the embedded Tpl) plus the element's own
-// token. A scalar collection has exactly one field.
+func titleValues(titles []string) []any {
+	values := make([]any, len(titles))
+	for i, title := range titles {
+		values[i] = title
+	}
+	return values
+}
+
+// Rows is a live For traced as a for statement: the container exists
+// from here on, the chain declares the table, and the loop body runs
+// once to author the blueprint.
+//
+//	rows := tx.Rows(items).Columns([]string{"Name"}, kaya.SortNone())
+//	for row := range rows.All() { … }
+//	tx.SetGrow(rows.Widget(), 1)
+type Rows struct{ st *rowsState }
+
+// Rows opens a For over c in the live tree.
+func (tx *Tx) Rows(c Collection) *Rows { return &Rows{tx.openRows(c)} }
+
+// Widget is the For's container: the handle every live-zone verb takes.
+func (r *Rows) Widget() Widget { return Widget{id: r.st.id, tx: r.st.tx} }
+
+// Columns declares the column header bar: one title per column, plus the
+// indicator. The row template's root must be a Row of exactly one cell
+// per column, refused loudly otherwise. Recorded here and emitted when
+// the trace ends; Tx.Columns re-declares it after a sort
+// (docs/tables-plan.md).
+func (r *Rows) Columns(titles []string, sort Sort) *Rows {
+	r.st.bar = &headerBar{titles, sort}
+	return r
+}
+
+// OnSort registers the header-click handler at this For — handlers scope
+// to their creator. The handler receives the 0-based column of a sort
+// REQUEST: nothing has changed on screen; reorder the collection by key
+// and re-declare the bar with Tx.Columns.
+func (r *Rows) OnSort(fn func(*Tx, uint32)) *Rows {
+	r.st.tx.app.OnSort(r.Widget(), fn)
+	return r
+}
+
+// All traces the template: `for row := range rows.All()` runs the body
+// ONCE, authoring the blueprint; stamping is the core's replay.
+func (r *Rows) All() iter.Seq[Row] { return r.st.all }
+
+// NodeRows is Rows one zone in: a For declared inside another template,
+// whose handle is a template node shared by every stamped copy.
+type NodeRows struct{ st *rowsState }
+
+// Rows opens a nested For over c inside this template.
+func (t *Tpl) Rows(c Collection) *NodeRows { return &NodeRows{t.tx.openRows(c)} }
+
+// Node is the nested For's template node — what Tx.ColumnsAt takes back
+// to re-declare ONE stamped copy's bar.
+func (r *NodeRows) Node() Node { return Node{r.st.id} }
+
+// Columns declares the header bar of this nested For for EVERY copy the
+// enclosing template stamps. The record lands after template_end, in the
+// still-open parent scope, which is where the header op finds its For
+// (docs/tables-plan.md, MEASURED IN SLICE 1).
+func (r *NodeRows) Columns(titles []string, sort Sort) *NodeRows {
+	r.st.bar = &headerBar{titles, sort}
+	return r
+}
+
+// OnSort registers this nested table's header-click handler at its For
+// node. The keys are the clicking copy's, outermost first, and they are
+// what Tx.ColumnsAt takes back to move THAT copy's indicator.
+func (r *NodeRows) OnSort(fn func(*Tx, []any, uint32)) *NodeRows {
+	r.st.tx.app.OnSortNode(r.Node(), fn)
+	return r
+}
+
+// All traces the nested template; the body runs once, as the live zone's
+// does.
+func (r *NodeRows) All() iter.Seq[Row] { return r.st.all }
+
+// Row is the row surface a trace yields: the whole template vocabulary
+// (the embedded Tpl) plus the element's own token. A scalar collection
+// has exactly one field; a record collection's typed row surface comes
+// from the generator instead (cmd/kaya-gen).
 type Row struct{ *Tpl }
 
 // Value is the element's token: what a stamped copy's bindings read.
@@ -1242,18 +1329,6 @@ func (r Row) Label(f Field[string]) Node {
 	n := r.Tpl.Widget(KindLabel)
 	r.Tpl.BindTextField(n, 0, f)
 	return n
-}
-
-// Rows traces this scalar collection's template as a for statement:
-// `for row := range items.Rows(tx)` runs the body ONCE, and
-// range-over-func makes the close structural even on break. The record
-// twin is the generated <Type>Rows surface.
-func (c Collection) Rows(tx *Tx) func(func(Row) bool) {
-	return func(yield func(Row) bool) {
-		t, done := BeginRowTrace(tx, c)
-		yield(Row{t})
-		done()
-	}
 }
 
 // When declares a When over a Bool signal: stamps on true, unstamps on
@@ -2841,8 +2916,8 @@ type Tpl struct {
 }
 
 func (t *Tpl) Widget(kind uint32) Node {
-	t.tx.app.c.node++
-	n := Node{t.tx.app.c.node}
+	t.tx.app.c.widget++
+	n := Node{t.tx.app.c.widget}
 	t.tx.emit(TxCreateWidget(n.id, kind))
 	t.tx.autoParent(n.id)
 	return n
@@ -3341,47 +3416,6 @@ func (t *Tpl) Collection() Collection {
 	return t.tx.Collection()
 }
 
-func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
-	assertRoot(c)
-	t.tx.app.c.node++
-	n := Node{t.tx.app.c.node}
-	parent := t.tx.currentParent()
-	t.tx.emit(TxCreateFor(n.id, c.id))
-	t.tx.app.openFors = append(t.tx.app.openFors, c.id)
-	t.tx.app.parents = append(t.tx.app.parents, 0)
-	t.tx.app.tplDepth++
-	fn(&Tpl{tx: t.tx})
-	t.tx.app.tplDepth--
-	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
-	t.tx.app.openFors = t.tx.app.openFors[:len(t.tx.app.openFors)-1]
-	t.tx.emit(TxTemplateEnd())
-	if parent != 0 {
-		t.tx.emit(TxAddChild(parent, n.id))
-	}
-	return n
-}
-
-// Columns declares the header bar of a NESTED For — the Node ForEach
-// returns — for every copy the enclosing template stamps. One title per
-// column; the nested row template's root must be a Row of exactly one
-// cell per column.
-//
-// WRITE IT AFTER ForEach RETURNS, on the enclosing Tpl: the header op
-// finds its For in the OPEN PARENT scope, and ForEach has folded the
-// nested For into that scope by then (docs/tables-plan.md, MEASURED IN
-// SLICE 1). Per-copy indicators come later, from a handler, through
-// Tx.ColumnsAt.
-func (t *Tpl) Columns(n Node, titles []string, sort Sort) {
-	values := make([]any, len(titles))
-	for i, title := range titles {
-		values[i] = title
-	}
-	// pathLen 0 against a TEMPLATE NODE is the every-copy addressing;
-	// the same call against a live container is Tx.Columns.
-	t.tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,
-		uint32(len(titles)), 0, values))
-}
-
 // ContextMenu attaches a live-built context catalog to a template node:
 // every stamped copy shows the same catalog, and each activation
 // carries that copy's key path. An item takes exactly ONE anchor, so a
@@ -3397,8 +3431,8 @@ func (t *Tpl) ContextMenu(n Node, c *ContextCatalog) {
 }
 
 func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
-	t.tx.app.c.node++
-	n := Node{t.tx.app.c.node}
+	t.tx.app.c.widget++
+	n := Node{t.tx.app.c.widget}
 	t.tx.emit(TxCreateWhen(n.id, s.id))
 	t.tx.app.tplDepth++
 	fn(&Tpl{tx: t.tx})
@@ -3608,15 +3642,16 @@ func (a *App) OnClick(w Widget, fn func(*Tx)) {
 // OnSort registers the table's header-click handler at its For — the
 // handler receives the 0-based column of a sort REQUEST: nothing has
 // changed on screen; reorder the collection by key and re-declare the
-// header with Columns (docs/tables-plan.md).
+// header with Columns (docs/tables-plan.md). Rows.OnSort is the same
+// registration co-located with the For that stamps the rows.
 func (a *App) OnSort(w Widget, fn func(*Tx, uint32)) {
 	a.sortHandlers[w.id] = fn
 }
 
 // OnSortNode registers a nested table's header-click handler at its For
-// node — the Node Tpl.ForEach returns, whose bar Tpl.Columns declares.
-// The keys are the clicking copy's, outermost first, and they are what
-// Tx.ColumnsAt takes back to move THAT copy's indicator
+// node — the Node NodeRows.Node hands out, whose bar NodeRows.Columns
+// declares. The keys are the clicking copy's, outermost first, and they
+// are what Tx.ColumnsAt takes back to move THAT copy's indicator
 // (docs/tables-plan.md).
 func (a *App) OnSortNode(n Node, fn func(*Tx, []any, uint32)) {
 	a.nodeSorts[n.id] = fn

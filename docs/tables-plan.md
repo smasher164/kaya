@@ -147,7 +147,11 @@ is a separate admission if a real app ever needs one).
    the For id eagerly so the chain reads
    `items.rows(tx).columns(&["Name", "Size"], sort).on_sort(&msgs, f)`,
    with `.id()` handing the handler the handle its re-declaration
-   targets. The expression forms and Go's ForEach already expose the
+   targets. Go is that same shape one language over since the idiom
+   sweep (2026-08-24): `tx.Rows(c)` mints the For, the chain declares
+   the bar and the handler, `for row := range rows.All()` traces the
+   template once, and `Widget()`/`Node()` hand out the handle. The
+   expression forms already expose the
    handle and take the declaration directly. Each binding spells it in
    its own idiom; both construction zones get the surface (the
    template-zone census and check-sugar-surface hold the fan-out
@@ -401,12 +405,21 @@ keyed re-declaration — Go (Tpl.Columns / App.OnSortNode / Tx.ColumnsAt),
 C# (Node-typed overloads beside the live ones), Java (Tpl.columns /
 onSort(Node, SortHandler) / Tx.columnsAt, RowSurface forwarding),
 Swift (KayaTpl.columns / onSort(_ n:) / columns(_:at:_:_:)), OCaml
-(Tpl.columns / on_sort_node / columns_at), Haskell (columnsNode /
-onSortNode / columnsAt). DO on every point in every language; zero
+(Tpl.columns and its `?on_sort` / columns_at — the registrars
+`on_sort`/`on_sort_node` died to the handler-consistency ruling on
+2026-08-24, a binding registering a handler where its own click
+convention does, which in OCaml is a labelled argument at the
+declaration), Haskell (Declare's columns /
+HandlerTarget's onSort / columnsAt — one name per zone-spanning point,
+the `columnsNode`/`onSortNode` pair having died to the module's own
+header rule on 2026-08-24; `SortTarget` was absorbed into the six-verb
+`HandlerTarget` the same day, when the rule reached the other five
+registrars). DO on every point in every language; zero
 carve-outs. Every spelling joined the tpl-surfaces/check-sugar census
 in the same change with its watched perturbations (the census
-self-test runs all 53 on every invocation), and each compiles under a
-gate that already runs. Three of the four dispatch loops (C#, Java,
+self-test runs every language's on every invocation; the gate's own
+output is the count), and each compiles under a gate that already
+runs. Three of the four dispatch loops (C#, Java,
 Haskell) had silently DROPPED a keyed sort_requested before this — the
 keyed arm is new in each. The fan-out also found a real core defect:
 widget and template-node numbers are separate per-binding counters

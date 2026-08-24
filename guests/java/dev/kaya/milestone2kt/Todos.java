@@ -72,7 +72,7 @@ final class Todos {
                     });
                 });
                 tx.label(itemsLeft);
-                for (var row : TodoKaya.rows(todos)) {
+                for (var row : TodoKaya.rows(tx, todos)) {
                     row.row(() -> {
                         row.checkbox(row.done, (t2, key, checked) -> {
                             // One field's delta through the generated

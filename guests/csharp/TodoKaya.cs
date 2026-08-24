@@ -24,6 +24,15 @@ static class TodoKaya
         System.Action<TodoRow> body) =>
         tx.Each(c.Collection, t => body(new TodoRow(t)));
 
+    /// <summary>The same, for a For opened INSIDE a template body —
+    /// the nested table's shape, "for every account, a positions
+    /// table". Without it the nested body holds the raw Tpl and
+    /// spells its cells with the static tokens rather than the row's
+    /// own (docs/deferred.md, the closed C# façade entry).</summary>
+    public static Node Each(Tpl t, RecordCollection<Todo> c,
+        System.Action<TodoRow> body) =>
+        t.Each(c.Collection, inner => body(new TodoRow(inner)));
+
     /// <summary>The foreach form: `foreach (var row in todos.Rows())`
     /// traces the record template — the body runs once, and the
     /// enumerator's Dispose closes the template, so foreach makes the
@@ -45,12 +54,16 @@ static class TodoKaya
 /// widget-kind floor (docs/sugar-pass-plan.md S4b).
 /// Add here whatever is added to Tpl: the prop setters below are
 /// forwarded for the same reason the constructors are.
-/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,
-/// Collection/ForEach/When, ContextMenu — stays off deliberately: a
-/// row surface hands out sugar, and its Tpl is private so the floor
-/// is reached by opening the For yourself. Columns is off with
-/// them: it declares a NESTED For's header bar, and the Node it
-/// takes comes from the ForEach this surface does not forward.</summary>
+/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild —
+/// stays off deliberately: a row surface hands out sugar, and its
+/// Tpl is private so the floor is reached by opening the For
+/// yourself. THE NESTED-FOR VOCABULARY IS NOT PLUMBING and is
+/// forwarded — Collection, Each, ForEach, and the Columns that
+/// names the Node Each hands back — or a nested table is spellable
+/// through tx.Each and not through a row at all. When and
+/// ContextMenu are the two still off the list; Java's RowSurface
+/// forwards both, and that divergence is recorded in
+/// docs/deferred.md rather than blessed here.</summary>
 sealed class TodoRow
 {
     readonly Tpl t;
@@ -166,6 +179,17 @@ sealed class TodoRow
     public Node Grid(int columns, System.Action body) => t.Grid(columns, body);
 
     public Node Spacer() => t.Spacer();
+
+    public Collection Collection() => t.Collection();
+
+    public Node Each(Collection c, System.Action<Tpl> body) => t.Each(c, body);
+
+    public Node ForEach(Collection c,
+        System.Action<Tpl> body) =>
+        t.ForEach(c, body);
+
+    public void Columns(Node n, string[] titles, Sort sort) =>
+        t.Columns(n, titles, sort);
 
     public void SetGrow(Node n, double weight) => t.SetGrow(n, weight);
 

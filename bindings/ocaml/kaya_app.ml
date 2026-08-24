@@ -143,9 +143,11 @@ type app = {
   post_lock : Mutex.t;
   mutable posted : (unit -> unit) list;
   mutable c_signal : int64;
+  (* Live widgets AND template nodes, one sequence (DESIGN.md, Binding
+     conventions). There is deliberately no [c_node]: without the field,
+     a second node counter does not compile. *)
   mutable c_widget : int64;
   mutable c_collection : int64;
-  mutable c_node : int64;
   mutable c_menu_item : int64;
   widget_handlers : (int64, unit -> unit) Hashtbl.t;
   (* Table sort requests, keyed by the For container's widget id
@@ -276,7 +278,6 @@ let create () =
     c_signal = 0L;
     c_widget = 0L;
     c_collection = 0L;
-    c_node = 0L;
     c_menu_item = 0L;
     widget_handlers = Hashtbl.create 8;
     sort_handlers = Hashtbl.create 8;
@@ -1949,8 +1950,8 @@ let menu_append (MenuItem id) children =
 type tpl = { tpl_tx : tx }
 
 let alloc_node tx =
-  tx.app.c_node <- Int64.add tx.app.c_node 1L;
-  tx.app.c_node
+  tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
+  tx.app.c_widget
 
 (* A For over a collection: [body] declares the template; the For
    itself (a live container) is returned alongside the body's result. *)
@@ -1983,9 +1984,15 @@ let sort_desc column = { sort_column = Int32.of_int column; sort_direction = 1l 
 (* Declare the column header bar on a For's container — the widget
    [for_each] returns. One title per column; the row template's root
    must be a row of exactly one cell per column, refused loudly
-   otherwise. Re-call after sorting to move the indicator. *)
-let columns (Widget id) titles sort =
+   otherwise. Re-call after sorting to move the indicator.
+   [~on_sort] answers the header clicks with the 0-based column, where
+   [?on_click] answers a button's: reorder the collection by key and
+   re-declare here with the new indicator. *)
+let columns ?(on_sort : (int -> unit) option) (Widget id) titles sort =
   let tx = the_tx () in
+  Option.iter
+    (fun handler -> Hashtbl.replace tx.app.sort_handlers id handler)
+    on_sort;
   (* path_len 0: no key path, so the values are titles alone
      (docs/tables-plan.md, dynamic tables). *)
   emit tx
@@ -1998,7 +2005,7 @@ let columns (Widget id) titles sort =
 (* Re-declare ONE stamped copy's header bar — the per-copy sort arrows.
    [node] is the nested For's template node ([Tpl.for_each]'s first
    result) and [keys] the copy's key path outermost first, exactly as
-   [on_sort_node] handed it over; an empty [keys] re-declares the
+   [Tpl.columns ~on_sort] handed it over; an empty [keys] re-declares the
    template-wide bar for every copy. The core walls a keyed target whose
    template bar was never declared (docs/tables-plan.md). *)
 let columns_at (Node id) keys titles sort =
@@ -2200,7 +2207,7 @@ module Tpl = struct
 
     (* --- The const setters ------------------------------------------
        A template node's props travel the wire exactly as a widget's do
-       — only the id space differs — so these are the live setters with
+       — only the handle's constructor differs — so these are the live setters with
        [Node] destructured instead of [Widget], and the constructor of
        the wrapper is what keeps a live setter off a blueprint and a
        template setter off a widget. *)
@@ -2406,9 +2413,16 @@ module Tpl = struct
      the nested For folds into that parent at its TemplateEnd and this
      op looks for it there, so a grandparent-scope target is not
      expressible (measured in slice 1, docs/tables-plan.md).
-     [columns_at] moves one copy's arrows after a sort request. *)
-  let columns (Node id) titles sort =
+     ONE [~on_sort] answers every stamped copy, and the handler receives
+     that copy's key path outermost first before the column — hand those
+     same keys to [columns_at] to move that copy's arrows alone. *)
+  let columns
+      ?(on_sort : (Kaya_wire.value list -> int -> unit) option)
+      (Node id) titles sort =
     let tx = the_tx () in
+    Option.iter
+      (fun handler -> Hashtbl.replace tx.app.node_sorts id handler)
+      on_sort;
     (* path_len 0 against a TEMPLATE NODE: every copy's bar, stored on
        the site and applied at each stamp. *)
     emit tx
@@ -2747,21 +2761,6 @@ end
 
 (* Register a click handler for a live widget: runs as one
    transaction per click (the ambient tx is set for its extent). *)
-(* Register the table's header-click handler at its For — the handler
-   receives the 0-based column of a sort REQUEST: nothing has changed
-   on screen; reorder the collection by key and re-declare the header
-   with [columns] (docs/tables-plan.md). *)
-let on_sort app (Widget id) (handler : int -> unit) =
-  Hashtbl.replace app.sort_handlers id handler
-
-(* The same, at a NESTED For's template node: one registration answers
-   every stamped copy, and the handler receives that copy's key path
-   outermost first before the column — hand those same keys back to
-   [columns_at] to move that copy's arrows alone. *)
-let on_sort_node app (Node id)
-    (handler : Kaya_wire.value list -> int -> unit) =
-  Hashtbl.replace app.node_sorts id handler
-
 let on_click app (Widget id) (handler : unit -> unit) =
   Hashtbl.replace app.widget_handlers id handler
 

@@ -31,7 +31,7 @@ func App() *kaya.App {
 			field = tx.Entry(nil)
 			add = tx.Button("add", nil)
 			tx.Label(status)
-			for row := range todos.Rows(tx) {
+			for row := range tx.Rows(todos).All() {
 				row.Label(row.Value())
 			}
 		}))
