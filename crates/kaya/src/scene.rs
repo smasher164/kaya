@@ -2201,12 +2201,18 @@ impl Scene {
                     // some platforms and not others.
                     Self::validate_bar(&titles, sorted, direction);
                     let count = titles.len() as u32;
-                    if let Some(site) = self.for_sites.values().find(|s| s.container == widget) {
-                        assert!(
-                            path.is_empty(),
-                            "kaya: a live For's container takes no key path — keys address \
-                             a nested table's stamped copy (docs/tables-plan.md)"
-                        );
+                    // Keys resolve in the TEMPLATE space alone: widget and
+                    // node numbers are separate per-binding counters over
+                    // one target field, so a keyed record must never be
+                    // answered by a live container that shares the number
+                    // (the Haskell breadth probe's finding; the collision
+                    // walls at declaration are this rule's other half).
+                    let live = if path.is_empty() {
+                        self.for_sites.values().find(|s| s.container == widget)
+                    } else {
+                        None
+                    };
+                    if let Some(site) = live {
                         Self::validate_row_arity(&site.bodies, count);
                         out.push(ApplyOp::SetColumnHeaders {
                             id: widget,
@@ -2219,10 +2225,18 @@ impl Scene {
                         let node = widget.0;
                         {
                             let bodies = self.find_tpl_for(node).unwrap_or_else(|| {
+                                if path.is_empty() {
+                                    panic!(
+                                        "kaya: set_column_headers targets {widget:?}, which is \
+                                         neither a live For's container nor a nested For's \
+                                         template node — columns are a declaration on the \
+                                         collection's own container (docs/tables-plan.md)"
+                                    )
+                                }
                                 panic!(
-                                    "kaya: set_column_headers targets {widget:?}, which is neither \
-                                     a live For's container nor a nested For's template node — \
-                                     columns are a declaration on the collection's own container \
+                                    "kaya: set_column_headers keys {path:?} address a stamped \
+                                     copy, and {widget:?} names no nested For's template node — \
+                                     keys resolve in the template space alone \
                                      (docs/tables-plan.md)"
                                 )
                             });
@@ -4011,6 +4025,13 @@ impl Scene {
                 match (scopes.last_mut(), bodies) {
                     // Nested: fold into the parent template.
                     (Some(parent), ClosedScope::For { id, collection, bodies }) => {
+                        assert!(
+                            !self.for_sites.values().any(|s| s.container.0 == id),
+                            "kaya: nested For template node {id} collides with a live For's \
+                             container — widget and template-node numbers resolve one \
+                             set_column_headers/sort_requested target space, so the two \
+                             counters may not meet (docs/tables-plan.md)"
+                        );
                         parent.current.ops.push(TplOp::For {
                             node: id,
                             collection,
@@ -4197,6 +4218,13 @@ impl Scene {
         chain: Vec<EntryRef>,
         out: &mut Vec<ApplyOp>,
     ) {
+        assert!(
+            self.find_tpl_for(container.0).is_none(),
+            "kaya: live For container {container:?} collides with a nested For's \
+             template node — widget and template-node numbers resolve one \
+             set_column_headers/sort_requested target space, so the two \
+             counters may not meet (docs/tables-plan.md)"
+        );
         let existing: Vec<Key> = self
             .coll_instances
             .get(&(collection, path.clone()))
@@ -9095,8 +9123,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "takes no key path")]
+    #[should_panic(expected = "names no nested For's template node")]
     fn a_live_container_refuses_keys() {
+        // Keys resolve in the template space ALONE: a keyed record whose
+        // number is only a live container must say so, not claim the
+        // container "takes no key path" while never checking the space
+        // the keys address (the Haskell breadth probe's finding).
         let mut scene = Scene::new();
         scene.apply(table_scene(2));
         scene.apply(vec![TxOp::SetColumnHeaders {
@@ -9106,6 +9138,66 @@ mod tests {
             path: vec![v("a1")],
             titles: vec!["Name".into(), "Size".into()],
         }]);
+    }
+
+    /// Widget and template-node numbers come from separate per-binding
+    /// counters yet resolve ONE set_column_headers / sort_requested
+    /// target space, so a collision misroutes silently. The wall
+    /// refuses it at declaration, both directions.
+    #[test]
+    #[should_panic(expected = "collides")]
+    fn a_nested_table_node_may_not_reuse_a_live_containers_number() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(5), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(5),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![
+            TxOp::CreateCollection { id: CollectionId(3), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 30, collection: CollectionId(3) },
+            TxOp::CreateCollection { id: CollectionId(4), variants: vec![vec![ValueType::Str]] },
+            // The nested For reuses the LIVE container's number.
+            TxOp::CreateFor { id: 4, collection: CollectionId(4) },
+            TxOp::CreateWidget { id: WidgetId(31), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(31),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(30) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "collides")]
+    fn a_live_for_may_not_reuse_a_nested_table_nodes_number() {
+        let mut scene = Scene::new();
+        scene.apply(dynamic_table_scene());
+        // A later live For reuses the nested table's node number 20.
+        scene.apply(vec![
+            TxOp::CreateCollection { id: CollectionId(5), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 20, collection: CollectionId(5) },
+            TxOp::CreateWidget { id: WidgetId(41), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(41),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(20) },
+        ]);
     }
 
     #[test]

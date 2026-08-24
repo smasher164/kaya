@@ -54,7 +54,10 @@ module KayaApp
     onClick,
     onClickNode,
     onSort,
+    onSortNode,
     columns,
+    columnsNode,
+    columnsAt,
     Sort (..),
     sortNone,
     sortAsc,
@@ -2554,6 +2557,43 @@ columns (Widget n) titles sort =
         }
     )
 
+-- | Declare the header bar of a NESTED table — the Node an inner
+-- 'forEach' returns — for every stamped copy of the enclosing template.
+-- Call it in the parent template scope, after the inner 'forEach'
+-- returns: the core finds the For in the scope that is still open, so a
+-- grandparent scope cannot reach it (docs/tables-plan.md, dynamic
+-- tables). Per-copy indicators are 'columnsAt'.
+columnsNode :: Node -> [String] -> Sort -> Tpl ()
+columnsNode (Node n) titles sort =
+  -- pathLen 0 against a TEMPLATE NODE: every copy's bar (the live arm's
+  -- pathLen 0 against a live container is the flat table).
+  emitT
+    ( W.txSetColumnHeaders
+        n
+        (sortColumn sort)
+        (sortDirection sort)
+        (fromIntegral (length titles))
+        0
+        (map W.VStr titles)
+    )
+
+-- | Re-declare ONE stamped copy's header bar: the table's template Node
+-- plus that copy's keys, outermost first — the keys 'onSortNode' hands
+-- the handler. An empty key list re-declares the bar for every copy.
+-- The core walls the template bar being declared first.
+columnsAt :: Node -> [W.Value] -> [String] -> Sort -> Build ()
+columnsAt (Node n) keys titles sort =
+  emitB
+    ( W.txSetColumnHeaders
+        n
+        (sortColumn sort)
+        (sortDirection sort)
+        (fromIntegral (length titles))
+        (fromIntegral (length keys))
+        -- Keys FIRST, then the titles (the record's own convention).
+        (keys ++ map W.VStr titles)
+    )
+
 -- Sums: the data declaration is the sum. KayaSum derives everything from the
 -- Generic representation — one schema per constructor (each constructor's
 -- fields walked by the same GRecord machinery records use), the discriminant,
@@ -2989,6 +3029,9 @@ data App = App
     -- Table sort requests, keyed by the For container's widget id
     -- (docs/tables-plan.md): the handler receives the 0-based column.
     appSortHandlers :: IORef (Map.Map Word64 (Int -> IO ())),
+    -- The node twin: a NESTED table's sort request names the template
+    -- node and the copy's key path, so each stamped table sorts alone.
+    appNodeSorts :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ())),
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
     appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ())),
@@ -3188,6 +3231,15 @@ onSort :: App -> Widget -> (Int -> IO ()) -> IO ()
 onSort app (Widget n) handler =
   modifyIORef' (appSortHandlers app) (Map.insert n handler)
 
+-- | The nested table's header-click handler, registered at the Node its
+-- inner 'forEach' returned: the handler receives the CLICKED COPY's key
+-- path, outermost first, and then the 0-based column. Re-declare that
+-- copy's indicator with 'columnsAt' and those same keys, so a sibling
+-- table's arrows do not move (docs/tables-plan.md, dynamic tables).
+onSortNode :: App -> Node -> ([W.Value] -> Int -> IO ()) -> IO ()
+onSortNode app (Node n) handler =
+  modifyIORef' (appNodeSorts app) (Map.insert n handler)
+
 onClick :: App -> Widget -> IO () -> IO ()
 onClick app (Widget n) handler =
   modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
@@ -3289,6 +3341,7 @@ newApp =
     <*> newIORef Map.empty -- appDerived
     <*> newIORef Map.empty -- appWidgetHandlers
     <*> newIORef Map.empty -- appSortHandlers
+    <*> newIORef Map.empty -- appNodeSorts
     <*> newIORef Map.empty -- appNodeHandlers
     <*> newIORef Map.empty -- appWidgetChanges
     <*> newIORef Map.empty -- appNodeChanges
@@ -3383,7 +3436,9 @@ dispatchLoop app = do
             [] -> do
               handlers <- readIORef (appSortHandlers app)
               dispatch (mapM_ ($ column) (Map.lookup ident handlers))
-            _ -> return ()
+            _ -> do
+              handlers <- readIORef (appNodeSorts app)
+              dispatch (mapM_ (\h -> h keys column) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> s; _ -> ""

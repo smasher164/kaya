@@ -1,8 +1,9 @@
 # Dynamic tables handoff — breadth and the native empty-row decision
 
 Status: the Rust/Python depth slice and its post-capture visual fixes are
-green. The dynamic-tables milestone remains open for Go, C#, Java, Swift,
-OCaml and Haskell binding breadth. The macOS native-table appearance
+green. CLOSED 2026-08-24: the six-binding breadth followed the same day
+(docs/tables-plan.md "BREADTH CLOSED 2026-08-24"); this handoff stays as
+the depth slice's record. The macOS native-table appearance
 question below was researched and RULED 2026-08-24 — see the resolution
 note ahead of that section.
 
@@ -24,8 +25,8 @@ bindings and both interpreters adapted with zero spelling changes; the
 next depth work added Rust then Python nested `columns()` / `on_sort`, the
 maintainer-approved string-key `kind@id[key]` harness targets, the real
 nested portfolio shape replacing `repopulate()`, per-copy divergence,
-and the moving censuses. The headline is still open for the other six
-binding spellings.
+and the moving censuses. The six remaining spellings closed later the
+same day (docs/tables-plan.md "BREADTH CLOSED 2026-08-24").
 
 ## What the fix-forward added
 
@@ -138,9 +139,9 @@ Relevant files:
 
 ## Remaining milestone order
 
-After the native empty-row decision (or an explicit defer), continue the
-binding sweep with an explicit do/can't/defer verdict for every language:
-Go, C#, Java, Swift, OCaml and Haskell. Each spelling moves its own
+DONE 2026-08-24, both halves: the empty-row decision was ruled and built
+(tables-plan decision 8's amendment), and the six-language binding sweep
+closed with DO on every point. Each spelling moves its own
 `tpl-surfaces.py` / `check-sugar-surface` census and watches the negative
 fail in the same commit. Mobile portfolio packaging remains separate.
 

@@ -468,6 +468,9 @@ sealed class KayaApp
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
     readonly Dictionary<ulong, Action<Tx, uint>> sortHandlers = new();
+    // The same, keyed by a NESTED For's template node: one bar per
+    // stamped copy, so the handler also receives that copy's key path.
+    readonly Dictionary<ulong, Action<Tx, List<object>, uint>> nodeSorts = new();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     // separate from every widget/node table. The node flavors receive
     // the stamped copy's key path.
@@ -733,6 +736,14 @@ sealed class KayaApp
     /// re-declare the header with Columns (docs/tables-plan.md).</summary>
     public void OnSort(Widget w, Action<Tx, uint> handler) => sortHandlers[w.Id] = handler;
 
+    /// <summary>The nested table's header-click handler, registered at
+    /// the For's template node: every stamped copy has its own bar, so
+    /// the handler receives that copy's keys, outermost first, and then
+    /// the 0-based column. Re-declare THAT copy's indicator with
+    /// tx.Columns(node, keys, ...) (docs/tables-plan.md).</summary>
+    public void OnSort(Node n, Action<Tx, List<object>, uint> handler) =>
+        nodeSorts[n.Id] = handler;
+
     /// Register a click handler for a template node; it also receives
     /// the stamped copy's keys, outermost first.
     public void OnClick(Node n, Action<Tx, List<object>> handler) => nodeHandlers[n.Id] = handler;
@@ -870,6 +881,12 @@ sealed class KayaApp
                 uint column = payload is uint u ? u : 0;
                 if (sortHandlers.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, column));
+            }
+            else if (kind == KayaWire.OccKindSortRequested)
+            {
+                uint column = payload is uint u ? u : 0;
+                if (nodeSorts.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, column));
             }
             else if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
             {
@@ -1700,12 +1717,34 @@ sealed class Tx
     /// indicator (docs/tables-plan.md).</summary>
     public void Columns(Widget w, string[] titles, Sort sort)
     {
-        var values = new object[titles.Length];
-        for (int i = 0; i < titles.Length; i++) values[i] = titles[i];
         // pathLen 0: no key path, so the values are titles alone
         // (docs/tables-plan.md, dynamic tables).
         Records.Add(KayaWire.TxSetColumnHeaders(
-            w.Id, sort.Sorted, sort.Direction, (uint)titles.Length, 0, values));
+            w.Id, sort.Sorted, sort.Direction, (uint)titles.Length, 0,
+            HeaderValues(Array.Empty<object>(), titles)));
+    }
+
+    /// <summary>Re-declare ONE stamped copy's header bar — the per-copy
+    /// sort arrows: `n` is the nested For's template node and `keys` is
+    /// that copy's key path, outermost first, exactly the list
+    /// OnSort(Node) handed over. An empty path re-declares the bar for
+    /// every copy. The core refuses a keyed re-declaration before the
+    /// template bar exists (docs/tables-plan.md).</summary>
+    public void Columns(Node n, IReadOnlyList<object> keys, string[] titles, Sort sort)
+    {
+        Records.Add(KayaWire.TxSetColumnHeaders(
+            n.Id, sort.Sorted, sort.Direction, (uint)titles.Length, (uint)keys.Count,
+            HeaderValues(keys, titles)));
+    }
+
+    /// The record's Values: the copy's KEYS first, then the titles
+    /// (docs/tables-plan.md, dynamic tables).
+    internal static object[] HeaderValues(IReadOnlyList<object> keys, string[] titles)
+    {
+        var values = new object[keys.Count + titles.Length];
+        for (int i = 0; i < keys.Count; i++) values[i] = keys[i];
+        for (int i = 0; i < titles.Length; i++) values[keys.Count + i] = titles[i];
+        return values;
     }
 
     public Widget ForEach(Collection c, Action<Tpl> body)
@@ -3282,6 +3321,25 @@ sealed class Tpl
     /// local rather than threaded back through a result — which is why
     /// this returns the For alone.
     public Node Each(Collection c, Action<Tpl> body) => ForEach(c, body);
+
+    /// <summary>Declare the header bar of a NESTED For — the Node Each
+    /// hands back — for every copy stamped from this template. One
+    /// title per column; the nested row template's root must be a Row
+    /// of exactly one cell per column, refused loudly otherwise. A
+    /// copy's own indicator comes later, from tx.Columns(node, keys, …).
+    ///
+    /// CALL IT AFTER THE FOR CLOSES, in the enclosing template body: the
+    /// nested For folds into the open parent scope at its TemplateEnd,
+    /// and that is where this record looks for it (docs/tables-plan.md,
+    /// measured in slice 1).</summary>
+    public void Columns(Node n, string[] titles, Sort sort)
+    {
+        // pathLen 0 with a TEMPLATE NODE: the bar every stamp emits
+        // (docs/tables-plan.md, dynamic tables).
+        tx.Records.Add(KayaWire.TxSetColumnHeaders(
+            n.Id, sort.Sorted, sort.Direction, (uint)titles.Length, 0,
+            Tx.HeaderValues(Array.Empty<object>(), titles)));
+    }
 
     public Node ForEach(Collection c, Action<Tpl> body)
     {

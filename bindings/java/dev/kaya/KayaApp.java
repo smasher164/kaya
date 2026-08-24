@@ -196,6 +196,10 @@ public final class KayaApp {
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
     private final Map<Long, BiConsumer<Tx, Integer>> sortHandlers = new HashMap<>();
+    // A NESTED table's sort requests, keyed by the For's TEMPLATE NODE:
+    // one registration serves every stamped copy, and the occurrence's
+    // key path says which copy was clicked.
+    private final Map<Long, SortHandler> nodeSorts = new HashMap<>();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     // separate from every widget/node table. The node flavors receive
     // the stamped copy's key path.
@@ -284,6 +288,13 @@ public final class KayaApp {
      * Value as an F64. */
     public interface ValueHandler {
         void accept(Tx tx, List<Object> keys, double value);
+    }
+
+    /** A nested table's header-click handler: the stamped copy's keys,
+     * then the 0-based column. The keys ARE part of the message — they
+     * name the copy whose bar {@link Tx#columnsAt} must re-declare. */
+    public interface SortHandler {
+        void accept(Tx tx, List<Object> keys, int column);
     }
 
     /** A node-anchored radio group's pick handler: the stamped copy's
@@ -2535,6 +2546,33 @@ public final class KayaApp {
         }
 
         /**
+         * A For inside this row's template, over a collection this row
+         * declared ({@link Tpl#forEach}).
+         *
+         * <p>FORWARDED BECAUSE A NESTED TABLE NEEDS THE HANDLE: the
+         * statement form {@code for (var p : positions.rows())} opens
+         * the same For and hands back nothing, so a header bar and its
+         * sort handler would have no node to name.
+         */
+        public Node forEach(Collection c, Consumer<Tpl> body) {
+            return t.forEach(c, body);
+        }
+
+        /** A nested For whose body returns the handles it declared, for
+         * the reason {@link #when(Signal, java.util.function.Function)}
+         * has that arity: a Java lambda cannot assign a captured local. */
+        public <R> Stamped<Node, R> forEach(
+                Collection c, java.util.function.Function<Tpl, R> body) {
+            return t.forEach(c, body);
+        }
+
+        /** The column header bar on a For declared inside this row —
+         * every copy of that nested table gets it ({@link Tpl#columns}). */
+        public void columns(Node n, String[] titles, Sort sort) {
+            t.columns(n, titles, sort);
+        }
+
+        /**
          * A When inside this row's template: the subtree stamps when the
          * signal is true and unstamps when it goes false
          * ({@link Tpl#when(Signal, Consumer)}).
@@ -3392,6 +3430,25 @@ public final class KayaApp {
             // (docs/tables-plan.md, dynamic tables).
             emit(KayaWire.txSetColumnHeaders(
                 w.id, sort.sorted, sort.direction, titles.length, 0, values));
+        }
+
+        /**
+         * Re-declare ONE stamped copy's header bar — the per-copy sort
+         * indicator. {@code node} is the nested For's template node and
+         * {@code keys} that copy's path, outermost first: exactly what
+         * {@link SortHandler} was handed. Empty keys re-declare the
+         * template-wide bar, for every copy at once
+         * (docs/tables-plan.md, dynamic tables).
+         */
+        public void columnsAt(Node node, List<Object> keys, String[] titles, Sort sort) {
+            // KEYS FIRST, then the titles (KayaWire.txSetColumnHeaders).
+            Object[] values = new Object[keys.size() + titles.length];
+            for (int i = 0; i < keys.size(); i++) {
+                values[i] = keys.get(i);
+            }
+            System.arraycopy(titles, 0, values, keys.size(), titles.length);
+            emit(KayaWire.txSetColumnHeaders(node.id, sort.sorted, sort.direction,
+                titles.length, keys.size(), values));
         }
 
         public Widget forEach(Collection c, Consumer<Tpl> body) {
@@ -4768,6 +4825,23 @@ public final class KayaApp {
             return tx.collection();
         }
 
+        /**
+         * Declare the column header bar on a NESTED For — the Node
+         * {@link #forEach} returned. One title per column; the row
+         * template's root must be a Row of exactly one cell per column,
+         * refused loudly otherwise. The declaration is the TEMPLATE's,
+         * so every stamped copy gets this bar; move one copy's
+         * indicator with {@link Tx#columnsAt} (docs/tables-plan.md).
+         */
+        public void columns(Node n, String[] titles, Sort sort) {
+            Object[] values = new Object[titles.length];
+            System.arraycopy(titles, 0, values, 0, titles.length);
+            // pathLen 0 against a TEMPLATE NODE is the bar for EVERY
+            // copy, not the flat case (docs/tables-plan.md).
+            tx.emit(KayaWire.txSetColumnHeaders(
+                n.id, sort.sorted, sort.direction, titles.length, 0, values));
+        }
+
         public Node forEach(Collection c, Consumer<Tpl> body) {
             return forEach(c, t -> {
                 body.accept(t);
@@ -5001,6 +5075,17 @@ public final class KayaApp {
      */
     public void onSort(Widget w, BiConsumer<Tx, Integer> handler) {
         sortHandlers.put(w.id, handler);
+    }
+
+    /**
+     * Register a NESTED table's header-click handler at its For's
+     * template node — one registration for every stamped copy. The
+     * handler also receives that copy's keys, outermost first, which is
+     * what {@link Tx#columnsAt} needs to move THIS copy's indicator and
+     * leave its siblings alone (docs/tables-plan.md).
+     */
+    public void onSort(Node n, SortHandler handler) {
+        nodeSorts.put(n.id, handler);
     }
 
     public void onClick(Widget w, Consumer<Tx> handler) {
@@ -5256,6 +5341,14 @@ public final class KayaApp {
                     int column = occ.payload instanceof Integer i ? i : 0;
                     dispatch(tx -> {
                         handler.accept(tx, column);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SORT_REQUESTED) {
+                SortHandler handler = nodeSorts.get(occ.id);
+                if (handler != null) {
+                    int column = occ.payload instanceof Integer i ? i : 0;
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, column);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED && occ.keys.isEmpty()) {

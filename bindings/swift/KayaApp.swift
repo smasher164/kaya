@@ -897,6 +897,10 @@ final class KayaApp {
     /// Table sort requests, keyed by the For container's widget id
     /// (docs/tables-plan.md): the handler receives the 0-based column.
     private var sortHandlers: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    /// A nested For's sort requests, keyed by its TEMPLATE NODE id —
+    /// its own table because the two id spaces collide numerically, and
+    /// the empty key path is what tells the two apart at dispatch.
+    private var nodeSorts: [UInt64: (KayaAppTx, [KayaValue], UInt32) throws -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
@@ -1273,6 +1277,17 @@ final class KayaApp {
         sortHandlers[w.id] = handler
     }
 
+    /// The same registration for a NESTED For — one table stamped per
+    /// entry of the enclosing collection. The handler receives the
+    /// clicked copy's keys, outermost first, before the column; hand
+    /// them back to `KayaAppTx.columns(_:at:_:_:)` to move that one
+    /// copy's indicator (docs/tables-plan.md, dynamic tables).
+    func onSort(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], UInt32) throws -> Void
+    ) {
+        nodeSorts[n.id] = handler
+    }
+
     func onClick(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) throws -> Void) {
         widgetHandlers[w.id] = handler
     }
@@ -1528,6 +1543,11 @@ final class KayaApp {
                     // The generated parser boxes the column as .i64.
                     let column = UInt32(truncatingIfNeeded: choice)
                     dispatch { try build { tx in try handler(tx, column) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_SORT_REQUESTED), false):
+                if let handler = nodeSorts[id] {
+                    let column = UInt32(truncatingIfNeeded: choice)
+                    dispatch { try build { tx in try handler(tx, keys, column) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), true):
                 if let handler = widgetHandlers[id] {
@@ -1917,6 +1937,24 @@ final class KayaAppTx {
         tx.setColumnHeaders(
             w.id, sort.sorted, sort.direction, UInt32(titles.count), 0,
             titles.map { .str($0) })
+    }
+
+    /// Re-declare ONE stamped copy's header bar — the per-copy sort
+    /// indicator, addressed by the nested For's template node plus that
+    /// copy's keys, outermost first: exactly what its `onSort` handler
+    /// was handed. `at: []` re-declares the template-wide bar instead,
+    /// for every copy at once.
+    ///
+    /// The core refuses a keyed re-declaration with no template bar
+    /// declared first, and a key path naming no stamped copy.
+    func columns(
+        _ n: KayaNodeHandle, at path: [KayaValue], _ titles: [String], _ sort: KayaSort
+    ) {
+        // Keys first, then the titles — TX 45's Values order
+        // (docs/tables-plan.md, dynamic tables).
+        tx.setColumnHeaders(
+            n.id, sort.sorted, sort.direction, UInt32(titles.count), UInt32(path.count),
+            path + titles.map { .str($0) })
     }
 
     func bindText(_ w: KayaWidget, _ s: KayaSignal) {
@@ -3799,6 +3837,26 @@ final class KayaTpl {
     /// scene's own bindings rather than threaded back through R.
     func each(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaNodeHandle {
         forEach(c) { body($0) }.0
+    }
+
+    /// Declare the header bar of a NESTED For — the template twin of
+    /// `KayaAppTx.columns(_:_:_:)`. One declaration, every stamped copy,
+    /// each copy sorting without disturbing its siblings.
+    ///
+    /// CALL IT RIGHT AFTER `forEach`/`each` RETURNS, in the same
+    /// template body: the nested For folds into the parent at its
+    /// TemplateEnd, and this op is resolved against that OPEN parent
+    /// scope — a grandparent's is not expressible (docs/tables-plan.md,
+    /// MEASURED IN SLICE 1). Answer its clicks with
+    /// `KayaApp.onSort(_ n:_:)`; move one copy's indicator with
+    /// `KayaAppTx.columns(_:at:_:_:)`.
+    func columns(_ n: KayaNodeHandle, _ titles: [String], _ sort: KayaSort) {
+        // pathLen 0 against a TEMPLATE NODE: the bar for every copy —
+        // the id's zone is what tells this from the live case
+        // (docs/tables-plan.md, dynamic tables).
+        tx.tx.setColumnHeaders(
+            n.id, sort.sorted, sort.direction, UInt32(titles.count), 0,
+            titles.map { .str($0) })
     }
 
     func forEach<R>(_ c: KayaCollection, _ body: (KayaTpl) -> R) -> (KayaNodeHandle, R) {

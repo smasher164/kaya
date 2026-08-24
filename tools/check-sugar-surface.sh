@@ -469,23 +469,52 @@ def stage(text):
     return root
 
 
+def link_children(source, destination, skip):
+    os.makedirs(destination, exist_ok=True)
+    for name in os.listdir(source):
+        if name != skip:
+            os.symlink(os.path.abspath(f"{source}/{name}"),
+                       f"{destination}/{name}")
+
+
 def stage_python(app_text, python_text):
     root = stage(app_text)
     os.unlink(f"{root}/bindings")
-
-    def link_children(source, destination, skip):
-        os.makedirs(destination, exist_ok=True)
-        for name in os.listdir(source):
-            if name != skip:
-                os.symlink(os.path.abspath(f"{source}/{name}"),
-                           f"{destination}/{name}")
-
     link_children("bindings", f"{root}/bindings", "python")
     link_children("bindings/python", f"{root}/bindings/python", "kaya")
     link_children("bindings/python/kaya", f"{root}/bindings/python/kaya",
                   "__init__.py")
     open(f"{root}/bindings/python/kaya/__init__.py", "w",
          encoding="utf-8").write(python_text)
+    return root
+
+
+def stage_go(app_text, go_text):
+    root = stage(app_text)
+    os.unlink(f"{root}/bindings")
+    link_children("bindings", f"{root}/bindings", "go")
+    link_children("bindings/go", f"{root}/bindings/go", "app.go")
+    open(f"{root}/bindings/go/app.go", "w", encoding="utf-8").write(go_text)
+    return root
+
+
+def stage_csharp(app_text, csharp_text):
+    root = stage(app_text)
+    os.unlink(f"{root}/bindings")
+    link_children("bindings", f"{root}/bindings", "csharp")
+    link_children("bindings/csharp", f"{root}/bindings/csharp", "KayaApp.cs")
+    open(f"{root}/bindings/csharp/KayaApp.cs", "w",
+         encoding="utf-8").write(csharp_text)
+    return root
+
+
+def stage_swift(app_text, swift_text):
+    root = stage(app_text)
+    os.unlink(f"{root}/bindings")
+    link_children("bindings", f"{root}/bindings", "swift")
+    link_children("bindings/swift", f"{root}/bindings/swift", "KayaApp.swift")
+    open(f"{root}/bindings/swift/KayaApp.swift", "w",
+         encoding="utf-8").write(swift_text)
     return root
 
 
@@ -517,6 +546,84 @@ def run_python(name, app_text, text, count, want):
         print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
         return
     root = stage_python(app_text, text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def run_go(name, app_text, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_go(app_text, text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def run_csharp(name, app_text, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_csharp(app_text, text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def run_swift(name, app_text, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_swift(app_text, text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+    return root
+
+
+def stage_ocaml(app_text, ml_text):
+    root = stage(app_text)
+    os.unlink(f"{root}/bindings")
+    link_children("bindings", f"{root}/bindings", "ocaml")
+    link_children("bindings/ocaml", f"{root}/bindings/ocaml", "kaya_app.ml")
+    open(f"{root}/bindings/ocaml/kaya_app.ml", "w",
+         encoding="utf-8").write(ml_text)
+    return root
+
+
+def run_ocaml(name, app_text, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_ocaml(app_text, text)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def stage_haskell(app_text, haskell_text):
+    root = stage(app_text)
+    os.unlink(f"{root}/bindings")
+    link_children("bindings", f"{root}/bindings", "haskell")
+    link_children("bindings/haskell", f"{root}/bindings/haskell", "KayaApp.hs")
+    open(f"{root}/bindings/haskell/KayaApp.hs", "w",
+         encoding="utf-8").write(haskell_text)
+    return root
+
+
+def run_haskell(name, app_text, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage_haskell(app_text, text)
     r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
                        capture_output=True, text=True)
     shutil.rmtree(root)
@@ -566,6 +673,155 @@ old = "    pub fn columns_at("
 n = src.count(old)
 run("rust-keyed", src.replace(old, "    pub fn columns_at_removed(") if n == 1 else src,
     n, "rust's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+# GO. The zone marker is the RECEIVER — `func (t *Tpl) Columns` and
+# `func (tx *Tx) Columns` are two surfaces spelled the same — so every
+# needle below carries one, and each is unique in the file.
+go = open("bindings/go/app.go", encoding="utf-8").read()
+go_points = (
+    ("go-columns", "columns",
+     "func (t *Tpl) Columns(n Node, titles []string, sort Sort) {",
+     "func (t *Tpl) ColumnsRemoved(n Node, titles []string, sort Sort) {"),
+    ("go-columns-path", "columns",
+     "\tt.tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,\n"
+     "\t\tuint32(len(titles)), 0, values))",
+     "\tt.tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,\n"
+     "\t\tuint32(len(titles)), 1, values))"),
+    ("go-nested-for", "columns",
+     "func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {",
+     "func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) {"),
+    ("go-sort", "on_sort",
+     "func (a *App) OnSortNode(n Node, fn func(*Tx, []any, uint32)) {",
+     "func (a *App) OnSortNode(n Node, fn func(*Tx, uint32)) {"),
+    ("go-sort-dispatch", "on_sort",
+     "a.dispatch(func(tx *Tx) { fn(tx, keys, column) })",
+     "a.dispatch(func(tx *Tx) { fn(tx, nil, column) })"),
+    ("go-keyed", "keyed re-declaration",
+     "func (tx *Tx) ColumnsAt(n Node, keys []any, titles []string, sort Sort) {",
+     "func (tx *Tx) ColumnsAtRemoved(n Node, keys []any, titles []string, sort Sort) {"),
+    ("go-keyed-order", "keyed re-declaration",
+     "\tvalues = append(values, keys...)\n"
+     "\tfor _, title := range titles {\n\t\tvalues = append(values, title)\n\t}\n",
+     "\tfor _, title := range titles {\n\t\tvalues = append(values, title)\n\t}\n"
+     "\tvalues = append(values, keys...)\n"),
+    ("go-keyed-pathlen", "keyed re-declaration",
+     "\t\tuint32(len(titles)), uint32(len(keys)), values))",
+     "\t\tuint32(len(titles)), 0, values))"),
+)
+for name, point, old, new in go_points:
+    n = go.count(old)
+    run_go(name, src, go.replace(old, new, 1) if n == 1 else go, n,
+           f"go's TEMPLATE-zone table cannot spell {point}")
+
+# And the reader itself: with the dispatch switch's own function gone it
+# must report a zone it could not READ, never an empty one.
+old = "func (a *App) Serve() {"
+n = go.count(old)
+run_go("go-reader", src,
+       go.replace(old, "func (a *App) ServeRemoved() {", 1) if n == 1 else go,
+       n, "cannot find go's dynamic-table zones")
+
+# C# spells both zones as OVERLOADS, so every deletion below is scoped
+# to one class block and the live Columns/OnSort stay where they are.
+cs = open("bindings/csharp/KayaApp.cs", encoding="utf-8").read()
+
+text, n = scoped(cs, "sealed class Tpl", "sealed class CopyRef",
+                 "    public void Columns(", "    public void ColumnsRemoved(")
+run_csharp("csharp-columns", src, text or cs, n,
+           "csharp's TEMPLATE-zone table cannot spell columns")
+
+text, n = scoped(
+    cs, "sealed class KayaApp", "sealed class Tx",
+    "    public void OnSort(Node n, Action<Tx, List<object>, uint> handler) =>",
+    "    public void OnSortRemoved(Node n, Action<Tx, List<object>, uint> handler) =>")
+run_csharp("csharp-sort", src, text or cs, n,
+           "csharp's TEMPLATE-zone table cannot spell on_sort")
+
+# The half a signature census cannot see, twice: drop the live arm's
+# guard and every stamped copy's request is answered by the live table
+# instead; drop the keys from the node arm's call and the handler can no
+# longer say which copy fired.
+text, n = scoped(
+    cs, "sealed class KayaApp", "sealed class Tx",
+    "kind == KayaWire.OccKindSortRequested && keys.Count == 0)",
+    "kind == KayaWire.OccKindSortRequested)")
+run_csharp("csharp-sort-arm", src, text or cs, n,
+           "csharp's TEMPLATE-zone table cannot spell on_sort")
+
+text, n = scoped(
+    cs, "sealed class KayaApp", "sealed class Tx",
+    "fn(tx, keys, column)", "fn(tx, column)")
+run_csharp("csharp-sort-keys", src, text or cs, n,
+           "csharp's TEMPLATE-zone table cannot spell on_sort")
+
+text, n = scoped(
+    cs, "sealed class Tx", "sealed class Tpl",
+    "    public void Columns(Node n, IReadOnlyList<object> keys,",
+    "    public void ColumnsAt(Node n, IReadOnlyList<object> keys,")
+run_csharp("csharp-keyed", src, text or cs, n,
+           "csharp's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+text, n = scoped(
+    cs, "sealed class Tx", "sealed class Tpl",
+    "(uint)titles.Length, (uint)keys.Count,", "(uint)titles.Length, 0,")
+run_csharp("csharp-keyed-len", src, text or cs, n,
+           "csharp's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+old = "sealed class Tpl"
+n = cs.count(old)
+run_csharp("csharp-reader", src,
+           cs.replace(old, "sealed class TplRemoved") if n == 1 else cs,
+           n, "cannot find csharp's dynamic-table zones")
+
+# OCaml namespaces the template zone by SCOPE, so each half is deleted
+# on the side it must live on: the declaration inside `module Tpl`, the
+# keyed re-declaration and the node registrar outside it.
+ml = open("bindings/ocaml/kaya_app.ml", encoding="utf-8").read()
+TPL = ("module Tpl = struct", "let on_sort app (Widget id)")
+columns_want = "ocaml's TEMPLATE-zone table cannot spell columns"
+sort_want = "ocaml's TEMPLATE-zone table cannot spell on_sort"
+keyed_want = "ocaml's TEMPLATE-zone table cannot spell keyed re-declaration"
+
+text, n = scoped(ml, *TPL,
+                 "  let columns (Node id) titles sort =",
+                 "  let columns_removed (Node id) titles sort =")
+run_ocaml("ocaml-columns", src, text or ml, n, columns_want)
+
+text, n = scoped(ml, *TPL,
+                 "         (List.length titles) 0",
+                 "         (List.length titles) 1")
+run_ocaml("ocaml-columns-pathlen", src, text or ml, n, columns_want)
+
+# menu_selected_node is the one table with the same value type, so it is
+# the only wrong table the compiler would let through.
+text, n = scoped(ml, "let on_sort_node app (Node id)",
+                 "let on_click app (Widget id)",
+                 "Hashtbl.replace app.node_sorts id handler",
+                 "Hashtbl.replace app.menu_selected_node id handler")
+run_ocaml("ocaml-sort-table", src, text or ml, n, sort_want)
+
+text, n = scoped(ml, "if kind = Kaya_wire.occ_kind_sort_requested then",
+                 "else if kind = Kaya_wire.occ_kind_text_changed then",
+                 "Hashtbl.find_opt app.node_sorts id",
+                 "Hashtbl.find_opt app.node_handlers id")
+run_ocaml("ocaml-sort-dispatch", src, text or ml, n, sort_want)
+
+KEYED = ("let columns_at (Node id) keys titles sort =", "(* Sums: a variant type")
+text, n = scoped(ml, *KEYED,
+                 "       (keys @ List.map (fun t -> Kaya_wire.Str t) titles))",
+                 "       (List.map (fun t -> Kaya_wire.Str t) titles @ keys))")
+run_ocaml("ocaml-keyed-order", src, text or ml, n, keyed_want)
+
+text, n = scoped(ml, *KEYED,
+                 "       (List.length titles) (List.length keys)",
+                 "       (List.length titles) 0")
+run_ocaml("ocaml-keyed-len", src, text or ml, n, keyed_want)
+
+old = "module Tpl = struct"
+n = ml.count(old)
+run_ocaml("ocaml-reader", src,
+          ml.replace(old, "module TplRemoved = struct") if n == 1 else ml,
+          n, "cannot find ocaml's dynamic-table zones")
 
 py = open("bindings/python/kaya/__init__.py", encoding="utf-8").read()
 row_points = (
@@ -630,11 +886,142 @@ n = py.count(old)
 run_python("python-reader", src,
            py.replace(old, "class _BoundCollectionRemoved:") if n == 1 else py,
            n, "cannot find python's dynamic-table zones")
+
+# SWIFT. Every point here is an OVERLOAD of a name the live zone also
+# has (`columns` on two classes, `onSort` twice on one), so each
+# perturbation leaves the live spelling untouched: a clause that came
+# back green would be reading the wrong one.
+sw = open("bindings/swift/KayaApp.swift", encoding="utf-8").read()
+tpl_bar = "    func columns(_ n: KayaNodeHandle, _ titles: [String], _ sort: KayaSort) {"
+n = sw.count(tpl_bar)
+run_swift("swift-columns", src,
+          sw.replace(tpl_bar, tpl_bar.replace("func columns(", "func columnsRemoved("))
+          if n == 1 else sw,
+          n, "swift's TEMPLATE-zone table cannot spell columns")
+
+text, n = scoped(sw, tpl_bar,
+                 "    func forEach<R>(_ c: KayaCollection, _ body: (KayaTpl) -> R)",
+                 "UInt32(titles.count), 0,", "UInt32(titles.count), 1,")
+run_swift("swift-columns-pathlen", src, text or sw, n,
+          "swift's TEMPLATE-zone table cannot spell columns")
+
+old = ("        _ n: KayaNodeHandle, "
+       "_ handler: @escaping (KayaAppTx, [KayaValue], UInt32) throws -> Void")
+n = sw.count(old)
+run_swift("swift-sort-keys", src,
+          sw.replace(old, old.replace("[KayaValue], ", "")) if n == 1 else sw,
+          n, "swift's TEMPLATE-zone table cannot spell on_sort")
+
+old = "            case (UInt16(KAYA_OCCURRENCE_SORT_REQUESTED), false):"
+n = sw.count(old)
+run_swift("swift-sort-dispatch", src,
+          sw.replace(old, old.replace("SORT_REQUESTED", "SORT_REMOVED"))
+          if n == 1 else sw,
+          n, "swift's TEMPLATE-zone table cannot spell on_sort")
+
+keyed = "    func columns(\n        _ n: KayaNodeHandle, at path:"
+n = sw.count(keyed)
+run_swift("swift-keyed", src,
+          sw.replace(keyed, keyed.replace("func columns(", "func columnsRemoved("))
+          if n == 1 else sw,
+          n, "swift's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+text, n = scoped(sw, keyed, "    func bindText(",
+                 "UInt32(path.count)", "0")
+run_swift("swift-keyed-len", src, text or sw, n,
+          "swift's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+text, n = scoped(sw, keyed, "    func bindText(",
+                 "path + titles.map { .str($0) })", "titles.map { .str($0) } + path)")
+run_swift("swift-keyed-order", src, text or sw, n,
+          "swift's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+# count and path_len are BOTH UInt32 — the compiler cannot see them
+# swapped, so this clause is the only reader that can.
+text, n = scoped(sw, keyed, "    func bindText(",
+                 "UInt32(titles.count), UInt32(path.count),",
+                 "UInt32(path.count), UInt32(titles.count),")
+run_swift("swift-keyed-swap", src, text or sw, n,
+          "swift's TEMPLATE-zone table cannot spell keyed re-declaration")
+
+old = "final class KayaTpl {"
+n = sw.count(old)
+run_swift("swift-reader", src,
+          sw.replace(old, "final class KayaTplRemoved {") if n == 1 else sw,
+          n, "cannot find swift's dynamic-table zones")
+# HASKELL'S ZONE IS ITS TYPE (KayaApp.hs is one flat namespace), so the
+# first perturbation of each pair moves the SIGNATURE into the live zone
+# with the name left alone: a reader that keyed on the name would stay
+# green there, which is the defect tools/tpl-surfaces.py exists to avoid.
+hs = open("bindings/haskell/KayaApp.hs", encoding="utf-8").read()
+haskell_want = "haskell's TEMPLATE-zone table cannot spell "
+
+text, n = scoped(hs, "columnsNode :: Node", "-- | Re-declare ONE stamped copy",
+                 "-> Sort -> Tpl ()", "-> Sort -> Build ()")
+run_haskell("haskell-columns-zone", src, text or hs, n, haskell_want + "columns")
+
+text, n = scoped(hs, "columnsNode :: Node", "-- | Re-declare ONE stamped copy",
+                 "(fromIntegral (length titles))\n        0\n",
+                 "(fromIntegral (length titles))\n        1\n")
+run_haskell("haskell-columns-path", src, text or hs, n, haskell_want + "columns")
+
+text, n = scoped(hs, "onSortNode :: App -> Node", "onClick :: App -> Widget",
+                 "(appNodeSorts app)", "(appSortHandlers app)")
+run_haskell("haskell-sort-registrar", src, text or hs, n, haskell_want + "on_sort")
+
+text, n = scoped(
+    hs,
+    "| kind == W.occKindSortRequested -> do",
+    "| kind == W.occKindTextChanged -> do",
+    "            _ -> do\n"
+    "              handlers <- readIORef (appNodeSorts app)\n"
+    "              dispatch (mapM_ (\\h -> h keys column) (Map.lookup ident handlers))\n",
+    "            _ -> return ()\n")
+run_haskell("haskell-sort-dispatch", src, text or hs, n, haskell_want + "on_sort")
+
+text, n = scoped(hs, "columnsAt :: Node", "-- Sums: the data declaration is the sum.",
+                 "(fromIntegral (length keys))", "0")
+run_haskell("haskell-keyed-len", src, text or hs, n,
+            haskell_want + "keyed re-declaration")
+
+text, n = scoped(hs, "columnsAt :: Node", "-- Sums: the data declaration is the sum.",
+                 "(keys ++ map W.VStr titles)", "(map W.VStr titles ++ keys)")
+run_haskell("haskell-keyed-order", src, text or hs, n,
+            haskell_want + "keyed re-declaration")
+
+old = "dispatchLoop :: App -> IO ()"
+n = hs.count(old)
+run_haskell("haskell-reader", src,
+            hs.replace(old, "dispatchLoopRemoved :: App -> IO ()") if n == 1 else hs,
+            n, "cannot find haskell's dynamic-table zones")
 PROBE
 )
 want_table_probe="rust-columns=applied:1 rc:1 named:True
 rust-sort=applied:1 rc:1 named:True
 rust-keyed=applied:1 rc:1 named:True
+go-columns=applied:1 rc:1 named:True
+go-columns-path=applied:1 rc:1 named:True
+go-nested-for=applied:1 rc:1 named:True
+go-sort=applied:1 rc:1 named:True
+go-sort-dispatch=applied:1 rc:1 named:True
+go-keyed=applied:1 rc:1 named:True
+go-keyed-order=applied:1 rc:1 named:True
+go-keyed-pathlen=applied:1 rc:1 named:True
+go-reader=applied:1 rc:1 named:True
+csharp-columns=applied:1 rc:1 named:True
+csharp-sort=applied:1 rc:1 named:True
+csharp-sort-arm=applied:1 rc:1 named:True
+csharp-sort-keys=applied:1 rc:1 named:True
+csharp-keyed=applied:1 rc:1 named:True
+csharp-keyed-len=applied:1 rc:1 named:True
+csharp-reader=applied:1 rc:1 named:True
+ocaml-columns=applied:1 rc:1 named:True
+ocaml-columns-pathlen=applied:1 rc:1 named:True
+ocaml-sort-table=applied:1 rc:1 named:True
+ocaml-sort-dispatch=applied:1 rc:1 named:True
+ocaml-keyed-order=applied:1 rc:1 named:True
+ocaml-keyed-len=applied:1 rc:1 named:True
+ocaml-reader=applied:1 rc:1 named:True
 python-rows-grow=applied:1 surface-rc:1 surface-named:True checks-rc:1 checks-named:True
 python-rows-grow-emitter=applied:1 rc:1 named:True
 python-rows-align=applied:1 surface-rc:1 surface-named:True checks-rc:1 checks-named:True
@@ -645,9 +1032,25 @@ python-columns=applied:1 rc:1 named:True
 python-sort=applied:1 rc:1 named:True
 python-keyed-len=applied:1 rc:1 named:True
 python-keyed-order=applied:1 rc:1 named:True
-python-reader=applied:1 rc:1 named:True"
+python-reader=applied:1 rc:1 named:True
+swift-columns=applied:1 rc:1 named:True
+swift-columns-pathlen=applied:1 rc:1 named:True
+swift-sort-keys=applied:1 rc:1 named:True
+swift-sort-dispatch=applied:1 rc:1 named:True
+swift-keyed=applied:1 rc:1 named:True
+swift-keyed-len=applied:1 rc:1 named:True
+swift-keyed-order=applied:1 rc:1 named:True
+swift-keyed-swap=applied:1 rc:1 named:True
+swift-reader=applied:1 rc:1 named:True
+haskell-columns-zone=applied:1 rc:1 named:True
+haskell-columns-path=applied:1 rc:1 named:True
+haskell-sort-registrar=applied:1 rc:1 named:True
+haskell-sort-dispatch=applied:1 rc:1 named:True
+haskell-keyed-len=applied:1 rc:1 named:True
+haskell-keyed-order=applied:1 rc:1 named:True
+haskell-reader=applied:1 rc:1 named:True"
 if [ "$tpl_table_probe" != "$want_table_probe" ]; then
-    echo "check-sugar-surface: SELF-TEST FAIL (the Rust/Python dynamic-table census" \
+    echo "check-sugar-surface: SELF-TEST FAIL (the dynamic-table census" \
         "did not catch its watched deletions). Wanted:" >&2
     echo "$want_table_probe" >&2
     echo "Got:" >&2
@@ -657,6 +1060,211 @@ fi
 echo "check-sugar-surface: dynamic-table perturbations applied:"
 echo "$tpl_table_probe"
 unset tpl_table_probe want_table_probe
+
+# (c2b) AND THE HASKELL SPELLING IS COMPILED. The census above reads
+#       text; Haskell states the zone and the copy's key path in TYPES,
+#       so only a typecheck says the three surfaces fit together. This is
+#       the compile_fail doc-test's shape in the one form this binding
+#       has: tools/checks/haskell-table/NestedTable.hs must compile, and
+#       the three mistakes it exists to stop must not.
+hs_table_probe=$(python3 - <<'PROBE'
+import shutil
+import subprocess
+import tempfile
+
+FIXTURE = "tools/checks/haskell-table/NestedTable.hs"
+src = open(FIXTURE, encoding="utf-8").read()
+tmp = tempfile.mkdtemp()
+
+
+def typecheck(module, text):
+    path = f"{tmp}/{module}.hs"
+    with open(path, "w", encoding="utf-8") as out:
+        out.write(text.replace("module NestedTable", f"module {module}"))
+    r = subprocess.run(
+        ["ghc", "-fno-code", "-XGHC2021", "-ibindings/haskell",
+         "-hidir", f"{tmp}/hi", "-odir", f"{tmp}/hi", path],
+        capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+rc, log = typecheck("NestedTable", src)
+print(f"fixture=rc:{rc}")
+if rc != 0:
+    print(log)
+
+# Each is a mistake the types are the wall for: calling the LIVE bar on a
+# nested For's node, a handler that drops the copy's keys, and a
+# re-declaration that drops them.
+for module, old, new in (
+    ("ZoneWall",
+     'columnsNode t ["Symbol", "Shares"] sortNone',
+     'columns t ["Symbol", "Shares"] sortNone'),
+    # The whole handler, so the perturbation is a TYPE error and not a
+    # `keys` left dangling out of scope: dropping the copy's keys binds
+    # the path where the column belongs.
+    ("HandlerPath",
+     '  onSortNode app table $ \\keys column ->\n'
+     '    submitTx app (columnsAt table keys ["Symbol", "Shares"] (sortAsc column))\n',
+     '  onSortNode app table $ \\column ->\n'
+     '    submitTx app (columnsAt table [] ["Symbol", "Shares"] (sortAsc column))\n'),
+    ("RedeclarePath",
+     'columnsAt table keys ["Symbol", "Shares"]',
+     'columnsAt table ["Symbol", "Shares"]'),
+):
+    n = src.count(old)
+    if n != 1:
+        print(f"{module}=SELFTEST-BROKEN(matched {n}, expected 1)")
+        continue
+    rc, log = typecheck(module, src.replace(old, new))
+    print(f"{module}=applied:1 rc:{rc} type-error:{'Couldn' in log}")
+
+shutil.rmtree(tmp)
+PROBE
+)
+want_hs_table_probe="fixture=rc:0
+ZoneWall=applied:1 rc:1 type-error:True
+HandlerPath=applied:1 rc:1 type-error:True
+RedeclarePath=applied:1 rc:1 type-error:True"
+if [ "$hs_table_probe" != "$want_hs_table_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the haskell dynamic-table typecheck)." \
+        "Wanted:" >&2
+    echo "$want_hs_table_probe" >&2
+    echo "Got:" >&2
+    echo "$hs_table_probe" >&2
+    exit 1
+fi
+echo "check-sugar-surface: haskell dynamic-table typecheck:"
+echo "$hs_table_probe"
+unset hs_table_probe want_hs_table_probe
+
+# (c3) JAVA'S DYNAMIC-TABLE READER, watched at each of its three points
+#      and at the façade half that lets the for-statement form reach
+#      them. A block of its own rather than more lines in (c2)'s: the six
+#      remaining bindings land in parallel worktrees, and an additive
+#      block is what merges.
+tpl_table_java=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+
+APP = "bindings/java/dev/kaya/KayaApp.java"
+TPL = "    public final class Tpl {"
+BUILD = "    public void build(Consumer<Tx> build) {"
+TABLE = "java's TEMPLATE-zone table cannot spell "
+
+
+def stage(perturb):
+    """A temp repo root where exactly `perturb` (path -> text) differs."""
+    root = tempfile.mkdtemp()
+    dirs = {}
+    for path in perturb:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            dirs.setdefault("/".join(parts[:i]), True)
+    for top in os.listdir("."):
+        if top not in dirs:
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for d in sorted(dirs):
+        os.makedirs(f"{root}/{d}", exist_ok=True)
+        for entry in os.listdir(d):
+            child = f"{d}/{entry}"
+            if child not in dirs and child not in perturb:
+                os.symlink(os.path.abspath(child), f"{root}/{child}")
+    for path, text in perturb.items():
+        open(f"{root}/{path}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def run(name, text, count, want):
+    if count != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {count}, expected 1)")
+        return
+    root = stage({APP: text})
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+def scoped(name, src, old, new, want):
+    """A perturbation confined to the Tpl class: the same spelling in
+    RowSurface and in the LIVE Tx stays, so a reader satisfied by either
+    of those passes and a zone-scoped one cannot."""
+    if src.count(TPL) != 1:
+        print(f"{name}=SELFTEST-BROKEN(zone header matched {src.count(TPL)})")
+        return
+    at, end = src.index(TPL), src.index(BUILD, src.index(TPL))
+    block = src[at:end]
+    n = block.count(old)
+    run(name, src[:at] + block.replace(old, new) + src[end:] if n == 1 else src,
+        n, want)
+
+
+def whole(name, src, old, new, want):
+    n = src.count(old)
+    run(name, src.replace(old, new) if n == 1 else src, n, want)
+
+
+src = open(APP, encoding="utf-8").read()
+
+scoped("java-columns", src,
+       "    public void columns(Node ", "    public void columnsRemoved(Node ",
+       TABLE + "columns")
+scoped("java-columns-pathlen", src,
+       "titles.length, 0, values)", "titles.length, 1, values)",
+       TABLE + "columns")
+
+whole("java-sort-keys", src,
+      "void accept(Tx tx, List<Object> keys, int column);",
+      "void accept(Tx tx, int column);", TABLE + "on_sort")
+whole("java-sort-route", src,
+      "nodeSorts.get(occ.id)", "nodeSortsRemoved.get(occ.id)",
+      TABLE + "on_sort")
+
+whole("java-keyed-order", src,
+      "System.arraycopy(titles, 0, values, keys.size(), titles.length);",
+      "System.arraycopy(titles, 0, values, 0, titles.length);",
+      TABLE + "keyed re-declaration")
+whole("java-keyed-len", src,
+      "titles.length, keys.size(), values)", "titles.length, 0, values)",
+      TABLE + "keyed re-declaration")
+
+# The façade half: a forward deleted from RowSurface leaves the nested
+# table reachable through forEach and not through `for (var row : …)`.
+whole("java-facade-columns", src,
+      "        public void columns(Node n, String[] titles, Sort sort) {\n"
+      "            t.columns(n, titles, sort);\n        }\n", "",
+      "does not forward: columns(Node, String[], Sort)")
+whole("java-facade-foreach", src,
+      "        public Node forEach(Collection c, Consumer<Tpl> body) {\n"
+      "            return t.forEach(c, body);\n        }\n", "",
+      "does not forward: forEach(Collection, Consumer<Tpl>)")
+
+# And the refusal: a reader that can no longer find the zone must say so
+# rather than report a binding with nothing missing.
+whole("java-reader", src, TPL + "\n", "    public final class TplRenamed {\n",
+      "cannot find java's dynamic-table zones")
+PROBE
+)
+want_table_java="java-columns=applied:1 rc:1 named:True
+java-columns-pathlen=applied:1 rc:1 named:True
+java-sort-keys=applied:1 rc:1 named:True
+java-sort-route=applied:1 rc:1 named:True
+java-keyed-order=applied:1 rc:1 named:True
+java-keyed-len=applied:1 rc:1 named:True
+java-facade-columns=applied:1 rc:1 named:True
+java-facade-foreach=applied:1 rc:1 named:True
+java-reader=applied:1 rc:1 named:True"
+if [ "$tpl_table_java" != "$want_table_java" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the Java dynamic-table census did" \
+        "not catch its watched deletions). Wanted:" >&2
+    echo "$want_table_java" >&2
+    echo "Got:" >&2
+    echo "$tpl_table_java" >&2
+    exit 1
+fi
+echo "check-sugar-surface: java dynamic-table perturbations applied:"
+echo "$tpl_table_java"
+unset tpl_table_java want_table_java
 
 # (c2) AND THE GUEST THAT SPELLS THEM. The census above says Python CAN
 #      spell the dynamic-table geometry; the portfolio guest is what

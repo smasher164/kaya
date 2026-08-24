@@ -4616,8 +4616,25 @@ remembering. The landing, per backend and surface:
   extended the census to Rust and Python's nested columns/on_sort and
   keyed re-declaration spellings; the other six bindings remain open.)
 
-## Dynamically created tables — HIGH PRIORITY (maintainer, 2026-08-21)
+## ~~Dynamically created tables — HIGH PRIORITY (maintainer, 2026-08-21)~~
 KEY: nested tables, template-zone set_column_headers, per-copy sort, dynamic table instances, forcing app
+
+COMPLETE 2026-08-24: the six-binding breadth closed — Go, C#, Java,
+Swift, OCaml and Haskell each spell the template-zone bar, nested
+on_sort carrying the copy's key path, and keyed re-declaration, DO on
+every point with zero carve-outs; every spelling joined the
+tpl-surfaces/check-sugar census in the same change (53 watched
+perturbations run on every invocation) and compiles under a gate that
+already runs. Three dispatch loops (C#, Java, Haskell) had silently
+dropped keyed sort_requested; each gained its keyed arm. The fan-out
+also surfaced and same-day-fixed a core defect: a widget-id/
+template-node-id collision misrouted set_column_headers — keys now
+resolve in the template space alone and the core refuses the collision
+at declaration, both directions watched red first (scene.rs; the
+one-id-space follow-up is its own DECISION entry). The full breadth
+record lives in docs/tables-plan.md's "BREADTH CLOSED 2026-08-24";
+canvas and virtualization remain the forcing app's next milestones,
+on the ledger's own entries and the ruled order.
 
 DEPTH SLICE GREEN 2026-08-23: b819423 is the pushed protocol/core
 root. Rust and Python now spell nested columns/on_sort plus keyed
@@ -6005,3 +6022,42 @@ mobile yet; table.steps runs there. Pixels-only, so the camera and the
 portfolio captures hold it, and the change lands with fresh captures
 inspected. DEFERRED by the maintainer until after the six-binding
 breadth fan-out.
+
+
+## GAP — Haskell cannot declare a nested RECORD collection (found 2026-08-24, by the breadth fan-out)
+KEY: collectionOf Build-only, RecordCollection, nested record rows, Tpl collection, haskell dynamic tables
+
+Haskell's `collectionOf` lives in `Build` alone and `at` yields no
+`RecordCollection`, while Rust's `Tpl::collection<T>` is typed — so a
+Haskell dynamic table's rows cannot carry record fields yet; its
+breadth exerciser uses plain value rows. The spelling gap is
+surface-only (the wire and core support it); closing it is a Haskell
+binding slice with its own census teeth.
+
+## GAP — C#'s generated row facade cannot spell a nested table (found 2026-08-24, by the breadth fan-out)
+KEY: <Rec>Row facade, kaya-csgen typed row sugar, nested typed For, NOT_FORWARDED_CSHARP
+
+Two pre-existing halves, both recorded with one-line fixes in the
+breadth agent's report: the generated `<Rec>Row` foreach facade has no
+Each/ForEach/Collection and a private Tpl, so a nested table cannot be
+spelled through it at all; and `kaya-csgen` emits typed row sugar for
+the live zone only, so a nested typed For's body falls back to the raw
+`Tpl`. The hand-written `Tpl` spelling works — this gap is about the
+generated sugar tier reaching parity. `Columns` sits in
+NOT_FORWARDED_CSHARP with its reachability reason until then.
+
+## DECISION — one id space for widgets and template nodes? (raised 2026-08-24)
+KEY: id collision, next_node, separate counters, set_column_headers target, sort_requested tag, one id space
+
+The Haskell breadth probe manufactured a widget-id/template-node-id
+collision and showed set_column_headers resolving the wrong space.
+FIXED the same day at two levels: keys now resolve in the template
+space alone, and the core refuses a live For container and a nested
+For template node that share a number, loudly at declaration, both
+directions watched red first (scene.rs). What remains is the design
+question the walls make visible: bindings allocate widget and node ids
+from separate counters over one u64 target field, so the collision is
+always one allocation away and only the wall stands between. Unifying
+the counters (one id space per app) would delete the class; it touches
+every binding's allocator and is the maintainer's call. Until then the
+walls hold.

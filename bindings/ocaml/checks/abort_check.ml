@@ -398,4 +398,116 @@ let () =
       fail "set_inset queued (widget %Ld, %g), wanted (%Ld, 2)" on v id
   | _, l -> fail "set_inset queued %d inset props, not one" (List.length l));
 
+  (* THE NESTED TABLE (docs/tables-plan.md, dynamic tables). Read off
+     the RECORDS the binding queued, never the arguments handed in: the
+     one thing a keyed re-declaration can get wrong and still look right
+     is the ORDER of its values, and keys-before-titles is invisible
+     from the call. *)
+  let header_records rs =
+    List.filter (fun r -> rec_kind r = Kaya_wire.tx_kind_set_column_headers) rs
+  in
+  (* {u64 widget, u32 sorted, u32 direction, u32 count, u32 path_len}
+     then encode_values' own {u32 len, u32 pad} at 32 and the values
+     from 40 — path_len keys first, then count titles. *)
+  let header_fields r =
+    let byte i = Char.code r.[i] in
+    let count = rec_u32 r 24 and path_len = rec_u32 r 28 in
+    let at = ref 40 in
+    let values =
+      List.init (path_len + count) (fun _ ->
+          let v, next = Kaya_wire.parse_value byte !at in
+          at := next;
+          v)
+    in
+    (rec_u64 r 8, rec_u32 r 16, rec_u32 r 20, count, path_len, values)
+  in
+  let one_header what rs =
+    match header_records rs with
+    | [ r ] -> header_fields r
+    | l -> fail "%s queued %d header records, not one" what (List.length l)
+  in
+  let show_values vs = String.concat "; " (List.map show_key vs) in
+  let accounts = build app (fun () -> collection ()) in
+  let sorted_at = ref [] in
+  let node, template_bar =
+    build app
+      (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        let _, node =
+          for_each accounts
+            (fun () ->
+              (* Declared INSIDE the template scope — the nested
+                 collection's own-scope wall. *)
+              let positions = Tpl.collection () in
+              let node, () =
+                Tpl.for_each positions
+                  (fun () ->
+                    ignore
+                      Tpl.(row [ label ~text:"sym"; label ~text:"qty" ] ()))
+                  ()
+              in
+              (* After the nested For closed, inside the still-open
+                 parent scope: where the template-zone header op finds
+                 its For. *)
+              Tpl.columns node [ "Symbol"; "Qty" ] sort_none;
+              on_sort_node app node (fun keys column ->
+                  sorted_at := (keys, column) :: !sorted_at);
+              ignore Tpl.(column [ w node ] ());
+              node)
+            ()
+        in
+        (node, one_header "Tpl.columns" (queued_since tx before)))
+  in
+  let (Node node_id) = node in
+  (match template_bar with
+  | id, sorted, _, 2, 0, [ Str "Symbol"; Str "Qty" ] when id = node_id ->
+      if sorted <> 0xFFFFFFFF then
+        fail "Tpl.columns sent sort_none as %d, not the no-indicator sentinel"
+          sorted
+  | id, _, _, count, path_len, values ->
+      fail
+        "Tpl.columns queued (widget %Ld, count %d, path_len %d, [%s]), wanted \
+         the template node %Ld with 2 titles and no keys"
+        id count path_len (show_values values) node_id);
+
+  (* One copy's arrows: the keys the handler received, handed straight
+     back. *)
+  let keyed_bar =
+    build app (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        columns_at node [ Str "acct-a" ] [ "Symbol"; "Qty" ] (sort_desc 1);
+        one_header "columns_at" (queued_since tx before))
+  in
+  (match keyed_bar with
+  | id, 1, 1, 2, 1, [ Str "acct-a"; Str "Symbol"; Str "Qty" ] when id = node_id
+    ->
+      ()
+  | id, sorted, direction, count, path_len, values ->
+      fail
+        "columns_at queued (widget %Ld, sorted %d, direction %d, count %d, \
+         path_len %d, [%s]), wanted the template node %Ld, descending on 1, \
+         and the copy's key BEFORE both titles"
+        id sorted direction count path_len (show_values values) node_id);
+
+  (* The registration is in [node_sorts] under the NODE's id — the one
+     table the keyed sort_requested arm looks in. The live [sort_handlers]
+     needs no clause here: its value type is [int -> unit], so filing a
+     copy handler there does not compile (watched 2026-08-24). *)
+  (match Hashtbl.find_opt app.node_sorts node_id with
+  | None -> fail "on_sort_node registered nothing under the template node"
+  | Some handler -> handler [ Str "acct-a" ] 1);
+  (match !sorted_at with
+  | [ ([ Str "acct-a" ], 1) ] -> ()
+  | l ->
+      fail
+        "the copy's sort handler saw [%s], wanted one request carrying its \
+         own key then the column"
+        (String.concat ", "
+           (List.map
+              (fun (keys, column) ->
+                Printf.sprintf "([%s], %d)" (show_values keys) column)
+              l)));
+
   print_endline "ocaml abort check: OK"

@@ -242,7 +242,9 @@ static class Program
         b.AppendLine("/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,");
         b.AppendLine("/// Collection/ForEach/When, ContextMenu — stays off deliberately: a");
         b.AppendLine("/// row surface hands out sugar, and its Tpl is private so the floor");
-        b.AppendLine("/// is reached by opening the For yourself.</summary>");
+        b.AppendLine("/// is reached by opening the For yourself. Columns is off with");
+        b.AppendLine("/// them: it declares a NESTED For's header bar, and the Node it");
+        b.AppendLine("/// takes comes from the ForEach this surface does not forward.</summary>");
         b.AppendLine($"sealed class {rec}Row");
         b.AppendLine("{");
         b.AppendLine("    readonly Tpl t;");

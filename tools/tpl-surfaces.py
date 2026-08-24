@@ -79,6 +79,23 @@ def python_class_block(src, name):
     return src[start.start():end]
 
 
+def swift_member(block, header_re):
+    """One Swift method's SIGNATURE and its brace-matched BODY.
+
+    Read apart because a nested-table point is half signature (WHICH
+    zone's handle it takes) and half body (what it puts on the wire), and
+    a binding whose two zones spell the method identically is told apart
+    only by the first half.
+    """
+    m = re.search(header_re, block, re.M)
+    if not m:
+        return None, None
+    open_at = block.find("{", m.start())
+    if open_at < 0:
+        return None, None
+    return block[m.start():open_at], brace_block(block[m.start():], header_re)
+
+
 def keyword_block(src, start_re, end_re):
     """The body between a start line and its matching end line.
 
@@ -286,8 +303,19 @@ PROP_ZONES = [
 # A table is a For surface rather than a widget kind. Read the nested
 # builder and its keyed re-declaration from their own blocks so the live
 # Tx/Messages methods cannot satisfy them (docs/tables-plan.md).
+#
+# KEEP A ZONE'S TABLE METHOD OUT OF ITS CONSTRUCTOR PATTERN. `offers`
+# below is prefix-loose, so a `columns` that the KIND reader can see —
+# C#'s `public Node <Name>(`, Java's, Swift's `-> KayaNodeHandle` — would
+# answer for the `column` kind and hide a missing constructor. C# returns
+# void from both zones' Columns for that reason.
 TABLE_POINTS = {
     "rust": ("columns", "on_sort", "keyed re-declaration"),
+    "go": ("columns", "on_sort", "keyed re-declaration"),
+    "csharp": ("columns", "on_sort", "keyed re-declaration"),
+    "swift": ("columns", "on_sort", "keyed re-declaration"),
+    "ocaml": ("columns", "on_sort", "keyed re-declaration"),
+    "haskell": ("columns", "on_sort", "keyed re-declaration"),
     "python": (
         "columns",
         "on_sort",
@@ -296,6 +324,7 @@ TABLE_POINTS = {
         "ordinary For align",
         "ordinary For a11y id",
     ),
+    "java": ("columns", "on_sort", "keyed re-declaration"),
 }
 
 
@@ -339,6 +368,368 @@ def table_rust(_):
         re.M | re.S,
     )
     if node_id and keyed:
+        got.add("keyed re-declaration")
+    return got
+
+
+def go_func_body(src, header_re):
+    """One Go function's brace-matched body, located by its full header.
+
+    The RECEIVER is Go's zone marker — `func (t *Tpl) Columns` and
+    `func (tx *Tx) Columns` are two different surfaces spelled the same
+    — so every needle below is anchored on one.
+    """
+    return brace_block(src, header_re)
+
+
+def table_go(_):
+    src = read("bindings/go/app.go")
+    # The dispatch switch lives in Serve's body; a reader that cannot
+    # find it has stopped reading, and must not report an empty zone.
+    serve = go_func_body(src, r"^func \(a \*App\) Serve\(\) \{")
+    tpl_methods = re.findall(r"^func \(t \*Tpl\) ([A-Za-z][A-Za-z0-9]*)", src, re.M)
+    if serve is None or len(tpl_methods) < 10:
+        return None
+
+    got = set()
+
+    # The nested For's handle, then the bar declared against it with an
+    # empty path: the template-scoped declaration, every copy's bar.
+    nested_for = re.search(
+        r"^func \(t \*Tpl\) ForEach\(c Collection, fn func\(\*Tpl\)\) Node \{",
+        src,
+        re.M,
+    )
+    tpl_columns = go_func_body(
+        src, r"^func \(t \*Tpl\) Columns\(n Node, titles \[\]string, sort Sort\) \{"
+    )
+    if (
+        nested_for
+        and tpl_columns
+        and re.search(
+            r"TxSetColumnHeaders\(n\.id,.*?uint32\(len\(titles\)\),\s*0,",
+            tpl_columns,
+            re.S,
+        )
+    ):
+        got.add("columns")
+
+    # Handlers scope to their creator: the registration is keyed by the
+    # For's NODE and its callback takes the copy's keys, and the dispatch
+    # arm that reads that map hands them over.
+    on_sort_node = go_func_body(
+        src,
+        r"^func \(a \*App\) OnSortNode\(n Node, "
+        r"fn func\(\*Tx, \[\]any, uint32\)\) \{",
+    )
+    routed = re.search(
+        r"case kind == occSortRequested:\s*\n"
+        r"\s*if fn := a\.nodeSorts\[id\]; fn != nil \{\s*\n"
+        r"\s*a\.dispatch\(func\(tx \*Tx\) \{ fn\(tx, keys, column\) \}\)",
+        serve,
+    )
+    if on_sort_node and "a.nodeSorts[n.id] = fn" in on_sort_node and routed:
+        got.add("on_sort")
+
+    # One copy's bar: the template node, then its keys OUTERMOST FIRST
+    # ahead of the titles, and path_len counting the keys.
+    columns_at = go_func_body(
+        src,
+        r"^func \(tx \*Tx\) ColumnsAt\(n Node, keys \[\]any, "
+        r"titles \[\]string, sort Sort\) \{",
+    )
+    if columns_at and re.search(
+        r"values = append\(values, keys\.\.\.\).*?"
+        r"for _, title := range titles \{\s*\n"
+        r"\s*values = append\(values, title\).*?"
+        r"TxSetColumnHeaders\(n\.id,.*?"
+        r"uint32\(len\(titles\)\),\s*uint32\(len\(keys\)\),",
+        columns_at,
+        re.S,
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
+def table_csharp(_):
+    """C# spells both zones as OVERLOADS — `Columns(Widget, …)` beside
+    `Columns(Node, …)`, `OnSort(Widget, …)` beside `OnSort(Node, …)` —
+    so every point here is read out of its own class block AND keyed by
+    the Node-typed signature. A name-keyed pattern would be satisfied by
+    the live table this binding has shipped since 2026-08-21.
+    """
+    src = read("bindings/csharp/KayaApp.cs")
+    app = brace_block(src, r"^\s*(public |internal )?sealed class KayaApp\b")
+    tx = brace_block(src, r"^\s*(public |internal )?sealed class Tx\b")
+    tpl = brace_block(src, r"^\s*(public |internal )?sealed class Tpl\b")
+    if None in (app, tx, tpl):
+        return None
+
+    got = set()
+    declare = brace_block(
+        tpl, r"^\s*public void Columns\(Node n, string\[\] titles, Sort sort\)")
+    if declare and re.search(
+        r"KayaWire\.TxSetColumnHeaders\(\s*n\.Id,[^;]*?\(uint\)titles\.Length,\s*0,",
+        declare,
+        re.S,
+    ):
+        got.add("columns")
+
+    # The registration names its own table, and the DISPATCH ARM must
+    # reach it: the live arm is guarded by `keys.Count == 0`, so a
+    # stamped copy's request is routed by that guard or dropped.
+    registration = re.search(
+        r"^\s*public void OnSort\(Node n, Action<Tx, List<object>, uint> handler\)\s*=>\s*"
+        r"(\w+)\[n\.Id\] = handler;",
+        app,
+        re.M,
+    )
+    live_guard = re.search(
+        r"kind == KayaWire\.OccKindSortRequested && keys\.Count == 0\)", app
+    )
+    if registration and live_guard:
+        arm = re.search(
+            r"kind == KayaWire\.OccKindSortRequested\)\s*\{[^}]*?"
+            + re.escape(registration.group(1))
+            + r"\.TryGetValue\(id, out var fn\)[^}]*?fn\(tx, keys, column\)",
+            app,
+            re.S,
+        )
+        if arm:
+            got.add("on_sort")
+
+    keyed = brace_block(
+        tx, r"^\s*public void Columns\(Node n, IReadOnlyList<object> keys,")
+    if keyed and re.search(
+        r"KayaWire\.TxSetColumnHeaders\(\s*n\.Id,[^;]*?\(uint\)keys\.Count,\s*"
+        r"HeaderValues\(keys, titles\)",
+        keyed,
+        re.S,
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
+def table_swift(_):
+    # Swift spells BOTH zones `columns` on two different classes and
+    # BOTH sort registrations `onSort` on one — overloads, told apart by
+    # the receiver's type and the argument label alone. So each point is
+    # located in the class block that owns it and read for the handle it
+    # takes AND the record it emits; a line-oriented pattern here is
+    # satisfied by the live method every time.
+    src = read("bindings/swift/KayaApp.swift")
+    tpl = brace_block(src, r"^final class KayaTpl\b")
+    live = brace_block(src, r"^final class KayaAppTx\b")
+    app = brace_block(src, r"^final class KayaApp\b")
+    if None in (tpl, live, app):
+        return None
+
+    got = set()
+    _, template_bar = swift_member(
+        tpl, r"^\s{4}func columns\(\s*_ n: KayaNodeHandle,\s*_ titles:")
+    if template_bar and re.search(
+        r"setColumnHeaders\(\s*n\.id,.*?,\s*0,\s*titles\.map", template_bar, re.S
+    ):
+        got.add("columns")
+
+    signature, registration = swift_member(
+        app, r"^\s{4}func onSort\(\s*_ n: KayaNodeHandle,")
+    registered = (
+        signature
+        and "[KayaValue]" in signature
+        and registration
+        and "nodeSorts[n.id] = handler" in registration
+    )
+    # A registration nothing dispatches to is a dead handler: the live
+    # arm keeps answering path-less requests and a stamped copy's click
+    # falls on the floor in silence.
+    dispatched = re.search(
+        r"case \(UInt16\(KAYA_OCCURRENCE_SORT_REQUESTED\), false\):"
+        r".*?nodeSorts\[id\].*?handler\(tx, keys, column\)",
+        app,
+        re.S,
+    )
+    if registered and dispatched:
+        got.add("on_sort")
+
+    _, keyed = swift_member(
+        live, r"^\s{4}func columns\(\s*_ n: KayaNodeHandle,\s*at path:")
+    # count, THEN path_len, THEN keys-before-titles. Both counts are
+    # UInt32, so nothing but this reads a swap; the values order is the
+    # half Python's census watches one binding over.
+    if keyed and re.search(
+        r"setColumnHeaders\(\s*n\.id,.*?UInt32\(titles\.count\),\s*"
+        r"UInt32\(path\.count\),\s*path \+ titles\.map",
+        keyed,
+        re.S,
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
+def ocaml_binding(src, header_re, indent):
+    """One OCaml `let`, from its header to the next binding at the same
+    indentation. OCaml closes nothing, so the next sibling is the end —
+    and the inner `let ... in` of a body is indented past it."""
+    m = re.search(header_re, src, re.M)
+    if not m:
+        return None
+    tail = src[m.end():]
+    nxt = re.search(rf"^{indent}(?:let|and|type|module|end)\b", tail, re.M)
+    return src[m.start():m.end() + (nxt.start() if nxt else len(tail))]
+
+
+def table_ocaml(_):
+    src = read("bindings/ocaml/kaya_app.ml")
+    tpl = keyword_block(src, r"^module Tpl = struct\b", r"^end")
+    if tpl is None:
+        return None
+    # The live `columns` and `on_sort` are top-level lets spelled with
+    # the same words, so each half is read from the side it must live
+    # on: the template declaration from inside module Tpl, the keyed
+    # re-declaration and the node registrar from the file with that
+    # module cut out.
+    outside = src.replace(tpl, "")
+
+    got = set()
+    tpl_columns = ocaml_binding(tpl, r"^  let columns \(Node id\) titles sort =", "  ")
+    if tpl_columns and re.search(
+        r"Kaya_wire\.tx_set_column_headers id\b.*?\(List\.length titles\) 0\b",
+        tpl_columns,
+        re.S,
+    ):
+        got.add("columns")
+
+    registrar = ocaml_binding(
+        outside, r"^let on_sort_node app \(Node id\)", ""
+    )
+    registered = registrar and re.search(
+        r"handler : Kaya_wire\.value list -> int -> unit.*?"
+        r"Hashtbl\.replace app\.node_sorts id handler",
+        registrar,
+        re.S,
+    )
+    # A registration nothing dispatches answers no copy: the keyed arm
+    # of sort_requested must be the one that reads that table.
+    dispatched = re.search(
+        r"kind = Kaya_wire\.occ_kind_sort_requested then.*?"
+        r"Some \(Kaya_wire\.I64 column\), keys ->.*?"
+        r"Hashtbl\.find_opt app\.node_sorts id.*?"
+        r"handler keys \(Int64\.to_int column\)",
+        outside,
+        re.S,
+    )
+    if registered and dispatched:
+        got.add("on_sort")
+
+    keyed = ocaml_binding(
+        outside, r"^let columns_at \(Node id\) keys titles sort =", ""
+    )
+    if keyed and re.search(
+        r"Kaya_wire\.tx_set_column_headers id\b.*?"
+        r"\(List\.length titles\) \(List\.length keys\).*?"
+        r"\(keys @ List\.map \(fun t -> Kaya_wire\.Str t\) titles\)",
+        keyed,
+        re.S,
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
+def haskell_decl(src, name):
+    """One top-level Haskell binding: its type signature, its equations,
+    and nothing else.
+
+    HASKELL'S ZONE IS ITS TYPE, not a block — KayaApp.hs is one flat
+    namespace and says so ("the RESULT TYPE is the template zone's only
+    scope"). So this is the file's block reader: a clause that demands
+    `Node ->` and `-> Tpl ()` inside the binding's own text cannot be
+    satisfied by the live `Widget -> … -> Build ()` spelling of the same
+    idea.
+
+    FOUND BY ITS SIGNATURE, never by its equations: every top-level in
+    KayaApp.hs declares one, so a name this cannot find is a reader that
+    has lost the file rather than a surface that is missing.
+    """
+    lines = src.split("\n")
+    head = rf"^{re.escape(name)}\s*::"
+    start = next((i for i, ln in enumerate(lines) if re.match(head, ln)), None)
+    if start is None:
+        return None
+    out = [lines[start]]
+    for line in lines[start + 1:]:
+        if line == "" or line.startswith((" ", "\t")):
+            out.append(line)
+        elif re.match(rf"^{re.escape(name)}\b", line):
+            out.append(line)
+        else:
+            break
+    return "\n".join(out)
+
+
+# --- one reader per binding -------------------------------------------
+#
+# Each returns the set of widget-kind constructor names its template zone
+# offers, in that language's own convention; compared case-normalised.
+
+
+def table_haskell(_):
+    src = read("bindings/haskell/KayaApp.hs")
+    # The LOCATORS are the two the file cannot lose while still being
+    # KayaApp.hs: the live bar and the occurrence loop. The three points
+    # below are then present-or-missing on their own, so a deleted
+    # spelling names ITSELF rather than reporting a broken reader.
+    if haskell_decl(src, "columns") is None or haskell_decl(src, "dispatchLoop") is None:
+        return None
+
+    got = set()
+    nested = haskell_decl(src, "columnsNode")
+    if nested and re.search(
+        r"^columnsNode\s*::\s*Node\s*->\s*\[String\]\s*->\s*Sort\s*->\s*Tpl \(\)",
+        nested,
+        re.M,
+    ) and re.search(
+        r"emitT\b.*?W\.txSetColumnHeaders\b.*?"
+        r"\(fromIntegral \(length titles\)\)\s*0\s*\(map W\.VStr titles\)",
+        nested,
+        re.S,
+    ):
+        got.add("columns")
+
+    registrar = haskell_decl(src, "onSortNode")
+    arm = re.search(
+        r"kind == W\.occKindSortRequested ->(.*?)(?=\|\s*kind ==)",
+        haskell_decl(src, "dispatchLoop"),
+        re.S,
+    )
+    routed = arm and re.search(
+        r"readIORef \(appNodeSorts app\).*?h keys column", arm.group(1), re.S
+    )
+    if (
+        registrar
+        and re.search(
+            r"^onSortNode\s*::\s*App\s*->\s*Node\s*->\s*"
+            r"\(\[W\.Value\]\s*->\s*Int\s*->\s*IO \(\)\)\s*->\s*IO \(\)",
+            registrar,
+            re.M,
+        )
+        and "appNodeSorts" in registrar
+        and routed
+    ):
+        got.add("on_sort")
+
+    keyed = haskell_decl(src, "columnsAt")
+    if keyed and re.search(
+        r"^columnsAt\s*::\s*Node\s*->\s*\[W\.Value\]\s*->\s*\[String\]\s*->\s*"
+        r"Sort\s*->\s*Build \(\)",
+        keyed,
+        re.M,
+    ) and re.search(
+        r"\(fromIntegral \(length titles\)\)\s*\(fromIntegral \(length keys\)\).*?"
+        r"\(keys \+\+ map W\.VStr titles\)",
+        keyed,
+        re.S,
+    ):
         got.add("keyed re-declaration")
     return got
 
@@ -423,16 +814,106 @@ def table_python(_):
     return got
 
 
+def table_java(_):
+    src = read("bindings/java/dev/kaya/KayaApp.java")
+    tpl = brace_block(src, r"^\s*public final class Tpl\b")
+    tx = brace_block(src, r"^\s*public final class Tx\b")
+    loop = brace_block(src, r"^\s*private void loop\(\)")
+    handler = brace_block(src, r"^\s*public interface SortHandler\b")
+    if None in (tpl, tx, loop, handler):
+        return None
+
+    got = set()
+    # Read out of the TEMPLATE class's own block: Tx.columns(Widget, …)
+    # is the live spelling of the same name, one block over.
+    columns = brace_block(
+        tpl, r"^\s*public void columns\(Node \w+, String\[\] titles, Sort sort\)"
+    )
+    if columns and re.search(
+        r"txSetColumnHeaders\(\s*\w+\.id,[^)]*titles\.length, 0, values\)",
+        columns,
+        re.S,
+    ):
+        got.add("columns")
+
+    # The nested handler: three parts, because two of them are satisfied
+    # by shapes that already existed. The interface must carry the KEYS,
+    # the registration must be node-keyed, and the loop must route a
+    # KEYED sort_requested to it — the live arm reads the same
+    # occurrence and is discriminated by `&& occ.keys.isEmpty()`.
+    keys_in_message = "void accept(Tx tx, List<Object> keys, int column);" in handler
+    registered = re.search(
+        r"public void onSort\(Node (\w+), SortHandler (\w+)\)\s*\{\s*"
+        r"nodeSorts\.put\(\1\.id, \2\);\s*\}",
+        src,
+    )
+    routed = re.search(
+        r"OCC_KIND_SORT_REQUESTED\)\s*\{\s*SortHandler \w+ = nodeSorts\.get\(occ\.id\)"
+        r".*?\.accept\(\w+, occ\.keys, \w+\)",
+        loop,
+        re.S,
+    )
+    if keys_in_message and registered and routed:
+        got.add("on_sort")
+
+    keyed = brace_block(
+        tx,
+        r"^\s*public void columnsAt\(Node \w+, List<Object> keys, "
+        r"String\[\] titles, Sort sort\)",
+    )
+    if (
+        keyed
+        and "values[i] = keys.get(i);" in keyed
+        and "System.arraycopy(titles, 0, values, keys.size(), titles.length);" in keyed
+        and re.search(r"titles\.length, keys\.size\(\), values\)", keyed)
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
 TABLE_ZONES = [
     ("rust", table_rust, "typed Rows + Tx::columns_at (crates/kaya/src/app.rs)"),
+    (
+        "go",
+        table_go,
+        "Tpl.Columns + App.OnSortNode + Tx.ColumnsAt (bindings/go/app.go)",
+    ),
+    (
+        "csharp",
+        table_csharp,
+        "Tpl.Columns(Node …) + KayaApp.OnSort(Node …) + Tx.Columns(Node, keys, …) "
+        "(bindings/csharp/KayaApp.cs)",
+    ),
     (
         "python",
         table_python,
         "Collection/_ColumnsTrace/_BoundCollection (bindings/python/kaya/__init__.py)",
     ),
+    (
+        "java",
+        table_java,
+        "class Tpl, class Tx, SortHandler and the dispatch loop "
+        "(bindings/java/dev/kaya/KayaApp.java)",
+    ),
+    (
+        "swift",
+        table_swift,
+        "KayaTpl.columns + KayaApp.onSort(_ n:) + KayaAppTx.columns(_:at:_:_:) "
+        "(bindings/swift/KayaApp.swift)",
+    ),
+    (
+        "ocaml",
+        table_ocaml,
+        "module Tpl's own `columns` + top-level columns_at/on_sort_node "
+        "(bindings/ocaml/kaya_app.ml)",
+    ),
+    (
+        "haskell",
+        table_haskell,
+        "columnsNode/onSortNode/columnsAt, read by their own signatures "
+        "(bindings/haskell/KayaApp.hs)",
+    ),
 ]
-# docs/deferred.md's dynamic-tables entry keeps Go, C#, Java, Swift,
-# OCaml and Haskell open; each joins this depth census with its spelling.
 
 
 # --- the TAKES-A-SOURCE census -----------------------------------------
@@ -638,21 +1119,34 @@ SOURCE_ZONES = [
 # drew the plumbing line in its own place; reading each one's own list is
 # measuring, one shared list would be legislating.
 #
-# Java's four: `widget` is the kind floor and its absence is load-bearing
-# (it keeps a for-statement guest off the tier invariant 5 excludes);
-# `addChild` is the parenting floor; `onToggleNode` is the bridge the
-# generated typed sugar reaches through `tpl()`; `forEach` is compensated
-# by `collection()`, which IS forwarded.
+# Java's three: `widget` is the kind floor and its absence is
+# load-bearing (it keeps a for-statement guest off the tier invariant 5
+# excludes); `addChild` is the parenting floor; `onToggleNode` is the
+# bridge the generated typed sugar reaches through `tpl()`.
+#
+# `forEach` LEFT THIS LIST with dynamic tables (docs/tables-plan.md).
+# `collection()` used to cover it — a nested For has a statement form,
+# `for (var p : positions.rows())` — but that form hands back no handle,
+# and a nested table's header bar and sort handler have nothing to name
+# without one.
 NOT_FORWARDED_JAVA = {
-    "widget", "addChild", "onToggleNode", "forEach",
+    "widget", "addChild", "onToggleNode",
 }
 
 # C#'s façade documents its own exclusions in its generated header
 # (guests/csharp/*Kaya.cs). ContextMenu is on this list and off Rust's —
 # a real divergence between two façades over one zone, recorded and
 # ledgered rather than silently blessed.
+#
+# `Columns` is off it for a REACHABILITY reason rather than a taste one:
+# it declares a NESTED For's header bar and takes the Node Each hands
+# back, and Each/ForEach/Collection are already off the façade, so a
+# forward would take an argument this surface cannot produce. Widening
+# the façade to the whole nested-For vocabulary would be a slice of its
+# own.
 NOT_FORWARDED_CSHARP = {
     "Widget", "AddChild", "Collection", "ForEach", "Each", "When", "ContextMenu",
+    "Columns",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
     "BindSourceField",
 }

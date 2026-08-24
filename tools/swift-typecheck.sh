@@ -68,6 +68,22 @@ done
 [ "$mac_guests" = "${#GUESTS[@]}" ] ||
     refuse "the macOS guest pass compiled $mac_guests of ${#GUESTS[@]} guests"
 PASSES+=("guests/swift: $mac_guests files, macOS SDK")
+
+# THE DYNAMIC-TABLE SURFACE, which no guest spells: a table per stamped
+# row (KayaTpl.columns, the node-flavoured KayaApp.onSort, and
+# KayaAppTx.columns(_:at:_:_:)). tools/tpl-surfaces.py censuses it as
+# TEXT; this is the compiler reading it as types.
+NESTED_TABLE=tools/checks/swift-nested-table.swift
+[ -f "$NESTED_TABLE" ] ||
+    refuse "$NESTED_TABLE is missing — the nested-table spelling would then be compiled by nothing"
+if ! kaya_swiftc -typecheck \
+    -import-objc-header crates/kaya/include/kaya.h \
+    bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
+    bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$NESTED_TABLE"; then
+    echo "swift-typecheck: FAIL ($NESTED_TABLE, the dynamic-table surface)"
+    exit 1
+fi
+PASSES+=("$NESTED_TABLE + bindings/swift: macOS SDK (the nested-table spelling)")
 # THE INTERPRETER ITSELF, the historic miss layer (docs/traps.md).
 # -warnings-as-errors here as in tools/swiftui/build-dylib.sh: a dropped
 # return value is only a warning, and that is how the clipboard seed

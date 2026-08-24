@@ -151,6 +151,10 @@ type app = {
   (* Table sort requests, keyed by the For container's widget id
      (docs/tables-plan.md): the handler receives the 0-based column. *)
   sort_handlers : (int64, int -> unit) Hashtbl.t;
+  (* A nested For's sort requests, keyed by its TEMPLATE NODE id: the
+     handler receives the stamped copy's key path outermost first, then
+     the 0-based column. *)
+  node_sorts : (int64, Kaya_wire.value list -> int -> unit) Hashtbl.t;
   (* Menu dispatch tables, keyed by MENU ITEM id — their own id space,
      separate from every widget/node table ("two tables, always" — now
      N tables, still always). The node flavors receive the stamped
@@ -276,6 +280,7 @@ let create () =
     c_menu_item = 0L;
     widget_handlers = Hashtbl.create 8;
     sort_handlers = Hashtbl.create 8;
+    node_sorts = Hashtbl.create 8;
     menu_activated = Hashtbl.create 8;
     menu_activated_node = Hashtbl.create 8;
     menu_toggled = Hashtbl.create 8;
@@ -1990,6 +1995,21 @@ let columns (Widget id) titles sort =
        (List.length titles) 0
        (List.map (fun t -> Kaya_wire.Str t) titles))
 
+(* Re-declare ONE stamped copy's header bar — the per-copy sort arrows.
+   [node] is the nested For's template node ([Tpl.for_each]'s first
+   result) and [keys] the copy's key path outermost first, exactly as
+   [on_sort_node] handed it over; an empty [keys] re-declares the
+   template-wide bar for every copy. The core walls a keyed target whose
+   template bar was never declared (docs/tables-plan.md). *)
+let columns_at (Node id) keys titles sort =
+  let tx = the_tx () in
+  emit tx
+    (Kaya_wire.tx_set_column_headers id
+       (Int32.to_int sort.sort_column land 0xFFFFFFFF)
+       (Int32.to_int sort.sort_direction)
+       (List.length titles) (List.length keys)
+       (keys @ List.map (fun t -> Kaya_wire.Str t) titles))
+
 (* Sums: a variant type whose constructors carry inline records. *)
 type 'a sum_type = {
   st_schemas : int list list;
@@ -2380,6 +2400,24 @@ module Tpl = struct
      have [each] in both zones; this is invariant 1, one line wide. *)
   let each c body () = fst (for_each c body ())
 
+  (* Declare the header bar of a nested For — one bar per stamped copy
+     from ONE declaration on the template node [for_each] just handed
+     back. It goes on the NEXT LINE, inside the still-open parent scope:
+     the nested For folds into that parent at its TemplateEnd and this
+     op looks for it there, so a grandparent-scope target is not
+     expressible (measured in slice 1, docs/tables-plan.md).
+     [columns_at] moves one copy's arrows after a sort request. *)
+  let columns (Node id) titles sort =
+    let tx = the_tx () in
+    (* path_len 0 against a TEMPLATE NODE: every copy's bar, stored on
+       the site and applied at each stamp. *)
+    emit tx
+      (Kaya_wire.tx_set_column_headers id
+         (Int32.to_int sort.sort_column land 0xFFFFFFFF)
+         (Int32.to_int sort.sort_direction)
+         (List.length titles) 0
+         (List.map (fun t -> Kaya_wire.Str t) titles))
+
   let when_ (Signal sid) body () =
     let tx = the_tx () in
     let id = alloc_node tx in
@@ -2716,6 +2754,14 @@ end
 let on_sort app (Widget id) (handler : int -> unit) =
   Hashtbl.replace app.sort_handlers id handler
 
+(* The same, at a NESTED For's template node: one registration answers
+   every stamped copy, and the handler receives that copy's key path
+   outermost first before the column — hand those same keys back to
+   [columns_at] to move that copy's arrows alone. *)
+let on_sort_node app (Node id)
+    (handler : Kaya_wire.value list -> int -> unit) =
+  Hashtbl.replace app.node_sorts id handler
+
 let on_click app (Widget id) (handler : unit -> unit) =
   Hashtbl.replace app.widget_handlers id handler
 
@@ -2974,6 +3020,11 @@ let dispatch_loop app =
                (match Hashtbl.find_opt app.sort_handlers id with
                | Some handler ->
                    dispatch app (fun () -> handler (Int64.to_int column))
+               | None -> ())
+           | Some (Kaya_wire.I64 column), keys ->
+               (match Hashtbl.find_opt app.node_sorts id with
+               | Some handler ->
+                   dispatch app (fun () -> handler keys (Int64.to_int column))
                | None -> ())
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_text_changed then

@@ -48,7 +48,9 @@ static class TodoKaya
 /// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,
 /// Collection/ForEach/When, ContextMenu — stays off deliberately: a
 /// row surface hands out sugar, and its Tpl is private so the floor
-/// is reached by opening the For yourself.</summary>
+/// is reached by opening the For yourself. Columns is off with
+/// them: it declares a NESTED For's header bar, and the Node it
+/// takes comes from the ForEach this surface does not forward.</summary>
 sealed class TodoRow
 {
     readonly Tpl t;

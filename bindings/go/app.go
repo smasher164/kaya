@@ -968,7 +968,7 @@ type Sort struct {
 }
 
 // SortNone is the no-indicator bar.
-func SortNone() Sort { return Sort{sorted: 0xFFFF_FFFF} }
+func SortNone() Sort { return Sort{sorted: sortNoneValue} }
 
 // SortAsc puts the ascending indicator on column (0-based).
 func SortAsc(column uint32) Sort { return Sort{sorted: column} }
@@ -990,6 +990,22 @@ func (tx *Tx) Columns(w Widget, titles []string, sort Sort) {
 	// (docs/tables-plan.md, dynamic tables).
 	tx.emit(TxSetColumnHeaders(w.id, sort.sorted, sort.direction,
 		uint32(len(titles)), 0, values))
+}
+
+// ColumnsAt re-declares ONE stamped copy's header bar: the nested For's
+// Node, then that copy's keys outermost first — the per-copy sort
+// indicator OnSortNode asks for. Empty keys re-declare the
+// template-wide bar for every copy, which is what Tpl.Columns spells at
+// build time. The core walls the rest (a template bar must exist first,
+// the keys must name a live copy).
+func (tx *Tx) ColumnsAt(n Node, keys []any, titles []string, sort Sort) {
+	values := make([]any, 0, len(keys)+len(titles))
+	values = append(values, keys...)
+	for _, title := range titles {
+		values = append(values, title)
+	}
+	tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,
+		uint32(len(titles)), uint32(len(keys)), values))
 }
 
 // Textarea creates a multi-line text editor with its change handler
@@ -3345,6 +3361,27 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	return n
 }
 
+// Columns declares the header bar of a NESTED For — the Node ForEach
+// returns — for every copy the enclosing template stamps. One title per
+// column; the nested row template's root must be a Row of exactly one
+// cell per column.
+//
+// WRITE IT AFTER ForEach RETURNS, on the enclosing Tpl: the header op
+// finds its For in the OPEN PARENT scope, and ForEach has folded the
+// nested For into that scope by then (docs/tables-plan.md, MEASURED IN
+// SLICE 1). Per-copy indicators come later, from a handler, through
+// Tx.ColumnsAt.
+func (t *Tpl) Columns(n Node, titles []string, sort Sort) {
+	values := make([]any, len(titles))
+	for i, title := range titles {
+		values[i] = title
+	}
+	// pathLen 0 against a TEMPLATE NODE is the every-copy addressing;
+	// the same call against a live container is Tx.Columns.
+	t.tx.emit(TxSetColumnHeaders(n.id, sort.sorted, sort.direction,
+		uint32(len(titles)), 0, values))
+}
+
 // ContextMenu attaches a live-built context catalog to a template node:
 // every stamped copy shows the same catalog, and each activation
 // carries that copy's key path. An item takes exactly ONE anchor, so a
@@ -3576,12 +3613,11 @@ func (a *App) OnSort(w Widget, fn func(*Tx, uint32)) {
 	a.sortHandlers[w.id] = fn
 }
 
-// OnSortNode registers a nested table's header-click handler at its
-// For node; the handler also receives the stamped copy's keys,
-// outermost first. (The core refuses a template-zone header today —
-// the tables ledger entry holds nested open — but a dispatch arm
-// without its node sibling drops a stamped occurrence silently, which
-// the tplzone test refuses on principle.)
+// OnSortNode registers a nested table's header-click handler at its For
+// node — the Node Tpl.ForEach returns, whose bar Tpl.Columns declares.
+// The keys are the clicking copy's, outermost first, and they are what
+// Tx.ColumnsAt takes back to move THAT copy's indicator
+// (docs/tables-plan.md).
 func (a *App) OnSortNode(n Node, fn func(*Tx, []any, uint32)) {
 	a.nodeSorts[n.id] = fn
 }

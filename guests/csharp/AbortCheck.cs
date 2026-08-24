@@ -1,7 +1,7 @@
 // The uniform-abort guard, plus every C# surface fact a SCENE cannot
 // see (menu record emission, the undo group's head-of-batch rule, the
-// mirror fold an undone/redone payload drives). Run by
-// tools/check-abort.sh.
+// mirror fold an undone/redone payload drives, the nested table's three
+// spellings). Run by tools/check-abort.sh.
 //
 // Runs headless: the library loads (KAYA_LIB) and records submit, but
 // Run() is never entered. The bindings compile into this assembly, so
@@ -65,6 +65,90 @@ static class AbortCheck
                 return true;
         }
         return false;
+    }
+
+    // A set_column_headers record, field by field: u32 length, u16 kind,
+    // u16 pad, then u64 target, u32 sorted, u32 direction, u32 count,
+    // u32 path_len, then the Values run (u32 count, u32 reserved, then
+    // {u32 tag, u32 len, bytes} each).
+    static ulong HeaderTarget(byte[] rec) => BitConverter.ToUInt64(rec, 8);
+
+    static uint HeaderCount(byte[] rec) => BitConverter.ToUInt32(rec, 24);
+
+    static uint HeaderPathLen(byte[] rec) => BitConverter.ToUInt32(rec, 28);
+
+    static uint HeaderValueCount(byte[] rec) => BitConverter.ToUInt32(rec, 32);
+
+    static string HeaderFirstValue(byte[] rec) =>
+        BitConverter.ToUInt32(rec, 40) == KayaWire.ValueStr
+            ? System.Text.Encoding.UTF8.GetString(rec, 48, (int)BitConverter.ToUInt32(rec, 44))
+            : null;
+
+    static byte[] LastHeaderRecord(List<byte[]> records, int from)
+    {
+        byte[] found = null;
+        for (int i = from; i < records.Count; i++)
+            if (RecKind(records[i]) == KayaWire.TxKindSetColumnHeaders)
+                found = records[i];
+        return found;
+    }
+
+    // THE NESTED TABLE, which no C# scene reaches: the dashboard shape
+    // is "for every account, a positions table", so the header bar is
+    // declared on a template NODE and each stamped copy sorts on its own
+    // (docs/tables-plan.md, dynamic tables). Rust pins the same two
+    // records in crates/kaya/src/app.rs's unit tests.
+    static void NestedTable(KayaApp app)
+    {
+        string[] titles = { "Ticker", "Qty" };
+        Node table = default;
+        app.Build(tx =>
+        {
+            var accounts = tx.Collection();
+            int before = tx.Records.Count;
+            tx.Each(accounts, account =>
+            {
+                // The nested collection is declared INSIDE the template
+                // scope — the core's own-scope wall.
+                var holdings = account.Collection();
+                table = account.Each(holdings, row => row.Row(() =>
+                {
+                    row.Label("ticker");
+                    row.Label("qty");
+                }));
+                // After the For closes and still inside the parent's
+                // template body, which is where the record finds it.
+                account.Columns(table, titles, Sort.None);
+            });
+            var bar = LastHeaderRecord(tx.Records, before);
+            Check(bar != null, "the template-zone Columns queued no set_column_headers");
+            Check(HeaderTarget(bar) == table.Id,
+                "the template bar must target the nested For's TEMPLATE NODE");
+            Check(HeaderPathLen(bar) == 0 && HeaderCount(bar) == 2,
+                "the template bar is path_len 0 with one value per column");
+            Check(HeaderValueCount(bar) == 2 && HeaderFirstValue(bar) == "Ticker",
+                "with no key path the values are the titles alone");
+            // The handler scopes to the For that owns the bar, and a
+            // copy answers for itself: keys in, keys back out.
+            app.OnSort(table, (t, keys, column) =>
+                t.Columns(table, keys, titles, Sort.Asc(column)));
+        });
+
+        // The per-copy re-declaration a sort request answers with: the
+        // same template node, plus that copy's keys outermost first.
+        app.Build(tx =>
+        {
+            int before = tx.Records.Count;
+            tx.Columns(table, new List<object> { "brokerage" }, titles, Sort.Desc(1));
+            var bar = LastHeaderRecord(tx.Records, before);
+            Check(bar != null, "the keyed Columns queued no set_column_headers");
+            Check(HeaderTarget(bar) == table.Id,
+                "a keyed re-declaration still targets the template node");
+            Check(HeaderPathLen(bar) == 1 && HeaderCount(bar) == 2,
+                "path_len counts the copy's keys, count the columns");
+            Check(HeaderValueCount(bar) == 3 && HeaderFirstValue(bar) == "brokerage",
+                "the copy's KEYS come first, then the titles");
+        });
     }
 
     // OPEN IS NOT ENOUGH: a transaction is the app thread's. `closed`
@@ -348,6 +432,8 @@ static class AbortCheck
         }
         Check(propagated, "menu abort: Build must propagate");
         app.Build(tx => tx.Menu(file, items: new[] { tx.Item("Recovered") }));
+
+        NestedTable(app);
 
         WrongThread(app);
 

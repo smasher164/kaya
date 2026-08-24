@@ -156,6 +156,9 @@ func LookupEnv(name string) (string, bool) {
 // in app.go is the surface; this is its floor.
 const capAuxWindows = uint64(C.KAYA_CAP_AUX_WINDOWS)
 
+// The core's own number, not a copy (check-file-modes' trap class).
+const sortNoneValue = uint32(C.KAYA_SORT_NONE)
+
 func capabilityBits() uint64 { return uint64(C.kaya_capabilities()) }
 
 // The stale-artifact guard, run once before the core takes the thread:

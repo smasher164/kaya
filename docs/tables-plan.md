@@ -276,9 +276,9 @@ set_column_headers addressed a live For container by bare widget id
 while a nested For's rows() carried a template node. The dashboard
 worked around that with one collection repopulated on selection
 (guests/python/portfolio.py's former repopulate()). The Rust/Python
-depth slice deleted that workaround; the milestone remains open for
-the other six bindings' nested spellings. Build order around it is
-RULED: tables -> virtualization -> canvas.
+depth slice deleted that workaround; the six remaining bindings'
+nested spellings closed 2026-08-24 (the breadth record below). Build
+order onward is RULED: tables -> virtualization -> canvas.
 
 WHAT THE STAMPING MACHINERY ALREADY GIVES US, which shrinks the
 milestone: run_body births a nested For's SITE per copy, keyed
@@ -393,8 +393,35 @@ THE DEPTH SLICE IS GREEN IN THIS ORDER; BREADTH REMAINS:
    new watched perturbations; its retention branch was watched red.
 
 WORKTREE STATUS 2026-08-23: items 1–6 are implemented and watched in
-the worktree. The dynamic-tables headline remains open for the six-
-binding breadth.
+the worktree.
+
+BREADTH CLOSED 2026-08-24: all six remaining bindings spell the
+template-zone bar, nested on_sort carrying the copy's key path, and
+keyed re-declaration — Go (Tpl.Columns / App.OnSortNode / Tx.ColumnsAt),
+C# (Node-typed overloads beside the live ones), Java (Tpl.columns /
+onSort(Node, SortHandler) / Tx.columnsAt, RowSurface forwarding),
+Swift (KayaTpl.columns / onSort(_ n:) / columns(_:at:_:_:)), OCaml
+(Tpl.columns / on_sort_node / columns_at), Haskell (columnsNode /
+onSortNode / columnsAt). DO on every point in every language; zero
+carve-outs. Every spelling joined the tpl-surfaces/check-sugar census
+in the same change with its watched perturbations (the census
+self-test runs all 53 on every invocation), and each compiles under a
+gate that already runs. Three of the four dispatch loops (C#, Java,
+Haskell) had silently DROPPED a keyed sort_requested before this — the
+keyed arm is new in each. The fan-out also found a real core defect:
+widget and template-node numbers are separate per-binding counters
+over one u64 target, and a collision misrouted set_column_headers.
+Fixed at two levels the same day, three watched reds first: keys
+resolve in the template space alone, and the core refuses the
+collision at declaration in both directions (scene.rs; the one-id-space
+design question is a ledger DECISION entry). The breadth record:
+407 unit tests + 4 runnable docs + 14 compile-fail docs, 42 gates,
+and the five-lane matrix ALL PASS — mac 277s/329 legs, Linux 312s/580,
+Windows 305s/191, iOS 371s/106, Android 132s/112, gates 291s, 425s
+wall. (The first attempt printed a mac DURATION ANOMALY at 648s: the
+coordinator edited docs mid-run, the lane's same-tree token failed,
+and it swept all 42 gates itself — a matrix run wants a quiescent
+tree; the rerun untouched was 277s.)
 
 POST-MATRIX VISUAL FOLLOW-UP: the artifact review found GTK allocating
 three unequal-natural, equal-weight account cards from an invalid summed
@@ -409,7 +436,8 @@ in docs/traps.md; the resolved ledger entry owns the screenshot finding.
 The 2026-08-24 fix-forward attempt is recorded in docs/deferred.md's
 resolved screenshot entry. Every scene assertion and the gate sweep
 passed, but duration guards refused the matrix record; it does not move
-the accepted depth record or the open six-binding breadth.
+the accepted depth record; the six-binding breadth closed later that
+day (above).
 
 MEASURED IN SLICE 1 — do not rediscover:
 - A nested collection must be declared INSIDE the template scope

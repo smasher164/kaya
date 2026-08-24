@@ -4667,3 +4667,16 @@ postcondition uses `grep -x ... >/dev/null` for that reason.
 cliphelper_prepare's older `-q` shape survives because `pm list
 packages` fits the pipe buffer — a property of the output size, not of
 the code, so do not copy it.
+
+
+## kaya_submit decodes eagerly and ABORTS on a malformed record (2026-08-24)
+
+Found by the Go breadth agent: a binding-level negative that feeds a
+bad record through `kaya_submit` never gets to assert anything — the
+core's decoder aborts the whole process at the wire layer
+(crates/kaya/src/wire.rs, "a column title is I64(7), wanted a string"),
+stealing the red from the probe. A binding test of a record's SHAPE
+must build the record and abandon it (assert on the bytes it queued),
+never submit it. The core's abort is correct — a malformed record is a
+generator bug, not a runtime input — the trap is only in where a test
+can stand to watch it.
