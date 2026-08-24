@@ -5981,3 +5981,27 @@ one cliphelper_prepare keeps — is restored: an install that reported
 success is re-read before it is believed. Watched both ways: the
 pre-fix join still running after 12s, the pre-fix subshell staging a
 lost install as OK.
+
+
+## GAP — only macOS delineates a table's end; GTK and WinUI run CASH straight into the account total (maintainer, 2026-08-24)
+KEY: table end boundary, closing rule, table card, boxed-list, apron, Account total, synthesized header
+
+Seen on the first cross-platform portfolio capture set: on GTK and
+WinUI the last row's text and the "Account total" label below it read
+as one run of text, because those lowerings draw a table's OPENING
+grammar (bold header, hairline under it, hairlines between rows) and
+never the closing half. macOS delineates only as a side effect of the
+native widget — NSTableView's base-color interior against the window
+plus the 5pt apron. Ruled a WIDGET issue, not app styling: if the guest
+had to add the divider itself, every app would need per-platform
+styling knowledge, which is the knowledge the lowering exists to
+absorb. The rule when built: a table bounds its own extent — one
+semantics, platform spelling (macOS has it; GTK/WinUI/Compose either
+complete the hairline grammar with a closing rule and a small bottom
+margin, or adopt the platform card idiom — Adwaita boxed-list, Fluent
+layer card — with the choice made per platform, not per app). Compose
+is in scope on the same reasoning even though the portfolio is not on
+mobile yet; table.steps runs there. Pixels-only, so the camera and the
+portfolio captures hold it, and the change lands with fresh captures
+inspected. DEFERRED by the maintainer until after the six-binding
+breadth fan-out.

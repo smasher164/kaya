@@ -7965,17 +7965,28 @@ struct KayaTableSurface: View {
 /// rowHeight 24, intercell 0, header 28, 5pt content insets above and
 /// below) — the content-height ruling: an UNGROWN table hugs
 /// header + rows, a GROWN one stays the fill-and-scroll viewport
-/// (docs/tables-plan.md, the empty-row ruling). No bottom inset: the
-/// next alternating stripe begins at the last row's edge, so any
-/// height past it shows that stripe's top as a sliver (viewed on the
-/// 2026-08-24 capture — grey under odd-parity last rows, invisible
-/// under even). iOS metrics are unpinned until a scene exercises an
-/// ungrown native table there.
+/// (docs/tables-plan.md, the empty-row ruling). The trailing 5 is the
+/// APRON, not scroll inset: NSTableView paints its next phantom stripe
+/// from the last row's edge, so table height past the rows shows that
+/// stripe (grey sliver at odd parity) while height cut to the rows
+/// leaves a grey LAST stripe flush against the table edge (asymmetric
+/// at even parity) — both viewed on 2026-08-24 captures. The
+/// safeAreaInset in KayaNativeTable owns those 5pt and paints them in
+/// the table's own base color, so neither parity can show. iOS metrics
+/// are unpinned until a scene exercises an ungrown native table there.
 private func kayaNativeTableContentHeight(rows: Int) -> CGFloat {
     #if os(macOS)
-        return 28 + 5 + CGFloat(rows) * 24
+        return 28 + 5 + CGFloat(rows) * 24 + 5
     #else
-        return 28 + 5 + CGFloat(rows) * 44
+        return 28 + 5 + CGFloat(rows) * 44 + 5
+    #endif
+}
+
+private var kayaNativeTableApron: Color {
+    #if os(macOS)
+        return Color(nsColor: .controlBackgroundColor)
+    #else
+        return Color(uiColor: .systemBackground)
     #endif
 }
 
@@ -8033,6 +8044,11 @@ private struct KayaNativeTable: View {
                                 generation: generation))
                     }
                 }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if node.grow <= 0 {
+                kayaNativeTableApron.frame(height: 5)
             }
         }
         .frame(

@@ -175,10 +175,16 @@ is a separate admission if a real app ever needs one).
    A GROWN table keeps everything above — a fill-and-scroll viewport
    whose native empty area may stripe. An UNGROWN native table hugs
    header + rows at the platform's measured metrics (macOS, probe-
-   measured: header 28, 5pt top inset, 24pt rows, NO bottom inset —
-   the next alternating stripe begins at the last row's edge, so any
-   height past it shows that stripe's top as a sliver; both viewed on
-   portfolio captures). The expect_fills table arm splits on the same
+   measured: header 28, 5pt top inset, 24pt rows) plus a 5pt bottom
+   APRON the safeAreaInset paints in the table's base color. The apron
+   matters at both row parities and only a camera can hold it:
+   NSTableView paints its next phantom stripe from the last row's
+   edge, so bare height past the rows shows a grey sliver at odd
+   parity, and height cut to the rows leaves a grey LAST stripe flush
+   against the table edge at even parity — the maintainer caught the
+   second on the first capture set (BND with a top margin, VXUS
+   without a bottom one). Both states viewed on 2026-08-24 captures;
+   the apron capture shows every stripe floating with equal margins. The expect_fills table arm splits on the same
    bit: a grown table skips vertical containment (NSTableView
    legitimately realizes an overscan row past the clip), an ungrown
    one keeps containment plus the hug clause — viewport within 30pt of
