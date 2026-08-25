@@ -205,15 +205,18 @@ object KayaPresent {
      * kaya_emit_menu_value_changed's JNI spelling. */
     @JvmStatic external fun emitMenuValueChanged(item: Long, noun: ByteArray, index: Double)
 
-    /**
-     * Block until the next transaction resolves, fill [buffer] with
-     * apply-op records (KAYA_APPLY_*), and return the byte length —
-     * 0 when the core has shut down. Use a 64 KiB buffer.
-     */
     /** The core's protocol fingerprint, for the stale-APK assert. */
     @JvmStatic external fun specHash(): Long
 
-    @JvmStatic external fun nextCommands(buffer: ByteArray): Int
+    /**
+     * Block until the next transaction resolves and return that batch's
+     * apply-op records (KAYA_APPLY_*) — null when the core has shut down.
+     *
+     * THE CORE SIZES THE ARRAY. A pump that sized its own aborted the
+     * process at 157 rows in one transaction (docs/deferred.md, the
+     * 64 KiB pump wall); a batch is one recomposition and cannot be split.
+     */
+    @JvmStatic external fun nextCommands(): ByteArray?
 
     /**
      * Fetch a blob's bytes by the [handle] an apply record carried.

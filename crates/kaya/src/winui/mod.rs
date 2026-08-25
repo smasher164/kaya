@@ -13,6 +13,9 @@
     clippy::all
 )]
 mod bindings;
+mod order;
+
+use order::{track_of, ChildOrder};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -349,8 +352,10 @@ struct CoreState {
     // Grid places by attached Row/Column index, not by child order
     // (docs/traps.md), so the logical order is tracked here and stamped
     // back onto the children after every structural change. It is also
-    // the order the definitions are rebuilt in, one per child.
-    child_order: HashMap<WidgetId, Vec<WidgetId>>,
+    // the order the definitions are rebuilt in, one per child — and the
+    // structural change only MARKS its container; `flush_tracks` is what
+    // stamps, once per batch (winui/order.rs).
+    child_order: ChildOrder,
     grow: HashMap<WidgetId, f64>,
     /// Container align modes (the align spec enum's wire values):
     /// reindex stamps the cross alignment onto every child after any
@@ -1245,16 +1250,32 @@ fn drain_transactions() {
         // aborted with exit 0xC0000409 and no verdict list
         // (crates/kaya/src/fault.rs; docs/deferred.md).
         crate::fault::guard("draining a transaction", || {
-            while let Ok(tx) = core.transactions.try_recv() {
+            let mut failed = false;
+            'drain: while let Ok(tx) = core.transactions.try_recv() {
                 for op in core.scene.apply(tx) {
                     let what = op_head(&op);
                     if let Err(e) = apply(core, op) {
                         crate::fault::report(format!(
                             "kaya: applying {what} failed: {e}"
                         ));
-                        return;
+                        failed = true;
+                        break 'drain;
                     }
                 }
+            }
+            // ONE coalesced track re-stamp for the whole drain — the
+            // batch boundary the deferred reindex is deferred TO
+            // (winui/order.rs). It runs even after a failed op, because a
+            // half-applied batch that also skipped this would leave the
+            // window's Grid tracks stale on top of incomplete.
+            if let Err(e) = flush_tracks(core) {
+                crate::fault::report(format!(
+                    "kaya: restamping the container tracks failed: {e}"
+                ));
+                return;
+            }
+            if failed {
+                return;
             }
             // ONE coalesced menu-chrome rebuild per drain, from the
             // post-user mirror. Quiet-armed as a belt: constructing and
@@ -1717,8 +1738,8 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
 }
 
 /// Re-attach a 2D grid's children row-major per its current column count,
-/// with one Auto track per row/column — called when children or the
-/// columns prop arrive, in either order.
+/// with one Auto track per row/column — reached from `flush_tracks` once
+/// per batch, whether the children or the columns prop moved.
 ///
 /// `reindex` below does the same job for a Column/Row: a Grid lays out by
 /// attached index rather than by child order (docs/traps.md), so the whole
@@ -1760,6 +1781,11 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     Ok(())
 }
 
+/// Rebuild one container's tracks and re-place every child on them.
+/// Reached from `flush_tracks` — a structural change marks its container
+/// instead of calling this, because running it per child is N^2
+/// (winui/order.rs). The one other caller is Mount's Loaded one-shot,
+/// which re-measures the baseline containers with live metrics.
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let (grid, vertical) = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) => (g.clone(), true),
@@ -1767,8 +1793,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // Destroyed, or never a container: nothing to place.
         _ => return Ok(()),
     };
-    let empty = Vec::new();
-    let order = core.child_order.get(&parent).unwrap_or(&empty);
+    let order = core.child_order.children(parent);
     // A DECLARED TABLE OWNS THE FIRST TWO TRACKS — the header row and the
     // rule under it — and every stamped row shifts down by them. This is
     // the only place a Column's children are placed, so it is the only
@@ -1811,11 +1836,11 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // from the UIElement the widget table hands out; every widget
         // kaya creates is one.
         let element: FrameworkElement = widget.element()?.cast()?;
-        let index = index as i32;
+        let track = track_of(index, head);
         if vertical {
-            Grid::SetRow(&element, index + head)?;
+            Grid::SetRow(&element, track)?;
         } else {
-            Grid::SetColumn(&element, index)?;
+            Grid::SetColumn(&element, track)?;
         }
         // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES
         // IT. 240x96 is the size all four backends declare, and on the
@@ -1894,6 +1919,29 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     }
     if mode == 4 && !vertical {
         baseline_compensate(core, &grid, order)?;
+    }
+    Ok(())
+}
+
+/// THE BATCH'S ONE RE-STAMP. `reindex` above is what an append costs, and
+/// running it per child is N^2/2 WinRT round trips (winui/order.rs), so a
+/// structural change marks its container and this drains the marks —
+/// every container once, in first-marked order.
+///
+/// It runs at both op runners' ends AND at every harness hop, so nothing
+/// — the screen or an observation — can be shown a tree a batch behind.
+/// A failure leaves the containers behind it marked: the next flush
+/// finishes them.
+fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
+    while let Some(container) = core.child_order.next_due() {
+        // A 2D grid re-flows row-major instead, and is the same N^2 one
+        // branch over — `reflow_grid` clears the Children collection and
+        // re-appends every child. Either arm is a no-op for the other's
+        // kind, so this is a dispatch and not a guard.
+        match core.widgets.get(&container) {
+            Some(NativeWidget::Grid2D(_)) => reflow_grid(core, container.0)?,
+            _ => reindex(core, container)?,
+        }
     }
     Ok(())
 }
@@ -2096,7 +2144,7 @@ fn table_cell_text(titles: &[String], sorted: u32, direction: u32, column: usize
 /// The rows and the tracks are not touched here — `reindex` places the
 /// children and `table_pass` sizes the columns.
 fn declare_table(
-    core: &CoreState,
+    core: &mut CoreState,
     id: WidgetId,
     sorted: u32,
     direction: u32,
@@ -2210,7 +2258,9 @@ fn declare_table(
         });
         grid.LayoutUpdated(&laid)?;
     }
-    reindex(core, id)
+    // The two head tracks the rows now shift down past.
+    core.child_order.mark(id);
+    Ok(())
 }
 
 /// Refresh what the geometry pass needs from the core — the live row
@@ -2220,11 +2270,9 @@ fn sync_tables(core: &CoreState) {
     let ids: Vec<u64> = TABLES.with_borrow(|tables| tables.keys().copied().collect());
     for id in ids {
         let mut rows = Vec::new();
-        if let Some(order) = core.child_order.get(&WidgetId(id)) {
-            for child in order {
-                if let Some(NativeWidget::Row(grid)) = core.widgets.get(child) {
-                    rows.push(grid.clone());
-                }
+        for child in core.child_order.children(WidgetId(id)) {
+            if let Some(NativeWidget::Row(grid)) = core.widgets.get(child) {
+                rows.push(grid.clone());
             }
         }
         let pad = container_padding(core, WidgetId(id));
@@ -8442,8 +8490,16 @@ fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence)
             let what = op_head(&op);
             if let Err(e) = apply(core, op) {
                 crate::fault::report(format!("kaya: applying undo op {what} failed: {e}"));
+                let _ = flush_tracks(core);
                 return false;
             }
+        }
+        // THE UNDO'S OWN BATCH BOUNDARY: an undo restores rows, and the
+        // restamp it marked (winui/order.rs) has to land before the
+        // occurrence below tells the app its model is back.
+        if let Err(e) = flush_tracks(core) {
+            crate::fault::report(format!("kaya: restamping an undo's container tracks failed: {e}"));
+            return false;
         }
         true
     });
@@ -10064,21 +10120,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             // The Children collection is now in the new order, but on a
             // Grid that collection does not place anything — without the
-            // restamp below the move would be invisible, which is
+            // batch's restamp the move would be invisible, which is
             // precisely what expect_order exists to catch.
-            let order = core.child_order.entry(parent).or_default();
-            order.retain(|&id| id != child);
-            match before {
-                Some(anchor) => {
-                    let at = order
-                        .iter()
-                        .position(|&id| id == anchor)
-                        .expect("kaya: move_child anchor not among siblings");
-                    order.insert(at, child);
-                }
-                None => order.push(child),
-            }
-            reindex(core, parent)?;
+            core.child_order.place(parent, child, before);
         }
         ApplyOp::Destroy { id } => {
             // A destroyed anchor takes its context attachment with it
@@ -10102,7 +10146,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             core.grow.remove(&id);
-            core.child_order.remove(&id);
+            core.child_order.forget(id);
             // A destroyed table takes its header chrome with it: the
             // entry holds XAML handles and a layout callback keyed on
             // this id, and both outlive the container otherwise.
@@ -10113,20 +10157,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 if children.IndexOf(&widget.element()?, &mut index)? {
                     children.RemoveAt(index)?;
                 }
-                // Find the parent by its grid, since only the grid was
-                // stored; the surviving siblings all shift up a track.
-                let parent = core
-                    .child_order
-                    .iter()
-                    .find(|(_, order)| order.contains(&id))
-                    .map(|(&parent, _)| parent);
-                if let Some(parent) = parent {
-                    core.child_order
-                        .entry(parent)
-                        .or_default()
-                        .retain(|&child| child != id);
-                    reindex(core, parent)?;
-                }
+                // The surviving siblings all shift up a track.
+                core.child_order.detach(id);
             }
         }
         ApplyOp::SetWindowProp { window, prop, value } => {
@@ -10846,13 +10878,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if let (Prop::Grow, Value::F64(weight)) = (prop, &value) {
                 debug_assert!(core.widgets.contains_key(&id), "scene validated the id");
                 core.grow.insert(id, *weight);
-                let parent = core
-                    .child_order
-                    .iter()
-                    .find(|(_, order)| order.contains(&id))
-                    .map(|(&parent, _)| parent);
-                if let Some(parent) = parent {
-                    reindex(core, parent)?;
+                if let Some(parent) = core.child_order.parent_of(id) {
+                    core.child_order.mark(parent);
                 }
                 return Ok(());
             }
@@ -10970,7 +10997,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
-                    reflow_grid(core, id.0)?;
+                    core.child_order.mark(id);
                 }
                 (NativeWidget::Grid2D(grid), Prop::Spacing, Value::F64(gap)) => {
                     grid.SetRowSpacing(gap)?;
@@ -11015,7 +11042,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Column(_), Prop::Align, Value::I64(mode))
                 | (NativeWidget::Row(_), Prop::Align, Value::I64(mode)) => {
                     core.aligns.insert(id, mode);
-                    reindex(core, id)?;
+                    core.child_order.mark(id);
                 }
                 (NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
                     core.spacings.insert(id, gap);
@@ -11153,7 +11180,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     .get_mut(&parent.0)
                     .expect("grid created")
                     .push(element);
-                reflow_grid(core, parent.0)?;
+                core.child_order.mark(parent);
                 return Ok(());
             }
             // A radio's label children are its OPTIONS: string rows
@@ -11226,9 +11253,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Textarea(field) => children.Append(field)?,
             }
             core.parents.insert(child, panel);
-            core.child_order.entry(parent).or_default().push(child);
-            // A new child means a new track and a shifted set of indices.
-            reindex(core, parent)?;
+            // A new child means a new track and a shifted set of indices —
+            // stamped once for the whole batch (winui/order.rs), never
+            // once per append.
+            core.child_order.append(parent, child);
         }
         ApplyOp::Mount { window, root } => {
             let widget = core.widgets.get(&root).expect("scene validated the id");
@@ -12646,7 +12674,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             #[cfg(feature = "harness")]
             column_ids: Vec::new(),
             rows: Vec::new(),
-            child_order: HashMap::new(),
+            child_order: ChildOrder::default(),
             grow: HashMap::new(),
             aligns: HashMap::new(),
             spacings: HashMap::new(),
@@ -12746,6 +12774,23 @@ fn run_powershell(script: &str) -> String {
 #[cfg(feature = "harness")]
 struct WinUiStage;
 
+/// Take the batch's outstanding track re-stamp before this hop touches
+/// the tree. A structural change only MARKS its container
+/// (winui/order.rs) and both op runners flush at their end, so this is
+/// normally a no-op — it is here so that no future op path can put an
+/// observation in front of the restamp it owed. Its own borrow, taken
+/// and dropped before the caller's: the hops below hand their closure a
+/// borrow that lives for the whole dispatched call, and a nested one
+/// aborts the process.
+#[cfg(feature = "harness")]
+fn flush_before_hop() {
+    CORE.with_borrow_mut(|core| {
+        if let Some(core) = core.as_mut() {
+            let _ = flush_tracks(core);
+        }
+    });
+}
+
 #[cfg(feature = "harness")]
 impl WinUiStage {
     /// The mutable twin of on_ui, for stage actions that reconcile
@@ -12758,6 +12803,7 @@ impl WinUiStage {
         let cell = std::sync::Mutex::new(Some((f, tx)));
         let handler = DispatcherQueueHandler::new(move || {
             if let Some((f, tx)) = cell.lock().unwrap().take() {
+                flush_before_hop();
                 CORE.with_borrow_mut(|core| {
                     let core = core.as_mut().expect("core state initialized");
                     let _ = tx.send(f(core));
@@ -12779,6 +12825,7 @@ impl WinUiStage {
         let cell = std::sync::Mutex::new(Some((f, tx)));
         let handler = DispatcherQueueHandler::new(move || {
             if let Some((f, tx)) = cell.lock().unwrap().take() {
+                flush_before_hop();
                 CORE.with_borrow(|core| {
                     let core = core.as_ref().expect("core state initialized");
                     let _ = tx.send(f(core));
@@ -12883,6 +12930,9 @@ impl WinUiStage {
         let cell = std::sync::Mutex::new(Some((f, tx)));
         let handler = DispatcherQueueHandler::new(move || {
             if let Some((f, tx)) = cell.lock().unwrap().take() {
+                // Its own borrow, taken and DROPPED before `f` runs —
+                // this hop exists precisely so `f` runs outside one.
+                flush_before_hop();
                 let _ = tx.send(f());
             }
             Ok(())
@@ -12899,6 +12949,7 @@ impl WinUiStage {
         let cell = std::sync::Mutex::new(Some((f, tx)));
         let handler = DispatcherQueueHandler::new(move || {
             if let Some((f, tx)) = cell.lock().unwrap().take() {
+                flush_before_hop();
                 CORE.with_borrow(|core| {
                     let core = core.as_ref().expect("core state initialized");
                     let _ = tx.send(f(core));
@@ -14898,8 +14949,7 @@ impl crate::harness::Stage for WinUiStage {
                     _ => None,
                 })
                 .expect("registry grids live in the widget table");
-            let empty = Vec::new();
-            let order = core.child_order.get(&id).unwrap_or(&empty);
+            let order = core.child_order.children(id);
             let mut rects: Vec<(f64, f64)> = Vec::new();
             let mut baselines: Vec<f64> = Vec::new();
             for child in order {
@@ -16304,6 +16354,195 @@ fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE DEFERRED RE-STAMP PUTS EVERY CHILD ON THE TRACK THE EAGER ONE
+    /// DID, and does it ONCE PER CONTAINER PER BATCH.
+    ///
+    /// `reindex` used to run at the end of every AddChild: it clears the
+    /// container's RowDefinitions, rebuilds one per child and writes
+    /// `Grid::SetRow` on every sibling, so N appends were N^2/2 WinRT
+    /// round trips — 4.7s for 2,500 rows, 77.6s for 10,000, and this
+    /// platform's choke at 12,000
+    /// (docs/measurements/choke-windows-2026-08-24.txt). It runs once per
+    /// container at the batch boundary now, and THE LAYOUT MAY NOT MOVE
+    /// BY ONE TRACK for that.
+    ///
+    /// Six batches over the real `ChildOrder`, each isolating one of its
+    /// methods so that method's mark is load-bearing, and the last one
+    /// mixed the way a For's update is (a row appended, one removed, one
+    /// re-ordered). Each batch runs twice: EAGER re-stamps the container
+    /// each edit named, right after the edit — the pre-fix arm — while
+    /// DEFERRED runs the whole batch and then re-stamps only what
+    /// `next_due` hands back, which is `flush_tracks`' loop with
+    /// `reindex`'s COM half replaced by the placement it writes. The two
+    /// are compared AFTER EVERY BATCH, because a mark dropped in one
+    /// method is repaired by the next batch that marks for another
+    /// reason: only the per-batch comparison can see it.
+    ///
+    /// The frozen rows beside them are what makes this more than the two
+    /// runs agreeing: they pin the table's two head tracks (a declared
+    /// table's rows start at 2, behind the header and the rule) and the
+    /// order every edit leaves.
+    #[test]
+    fn the_deferred_rebuild_places_every_child_where_the_eager_one_did() {
+        use std::collections::BTreeMap;
+
+        // A plain column and a declared table, whose rows sit two tracks
+        // down. Children: a b c d under the column, r0 r1 r2 under the
+        // table.
+        const COLUMN: WidgetId = WidgetId(1);
+        const TABLE: WidgetId = WidgetId(2);
+        let (a, b, c, d) = (WidgetId(10), WidgetId(11), WidgetId(12), WidgetId(13));
+        let (r0, r1, r2) = (WidgetId(20), WidgetId(21), WidgetId(22));
+
+        #[derive(Clone, Copy, Debug)]
+        enum Edit {
+            /// AddChild.
+            Append(WidgetId, WidgetId),
+            /// MoveChild.
+            Place(WidgetId, WidgetId, Option<WidgetId>),
+            /// Destroy, on a child.
+            Detach(WidgetId),
+            /// The `grow` prop: the ORDER does not move and the track's
+            /// size does, so the container is marked through the child's
+            /// parent — the lookup that replaced a scan over every
+            /// container.
+            Grow(WidgetId),
+            /// Destroy, on the container itself.
+            Forget(WidgetId),
+        }
+
+        /// The container this edit re-stamps, which is what the eager arm
+        /// passed to `reindex` on the spot.
+        fn edit(order: &mut ChildOrder, e: Edit) -> Option<WidgetId> {
+            match e {
+                Edit::Append(parent, child) => {
+                    order.append(parent, child);
+                    Some(parent)
+                }
+                Edit::Place(parent, child, before) => {
+                    order.place(parent, child, before);
+                    Some(parent)
+                }
+                Edit::Detach(child) => order.detach(child),
+                Edit::Grow(child) => {
+                    let parent = order.parent_of(child);
+                    if let Some(parent) = parent {
+                        order.mark(parent);
+                    }
+                    parent
+                }
+                Edit::Forget(container) => {
+                    order.forget(container);
+                    None
+                }
+            }
+        }
+
+        /// `reindex`'s placement, without its COM half.
+        fn stamp(
+            into: &mut BTreeMap<u64, Vec<(u64, i32)>>,
+            order: &ChildOrder,
+            container: WidgetId,
+        ) {
+            let head = if container == TABLE { 2 } else { 0 };
+            into.insert(
+                container.0,
+                order
+                    .children(container)
+                    .iter()
+                    .enumerate()
+                    .map(|(at, child)| (child.0, track_of(at, head)))
+                    .collect(),
+            );
+        }
+
+        use Edit::*;
+        let script: [&[Edit]; 6] = [
+            // The build.
+            &[
+                Append(COLUMN, a),
+                Append(COLUMN, b),
+                Append(COLUMN, c),
+                Append(TABLE, r0),
+                Append(TABLE, r1),
+                Append(TABLE, r2),
+            ],
+            // A sort: a move and nothing else.
+            &[Place(COLUMN, c, Some(a)), Place(TABLE, r2, Some(r0))],
+            // A removal and nothing else.
+            &[Detach(a), Detach(r0)],
+            // A weight, which moves no child and re-sizes a track.
+            &[Grow(b), Grow(r1)],
+            // The shape a For's update really has.
+            &[
+                Append(COLUMN, d),
+                Detach(b),
+                Place(COLUMN, d, Some(c)),
+                Append(TABLE, r0),
+                Detach(r2),
+                Place(TABLE, r0, Some(r1)),
+            ],
+            // A marked container destroyed inside its own batch: the mark
+            // goes with it, so the flush does not chase a dead Grid.
+            &[Grow(r1), Forget(TABLE)],
+        ];
+        let want: [&[(u64, &[(u64, i32)])]; 6] = [
+            &[(1, &[(10, 0), (11, 1), (12, 2)]), (2, &[(20, 2), (21, 3), (22, 4)])],
+            &[(1, &[(12, 0), (10, 1), (11, 2)]), (2, &[(22, 2), (20, 3), (21, 4)])],
+            &[(1, &[(12, 0), (11, 1)]), (2, &[(22, 2), (21, 3)])],
+            &[(1, &[(12, 0), (11, 1)]), (2, &[(22, 2), (21, 3)])],
+            &[(1, &[(13, 0), (12, 1)]), (2, &[(20, 2), (21, 3)])],
+            &[(1, &[(13, 0), (12, 1)]), (2, &[(20, 2), (21, 3)])],
+        ];
+        // ONE re-stamp per container per batch — the whole point, and the
+        // number the eager arm got wrong: 6, 2, 2, 2, 6 edits against
+        // these. The last batch re-stamps NOTHING: its one marked
+        // container was destroyed before the boundary.
+        let want_restamps: [&[u64]; 6] = [&[1, 2], &[1, 2], &[1, 2], &[1, 2], &[1, 2], &[]];
+
+        let mut eager_order = ChildOrder::default();
+        let mut deferred_order = ChildOrder::default();
+        let mut eager: BTreeMap<u64, Vec<(u64, i32)>> = BTreeMap::new();
+        let mut deferred: BTreeMap<u64, Vec<(u64, i32)>> = BTreeMap::new();
+        for (n, batch) in script.iter().enumerate() {
+            for e in *batch {
+                if let Some(container) = edit(&mut eager_order, *e) {
+                    stamp(&mut eager, &eager_order, container);
+                }
+            }
+            for e in *batch {
+                edit(&mut deferred_order, *e);
+            }
+            let mut restamped: Vec<u64> = Vec::new();
+            while let Some(container) = deferred_order.next_due() {
+                stamp(&mut deferred, &deferred_order, container);
+                restamped.push(container.0);
+            }
+            assert_eq!(
+                deferred, eager,
+                "batch {n} places a child on a different track than the eager \
+                 re-stamp did — a structural change that did not mark its \
+                 container leaves the batch's boundary with nothing to rebuild"
+            );
+            let frozen: BTreeMap<u64, Vec<(u64, i32)>> = want[n]
+                .iter()
+                .map(|(container, tracks)| (*container, tracks.to_vec()))
+                .collect();
+            assert_eq!(deferred, frozen, "batch {n} does not place children where it must");
+            assert_eq!(
+                restamped, want_restamps[n],
+                "batch {n} re-stamped the wrong containers, or one of them twice — \
+                 an append that re-stamps per child is the N^2 this replaced"
+            );
+        }
+        // The destroyed container's children stop naming it: a stale
+        // reverse entry would send the next `grow` on one of them at a
+        // dead Grid.
+        assert_eq!(deferred_order.parent_of(r0), None);
+        assert_eq!(deferred_order.parent_of(r1), None);
+        println!("batches: 6, edits: 20, re-stamps: 10");
+    }
 
     #[test]
     fn table_viewport_rejects_overflow() {

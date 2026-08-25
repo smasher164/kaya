@@ -319,6 +319,31 @@ in docs/deferred.md.
    failure path with ONE answer, or an answer that interpolates nothing:
    such a sentence is printed for every cause it does not name, and it is
    believed),
+   `tools/check-harness-ceiling.sh` (THE HARNESS LOSES LEGIBLY: every
+   step is entered with a CEILING, and once a verdict is published the
+   process leaves within the GRACE whether or not the platform's exit
+   path runs — one rule, all three harnesses. A step's retry deadline is
+   read only AFTER the step returns and every step blocks in a hop to
+   the platform's UI thread with no timeout of its own, so a saturated
+   app printed NOTHING, no verdict and no timeout sentence, until
+   something outside killed it (measured on four platforms 2026-08-24,
+   docs/measurements/choke-*-2026-08-24.txt; on the mac lane that
+   something is `timeout 120`, a KILL that takes the log with it). NO
+   SCENE CAN FAIL THIS — the wedge would have to happen on every
+   platform at once and would then measure nothing else — so, like the
+   native-undo pair, a gate is the only wall available. The static
+   clause holds the two numbers equal in all three, the arm INSIDE the
+   script runner carrying the step itself (a fixed string names every
+   step the same), the publish over the exit hop, and ONE sentence
+   compared FLATTENED, since Rust's line continuations and the
+   interpreters' `+` splices spell that text three ways. The macOS
+   clause is check-empty-child's shape: the interpreter's OWN watchdog,
+   cut out of KayaSwiftUI.swift by the gate and compiled with
+   tools/checks/swiftui-wedge.swift, run against a REAL wedged main
+   thread — with a ceiling that can never expire watched reporting the
+   silence. The Rust half's runtime proof is in the unit suite instead,
+   where a wedged MockStage read leaves a child process under its own
+   verdict),
    `tools/check-empty-child.sh` (ONE NODE IS ONE WIDGET, even when its
    content will not decode. The widget backends have that by
    construction — GTK keeps the GtkPicture and clears the paintable,
@@ -370,11 +395,19 @@ in docs/deferred.md.
    KayaTableSurface in an NSWindow with the NSTableView the native tier
    is made of found in its view tree. The same probe holds the geometry
    half too: viewport, cells and assigned track share the current table
-   generation; every batch and native resize invalidates it before
-   acting; and a generation-keyed reporter republishes even after a
-   same-size resize. The watched shadows remove each link separately.
-   What no gate holds is whether a PHYSICAL device reports the size class
-   the simulator did),
+   generation; every batch, native resize and USER-ROUTE MODEL WRITE
+   (`kayaUserWrite`) invalidates it before acting; and a generation-keyed
+   reporter republishes even after a same-size resize. The generation is
+   the STORED epoch and the static clause refuses a walk in it — the
+   recursive subtree hash it replaces was 41% of the mac main thread at
+   100k rows and caused the 37% of observation bookkeeping beside it
+   (docs/measurements/choke-macos-2026-08-24.txt), so a model-derived
+   generation is a measured defect, not a style. Beside it a census: every
+   assignment to the interpreter's own `text`/`checked`/`value` is inside
+   kayaApply, inside a kayaUserWrite block, or in an EXEMPT table with a
+   reason that must still match a real site. The watched shadows remove
+   each link separately. What no gate holds is whether a PHYSICAL device
+   reports the size class the simulator did),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside

@@ -99,6 +99,11 @@ GATES = [
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.sh"], True, ""),
+    # The harness loses legibly: a step that never returns publishes a
+    # verdict and leaves, in all three harnesses. NO SCENE CAN FAIL IT —
+    # the wedge would have to happen on every platform at once and would
+    # measure nothing else (docs/measurements/choke-*-2026-08-24.txt).
+    ("check-harness-ceiling", ["tools/check-harness-ceiling.sh"], True, ""),
     # ONE NODE IS ONE WIDGET, even when its content will not decode: in
     # the declarative backends "render nothing" makes the node LEAVE THE
     # TREE and every positional reader above it reads the wrong child

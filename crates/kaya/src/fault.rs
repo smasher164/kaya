@@ -265,6 +265,110 @@ mod tests {
         );
     }
 
+    /// AND THE PUMP'S OWN FRAME MAY NOT DECIDE TO DIE. `fault::guard`
+    /// wraps `Scene::apply` inside `kaya_next_commands`; everything else
+    /// in that function is outside it, so a panic there is the abort with
+    /// no verdict list AND no transaction to blame. It shipped one: an
+    /// `assert!` that the resolved batch fit the caller's 64 KiB buffer
+    /// killed macOS, iOS and Android at 161 table rows in one transaction
+    /// (docs/deferred.md, the 64 KiB pump wall).
+    #[test]
+    fn the_pump_frame_never_decides_to_die() {
+        let body = body(CAPI, "kaya_next_commands", "capi.rs");
+        for bad in PANICKING {
+            assert!(
+                !body.contains(bad),
+                "kaya: capi.rs's `kaya_next_commands` contains `{bad}` — the pump's \
+                 frame cannot unwind, and what it hands out is sized by the CORE, so \
+                 there is nothing here left to refuse. Whatever this is about, report \
+                 it through crate::fault::report (docs/deferred.md, the 64 KiB pump \
+                 wall)"
+            );
+        }
+    }
+
+    /// AND NO PUMP SIZES ITS OWN BUFFER. The core owns the batch's bytes
+    /// and states their length; a reader that allocates a fixed buffer
+    /// instead puts a cap back on how many rows one transaction may
+    /// build, which is invisible until a real app crosses it — 161 rows
+    /// on macOS/iOS, 157 on Android, and not at all on GTK or WinUI,
+    /// whose backends never cross this ABI (docs/measurements/
+    /// choke-macos-2026-08-24.txt).
+    #[test]
+    fn no_pump_sizes_its_own_buffer() {
+        let swift = include_str!("../../../swift/KayaSwiftUI.swift");
+        let kotlin =
+            include_str!("../../../android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt");
+        for (src, opener, closer, names, file) in [
+            (
+                swift,
+                "func kayaStartCommandPump() {",
+                "\n}\n",
+                "KayaHost.nextCommands(",
+                "KayaSwiftUI.swift",
+            ),
+            (
+                kotlin,
+                "private fun startPump(",
+                "\n    }\n",
+                "KayaPresent.nextCommands(",
+                "KayaCompose.kt",
+            ),
+        ] {
+            let start = src.find(opener).unwrap_or_else(|| {
+                panic!("kaya: {file} no longer defines `{opener}` — this census is reading nothing")
+            });
+            let rest = &src[start..];
+            let end = rest
+                .find(closer)
+                .unwrap_or_else(|| panic!("kaya: {file}'s pump has no closing brace"));
+            let pump = &rest[..end];
+            // The read is checked before it is believed: the pump asks
+            // the core for the batch, so a body without that call is the
+            // wrong body.
+            assert!(
+                pump.contains(names),
+                "kaya: the census read {} bytes for {file}'s pump and they do not call \
+                 `{names}` — it is reading the wrong function",
+                pump.len()
+            );
+            for size in size_literals(pump) {
+                assert!(
+                    size < 256,
+                    "kaya: {file}'s pump names the size {size} — the batch is sized by \
+                     the core (kaya_next_commands writes the length), and a buffer sized \
+                     here is a cap on how many rows one transaction may build \
+                     (docs/deferred.md, the 64 KiB pump wall)"
+                );
+            }
+        }
+    }
+
+    /// The integer literals in a body, ignoring the digits inside
+    /// identifiers (`UInt8`, `runOnUiThread2`) — those name a type, not
+    /// an amount.
+    fn size_literals(body: &str) -> Vec<u64> {
+        let bytes = body.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if !bytes[i].is_ascii_digit() {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let joined = start > 0
+                && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_');
+            if !joined {
+                out.push(body[start..i].parse().unwrap_or(u64::MAX));
+            }
+        }
+        out
+    }
+
     /// EVERY SCRIPT RUNNER DECLARES ITSELF WATCHED, before its first
     /// step — the other half of `report`'s fork: a runner that forgot
     /// this dies at its first fault instead of reddening the leg, and

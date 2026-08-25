@@ -394,10 +394,15 @@ enum KayaTableTierProbe {
             }(),
             true)
 
+        // THE USER ROUTE, not a bare assignment: the model write a
+        // checkbox, a slider or a keystroke makes goes through
+        // kayaUserWrite, which stales the observations the way a batch
+        // and a resize do. A generation derived from the model was tried
+        // and did not cover the sibling-only case at all (docs/traps.md).
         let firstGeneration = table.tableViewport?.generation
-        table.children[0].children[0].text = "row zero changed"
+        kayaUserWrite { table.children[0].children[0].text = "row zero changed" }
         expectBool(
-            "a mutated table immediately refuses the previous generation",
+            "a user-route model write immediately refuses the previous generation",
             {
                 if case .current = kayaCurrentTableGeometry(table) { return false }
                 return true
@@ -405,7 +410,7 @@ enum KayaTableTierProbe {
             true)
         let refreshedGeometry = awaitCurrentGeometry()
         expectBool(
-            "a mutated table records a fresh live generation",
+            "a user-route model write records a fresh live generation",
             {
                 guard case .current = refreshedGeometry,
                     let refreshed = table.tableViewport?.generation,

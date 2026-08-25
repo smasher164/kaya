@@ -2381,9 +2381,9 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
     // this repo keeps paying for, and it is worse on the Rust backends
     // because they carry 434 of the matrix's 686 legs.
     let Some(text) = script(scene) else {
-        stage.finish(
-            1,
-            &format!(
+        preflight_fail(
+            stage,
+            format!(
                 "KAYA_SELFTEST: FAILED (no script for scene {scene:?} — export \
                  KAYA_SELFTEST_SCRIPT with the scene's steps, or add an arm to \
                  harness::script for a standalone run)"
@@ -2394,7 +2394,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
     let steps = match parse(text) {
         Ok(steps) => steps,
         Err(e) => {
-            stage.finish(1, &format!("KAYA_SELFTEST: FAILED (bad script: {e})"));
+            preflight_fail(stage, format!("KAYA_SELFTEST: FAILED (bad script: {e})"));
             return;
         }
     };
@@ -2432,7 +2432,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
         // win where it works and the process leaves under its own
         // verdict where it does not.
         let code = outcome.unwrap_or(1);
-        std::thread::sleep(Duration::from_secs(3));
+        std::thread::sleep(EXIT_GRACE);
         use std::io::Write;
         let _ = std::io::stderr().flush();
         let _ = std::io::stdout().flush();
@@ -2444,6 +2444,19 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
 /// it with a mock stage.
 pub fn run(steps: Vec<Step>, stage: impl Stage) {
     let _ = run_with_log(steps, stage, None);
+}
+
+/// A verdict published before any step, from whatever thread called
+/// `spawn` — the app's own thread on both Rust backends, where
+/// `finish`'s exit hop cannot be answered at all. EXIT_GRACE is then
+/// the only thing that ends the process.
+fn preflight_fail(stage: impl Stage, verdict: String) {
+    let watch = StepWatchdog::start(step_ceiling());
+    watch.published(1);
+    stage.finish(1, &verdict);
+    watch.clear();
+    std::thread::sleep(EXIT_GRACE);
+    std::process::exit(1);
 }
 
 /// Recording handshake: when the runner exports KAYA_HARNESS_GATE, it
@@ -2503,11 +2516,17 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             .unwrap_or(0);
         log(&format!("KAYA_HARNESS: epoch {epoch}"));
     }
+    // THE CEILING THAT COVERS THE HOP (STEP_CEILING), and the grace that
+    // covers every `finish` below it. Dropped with this frame, so
+    // nothing it can report outlives the run.
+    let watch = StepWatchdog::start(step_ceiling());
     // A script with no expects proves nothing; a transport that
     // mangled the text into a comment must fail, not pass.
     if !steps.iter().any(Step::is_assertion)
     {
+        watch.published(1);
         stage.finish(1, "KAYA_SELFTEST: FAILED (script has no expects)");
+        watch.clear();
         return 1;
     }
     let mut observed = Vec::new();
@@ -2528,6 +2547,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
         }
         // Where this step's failures start, for the retraction below.
         let failures_before = failures.len();
+        // Armed BEFORE the id normalization below, which hops as well
+        // (Stage::resolve_id), and with the step as the script wrote it
+        // so the sentence names what the trace names.
+        watch.enter(format!("{step:?}"));
         // kind@id targets normalize HERE, once per step, through the
         // backend's own records (Stage::resolve_id) — so the dozens of
         // index-shaped Stage reads below never learn about ids. An
@@ -3615,13 +3638,18 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
         }
     }
     record_linger();
-    if failures.is_empty() {
-        stage.finish(0, &format!("KAYA_SELFTEST: OK ({})", observed.join(", ")));
-        0
+    let (code, verdict) = if failures.is_empty() {
+        (0, format!("KAYA_SELFTEST: OK ({})", observed.join(", ")))
     } else {
-        stage.finish(1, &format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")));
-        1
-    }
+        (1, format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")))
+    };
+    // EXIT_GRACE covers `finish` itself: it prints the verdict and then
+    // hops to the UI thread for the exit, and that hop wedges with the
+    // rest (the linux lane's N=6000, verdict at 103.63s and no exit).
+    watch.published(code);
+    stage.finish(code, &verdict);
+    watch.clear();
+    code
 }
 
 /// The steps-file spelling of a target — "column#0" — for observation
@@ -3732,6 +3760,138 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // returns the moment it matches, so the width costs a green run
 // nothing; only a genuine failure reports slower.
 pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
+
+/// THE CEILING ON ONE STEP, HOP INCLUDED — the cover the deadline above
+/// cannot give, because it is consulted only after a step RETURNS and
+/// every step blocks in a hop to the platform's UI thread with no
+/// timeout of its own (gtk.rs's `on_main`, winui's `on_ui_read`, the
+/// interpreters' `DispatchQueue.main.sync` and `onUi`). A saturated app
+/// answers no step, so the run prints NOTHING until something outside
+/// kills it: measured on four platforms 2026-08-24
+/// (docs/measurements/choke-*-2026-08-24.txt).
+///
+/// 60s, and both bounds are measured. Above: the longest legitimate
+/// step in the tree is Android's ax arm extending its own deadline to
+/// 20s, and an attempt entered inside the retry deadline may finish
+/// well past it (choke-macos note 3 — entered at 4.9s, passing at
+/// 9.6s), so firing at POLL_DEADLINE would redden legs that pass today.
+/// Below: validate-mac kills a leg at `timeout 120` and a kill takes
+/// the log with it, so the harness's own sentence has to beat it.
+///
+/// `KAYA_STEP_CEILING_MS` overrides it; the default is censused in all
+/// three harnesses by tools/check-harness-ceiling.sh.
+pub const STEP_CEILING: Duration = Duration::from_secs(60);
+
+/// The other half: once a verdict is published the process leaves
+/// within this whether or not the platform's exit path runs. `finish`
+/// prints the verdict and then hops to the same UI thread to ask for
+/// the exit — measured on the linux lane 2026-08-24, N=6000:
+/// "KAYA_SELFTEST: OK (77987.99)" at 103.63s and no exit ever, killed
+/// from outside at the bench's 120s cap.
+pub const EXIT_GRACE: Duration = Duration::from_secs(3);
+
+fn step_ceiling() -> Duration {
+    match std::env::var("KAYA_STEP_CEILING_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+        Some(ms) if ms > 0 => Duration::from_millis(ms),
+        _ => STEP_CEILING,
+    }
+}
+
+/// What the watchdog below is waiting on, and since when.
+enum Watched {
+    /// A step the harness thread entered and has not come back from.
+    Step { text: String, entered: Instant },
+    /// A verdict already published, waiting on the platform's exit.
+    Exit { code: i32, published: Instant },
+}
+
+/// The thread that makes those two ceilings real. NOT the harness
+/// thread: the whole failure class is the harness thread stuck inside a
+/// call that never returns, so the only thread that can report it is
+/// one that never enters a step. (crate::stall is the other watchdog
+/// and watches the APP thread's unclaimed occurrences; this one watches
+/// the harness's own step.)
+struct StepWatchdog {
+    watched: std::sync::Arc<std::sync::Mutex<Option<Watched>>>,
+}
+
+impl StepWatchdog {
+    fn start(ceiling: Duration) -> Self {
+        let watched = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let weak = std::sync::Arc::downgrade(&watched);
+        std::thread::spawn(move || {
+            // The run's own end drops the last strong reference, so the
+            // watchdog cannot outlive the run it watches.
+            while let Some(watched) = weak.upgrade() {
+                let now = Instant::now();
+                let fire = match &*watched.lock().unwrap() {
+                    Some(Watched::Step { text, entered }) if now >= *entered + ceiling => {
+                        Some((1, Some(wedge_verdict(text, now - *entered))))
+                    }
+                    Some(Watched::Exit { code, published }) if now >= *published + EXIT_GRACE => {
+                        Some((*code, None))
+                    }
+                    _ => None,
+                };
+                drop(watched);
+                if let Some((code, verdict)) = fire {
+                    match verdict {
+                        Some(text) => eprintln!("{text}"),
+                        // NOT a second verdict: the leg's own is
+                        // already out, and overwriting it would lose
+                        // the answer the run reached.
+                        None => eprintln!(
+                            "KAYA_HARNESS: the verdict is published and the platform's exit \
+                             path has not run {}s later — leaving under the verdict's own \
+                             code (the harness exit grace)",
+                            EXIT_GRACE.as_secs()
+                        ),
+                    }
+                    use std::io::Write;
+                    let _ = std::io::stderr().flush();
+                    let _ = std::io::stdout().flush();
+                    std::process::exit(code);
+                }
+                std::thread::sleep(POLL_INTERVAL);
+            }
+        });
+        StepWatchdog { watched }
+    }
+
+    fn enter(&self, text: String) {
+        *self.watched.lock().unwrap() = Some(Watched::Step { text, entered: Instant::now() });
+    }
+
+    fn published(&self, code: i32) {
+        *self.watched.lock().unwrap() = Some(Watched::Exit { code, published: Instant::now() });
+    }
+
+    fn clear(&self) {
+        *self.watched.lock().unwrap() = None;
+    }
+}
+
+/// The sentence a wedged step ends its run with. It prints only what it
+/// measured — which step was entered, how long ago, and that nothing
+/// has come back — and says out loud that it cannot tell a wedged UI
+/// thread from a slow one. The steps that already failed are not
+/// reprinted here: each was printed the moment it became final (the
+/// step-failed rule above), which is what leaves them in the log when a
+/// run ends without reaching its verdict.
+///
+/// ONE SENTENCE, THREE HARNESSES: KayaSwiftUI.swift's `kayaWedgeVerdict`
+/// and KayaCompose.kt's `wedgeVerdict` are the same text.
+fn wedge_verdict(step: &str, waited: Duration) -> String {
+    format!(
+        "KAYA_SELFTEST: FAILED (no verdict — the harness entered step {step} {:.1}s ago \
+         and has not come back from it. A step blocks in its hop to the platform's UI \
+         thread, so nothing answered from there; a wedged UI thread and a merely slow \
+         one look the same from here and this does not claim to tell them apart. Ended \
+         by the harness step ceiling, which is the cover a step's own retry deadline \
+         cannot give: that one is read only after a step returns.)",
+        waited.as_secs_f64()
+    )
+}
 
 /// `$TMP` and `$PID` in a scene path.
 ///
@@ -4174,6 +4334,12 @@ mod tests {
             self.seen.lock().unwrap().push(format!("type {text}"));
         }
         fn read_label(&self, _: Target) -> String {
+            // THE WEDGE, for the step-ceiling test below: a Stage call
+            // that never comes back, which is what every backend's hop
+            // is when the UI thread is saturated.
+            while WEDGE.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(25));
+            }
             "ok-text".into()
         }
         fn read_text(&self, _: Target) -> String {
@@ -4400,12 +4566,138 @@ mod tests {
         }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
+            // The exit hop's wedge: `finish` prints the verdict and then
+            // asks the UI thread to end the process, and THAT hop wedges
+            // too (the linux lane's N=6000 — verdict at 103.63s, no exit
+            // ever, killed from outside).
+            while WEDGE_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(25));
+            }
         }
     }
 
     static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static RESOLVE_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static NORMALIZED_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static WEDGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static WEDGE_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// A WEDGED STEP ENDS THE RUN LEGIBLY. Before the step ceiling a
+    /// step that never returned printed NOTHING — no verdict, no
+    /// timeout sentence — because the retry deadline is read only after
+    /// a step returns and every step blocks in a hop to the platform's
+    /// UI thread. Measured on all four platforms 2026-08-24
+    /// (docs/measurements/choke-*-2026-08-24.txt); on the mac lane that
+    /// is a 120s `timeout` KILL, which takes the log with it.
+    ///
+    /// IN A CHILD PROCESS, because what the guard promises is that the
+    /// harness LEAVES: the watchdog publishes and exits, which the
+    /// process it ends cannot report. The child is this same test binary
+    /// with this one test selected.
+    #[test]
+    fn a_wedged_step_publishes_a_verdict_and_leaves() {
+        use std::sync::atomic::Ordering::Relaxed;
+        const CHILD: &str = "KAYA_HARNESS_WEDGE_CHILD";
+        const CEILING: Duration = Duration::from_millis(1500);
+        let me = format!(
+            "{}::a_wedged_step_publishes_a_verdict_and_leaves",
+            module_path!().splitn(2, "::").nth(1).unwrap()
+        );
+        // BOTH HOPS, because the measurement found both: a step that
+        // never answers (no verdict at all) and, once a verdict IS out,
+        // an exit that never runs (linux N=6000, verdict at 103.63s).
+        match std::env::var(CHILD).as_deref() {
+            Ok("step") => {
+                WEDGE.store(true, Relaxed);
+                let (tx, _rx) = std::sync::mpsc::channel();
+                run(
+                    parse("expect label#0 \"ok-text\"").unwrap(),
+                    MockStage { seen: &SEEN, verdict: tx },
+                );
+                // Only reachable if the ceiling did NOT fire — the
+                // parent reads this line as the failure it is.
+                println!("KAYA_TEST: the wedged run returned on its own");
+                return;
+            }
+            Ok("exit") => {
+                WEDGE_EXIT.store(true, Relaxed);
+                let (tx, _rx) = std::sync::mpsc::channel();
+                run(
+                    parse("expect label#0 \"ok-text\"").unwrap(),
+                    MockStage { seen: &SEEN, verdict: tx },
+                );
+                println!("KAYA_TEST: the wedged finish returned on its own");
+                return;
+            }
+            _ => {}
+        }
+        // The cap is the OLD behavior's stand-in for "something outside
+        // kills it"; reaching it is the pre-fix red.
+        let cap = Duration::from_secs(30);
+        let drive = |mode: &str| -> (Option<std::process::ExitStatus>, String, Duration) {
+            let log_path = std::env::temp_dir()
+                .join(format!("kaya-wedge-{}-{mode}.log", std::process::id()));
+            let log_file = std::fs::File::create(&log_path).unwrap();
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "--nocapture", "--test-threads=1", &me])
+                .env(CHILD, mode)
+                .env("KAYA_STEP_CEILING_MS", CEILING.as_millis().to_string())
+                .stdout(std::process::Stdio::from(log_file.try_clone().unwrap()))
+                .stderr(std::process::Stdio::from(log_file))
+                .spawn()
+                .unwrap();
+            let started = Instant::now();
+            let status = loop {
+                match child.try_wait().unwrap() {
+                    Some(status) => break Some(status),
+                    None if started.elapsed() > cap => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break None;
+                    }
+                    None => std::thread::sleep(Duration::from_millis(25)),
+                }
+            };
+            let waited = started.elapsed();
+            let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+            let _ = std::fs::remove_file(&log_path);
+            (status, log, waited)
+        };
+
+        let (status, log, waited) = drive("step");
+        let status = status.unwrap_or_else(|| {
+            panic!("the wedged child never left in {cap:?} — the step ceiling did not fire, \
+                    which is the silence this test exists for. Its log:\n{log}")
+        });
+        assert_eq!(status.code(), Some(1), "the wedged child left with the wrong code:\n{log}");
+        assert!(
+            log.contains("KAYA_SELFTEST: FAILED (no verdict"),
+            "the wedged child left without publishing a verdict:\n{log}"
+        );
+        // The sentence NAMES THE STEP: a fixed sentence would be printed
+        // for every wedge and name none of them.
+        assert!(
+            log.contains(r#"Expect(Target { kind: Label, index: 0"#),
+            "the verdict does not name the step:\n{log}"
+        );
+        assert!(waited >= CEILING, "the ceiling fired before its own deadline ({waited:?})");
+        assert!(waited < cap, "{waited:?}");
+
+        let (status, log, waited) = drive("exit");
+        let status = status.unwrap_or_else(|| {
+            panic!("the child never left in {cap:?} though its verdict was published — \
+                    the exit grace did not fire. Its log:\n{log}")
+        });
+        // UNDER THE VERDICT'S OWN CODE: this run PASSED, and a wedged
+        // exit must not turn a pass into a failure.
+        assert_eq!(status.code(), Some(0), "the wedged exit left with the wrong code:\n{log}");
+        assert!(
+            log.contains("the verdict is published and the platform's exit path has not run"),
+            "the exit grace left without saying why:\n{log}"
+        );
+        assert!(waited >= EXIT_GRACE, "the exit grace fired early ({waited:?})");
+        assert!(waited < cap, "{waited:?}");
+    }
 
     /// The zero-expect guard fires: a script a transport mangled into
     /// nothing (or someone forgot to assert in) must fail, not pass.

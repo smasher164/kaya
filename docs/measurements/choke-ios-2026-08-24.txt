@@ -17,7 +17,7 @@ guest:    SWIFT. The lane runs the `table` scene from three guests
           libkaya_swiftui_ios.dylib, so the interpreter numbers are
           comparable; the GUEST-side numbers below are Swift-binding
           specific and are reported separately for that reason.
-guest src: scratchpad/choke/ios/main.swift — guests/swift/table.swift's
+guest src: choke-ios-guest-2026-08-24.swift (beside this report) — guests/swift/table.swift's
           shape with a 4-field record (Date, Ticker, Side, Total),
           strings from a counter, row count from KAYA_ROWS, no asset
           reads. Compiled exactly as run-sim.sh compiles a swift-suite
@@ -191,7 +191,7 @@ device:   kaya-sim-2 is still Booted, as are kaya-sim-0, kaya-sim-1 and
   uninstalled: the dev.kaya.* listing on kaya-sim-2 is byte-identical to
   the pre-run capture (pre-state.txt) — 27 before, 27 after, added [],
   removed [].
-disk:     scratchpad/choke/ios went 49M -> 320K (the 23M binary, the 25M
+disk:     the session scratch dir went 49M -> 320K (the 23M binary, the 25M
   .app and the 912K pch module cache deleted; main.swift, the three run
   scripts, the 25 per-run logs and the RSS traces kept, 320K total). The
   15 chokeswift-*.ips crash reports this run generated in

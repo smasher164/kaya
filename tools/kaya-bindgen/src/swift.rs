@@ -58,7 +58,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("import Foundation");
     c.line("");
-    c.line("enum KayaValue: Equatable {");
+    c.line("enum KayaValue: Hashable {");
     c.line("    case bool(Bool)");
     c.line("    case i64(Int64)");
     c.line("    case f64(Double)");

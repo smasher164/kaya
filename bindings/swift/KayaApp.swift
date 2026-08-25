@@ -265,12 +265,80 @@ struct KayaCollection {
 
 /// One instance of a collection: the table inside the stamped copy selected
 /// by `path` (the empty path for a live-zone collection).
+///
+/// ORDERED AND KEYED AT ONCE: `entries` is the order the guest reads back,
+/// `slots` is each key's index in it. `entries` is read-only from outside
+/// and `slots` is unreachable, so a write that skipped the index cannot be
+/// spelled — the scan it replaces cost 58s of guest time at 40,000 rows
+/// (docs/deferred.md, the Swift binding's quadratic insert).
 private struct KayaInstance {
     let path: [KayaValue]
     // Any: a KayaValue for scalar collections, the record struct itself
     // for record collections — the model is guest-owned, so it keeps
     // native values and only wire fields ever encode.
-    var entries: [(key: KayaValue, value: Any)]
+    private(set) var entries: [(key: KayaValue, value: Any)] = []
+    private var slots: [KayaValue: Int] = [:]
+
+    init(path: [KayaValue]) {
+        self.path = path
+    }
+
+    func has(_ key: KayaValue) -> Bool {
+        slots[key] != nil
+    }
+
+    mutating func set(_ key: KayaValue, _ value: Any) {
+        if let at = slots[key] {
+            entries[at].value = value
+        } else {
+            slots[key] = entries.count
+            entries.append((key: key, value: value))
+        }
+    }
+
+    mutating func remove(_ key: KayaValue) {
+        guard let at = slots.removeValue(forKey: key) else { return }
+        entries.remove(at: at)
+        reindex(from: at)
+    }
+
+    /// Lift `key` out and put it back before `anchor`, or at the end when
+    /// there is none. The anchor is resolved AFTER the lift, so moving an
+    /// entry before itself lands it last.
+    mutating func move(_ key: KayaValue, before anchor: KayaValue?) {
+        guard let from = slots.removeValue(forKey: key) else { return }
+        let entry = entries.remove(at: from)
+        reindex(from: from)
+        let to = anchor.flatMap { slots[$0] } ?? entries.count
+        entries.insert(entry, at: to)
+        reindex(from: to)
+    }
+
+    /// Put the named keys first, in this order; anything the list does not
+    /// name keeps its place behind them. A key named twice is placed once.
+    mutating func reorder(_ keys: [KayaValue]) {
+        var lifted: Set<Int> = []
+        var front: [(key: KayaValue, value: Any)] = []
+        for key in keys {
+            guard let at = slots[key], lifted.insert(at).inserted else { continue }
+            front.append(entries[at])
+        }
+        if front.isEmpty { return }
+        var back: [(key: KayaValue, value: Any)] = []
+        back.reserveCapacity(entries.count - front.count)
+        for (at, entry) in entries.enumerated() where !lifted.contains(at) {
+            back.append(entry)
+        }
+        entries = front + back
+        slots.removeAll(keepingCapacity: true)
+        reindex(from: 0)
+    }
+
+    private mutating func reindex(from: Int) {
+        for at in from..<entries.count {
+            slots[entries[at].key] = at
+        }
+    }
 }
 
 /// A live menu item: its OWN id space (the c_menu_item counter) behind its
@@ -1035,12 +1103,10 @@ final class KayaApp {
 
     private var model: [UInt64: [KayaInstance]] = [:]
     // The minter's counters: the highest I64 key each collection
-    // INSTANCE has minted or absorbed. Keyed by path the way the model
-    // is (a [KayaValue] is not Hashable — KayaValue carries an f64), and
-    // NOT part of the transaction journal: a minted key is spent even if
-    // the transaction that spent it is abandoned, so an id can never be
-    // handed out twice.
-    private var fresh: [UInt64: [(path: [KayaValue], counter: Int64)]] = [:]
+    // INSTANCE has minted or absorbed. NOT part of the transaction
+    // journal: a minted key is spent even if the transaction that spent
+    // it is abandoned, so an id can never be handed out twice.
+    private var fresh: [UInt64: [[KayaValue]: Int64]] = [:]
     private var childCollections: [UInt64: [UInt64]] = [:]
     fileprivate var openFors: [UInt64] = []
     // Signals recomputed from a collection after each of its
@@ -1075,26 +1141,30 @@ final class KayaApp {
         }
     }
 
+    /// `path`'s slot in `coll`'s instance list, made if this is the first
+    /// anyone asked. There is one instance per stamped copy, not one per
+    /// entry, so this list stays short.
+    private func instanceSlot(_ coll: UInt64, _ path: [KayaValue]) -> Int {
+        if let at = model[coll]?.firstIndex(where: { $0.path == path }) { return at }
+        model[coll, default: []].append(KayaInstance(path: path))
+        return model[coll]!.count - 1
+    }
+
     fileprivate func modelSet(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: Any) {
         touchModel(coll)
-        var instances = model[coll, default: []]
-        let at = instances.firstIndex { $0.path == path } ?? {
-            instances.append(KayaInstance(path: path, entries: []))
-            return instances.count - 1
-        }()
-        if let slot = instances[at].entries.firstIndex(where: { $0.key == key }) {
-            instances[at].entries[slot].value = value
-        } else {
-            instances[at].entries.append((key: key, value: value))
-        }
-        model[coll] = instances
+        let at = instanceSlot(coll, path)
+        // IN PLACE, through the default subscript: `var copy = model[coll]`
+        // … `model[coll] = copy` leaves the entry array shared and copies
+        // every entry on every insert, which is the other half of the
+        // quadratic (docs/deferred.md, the Swift binding's quadratic
+        // insert).
+        model[coll, default: []][at].set(key, value)
     }
 
     fileprivate func modelRemove(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue) {
         touchModel(coll)
-        if var instances = model[coll], let at = instances.firstIndex(where: { $0.path == path }) {
-            instances[at].entries.removeAll { $0.key == key }
-            model[coll] = instances
+        if let at = model[coll]?.firstIndex(where: { $0.path == path }) {
+            model[coll, default: []][at].remove(key)
         }
         // The core tears down the copy, taking descendant collection
         // instances with it; the model follows.
@@ -1109,14 +1179,7 @@ final class KayaApp {
     private func withCounter<R>(
         _ coll: UInt64, _ path: [KayaValue], _ body: (inout Int64) -> R
     ) -> R {
-        var instances = fresh[coll, default: []]
-        let at = instances.firstIndex { $0.path == path } ?? {
-            instances.append((path: path, counter: 0))
-            return instances.count - 1
-        }()
-        let out = body(&instances[at].counter)
-        fresh[coll] = instances
-        return out
+        body(&fresh[coll, default: [:]][path, default: 0])
     }
 
     /// The next fresh key for one instance: counter+1, and the counter keeps
@@ -1140,20 +1203,15 @@ final class KayaApp {
         touchModel(coll)
         // The same checks the scene makes, made where the guest can see the
         // stack: a missing key or anchor is a guest bug, never a fallback.
-        guard var instances = model[coll], let at = instances.firstIndex(where: { $0.path == path }),
-            let pos = instances[at].entries.firstIndex(where: { $0.key == key })
+        guard let at = model[coll]?.firstIndex(where: { $0.path == path }),
+            model[coll]![at].has(key)
         else { preconditionFailure("kaya: move of missing key \(key)") }
         if let anchor = before.first {
             precondition(
-                instances[at].entries.contains { $0.key == anchor },
+                model[coll]![at].has(anchor),
                 "kaya: move before missing key \(anchor)")
         }
-        let entry = instances[at].entries.remove(at: pos)
-        let slot = before.first.flatMap { anchor in
-            instances[at].entries.firstIndex { $0.key == anchor }
-        } ?? instances[at].entries.count
-        instances[at].entries.insert(entry, at: slot)
-        model[coll] = instances
+        model[coll, default: []][at].move(key, before: before.first)
     }
 
     private func purgeChildren(_ coll: UInt64, prefix: [KayaValue]) {
@@ -1210,21 +1268,13 @@ final class KayaApp {
                 decode(state.variant, state.fields))
         }
         for order in delta.orders {
-            guard var instances = model[order.collection],
-                let at = instances.firstIndex(where: { $0.path == order.path })
+            guard let at = model[order.collection]?.firstIndex(where: { $0.path == order.path })
             else { continue }
             // Position by the payload's list, keeping anything it does
             // not name at the end: the delta describes one instance's
             // whole order, and an entry it never mentions is one this
             // undo did not touch.
-            var sorted: [(key: KayaValue, value: Any)] = []
-            for key in order.keys {
-                if let slot = instances[at].entries.firstIndex(where: { $0.key == key }) {
-                    sorted.append(instances[at].entries.remove(at: slot))
-                }
-            }
-            instances[at].entries = sorted + instances[at].entries
-            model[order.collection] = instances
+            model[order.collection, default: []][at].reorder(order.keys)
         }
     }
 
@@ -1805,6 +1855,18 @@ final class KayaAppTx {
         set {
             alive()
             storage = newValue
+        }
+        // `tx.<verb>(...)` is a MUTATING call, and a get/set property
+        // serves one by copying the value out, mutating the copy and
+        // writing it back — so every record copied the whole batch built
+        // so far, N records costing N²/2 bytes of memcpy. Measured
+        // 2026-08-24 at 32,000 inserts: 3070ms with get/set, 16ms
+        // yielding (docs/deferred.md, the Swift binding's quadratic
+        // insert). `_modify` keeps the ONE chokepoint above intact — do
+        // not answer this by checking liveness at the callsites.
+        _modify {
+            alive()
+            yield &storage
         }
     }
 

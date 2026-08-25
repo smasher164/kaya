@@ -6183,8 +6183,16 @@ Renumbering is mechanical, only the lanes verify it, and it should ride
 the next C-floor touch rather than its own matrix run.
 
 
-## BUG — one build transaction over ~160 table rows ABORTS the app on the interpreter platforms (measured 2026-08-24)
+## ~~BUG — one build transaction over ~160 table rows ABORTS the app on the interpreter platforms (measured 2026-08-24)~~
 KEY: pump buffer 64 KiB, apply batch exceeds, capi.rs abort, interpreter ring cap, chunked inserts, transport wall
+
+FIXED 2026-08-24, the same day, by the repo's own precedent (traps:
+"THE FIX WAS TO DELETE THE CAP, NOT RAISE IT"): kaya_next_commands now
+hands out a borrowed pointer to the core-owned batch — no buffer, no
+cap, and a stale reader fails to compile. All four readers moved; mac
+passes 25,000 rows in one transaction (chunking now buys nothing);
+three cargo-level guards including a no-size-literal census of both
+interpreters' pump bodies, five watched negatives.
 
 Both interpreter dylibs read applies through a fixed 64 KiB pump buffer
 (SwiftUI `let cap = 64 * 1024`, Compose `ByteArray(64 * 1024)`), and
@@ -6201,8 +6209,16 @@ answer. FIRST of the pre-virtualization fixes (maintainer 2026-08-24):
 the portfolio's transactions view dies on this wall today at 2,645
 rows.
 
-## BUG — WinUI's child append is quadratic: reindex on every AddChild (measured 2026-08-24)
+## ~~BUG — WinUI's child append is quadratic: reindex on every AddChild (measured 2026-08-24)~~
 KEY: reindex RowDefinitions, AddChild quadratic, COM round trips, winui append, N squared
+
+FIXED 2026-08-24: ChildOrder (winui/order.rs) makes the order private
+so a structural change cannot skip the mark, and flush_tracks drains
+once per batch — also killing the Destroy and grow-prop N² scans and
+deferring reflow_grid's. Measured on the lane's VM against a
+sha-verified pre-fix dll: N=2500 5.3s -> 0.75s, N=10000 82.9s -> 4.5s,
+the old 12,000-row choke now 50,000 in 13.6s. Placement equality
+frozen in winui::tests (lane count 10 -> 11), six watched negatives.
 
 `ApplyOp::AddChild` in crates/kaya/src/winui/mod.rs ends every append
 with `reindex(core, parent)`, which clears the parent Grid's whole
@@ -6215,8 +6231,16 @@ moves the platform's whole baseline and must land BEFORE the
 virtualization slice so the before/after measures virtualization, not
 this bug.
 
-## BUG — a wedged main thread produces NO verdict: the step deadline is consulted only after a blocking hop returns (measured 2026-08-24, four platforms)
+## ~~BUG — a wedged main thread produces NO verdict: the step deadline is consulted only after a blocking hop returns (measured 2026-08-24, four platforms)~~
 KEY: POLL_DEADLINE, main.sync, on_ui_read recv no timeout, no verdict, harness loses legibly, wedged main thread
+
+FIXED 2026-08-24 in all three harnesses under one rule: a watchdog
+thread gives every step a 60s ceiling and guarantees exit within 3s of
+any published verdict (above Android's 20s ax extension, below
+validate-mac's 120s kill; KAYA_STEP_CEILING_MS drives the real path in
+tests). Every branch watched printing, every silence watched first.
+Held by the new tools/check-harness-ceiling.sh — gate 43 — since no
+shared scene can fail it.
 
 The harness's expect deadline is checked after an attempt returns, and
 an attempt hops to the platform main thread with no timeout (SwiftUI
@@ -6230,8 +6254,17 @@ Measured on macOS, Linux, Windows and iOS
 legibly here: a deadline on the HOP (or a watchdog thread that
 publishes the timeout verdict) in all three harness implementations.
 
-## BUG — the Swift binding's insert is quadratic (measured 2026-08-24)
+## ~~BUG — the Swift binding's insert is quadratic (measured 2026-08-24)~~
 KEY: modelSet linear scan, swift insert quadratic, bindings/swift KayaApp insert
+
+FIXED 2026-08-24 — and the ledger's cause was the smaller of TWO: the
+dominant one was KayaAppTx.tx being a get/set computed property
+copying the whole accumulated batch per mutating call. 32,000 inserts:
+15,135ms -> 18ms with both fixed, flat per-row. A keyed slots index
+with compiler-refused bypass (three watched negatives) plus a _modify
+accessor on the tx chokepoint (the underscored-accessor choice is on
+the record for the maintainer; nothing observable differs). Wire
+proven unmoved by batch sha against saved-copy builds.
 
 bindings/swift/KayaApp.swift's `modelSet` linear-scans every entry
 inserted so far on each insert, so N inserts cost N²/2 comparisons —
@@ -6240,8 +6273,19 @@ choke-ios-2026-08-24.txt). A dictionary keyed the way every other
 binding keys it. Small, isolated, and it pollutes any large-data
 measurement made through Swift guests until fixed.
 
-## PERF — mac's table model cost is dominated by the generation hash re-hashing the whole subtree per body evaluation (measured 2026-08-24)
+## ~~PERF — mac's table model cost is dominated by the generation hash re-hashing the whole subtree per body evaluation (measured 2026-08-24)~~
 KEY: kayaTableGeometryGeneration recursive hash, ObservationTracking churn, mac model-side choke, 42500 rows
+
+FIXED 2026-08-24: the walk became a stored tableGeometryEpoch — one
+read — and the 37% observation bookkeeping died with it (it was caused
+by the walk's property reads). Semantics widened, not narrowed:
+kayaUserWrite (invalidate, then write) funnels all twelve non-batch
+model writes, covering the sibling-only case for the first time. Three
+new static clauses + four watched negatives in check-table-tier; bench
+N=20000 2.5s -> 1.0s, the 45,000 choke passes at 5.3s, N=100000 is now
+bound by the guest's own submission. The residual — one
+attribute-graph node per row — is virtualization's job, recorded in
+the NOTE entry below.
 
 At 100k rows the mac main thread spends ~41% of its samples inside
 `kayaTableGeometryGeneration` — the geometry-generation hash (added
@@ -6259,3 +6303,30 @@ is 47× slower than a plain For with identical widget counts, and an
 unbounded natural-height For crashes X11 at 1,361 rows (window height
 crosses the 32,767px protocol ceiling) — both shape the virtualization
 design.
+
+
+## BUG — the Python binding's insert is quadratic (found 2026-08-24, by the WinUI bench)
+KEY: python insert quadratic, ambient binding insert scan, large data guests
+
+Measured while benching the reindex fix: 2,500 inserts cost 21ms,
+50,000 cost 5,162ms — the same class as the Swift entry fixed the same
+day (a per-insert scan or copy in the accumulation path), now the
+largest remaining term at 50k rows on the Windows bench. The
+transactions view is Python, so this sits directly on the
+virtualization slice's path; fix with the keyed shape the Swift fix
+used, wire proven unmoved the same way.
+
+## NOTE — virtualization design inputs from the fix slice (2026-08-24)
+KEY: AG Subgraph per-row attribute node, grid_children chokepoint, row window design inputs
+
+What the fix slice measured and deliberately left: mac's remaining
+table cost is one SwiftUI attribute-graph node per row (39% of the
+sample in AG::Subgraph::update under the outline coordinator) — no
+cheap reduction exists; that is what row-windowing removes on the
+native tier. WinUI's grid_children stays a bare HashMap (a chokepoint,
+not a compiler guarantee — absorbing it into ChildOrder would change
+destroyed-grid-cell behavior, an observable, so it waits for a
+ruling). X11's 32,767px window ceiling and the GTK 47x table-path
+factor are in the choke reports (docs/measurements/). These are the
+design entry's constraints, recorded so the proposal argues from
+measurements.

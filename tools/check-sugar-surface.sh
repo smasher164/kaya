@@ -2402,12 +2402,25 @@ if n != 1:
     print(f"SELFTEST-BROKEN: perturbation matched {n} times, expected 1")
     sys.exit(0)
 root = tempfile.mkdtemp()
-shutil.copytree('guests', f"{root}/guests")
-open(f"{root}/{p}", "w").write(src.replace(old, new))
-r = subprocess.run([sys.executable, 'tools/guest-floor.py', root],
-                   capture_output=True, text=True)
-shutil.rmtree(root)
-print(f"applied=1 rc={r.returncode} named={'editor.go' in r.stdout}")
+try:
+    # SOURCES ONLY: the matrix's sweep overlaps still-running lanes,
+    # and a bare copytree of guests/ dies mid-walk when a lane's build
+    # churns bin/obj inside it (measured 2026-08-24 — the probe printed
+    # an EMPTY finding once under the five-lane matrix). The prune set
+    # is the shadows'; the except keeps any residual failure legible.
+    shutil.copytree('guests', f"{root}/guests",
+                    ignore=shutil.ignore_patterns(
+                        'bin', 'obj', '.build', '_build', 'target',
+                        '__pycache__', '.gradle', 'build', 'dist',
+                        'dist-newstyle', 'node_modules', 'DerivedData'))
+    open(f"{root}/{p}", "w").write(src.replace(old, new))
+    r = subprocess.run([sys.executable, 'tools/guest-floor.py', root],
+                       capture_output=True, text=True)
+    print(f"applied=1 rc={r.returncode} named={'editor.go' in r.stdout}")
+except OSError as e:
+    print(f"SELFTEST-BROKEN: staging failed mid-copy: {e}")
+finally:
+    shutil.rmtree(root, ignore_errors=True)
 PROBE
 )
 case "$floor_probe" in

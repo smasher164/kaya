@@ -1468,16 +1468,17 @@ typedef struct KayaRecordButtonClicked {
 
 /**
  * The presentation-side functions handed to a guest-language backend.
- * next_commands blocks until a transaction resolves and fills the buffer
- * with apply-op records (KAYA_APPLY_*), returning the byte length, 0 on
- * shutdown. blob_data resolves a blob value's u64 handle to (pointer,
- * length): handles are batch-local and the pointer dies at the next
- * next_commands call, so fetch and decode within the batch; NULL for a
- * dead handle.
+ * next_commands blocks until a transaction resolves, then borrows out
+ * that batch's apply-op records (KAYA_APPLY_*): it writes a core-owned
+ * pointer and returns the byte length, 0 (pointer NULLed) on shutdown.
+ * blob_data resolves a blob value's u64 handle to (pointer, length),
+ * NULL for a dead handle. BOTH BORROWS DIE AT THE NEXT next_commands
+ * call — the batch's bytes and its blob table together — so fetch and
+ * decode within the batch. THERE IS NO SIZE CAP on either.
  */
 typedef struct KayaHostApi {
   void (*emit_clicked)(const uint8_t*, uintptr_t);
-  uintptr_t (*next_commands)(uint8_t*, uintptr_t);
+  uintptr_t (*next_commands)(const uint8_t**);
   /**
    * An entry edit: the tag and the new text, plus the three facts only
    * the backend holds — the window whose undo ledger this run of typing
@@ -2115,11 +2116,29 @@ void kaya_note_native_undo(uint64_t window,
 
 /**
  * Presentation side: block until the next transaction, resolve it
- * through the scene, and write the apply-op records into `buf`.
- * Returns the byte length written, or 0 when the core has shut down.
- * Call from a single pump thread with a buffer of at least 64 KiB;
- * an overflowing batch fails loudly.
+ * through the scene, and hand back that batch's apply-op records.
+ * Writes the borrowed pointer to `batch` and returns the byte length,
+ * or 0 when the core has shut down. Call from a single pump thread.
+ *
+ * THE CORE OWNS THE BYTES, and there is no size cap — kaya_next_occurrence's
+ * ruling, reached the same way one direction over: a caller-sized buffer
+ * makes the batch a wall, and 161 four-column rows in one transaction
+ * aborted the interpreter platforms from inside this `extern "C"` frame
+ * (docs/traps.md, "A caller-sized occurrence buffer"; docs/measurements/
+ * choke-{macos,ios,android}-2026-08-24.txt). Splitting is not the
+ * alternative: a batch is one recomposition, so only the producer can
+ * size it.
+ *
+ * The bytes — and this batch's blob table — stay valid until this
+ * thread's NEXT call here. Copy out what you keep, exactly as
+ * `kaya_blob_data` asks.
+ *
+ * SHUTDOWN NULLS THE POINTER rather than leaving it as it was, so a
+ * caller that forgets the case cannot re-apply the previous batch.
+ *
+ * # Safety
+ * `batch` must be a valid place to write a pointer.
  */
-uintptr_t kaya_next_commands(uint8_t *buf, uintptr_t cap);
+uintptr_t kaya_next_commands(const uint8_t **batch);
 
 #endif  /* KAYA_H */

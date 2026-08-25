@@ -162,6 +162,17 @@ fi
 # core's miss sentence naming the bundle it looked in.
 #
 # THE WHOLE ROOT, not the files a scene happens to want (A5.1).
+#
+# AND ONE FILE UNDER IT IS DERIVED, never committed
+# (guests/assets/market/README.md): a bundle assembled from a fresh
+# clone would simply not carry it, and the guest would get the core's
+# miss sentence with nothing to explain it.
+if ! python3 "$ROOT/tools/gen-market.py" --ensure; then
+    echo "run-sim: python3 tools/gen-market.py --ensure failed — the market" >&2
+    echo "  family's transactions.csv is derived, so every bundle this lane" >&2
+    echo "  assembles would carry an incomplete asset root" >&2
+    exit 1
+fi
 ASSET_SRC="$ROOT/guests/assets"
 if [ ! -d "$ASSET_SRC" ]; then
     echo "run-sim: the asset root $ASSET_SRC is missing — every bundle this" >&2

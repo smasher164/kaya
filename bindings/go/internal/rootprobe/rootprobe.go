@@ -39,12 +39,14 @@ func Pump() int { return len(PumpBatch()) }
 // which the NEXT pump replaces — so read what you need before pumping
 // again (the pump contract, kaya.h).
 func PumpBatch() []byte {
-	// The pump's documented budget: at least 64 KiB, and an overflowing
-	// batch fails loudly rather than truncating.
-	buf := make([]byte, 64*1024)
-	n := int(C.kaya_next_commands(
-		(*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uintptr_t(len(buf))))
-	return buf[:n:n]
+	// The core sizes and owns the batch; the borrow dies at the next
+	// pump, so copy now (the pump contract, kaya.h).
+	var batch *C.uint8_t
+	n := C.kaya_next_commands(&batch)
+	if n == 0 || batch == nil {
+		return nil
+	}
+	return C.GoBytes(unsafe.Pointer(batch), C.int(n))
 }
 
 // BlobData fetches the bytes an apply record's blob value named, copied

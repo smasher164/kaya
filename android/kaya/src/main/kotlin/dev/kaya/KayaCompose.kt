@@ -1300,11 +1300,9 @@ object KayaCompose {
 
     private fun startPump(activity: ComponentActivity) {
         thread(name = "kaya-compose-pump") {
-            val buffer = ByteArray(64 * 1024)
             while (true) {
-                val length = KayaPresent.nextCommands(buffer)
-                if (length == 0) break
-                val batch = buffer.copyOf(length)
+                // THE CORE SIZES THE BATCH (KayaPresent.nextCommands).
+                val batch = KayaPresent.nextCommands() ?: break
                 // Blob handles are batch-local: the next nextCommands
                 // call replaces the core's table, and the UI-thread
                 // apply may run after that. Fetch every referenced blob
@@ -4944,12 +4942,118 @@ object KayaCompose {
     private const val RETRY_PERIOD_MS = 20L
     private const val RETRY_PERIOD_NS = RETRY_PERIOD_MS * 1_000_000
 
+    /**
+     * THE CEILING ON ONE STEP, HOP INCLUDED — harness.rs's
+     * STEP_CEILING, the same number in all three harnesses
+     * (tools/check-harness-ceiling.sh). The retry deadline above is read only
+     * AFTER a step returns and every step blocks in `onUi`'s
+     * `done.await()`, so a saturated UI thread answers nothing and the
+     * leg prints no verdict at all until the runner kills it. Measured
+     * on four platforms 2026-08-24
+     * (docs/measurements/choke-*-2026-08-24.txt).
+     */
+    private const val STEP_CEILING_MS = 60_000L
+
+    /**
+     * Once a verdict is published the process leaves within this
+     * whether or not the UI thread ever runs the halt below
+     * (harness.rs's EXIT_GRACE).
+     */
+    private const val EXIT_GRACE_MS = 3_000L
+
+    private fun stepCeilingMs(): Long =
+        System.getenv("KAYA_STEP_CEILING_MS")?.toLongOrNull()?.takeIf { it > 0 } ?: STEP_CEILING_MS
+
+    /**
+     * The sentence a wedged step ends its run with — harness.rs's
+     * `wedge_verdict` and KayaSwiftUI.swift's `kayaWedgeVerdict` are the
+     * same text. It prints only what it measured (which step, how long
+     * ago, that nothing came back) and says out loud what it cannot
+     * tell apart. The steps that already failed are not repeated here:
+     * each was printed the moment it became final, which is what leaves
+     * them in the log when a run ends before its verdict.
+     */
+    private fun wedgeVerdict(step: String, waitedMs: Long): String =
+        "KAYA_SELFTEST: FAILED (no verdict — the harness entered step $step " +
+            String.format(java.util.Locale.ROOT, "%.1f", waitedMs / 1000.0) +
+            "s ago and has not come back from it. A step blocks in its hop to the " +
+            "platform's UI thread, so nothing answered from there; a wedged UI thread " +
+            "and a merely slow one look the same from here and this does not claim to " +
+            "tell them apart. Ended by the harness step ceiling, which is the cover a " +
+            "step's own retry deadline cannot give: that one is read only after a step " +
+            "returns.)"
+
+    /**
+     * The thread that makes those two ceilings real. NOT the harness
+     * thread: the whole failure class is the harness thread stuck
+     * inside a call that never returns, so the only thread that can
+     * report it is one that never enters a step.
+     *
+     * `halt`, never `exit`: shutdown hooks run on a thread pool this
+     * process can no longer schedule reliably, and the Activity's own
+     * teardown wants the UI thread that is not answering.
+     */
+    private class StepWatchdog(private val ceilingMs: Long) {
+        private val lock = Object()
+        private var step: String? = null
+        private var leaving: Int? = null
+        private var since = System.nanoTime()
+
+        fun start() {
+            thread(name = "kaya-step-ceiling", isDaemon = true) {
+                while (true) {
+                    Thread.sleep(RETRY_PERIOD_MS)
+                    val step: String?
+                    val leaving: Int?
+                    val waitedMs: Long
+                    synchronized(lock) {
+                        step = this.step
+                        leaving = this.leaving
+                        waitedMs = (System.nanoTime() - since) / 1_000_000
+                    }
+                    if (leaving != null && waitedMs >= EXIT_GRACE_MS) {
+                        // NOT a second verdict: the leg's own is already
+                        // out, and replacing it would lose the answer
+                        // the run reached.
+                        Log.e(
+                            "kaya",
+                            "KAYA_HARNESS: the verdict is published and the platform's exit " +
+                                "path has not run ${EXIT_GRACE_MS / 1000}s later — leaving " +
+                                "under the verdict's own code (the harness exit grace)",
+                        )
+                        Runtime.getRuntime().halt(leaving)
+                    }
+                    if (step != null && waitedMs >= ceilingMs) {
+                        Log.e("kaya", wedgeVerdict(step, waitedMs))
+                        Runtime.getRuntime().halt(1)
+                    }
+                }
+            }
+        }
+
+        fun enter(step: String) = synchronized(lock) {
+            this.step = step
+            leaving = null
+            since = System.nanoTime()
+        }
+
+        fun published(code: Int) = synchronized(lock) {
+            step = null
+            leaving = code
+            since = System.nanoTime()
+        }
+    }
+
     private fun runScript(activity: ComponentActivity, script: String) {
         // Watched, before any step (crates/kaya/src/fault.rs; the fault
         // census holds all three runners to this call).
         KayaPresent.faultWatch()
         val observed = ArrayList<String>()
         val failures = ArrayList<String>()
+        // THE CEILING THAT COVERS THE HOP: armed at every step below and
+        // again over the exit, so this run cannot end in silence.
+        val watchdog = StepWatchdog(stepCeilingMs())
+        watchdog.start()
         val start = System.nanoTime()
         Log.i("kaya", "KAYA_HARNESS: epoch ${System.currentTimeMillis()}")
         // Whether the run already carried the core's fault into
@@ -4967,6 +5071,7 @@ object KayaCompose {
                 val parts = line.split(' ').filter { it.isNotEmpty() }
                 val offset = (System.nanoTime() - start) / 1_000_000
                 Log.i("kaya", "KAYA_HARNESS: +${offset}ms $line")
+                watchdog.enter(line)
                 // The observation contract (harness.rs is the norm):
                 // every expect is a BOUNDED RETRY — each verb case
                 // appends exactly one failure on a miss, so the
@@ -6895,6 +7000,10 @@ object KayaCompose {
             Log.e("kaya", "KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
             1
         }
+        // The halt below hops to the UI thread, which is the thread that
+        // may be answering nothing; the grace leaves under the verdict
+        // either way.
+        watchdog.published(code)
         activity.runOnUiThread {
             activity.finishAndRemoveTask()
             Runtime.getRuntime().halt(code)

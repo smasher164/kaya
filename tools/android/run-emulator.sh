@@ -523,6 +523,18 @@ cliphelper_prepare() { # serial
 # read here — the HOST side of it, for apk_icon_verify, which holds the
 # bytes gradle packaged against the bytes guests/assets/identity.toml
 # declares (docs/app-identity-plan.md ruling 4).
+#
+# AND ONE FILE UNDER THE ROOT IS DERIVED, never committed
+# (guests/assets/market/README.md). HERE rather than in
+# android/build.gradle.kts's copy: this is ahead of BOTH readers — the
+# adb push below and the three assembleDebug runs whose configuration
+# copies the root into the APK — and gradle's copy has no python.
+if ! python3 "$ROOT/tools/gen-market.py" --ensure; then
+    echo "run-emulator: python3 tools/gen-market.py --ensure failed — the market" >&2
+    echo "  family's transactions.csv is derived, so both the pushed root and" >&2
+    echo "  every APK this lane assembles would be missing it" >&2
+    exit 1
+fi
 ASSET_SRC="$ROOT/guests/assets"
 ASSET_ON_DEVICE=/data/local/tmp/kaya-assets
 # The subdirectory of the APK's own `assets/` that IS kaya's asset root.

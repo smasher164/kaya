@@ -105,16 +105,17 @@ impl crate::protocol::PickedSource for UrlSource {
 }
 
 /// The presentation-side functions handed to a guest-language backend.
-/// next_commands blocks until a transaction resolves and fills the buffer
-/// with apply-op records (KAYA_APPLY_*), returning the byte length, 0 on
-/// shutdown. blob_data resolves a blob value's u64 handle to (pointer,
-/// length): handles are batch-local and the pointer dies at the next
-/// next_commands call, so fetch and decode within the batch; NULL for a
-/// dead handle.
+/// next_commands blocks until a transaction resolves, then borrows out
+/// that batch's apply-op records (KAYA_APPLY_*): it writes a core-owned
+/// pointer and returns the byte length, 0 (pointer NULLed) on shutdown.
+/// blob_data resolves a blob value's u64 handle to (pointer, length),
+/// NULL for a dead handle. BOTH BORROWS DIE AT THE NEXT next_commands
+/// call — the batch's bytes and its blob table together — so fetch and
+/// decode within the batch. THERE IS NO SIZE CAP on either.
 #[repr(C)]
 pub struct KayaHostApi {
     pub emit_clicked: unsafe extern "C" fn(*const u8, usize),
-    pub next_commands: unsafe extern "C" fn(*mut u8, usize) -> usize,
+    pub next_commands: unsafe extern "C" fn(*mut *const u8) -> usize,
     /// An entry edit: the tag and the new text, plus the three facts only
     /// the backend holds — the window whose undo ledger this run of typing
     /// belongs to, whether the field is focused, and whether the edit is

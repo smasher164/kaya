@@ -2873,16 +2873,44 @@ pub unsafe extern "C" fn kaya_note_native_undo(
     });
 }
 
+thread_local! {
+    /// Where the batch handed out by the last `kaya_next_commands`
+    /// lives. THREAD-LOCAL for HELD_OCCURRENCE's reason: the borrow's
+    /// lifetime is stated per caller, and a second thread calling would
+    /// otherwise free bytes the pump is still decoding.
+    static HELD_BATCH: std::cell::RefCell<Vec<u8>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Presentation side: block until the next transaction, resolve it
-/// through the scene, and write the apply-op records into `buf`.
-/// Returns the byte length written, or 0 when the core has shut down.
-/// Call from a single pump thread with a buffer of at least 64 KiB;
-/// an overflowing batch fails loudly.
+/// through the scene, and hand back that batch's apply-op records.
+/// Writes the borrowed pointer to `batch` and returns the byte length,
+/// or 0 when the core has shut down. Call from a single pump thread.
+///
+/// THE CORE OWNS THE BYTES, and there is no size cap — kaya_next_occurrence's
+/// ruling, reached the same way one direction over: a caller-sized buffer
+/// makes the batch a wall, and 161 four-column rows in one transaction
+/// aborted the interpreter platforms from inside this `extern "C"` frame
+/// (docs/traps.md, "A caller-sized occurrence buffer"; docs/measurements/
+/// choke-{macos,ios,android}-2026-08-24.txt). Splitting is not the
+/// alternative: a batch is one recomposition, so only the producer can
+/// size it.
+///
+/// The bytes — and this batch's blob table — stay valid until this
+/// thread's NEXT call here. Copy out what you keep, exactly as
+/// `kaya_blob_data` asks.
+///
+/// SHUTDOWN NULLS THE POINTER rather than leaving it as it was, so a
+/// caller that forgets the case cannot re-apply the previous batch.
+///
+/// # Safety
+/// `batch` must be a valid place to write a pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
-    if buf.is_null() {
+pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
+    if batch.is_null() {
         return 0;
     }
+    unsafe { *batch = std::ptr::null() };
     let mut rx_slot = PRESENTATION_TX_RX.lock().unwrap();
     if rx_slot.is_none() {
         let Some((_occ, tx_rx)) = state().core_ends.lock().unwrap().take() else {
@@ -2928,23 +2956,25 @@ pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
         writer.apply_op(op);
     }
     // Publish the batch's blob table (replacing the previous batch's):
-    // records in `buf` reference these bytes by 1-based index through
+    // the records reference these bytes by 1-based index through
     // kaya_blob_data, valid until the next call here. Blob payloads never
-    // enter `buf`.
+    // enter the record stream.
     blobs().lock().unwrap().out = std::mem::take(&mut writer.blobs);
-    let bytes = writer.into_bytes();
-    assert!(
-        bytes.len() <= cap,
-        "kaya: apply batch of {} bytes exceeds the pump buffer of {cap}",
-        bytes.len()
-    );
-    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, bytes.len()) };
-    bytes.len()
+    HELD_BATCH.with(|held| {
+        let mut held = held.borrow_mut();
+        *held = writer.into_bytes();
+        unsafe { *batch = held.as_ptr() };
+        held.len()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `blobs().out` is process-global AND the pump replaces it with
+    /// every batch, so the two tests that read it take this first.
+    static OUT_TABLE: Mutex<()> = Mutex::new(());
 
     /// The blob tables' lifecycle, in one serial test (the tables are
     /// process-global): registration fills pending; the submit boundary
@@ -2952,6 +2982,7 @@ mod tests {
     /// batch by 1-based index and a dead handle reads NULL.
     #[test]
     fn blob_tables_register_drain_and_serve() {
+        let _serial = OUT_TABLE.lock().unwrap_or_else(|e| e.into_inner());
         let bytes = [1u8, 2, 3, 4];
         let handle = unsafe { kaya_blob_register(bytes.as_ptr(), bytes.len()) };
         assert!(handle > 0);
@@ -3017,6 +3048,78 @@ mod tests {
             "the record was truncated: {size} bytes for {} of text",
             text.len()
         );
+    }
+
+    /// AND NEITHER DOES THE PUMP, the same call one direction over. It
+    /// used to copy into a caller-sized buffer both interpreters sized
+    /// 64 KiB, so ONE BUILD TRANSACTION of 161 four-column table rows
+    /// aborted the process on macOS, iOS and Android before the harness
+    /// script started (docs/deferred.md; docs/measurements/choke-*.txt).
+    ///
+    /// 400 labels is ~10x that buffer. A batch is one recomposition and
+    /// may not be split, so the only fix is the core owning the bytes.
+    #[test]
+    fn the_pump_hands_out_a_batch_of_any_size() {
+        let _serial = OUT_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let rows = 400usize;
+        let last = format!("row {} {}", rows - 1, "y".repeat(200));
+        let mut tx = vec![crate::protocol::TxOp::CreateWidget {
+            id: crate::protocol::WidgetId(1),
+            kind: crate::protocol::WidgetKind::Column,
+        }];
+        for i in 0..rows {
+            let id = crate::protocol::WidgetId(2 + i as u64);
+            tx.push(crate::protocol::TxOp::CreateWidget {
+                id,
+                kind: crate::protocol::WidgetKind::Label,
+            });
+            tx.push(crate::protocol::TxOp::SetProperty {
+                widget: id,
+                prop: crate::protocol::Prop::Text,
+                value: crate::protocol::PropValue::Const(crate::protocol::Value::Str(
+                    format!("row {i} {}", "y".repeat(200)),
+                )),
+            });
+            tx.push(crate::protocol::TxOp::AddChild {
+                parent: crate::protocol::WidgetId(1),
+                child: id,
+            });
+        }
+        tx.push(crate::protocol::TxOp::Mount {
+            window: crate::protocol::DEFAULT_WINDOW,
+            root: crate::protocol::WidgetId(1),
+        });
+        state().tx_tx.send(tx).unwrap();
+
+        let mut batch: *const u8 = std::ptr::null();
+        let n = unsafe { kaya_next_commands(&mut batch) };
+        assert!(!batch.is_null());
+        assert!(
+            n > 64 * 1024,
+            "the probe is too small to reach the old wall: {n} bytes"
+        );
+        let bytes = unsafe { std::slice::from_raw_parts(batch, n) };
+
+        // The records walk to EXACTLY n and the walk ends on the Mount:
+        // a truncated batch either runs off the end or stops short of it.
+        let mut at = 0usize;
+        let mut kind = 0u16;
+        while at < n {
+            let size = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+            kind = u16::from_le_bytes(bytes[at + 4..at + 6].try_into().unwrap());
+            assert!(
+                size >= wire::HEADER_SIZE && size % 8 == 0 && at + size <= n,
+                "record of {size} bytes at {at} of {n}"
+            );
+            at += size;
+        }
+        assert_eq!(at, n);
+        assert_eq!(kind, wire::APPLY_MOUNT);
+        assert!(
+            bytes.windows(last.len()).any(|w| w == last.as_bytes()),
+            "the last row's text never arrived in {n} bytes"
+        );
+        blobs().lock().unwrap().out.clear();
     }
 
     /// The KAYA_-prefixed constants are the C ABI's copy of the spec's

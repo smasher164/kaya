@@ -279,13 +279,22 @@ the same patterns return through interpreter drop-downs
   consistent, so the following retryable expect could pass once without
   ever yielding for their reporters. Hashing the table subtree did not
   help a resize or a sibling-only transaction, and an unversioned track
-  could still agree with the wrong viewport. Every applied batch and
-  native content-size change now advances an observable table geometry
-  epoch before acting; viewport, cells and track carry that generation,
-  and the track reporter's task is keyed by it so even a same-size resize
-  republishes. The real-NSWindow probe watches the old triple become
-  unusable synchronously, then waits for one fresh matching triple at a
-  changed size and again at the same size.
+  could still agree with the wrong viewport. Every applied batch, native
+  content-size change and user-route model write (`kayaUserWrite` — the
+  checkbox flip, the keystroke, the harness verbs that stand in for them)
+  now advances an observable table geometry epoch before acting; viewport,
+  cells and track carry that generation, and the track reporter's task is
+  keyed by it so even a same-size resize republishes. The real-NSWindow
+  probe watches the old triple become unusable synchronously, then waits
+  for one fresh matching triple at a changed size and again at the same
+  size. The hash was then MEASURED, and it was the mac table's largest
+  single cost: 41% of the main thread at 100k rows, ~500k nodes re-hashed
+  per body evaluation, plus the 37% of per-child observation bookkeeping
+  it caused by reading every property of every node inside the table
+  body's tracking scope (docs/measurements/choke-macos-2026-08-24.txt
+  note 2). The generation is the stored epoch alone now, and both shares
+  went to ~0 — a derived generation was paying for discrimination the
+  epoch already had.
 - **Stretch does not jump over a same-axis collection wrapper.** The
   mac portfolio's detail column already filled its track, but its new
   nested accounts For still defaulted to start and handed each native

@@ -102,6 +102,8 @@ GATES = {
     "check-diagnostics": ["crates", "swift", "android", "bindings",
                           "guests", "cmd"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
+    # tools/checks/ too: its clause B compiles the probe that lives there.
+    "check-harness-ceiling": ["crates", "swift", "android", "tools/checks"],
     "check-file-modes": ["crates", "bindings", "swift", "android"],
     "check-go-env": ["bindings", "guests"],
     "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],

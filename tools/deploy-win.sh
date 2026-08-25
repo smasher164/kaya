@@ -525,6 +525,17 @@ run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul'
 # as the guests are concerned. KAYA_ASSET_DIR is set absolutely all the
 # same, machine-wide, because the C# leg's cwd is C:\kaya\cs where a
 # relative default would miss.
+#
+# AND ONE FILE UNDER IT IS DERIVED, never committed
+# (guests/assets/market/README.md), so a fresh clone would ship a root
+# without it and the hash check below would agree, both sides missing
+# the same file.
+if ! python3 "$ROOT/tools/gen-market.py" --ensure; then
+    echo "deploy-win: python3 tools/gen-market.py --ensure failed — the market" >&2
+    echo "  family's transactions.csv is derived, so the root about to be shipped" >&2
+    echo "  is incomplete and the VM would get it that way" >&2
+    exit 1
+fi
 run_ssh 'cmd /c "if exist C:\kaya\guests\assets rmdir /s /q C:\kaya\guests\assets"'
 run_ssh 'cmd /c if not exist C:\kaya\guests mkdir C:\kaya\guests'
 scp -q -r "$ROOT/guests/assets" "$HOST:C:/kaya/guests/"

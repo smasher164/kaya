@@ -2971,8 +2971,11 @@ enum KayaHost {
         }
     }
 
-    static func nextCommands(_ buffer: UnsafeMutablePointer<UInt8>, _ cap: Int) -> Int {
-        Int(api.next_commands(buffer, UInt(cap)))
+    /// Blocks until the next transaction resolves, then borrows out that
+    /// batch's records: the core owns the bytes and they die at the next
+    /// call. 0 (pointer NULLed) is shutdown.
+    static func nextCommands(_ batch: UnsafeMutablePointer<UnsafePointer<UInt8>?>) -> Int {
+        Int(api.next_commands(batch))
     }
 
     /// Fetch a blob's bytes by the handle an apply record carried, copied out
@@ -2987,13 +2990,15 @@ enum KayaHost {
 
 func kayaStartCommandPump() {
     let thread = Thread {
-        let cap = 64 * 1024
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: cap)
-        defer { buffer.deallocate() }
         while true {
-            let length = KayaHost.nextCommands(buffer, cap)
-            if length == 0 { break }
-            let batch = Data(bytes: buffer, count: length)
+            // THE CORE SIZES THE BATCH and owns its bytes until the next
+            // call here, so this copies before doing anything else. A pump
+            // that sized its own buffer aborted the process at 161 rows in
+            // one transaction (docs/deferred.md, the 64 KiB pump wall).
+            var bytes: UnsafePointer<UInt8>?
+            let length = KayaHost.nextCommands(&bytes)
+            guard length > 0, let bytes else { break }
+            let batch = Data(bytes: bytes, count: length)
             // Blob handles are batch-local: the next nextCommands call
             // replaces the core's table, and the main-queue apply may run
             // after that. Fetch every referenced blob here, on the pump
@@ -5201,6 +5206,118 @@ private func kayaSplitStatements(_ line: String) -> [String] {
     return out.filter { !$0.isEmpty }
 }
 
+/// THE CEILING ON ONE STEP, HOP INCLUDED — harness.rs's STEP_CEILING,
+/// the same number in all three harnesses
+/// (tools/check-harness-ceiling.sh). The
+/// retry deadline below is read only AFTER a step returns, and every
+/// step here is a `DispatchQueue.main.sync`: a saturated main thread
+/// answers none of them, so the leg prints NOTHING — no verdict, no
+/// timeout sentence — until validate-mac's `timeout 120` kills it,
+/// which takes the log with it. Measured 2026-08-24 on macOS (the
+/// ASIDE in docs/measurements/choke-macos-2026-08-24.txt: plain-For
+/// legs at 10000 and 20000 rows printed no verdict at all) and on iOS
+/// (choke-ios's FAILURE MODES).
+let kayaStepCeiling: TimeInterval = 60.0
+/// Once a verdict is published the process leaves within this whether
+/// or not `exit()` itself can finish (harness.rs's EXIT_GRACE).
+let kayaExitGrace: TimeInterval = 3.0
+
+func kayaStepCeilingSetting() -> TimeInterval {
+    if let ms = ProcessInfo.processInfo.environment["KAYA_STEP_CEILING_MS"],
+        let n = Double(ms), n > 0
+    {
+        return n / 1000
+    }
+    return kayaStepCeiling
+}
+
+/// The sentence a wedged step ends its run with — harness.rs's
+/// `wedge_verdict` and KayaCompose.kt's `kayaWedgeVerdict` are the same
+/// text. It prints only what it measured (which step, how long ago,
+/// that nothing came back) and says out loud what it cannot tell apart.
+/// The steps that already failed are not repeated here: each was
+/// printed the moment it became final, which is what leaves them in the
+/// log when a run ends before its verdict.
+func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
+    "KAYA_SELFTEST: FAILED (no verdict — the harness entered step \(step) "
+        + String(format: "%.1f", waited)
+        + "s ago and has not come back from it. A step blocks in its hop to the "
+        + "platform's UI thread, so nothing answered from there; a wedged UI thread "
+        + "and a merely slow one look the same from here and this does not claim to "
+        + "tell them apart. Ended by the harness step ceiling, which is the cover a "
+        + "step's own retry deadline cannot give: that one is read only after a step "
+        + "returns.)"
+}
+
+/// The thread that makes those two ceilings real. NOT the harness
+/// thread: the whole failure class is the harness thread stuck inside a
+/// call that never returns, so the only thread that can report it is one
+/// that never enters a step.
+///
+/// `_exit`, never `exit`: `exit()` runs atexit handlers and stdio
+/// teardown, and the state this fires in is one where the main thread is
+/// answering nothing. stdout is line-buffered from `kayaRunScript`, so
+/// the trace is already out and there is nothing left to flush.
+final class KayaStepWatchdog {
+    private let lock = NSLock()
+    private let ceiling: TimeInterval
+    private var step: String?
+    private var leaving: Int32?
+    private var since = Date()
+
+    init(ceiling: TimeInterval) {
+        self.ceiling = ceiling
+    }
+
+    func start() {
+        let thread = Thread { [self] in
+            while true {
+                Thread.sleep(forTimeInterval: 0.02)
+                lock.lock()
+                let step = self.step
+                let leaving = self.leaving
+                let waited = Date().timeIntervalSince(since)
+                lock.unlock()
+                if let leaving, waited >= kayaExitGrace {
+                    // NOT a second verdict: the leg's own is already
+                    // out, and replacing it would lose the answer the
+                    // run reached.
+                    FileHandle.standardError.write(
+                        Data(
+                            ("KAYA_HARNESS: the verdict is published and the platform's exit "
+                                + "path has not run \(Int(kayaExitGrace))s later — leaving "
+                                + "under the verdict's own code (the harness exit grace)\n")
+                                .utf8))
+                    _exit(leaving)
+                }
+                if let step, waited >= ceiling {
+                    FileHandle.standardError.write(
+                        Data((kayaWedgeVerdict(step, waited) + "\n").utf8))
+                    _exit(1)
+                }
+            }
+        }
+        thread.name = "kaya-step-ceiling"
+        thread.start()
+    }
+
+    func enter(_ step: String) {
+        lock.lock()
+        self.step = step
+        leaving = nil
+        since = Date()
+        lock.unlock()
+    }
+
+    func published(_ code: Int32) {
+        lock.lock()
+        step = nil
+        leaving = code
+        since = Date()
+        lock.unlock()
+    }
+}
+
 private func kayaRunScript(_ script: String) {
     // Watched, before any step: a fault now reddens this leg instead of
     // ending the process (crates/kaya/src/fault.rs; the fault census
@@ -5223,6 +5340,10 @@ private func kayaRunScript(_ script: String) {
     // before this line existed: two accessibility legs died at 120s with no
     // trace at all. Line buffering makes a killed leg say where it stopped.
     setvbuf(stdout, nil, _IOLBF, 0)
+    // THE CEILING THAT COVERS THE HOP: armed at every step below and
+    // again over the exit, so this run cannot end in silence.
+    let watchdog = KayaStepWatchdog(ceiling: kayaStepCeilingSetting())
+    watchdog.start()
     let start = Date()
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
     // Whether the run already carried the core's fault into `failures`,
@@ -5240,6 +5361,7 @@ private func kayaRunScript(_ script: String) {
             let parts = line.split(separator: " ", omittingEmptySubsequences: true)
             let offset = Int(Date().timeIntervalSince(start) * 1000)
             print("KAYA_HARNESS: +\(offset)ms \(line)")
+            watchdog.enter(line)
             // The observation contract (harness.rs is the norm): every expect is
             // a BOUNDED RETRY — each verb case appends exactly one failure on a
             // miss, so the wrapper retracts it and re-runs until it passes or
@@ -5288,7 +5410,7 @@ private func kayaRunScript(_ script: String) {
                     guard let node = kayaTarget(parts[1], "checkbox", kayaScene.checkboxes) else {
                         return false
                     }
-                    node.checked = parts[2] == "on"
+                    kayaUserWrite { node.checked = parts[2] == "on" }
                     KayaHost.emitToggled(node.tag, node.checked)
                     return true
                 }
@@ -5298,7 +5420,7 @@ private func kayaRunScript(_ script: String) {
                     guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else {
                         return false
                     }
-                    node.value = Double(parts[2])!
+                    kayaUserWrite { node.value = Double(parts[2])! }
                     KayaHost.emitValue(node.tag, node.value)
                     return true
                 }
@@ -5316,7 +5438,7 @@ private func kayaRunScript(_ script: String) {
                     guard let node else {
                         return false
                     }
-                    node.value = Double(parts[2])!
+                    kayaUserWrite { node.value = Double(parts[2])! }
                     KayaHost.emitValue(node.tag, node.value)
                     return true
                 }
@@ -5330,7 +5452,7 @@ private func kayaRunScript(_ script: String) {
                     guard let node else {
                         return false
                     }
-                    node.text = kayaLF(kayaQuoted(Array(parts[2...])))
+                    kayaUserWrite { node.text = kayaLF(kayaQuoted(Array(parts[2...]))) }
                     KayaHost.emitText(node, node.text)
                     return true
                 }
@@ -7407,6 +7529,9 @@ private func kayaRunScript(_ script: String) {
     // different vocabulary (a UITextView's keyboard traits, an NSTextView's
     // checking and find flags) but hold the SAME rule, so they fill the same
     // set and answer through the same sentence.
+    // THE VERDICT'S OWN READS HOP TOO, so they stay under the ceiling —
+    // the angle brackets mark a wait that is not a script step.
+    watchdog.enter("<the verdict's plain-text pin read>")
     let pinBreaches = DispatchQueue.main.sync { kayaPlainTextPinBreaches.sorted() }
     if !pinBreaches.isEmpty {
         failures.append(
@@ -7432,10 +7557,14 @@ private func kayaRunScript(_ script: String) {
     }
     if failures.isEmpty {
         print("KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))")
+        // `exit` runs atexit handlers and stdio teardown, which a
+        // wedged main thread can hold; the grace leaves anyway.
+        watchdog.published(0)
         exit(0)
     }
     // docs/traps.md, "A scene that never mounts measures an invisible app".
     var reported = failures
+    watchdog.enter("<the verdict's unmounted-scene read>")
     let unmountedNodeCount = DispatchQueue.main.sync { () -> Int? in
         guard !kayaScene.nodes.isEmpty,
             kayaScene.windows.values.allSatisfy({ !kayaWindowHasMountedContent($0) })
@@ -7451,6 +7580,7 @@ private func kayaRunScript(_ script: String) {
     }
     FileHandle.standardError.write(
         "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))\n".data(using: .utf8)!)
+    watchdog.published(1)
     exit(1)
 }
 
@@ -7698,33 +7828,24 @@ func kayaInvalidateTableGeometry() {
     }
 }
 
+/// The USER ROUTE's model mirror — the checkbox flip, the slider drag, the
+/// keystroke, the platform undo, and the harness verbs that stand in for
+/// them. A write nobody batched stales the table observations the way a
+/// batch does, scene-wide because a sibling can move a table it is not
+/// inside of. tools/check-table-tier.sh holds every model write here.
+func kayaUserWrite(_ write: () -> Void) {
+    kayaInvalidateTableGeometry()
+    write()
+}
+
+/// The staleness token every table observation carries: a STORED epoch,
+/// advanced by kayaApply, kayaSetWindowContentSize and kayaUserWrite.
+/// NEVER derived from the model — that cost 41% of the mac main thread at
+/// 100k rows and bought nothing the epoch did not already have
+/// (docs/traps.md, "A main-queue resize is not a completed SwiftUI layout
+/// turn"). tools/check-table-tier.sh refuses a walk here.
 func kayaTableGeometryGeneration(_ table: KayaNode) -> Int {
-    var hasher = Hasher()
-    func visit(_ node: KayaNode) {
-        hasher.combine(node.id)
-        hasher.combine(node.kind)
-        hasher.combine(node.text)
-        hasher.combine(node.role)
-        hasher.combine(node.inset)
-        hasher.combine(node.checked)
-        hasher.combine(node.value)
-        hasher.combine(node.minValue)
-        hasher.combine(node.maxValue)
-        hasher.combine(node.imageSize)
-        hasher.combine(node.indeterminate)
-        hasher.combine(node.columns)
-        hasher.combine(node.grow)
-        hasher.combine(node.spacing)
-        hasher.combine(node.align)
-        hasher.combine(node.tableSorted)
-        hasher.combine(node.tableDirection)
-        hasher.combine(node.tableGeometryEpoch)
-        for title in node.tableColumns { hasher.combine(title) }
-        hasher.combine(node.children.count)
-        for child in node.children { visit(child) }
-    }
-    visit(table)
-    return hasher.finalize()
+    table.tableGeometryEpoch
 }
 
 func kayaCurrentTableTrackWidth(_ table: KayaNode) -> Double? {
@@ -8081,6 +8202,13 @@ private struct KayaNativeTable: View {
     }
 }
 
+/// The reporters' task id — a struct, not an interpolated string: this is
+/// one format per cell per layout pass, for a comparison CGRect answers.
+private struct KayaGeometryStamp: Equatable {
+    let generation: Int
+    let frame: CGRect
+}
+
 /// docs/traps.md, "A table viewport contains rows".
 private struct KayaEdgeReporter: View {
     let node: KayaNode
@@ -8089,8 +8217,7 @@ private struct KayaEdgeReporter: View {
     var body: some View {
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
-            let signature = "\(generation)/\(frame.minX)/\(frame.minY)/\(frame.maxX)/\(frame.maxY)"
-            Color.clear.task(id: signature) {
+            Color.clear.task(id: KayaGeometryStamp(generation: generation, frame: frame)) {
                 node.tableCellFrames[key] = KayaTableCellObservation(
                     generation: generation, frame: frame)
             }
@@ -8106,8 +8233,7 @@ private struct KayaTableViewportReporter: View {
     var body: some View {
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
-            let signature = "\(generation)/\(frame.minX)/\(frame.minY)/\(frame.maxX)/\(frame.maxY)"
-            Color.clear.task(id: signature) {
+            Color.clear.task(id: KayaGeometryStamp(generation: generation, frame: frame)) {
                 node.tableViewport = KayaTableViewportObservation(
                     generation: generation, frame: frame, synthesized: synthesized)
             }
@@ -9214,7 +9340,7 @@ struct KayaRender: View {
                 isOn: Binding(
                     get: { node.checked },
                     set: { newValue in
-                        node.checked = newValue
+                        kayaUserWrite { node.checked = newValue }
                         KayaHost.emitToggled(node.tag, newValue)
                     })
             )
@@ -9236,7 +9362,7 @@ struct KayaRender: View {
                 value: Binding(
                     get: { node.value },
                     set: { newValue in
-                        node.value = newValue
+                        kayaUserWrite { node.value = newValue }
                         KayaHost.emitValue(node.tag, newValue)
                     }),
                 in: node.minValue...node.maxValue
@@ -9261,7 +9387,7 @@ struct KayaRender: View {
                 selection: Binding(
                     get: { Int(node.value) },
                     set: { newIndex in
-                        node.value = Double(newIndex)
+                        kayaUserWrite { node.value = Double(newIndex) }
                         KayaHost.emitValue(node.tag, Double(newIndex))
                     })
             ) {
@@ -9325,7 +9451,7 @@ struct KayaRender: View {
                 selection: Binding(
                     get: { Int(node.value) },
                     set: { newIndex in
-                        node.value = Double(newIndex)
+                        kayaUserWrite { node.value = Double(newIndex) }
                         KayaHost.emitValue(node.tag, Double(newIndex))
                     })
             ) {
@@ -10563,7 +10689,7 @@ func kayaNoteNativeUndo(_ window: UInt64) {
         else { return }
         let text = responder.string
         let canUndo = responder.undoManager?.canUndo ?? false
-        node.text = text
+        kayaUserWrite { node.text = text }
         kayaNoteNativeUndoEcho(field, text)
         let utf8 = Array(text.utf8)
         utf8.withUnsafeBufferPointer { s in
@@ -13203,7 +13329,7 @@ struct KayaEntry: View {
                 get: { node.text },
                 set: { newValue in
                     let value = kayaLF(newValue)
-                    node.text = value
+                    kayaUserWrite { node.text = value }
                     KayaHost.emitText(node, value)
                 })
         )
@@ -13519,7 +13645,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
             // text_changed the app never caused. Comparing against the model
             // refuses that whatever AppKit decides to notify about.
             guard value != node.text else { return }
-            node.text = value
+            kayaUserWrite { node.text = value }
             KayaHost.emitText(node, value)
         }
     }
@@ -13840,7 +13966,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 guard let node else { return }
                 let value = kayaLF(textView.text ?? "")
                 guard value != node.text else { return }
-                node.text = value
+                kayaUserWrite { node.text = value }
                 KayaHost.emitText(node, value)
             }
 

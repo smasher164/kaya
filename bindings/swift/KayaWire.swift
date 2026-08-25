@@ -5,7 +5,7 @@
 
 import Foundation
 
-enum KayaValue: Equatable {
+enum KayaValue: Hashable {
     case bool(Bool)
     case i64(Int64)
     case f64(Double)

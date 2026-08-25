@@ -100,6 +100,18 @@ fi
 # file looking for a staging line, and its absence has to be an answer
 # (docs/assets-plan.md A5.4).
 #
+# ONE FILE UNDER THE ROOT IS DERIVED and never committed
+# (guests/assets/market/README.md), so the root a fresh clone has is
+# incomplete until this runs. The gate sweep runs it too; a lane may not
+# depend on the sweep having run, since this one can skip it (the matrix
+# handshake below) and the other four never call it.
+if ! python3 "$ROOT/tools/gen-market.py" --ensure; then
+    echo "validate-mac: python3 tools/gen-market.py --ensure failed — the market" >&2
+    echo "  family's transactions.csv is derived, so the asset root is incomplete" >&2
+    echo "  and every guest that reads it fails inside its build closure" >&2
+    exit 1
+fi
+
 # LOUD, AND BEFORE ANY LEG RUNS: without the root, every guest that
 # names an asset dies inside its build closure on eight legs at once.
 if [ ! -f "$ROOT/guests/assets/fonts/sora-wght.ttf" ]; then

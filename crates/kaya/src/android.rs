@@ -363,7 +363,7 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
             },
             NativeMethod {
                 name: "nextCommands".into(),
-                sig: "([B)I".into(),
+                sig: "()[B".into(),
                 fn_ptr: present_next_commands as *mut _,
             },
             NativeMethod {
@@ -974,25 +974,27 @@ extern "system" fn present_blob_data(
 }
 
 /// KayaPresent.nextCommands: block until the next transaction resolves,
-/// fill the array with apply-op records, return the length (0 on shutdown).
-extern "system" fn present_next_commands(
-    env: JNIEnv,
-    _class: JClass,
-    out: JByteArray,
-) -> jint {
-    let cap = env
-        .get_array_length(&out)
-        .expect("kaya: reading the pump buffer length failed") as usize;
-    let mut buf = vec![0u8; cap];
-    let n = unsafe { crate::capi::kaya_next_commands(buf.as_mut_ptr(), cap) };
-    if n == 0 {
-        return 0;
+/// copy that batch's apply-op records into a fresh byte[] (the JVM cannot
+/// borrow core memory, and the borrow dies at the next call anyway). Null
+/// on shutdown. The array is sized by the CORE — a pump that sizes its own
+/// aborted the process at 157 rows (docs/deferred.md, the 64 KiB pump wall).
+extern "system" fn present_next_commands(env: JNIEnv, _class: JClass) -> jni::sys::jbyteArray {
+    let mut bytes: *const u8 = std::ptr::null();
+    let n = unsafe { crate::capi::kaya_next_commands(&mut bytes) };
+    if n == 0 || bytes.is_null() {
+        return std::ptr::null_mut();
     }
-    let signed: &[i8] =
-        unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const i8, n) };
-    env.set_byte_array_region(&out, 0, signed)
-        .expect("kaya: filling the pump buffer failed");
-    n as jint
+    let batch = unsafe { std::slice::from_raw_parts(bytes, n) };
+    match env.byte_array_from_slice(batch) {
+        Ok(array) => array.into_raw(),
+        Err(e) => {
+            log::error!(
+                "kaya: copying an apply batch of {n} bytes to the JVM failed: {e} — \
+                 the pump reads this as shutdown and the surface stops updating"
+            );
+            std::ptr::null_mut()
+        }
+    }
 }
 
 /// Export the JNI entry `dev.kaya.Kaya.attach` resolves, wiring `$app` as

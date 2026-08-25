@@ -183,12 +183,84 @@ generation_match = braced(text, r"func kayaTableGeometryGeneration\s*\(")
 if generation_match is None:
     bad.append(f"{path}: no `func kayaTableGeometryGeneration(` — current geometry "
                "has no generation wall this gate can inspect.")
-elif "hasher.combine(node.tableGeometryEpoch)" not in text[
-    generation_match[0]:generation_match[1]
-]:
-    bad.append(f"{path}: kayaTableGeometryGeneration must include tableGeometryEpoch. "
-               "Model-only generations accept a coherent old viewport after a layout-only "
-               "change, before SwiftUI's reporters run.")
+else:
+    generation = text[generation_match[0]:generation_match[1]]
+    if "table.tableGeometryEpoch" not in generation:
+        bad.append(f"{path}: kayaTableGeometryGeneration must READ tableGeometryEpoch and "
+                   "return it. A generation derived from the model accepts a coherent old "
+                   "viewport after a layout-only change and after a sibling-only "
+                   "transaction, neither of which touches the table's own subtree.")
+    # …and it must be that READ, not a walk that happens to include it. The
+    # walk this replaces was 41% of the mac main thread at 100k rows
+    # (docs/measurements/choke-macos-2026-08-24.txt note 2) and it is a
+    # SwiftUI body, so it ran per evaluation.
+    for hazard in ("Hasher", "for ", "func ", "while ", "map(", "reduce("):
+        if hazard in generation:
+            bad.append(f"{path}: kayaTableGeometryGeneration's body contains `{hazard}`. "
+                       "The generation is a STORED epoch read, never a walk: this runs "
+                       "inside every table body evaluation, and the recursive subtree "
+                       "hash it replaces hashed ~500k nodes per evaluation.")
+
+user_write = braced(text, r"func kayaUserWrite\s*\(")
+if user_write is None:
+    bad.append(f"{path}: no `func kayaUserWrite(` — the user route's model writes have "
+               "no funnel, so a checkbox flip or a keystroke leaves the previous table "
+               "viewport, cells and track mutually consistent and readable.")
+else:
+    funnel = text[user_write[0]:user_write[1]]
+    invalidation_call = "kayaInvalidateTableGeometry()"
+    write_call = "write()"
+    if (invalidation_call not in funnel or write_call not in funnel
+            or funnel.index(invalidation_call) > funnel.index(write_call)):
+        bad.append(f"{path}: kayaUserWrite must invalidate table geometry BEFORE running "
+                   "the write, exactly as kayaApply and kayaSetWindowContentSize do. A "
+                   "model change nobody staled is a coherent old snapshot the next "
+                   "expect can pass against.")
+
+# EVERY model write is in one of three places. The interpreter's own
+# mutable model state is `text`, `checked` and `value`; each assignment to
+# one is inside the batch path, inside the user-route funnel, or named
+# here with the reason it is neither.
+EXEMPT = {
+    "group.value =": "KayaMenuItemModel's radio mirror — a menu item is chrome, not a "
+                     "widget, and carries no table geometry",
+    "view.text =": "UITextView's own text — the platform control kaya pushes the model "
+                   "INTO, the opposite direction",
+}
+apply_span = braced(text, r"private func kayaApply\s*\(")
+funnels = []
+for m in re.finditer(r"kayaUserWrite\s*\{", text):
+    i = text.find("{", m.end() - 1)
+    j = span(text, i) if i >= 0 else None
+    if j is not None:
+        funnels.append((i, j))
+print(f"check-table-tier: kayaUserWrite call sites found {len(funnels)}")
+writes = list(re.finditer(r"[\w\.\[\]\)]+\.(?:text|checked|value)\s*=(?!=)", text))
+print(f"check-table-tier: model-write sites found {len(writes)}")
+if len(writes) < 12:
+    bad.append(f"{path}: only {len(writes)} model-write site(s) found. This census reads "
+               "the assignments the interpreter makes to `text`, `checked` and `value`; a "
+               "reader that finds almost none agrees with everything.")
+exempt_hits = {key: 0 for key in EXEMPT}
+for m in writes:
+    inside_apply = apply_span is not None and apply_span[0] <= m.start() < apply_span[1]
+    inside_funnel = any(lo <= m.start() < hi for lo, hi in funnels)
+    if inside_apply or inside_funnel:
+        continue
+    exempt = next((key for key in EXEMPT if m.group(0).startswith(key.split()[0])), None)
+    if exempt is not None:
+        exempt_hits[exempt] += 1
+        continue
+    bad.append(f"{path}:{line_of(m.start())}: `{m.group(0)}` writes the model outside "
+               "kayaApply and outside a kayaUserWrite block. A write nobody staled leaves "
+               "the previous table viewport, cells and track mutually consistent, and the "
+               "next expect passes against a snapshot of the state before the write.")
+for key, hits in exempt_hits.items():
+    print(f"check-table-tier: model-write exemption `{key}` matched {hits} time(s)")
+    if hits == 0:
+        bad.append(f"{path}: the model-write exemption `{key}` ({EXEMPT[key]}) matches "
+                   "nothing any more. An exemption for a site that no longer exists is a "
+                   "hole held open for whatever takes that name next.")
 
 track_match = braced(text, r"func kayaCurrentTableTrackWidth\s*\(")
 if track_match is None:
@@ -575,12 +647,44 @@ refuses() {
     echo "check-table-tier: self-test — $3 refused, as demanded"
 }
 
-hits="$(perturb "$SWIFTUI" '        hasher\.combine\(node\.tableGeometryEpoch\)\n' \
-    '' "$T/no-layout-epoch.swift")"
-applied "$hits" "the layout epoch removed from table geometry generations" \
-    "func kayaTableGeometryGeneration > func visit"
-refuses "$T/no-layout-epoch.swift" "must include tableGeometryEpoch" \
-    "model-only geometry generations accepting a pre-layout snapshot"
+GENERATION_BODY='func kayaTableGeometryGeneration\(_ table: KayaNode\) -> Int \{\n    table\.tableGeometryEpoch\n\}'
+
+hits="$(perturb "$SWIFTUI" "$GENERATION_BODY" \
+    'func kayaTableGeometryGeneration(_ table: KayaNode) -> Int {
+    table.children.count
+}' "$T/no-layout-epoch.swift")"
+applied "$hits" "the geometry generation derived from the model instead of the epoch" \
+    "func kayaTableGeometryGeneration"
+refuses "$T/no-layout-epoch.swift" "must READ tableGeometryEpoch" \
+    "a model-derived generation accepting a pre-layout snapshot"
+
+hits="$(perturb "$SWIFTUI" "$GENERATION_BODY" \
+    'func kayaTableGeometryGeneration(_ table: KayaNode) -> Int {
+    var hasher = Hasher()
+    hasher.combine(table.tableGeometryEpoch)
+    for child in table.children { hasher.combine(child.text) }
+    return hasher.finalize()
+}' "$T/walked-generation.swift")"
+applied "$hits" "the geometry generation walking the subtree again" \
+    "func kayaTableGeometryGeneration"
+refuses "$T/walked-generation.swift" "is a STORED epoch read, never a walk" \
+    "a generation re-hashing the subtree on every body evaluation"
+
+hits="$(perturb "$SWIFTUI" \
+    'func kayaUserWrite\(_ write: \(\) -> Void\) \{\n    kayaInvalidateTableGeometry\(\)\n' \
+    'func kayaUserWrite(_ write: () -> Void) {
+' "$T/unstaled-user-write.swift")"
+applied "$hits" "the user-route funnel's invalidation removed" \
+    "func kayaUserWrite"
+refuses "$T/unstaled-user-write.swift" "kayaUserWrite must invalidate table geometry BEFORE" \
+    "a user-route model write that stales nothing"
+
+hits="$(perturb "$SWIFTUI" 'kayaUserWrite \{ node\.checked = newValue \}' \
+    'node.checked = newValue' "$T/unfunnelled-write.swift")"
+applied "$hits" "a user-route model write moved out of the funnel" \
+    "struct KayaRender > var body"
+refuses "$T/unfunnelled-write.swift" "writes the model outside" \
+    "a model write no path staled"
 
 hits="$(perturb "$SWIFTUI" '        table\.tableGeometryEpoch &\+= 1\n' \
     '' "$T/no-layout-invalidation.swift")"
@@ -819,7 +923,10 @@ runtime_refuses() {
 
 runtime_refuses "$T/no-layout-epoch.swift" "no-layout-epoch" \
     "a layout invalidation rejects the previous generation" \
-    "a model-only table geometry generation"
+    "a model-derived table geometry generation"
+runtime_refuses "$T/unstaled-user-write.swift" "unstaled-user-write" \
+    "a user-route model write immediately refuses the previous generation" \
+    "a user-route model write that stales nothing"
 runtime_refuses "$T/no-resize-helper-invalidation.swift" "no-resize-helper-invalidation" \
     "a resize never accepts the previous generation" \
     "a resize helper that does not invalidate table geometry"
@@ -894,7 +1001,7 @@ for diagnostic in \
     "column representatives must remain distinct and increasing" \
     "missing current row-cell geometry is rejected" \
     "stale row-cell geometry is rejected" \
-    "a mutated table immediately refuses the previous generation" \
+    "a user-route model write immediately refuses the previous generation" \
     "a layout invalidation rejects the previous generation" \
     "live native cells stay inside the recorded viewport horizontally" \
     "live native rows stay inside the recorded viewport vertically"
