@@ -218,6 +218,19 @@ pub struct KayaHostApi {
     /// so an unwatched process still dies legibly while a watched leg
     /// reddens.
     pub fault_watch: extern "C" fn(),
+    /// ROW WINDOWING (docs/virtualization-plan.md §3), backend plumbing
+    /// and never app surface. `window_moved` is the report that narrows a
+    /// For's band — before the first one the band is unbounded and every
+    /// row realizes; `rows_measured` is the verify half, one extent per
+    /// realized row; `scroll_to_row_*` map a row KEY to its index in the
+    /// collection's current order (KAYA_ROW_NOT_FOUND for no answer), one
+    /// entry per key type; `window_geometry` reads the band, the total
+    /// and the arithmetic the core owns.
+    pub window_moved: extern "C" fn(u64, u64, u64),
+    pub rows_measured: unsafe extern "C" fn(u64, u64, *const f64, usize),
+    pub scroll_to_row_str: unsafe extern "C" fn(u64, *const u8, usize) -> u64,
+    pub scroll_to_row_i64: extern "C" fn(u64, i64) -> u64,
+    pub window_geometry: unsafe extern "C" fn(u64, *mut crate::capi::KayaWindowGeometry),
 }
 
 unsafe extern "C" {
@@ -327,6 +340,11 @@ pub(crate) fn run() -> i32 {
         emit_sort_requested: crate::capi::kaya_emit_sort_requested,
         fault: crate::capi::kaya_fault,
         fault_watch: crate::capi::kaya_fault_watch,
+        window_moved: crate::capi::kaya_window_moved,
+        rows_measured: crate::capi::kaya_rows_measured,
+        scroll_to_row_str: crate::capi::kaya_scroll_to_row_str,
+        scroll_to_row_i64: crate::capi::kaya_scroll_to_row_i64,
+        window_geometry: crate::capi::kaya_window_geometry,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

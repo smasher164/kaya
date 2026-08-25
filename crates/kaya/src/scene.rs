@@ -171,6 +171,10 @@ struct ForSite {
     container: WidgetId,
     bodies: Vec<Arc<TplBody>>,
     chain: Vec<EntryRef>,
+    /// This site's row window. UNREPORTED until a backend says otherwise,
+    /// and an unreported window has an unbounded band — every row
+    /// realizes (docs/virtualization-plan.md §1).
+    window: crate::rowwindow::RowWindow,
 }
 
 struct WhenSite {
@@ -2450,6 +2454,8 @@ impl Scene {
         if let Some(cap) = group {
             self.bank_group(cap, &dirty, &rollback, &mut out);
         }
+        #[cfg(debug_assertions)]
+        self.assert_bands_hold();
         out
     }
 
@@ -4239,6 +4245,7 @@ impl Scene {
                 container,
                 bodies,
                 chain: chain.clone(),
+                window: crate::rowwindow::RowWindow::default(),
             },
         );
         for key in existing {
@@ -4327,7 +4334,11 @@ impl Scene {
         );
         inst.order.push(key.clone());
         inst.entries.insert(key.clone(), (variant, record));
-        self.stamp_entry(id, &path, &key, out);
+        if self.windowed(id, &path) {
+            self.window_order_moved(id, &path, out);
+        } else {
+            self.stamp_entry(id, &path, &key, out);
+        }
     }
 
     fn update_entry(
@@ -4357,6 +4368,12 @@ impl Scene {
             // kept its position in the order; only the shape changed.
             if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
                 self.teardown(stamp, out);
+            }
+            if self.windowed(id, &path) {
+                // The copy is gone, so reconcile sees the row as entering
+                // and stamps the new case's blueprint in its band place.
+                self.reconcile_window(id, &path, out);
+                return;
             }
             self.stamp_entry(id, &path, &key, out);
             self.reposition_restamp(id, &path, &key, out);
@@ -4482,8 +4499,13 @@ impl Scene {
             "kaya: remove of missing key {key:?} in {id:?}"
         );
         inst.order.retain(|k| k != &key);
-        if let Some(stamp) = self.stamps.remove(&(id, path, key)) {
+        if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key)) {
             self.teardown(stamp, out);
+        }
+        if self.windowed(id, &path) {
+            // Every row below shifted up: the band is a position, so one
+            // more row at the bottom enters.
+            self.window_order_moved(id, &path, out);
         }
     }
 
@@ -4526,6 +4548,13 @@ impl Scene {
                 inst.order.insert(at, key.clone());
             }
             None => inst.order.push(key.clone()),
+        }
+        // A windowed site's rows FLOW THROUGH A FIXED BAND: the band is a
+        // position over the current order, so a move is an enter/leave
+        // diff plus a reordering of what stayed.
+        if self.windowed(id, &path) {
+            self.window_order_moved(id, &path, out);
+            return;
         }
         // Reposition the stamped copy, if this instance is rendered.
         let Some(site) = self.for_sites.get(&(id, path.clone())) else {
@@ -4931,6 +4960,284 @@ impl Scene {
             out.push(ApplyOp::Destroy { id: *id });
         }
     }
+
+    // --- Row windowing (docs/virtualization-plan.md §1-§3) ---------------
+    //
+    // A For with NO window report has an UNBOUNDED band: every row
+    // realizes, and every path above stays the one it was. The report is
+    // what narrows it, and from then on the site's realized set is
+    // exactly the band's rows.
+
+    fn windowed(&self, id: CollectionId, path: &PathKey) -> bool {
+        self.for_sites
+            .get(&(id, path.clone()))
+            .is_some_and(|s| s.window.is_reported())
+    }
+
+    /// A backend's report of what is on screen. The band moves, entering
+    /// rows STAMP through the ordinary stamping path and leaving rows
+    /// tear down through the ordinary teardown path — so the applies are
+    /// ordinary applies, and this is the pump's SECOND PRODUCER (§3.3).
+    pub(crate) fn window_moved(&mut self, target: u64, first: usize, count: usize) -> Vec<ApplyOp> {
+        let site = self.window_site(target, "kaya_window_moved");
+        // THE FIRST REPORT INHERITS WHAT THE UNBOUNDED BAND REALIZED.
+        // Until it arrives every row is stamped, and the realized set has
+        // to say so or the rows outside the new band never leave. Once
+        // only, so the walk over every row is paid once.
+        if !self.for_sites[&site].window.is_reported() {
+            let (id, path) = site.clone();
+            let seeded: Vec<Key> = self.coll_instances[&site]
+                .order
+                .iter()
+                .filter(|k| self.stamps.contains_key(&(id, path.clone(), (*k).clone())))
+                .cloned()
+                .collect();
+            self.for_sites.get_mut(&site).unwrap().window.set_realized(seeded);
+        }
+        self.for_sites.get_mut(&site).unwrap().window.report(first, count);
+        let mut out = Vec::new();
+        self.reconcile_window(site.0, &site.1, &mut out);
+        // The viewport is parked on its first visible row (§2.4).
+        let order = &self.coll_instances[&site].order;
+        self.for_sites
+            .get_mut(&site)
+            .unwrap()
+            .window
+            .park(order, first.min(order.len().saturating_sub(1)));
+        #[cfg(debug_assertions)]
+        self.assert_bands_hold();
+        out
+    }
+
+    /// The verify half (§2.2): the extents a backend measured for the rows
+    /// at `first..`, one per row. The core owns the presumption, the
+    /// cache, the prefix sums and the path choice, so all five backends
+    /// share one correctness story.
+    ///
+    /// A run past the end is TRUNCATED rather than refused: layout and
+    /// this report are separated by a hop, and a row the model dropped in
+    /// between has no identity left to hang a height on.
+    pub(crate) fn rows_measured(&mut self, target: u64, first: usize, heights: &[f64]) {
+        let site = self.window_site(target, "kaya_rows_measured");
+        let order = &self.coll_instances[&site].order;
+        let from = first.min(order.len());
+        let upto = from.saturating_add(heights.len()).min(order.len());
+        let window = &mut self.for_sites.get_mut(&site).unwrap().window;
+        window.measured(from, &order[from..upto], &heights[..upto - from]);
+    }
+
+    /// `scroll_to_row`'s core half: the row's position in the
+    /// collection's CURRENT order (§5). It addresses the ROW, so an
+    /// unrealized row answers exactly like a realized one — and a key the
+    /// collection does not hold fails loudly naming it, because "scroll
+    /// nowhere" is indistinguishable from "already there".
+    pub(crate) fn scroll_to_row(&self, target: u64, key: &Value) -> usize {
+        let site = self.window_site(target, "scroll_to_row");
+        let key = Key::from_value(key);
+        let order = &self.coll_instances[&site].order;
+        order.iter().position(|k| *k == key).unwrap_or_else(|| {
+            panic!(
+                "kaya: scroll_to_row names key {key:?}, which this collection's {} \
+                 rows do not include — the row is addressed as DATA, so an \
+                 unrealized row scrolls and a missing one is the caller's bug",
+                order.len()
+            )
+        })
+    }
+
+    /// What a backend needs to lay the window out: the band, the whole
+    /// collection's row count, the band's top offset, the total extent,
+    /// and the anchor's outstanding scroll adjustment.
+    pub(crate) fn window_geometry(&mut self, target: u64) -> WindowGeometry {
+        let site = self.window_site(target, "kaya_window_geometry");
+        let order = &self.coll_instances[&site].order;
+        let window = &mut self.for_sites.get_mut(&site).unwrap().window;
+        let band = window.band(order.len());
+        WindowGeometry {
+            first: band.start,
+            count: band.len(),
+            total: order.len(),
+            offset: window.position(order, band.start),
+            extent: window.extent(order),
+            anchor_shift: window.anchor_shift(order),
+            corrected: window.corrected(),
+        }
+    }
+
+    /// A windowed site's realized set is exactly the band's rows, and its
+    /// container's children are those rows in band order.
+    fn reconcile_window(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
+        if !self.windowed(id, path) {
+            return;
+        }
+        let site = (id, path.clone());
+        let total = self.coll_instances[&site].order.len();
+        let band = self.for_sites[&site].window.band(total);
+        // BAND-SIZED, never N-sized: this runs on every insert, remove and
+        // move of a windowed collection.
+        let desired: Vec<Key> = self.coll_instances[&site].order[band].to_vec();
+        let want: std::collections::HashSet<Key> = desired.iter().cloned().collect();
+        let realized = self.for_sites[&(id, path.clone())].window.realized().to_vec();
+        for key in &realized {
+            if !want.contains(key) {
+                if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
+                    self.teardown(stamp, out);
+                }
+            }
+        }
+        // Survivors keep their relative order; a survivor whose stamp is
+        // gone (a variant change tore it down) counts as entering.
+        let mut current: Vec<Key> = realized
+            .into_iter()
+            .filter(|k| {
+                want.contains(k) && self.stamps.contains_key(&(id, path.clone(), k.clone()))
+            })
+            .collect();
+        for key in &desired {
+            if !self.stamps.contains_key(&(id, path.clone(), key.clone())) {
+                self.stamp_entry(id, path, key, out);
+                current.push(key.clone());
+            }
+        }
+        self.order_children(id, path, &mut current, &desired, out);
+        self.for_sites
+            .get_mut(&(id, path.clone()))
+            .unwrap()
+            .window
+            .set_realized(desired);
+    }
+
+    /// The collection's ORDER changed under a windowed site (an insert, a
+    /// remove, a sort). The prefix sums are indexed by position, so they
+    /// are about a different collection now; the band's membership
+    /// follows too.
+    fn window_order_moved(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
+        if let Some(site) = self.for_sites.get_mut(&(id, path.clone())) {
+            site.window.order_moved();
+        }
+        self.reconcile_window(id, path, out);
+    }
+
+    /// Move the container's children into band order, one MoveChild per
+    /// row that actually moved.
+    fn order_children(
+        &mut self,
+        id: CollectionId,
+        path: &PathKey,
+        current: &mut Vec<Key>,
+        desired: &[Key],
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let container = self.for_sites[&(id, path.clone())].container;
+        for (i, want) in desired.iter().enumerate() {
+            if current.get(i) == Some(want) {
+                continue;
+            }
+            let Some(from) = current.iter().position(|k| k == want) else {
+                continue;
+            };
+            let anchor = self
+                .stamps
+                .get(&(id, path.clone(), current[i].clone()))
+                .and_then(|s| s.roots.first().copied());
+            let roots = self
+                .stamps
+                .get(&(id, path.clone(), want.clone()))
+                .map(|s| s.roots.clone())
+                .unwrap_or_default();
+            for child in roots {
+                out.push(ApplyOp::MoveChild {
+                    parent: container,
+                    child,
+                    before: anchor,
+                });
+            }
+            let moved = current.remove(from);
+            current.insert(i, moved);
+        }
+    }
+
+    /// Resolve a window report's target to the For site it names.
+    ///
+    /// For containers and template nodes are ONE id space (the
+    /// set_column_headers collision walls, docs/tables-plan.md), so an id
+    /// that is not a container is named for what it actually is rather
+    /// than merely refused.
+    fn window_site(&self, target: u64, verb: &str) -> (CollectionId, PathKey) {
+        let widget = WidgetId(target);
+        if let Some((site, _)) = self.for_sites.iter().find(|(_, s)| s.container == widget) {
+            return site.clone();
+        }
+        if self.find_tpl_for(target).is_some() {
+            let copies = self.bar_instances.keys().filter(|(n, _)| *n == target).count();
+            panic!(
+                "kaya: {verb} targets {target}, a nested For's TEMPLATE NODE with \
+                 {copies} stamped copies — a window is one copy's scroll, so report \
+                 the copy's own container widget id (the id its create apply \
+                 carried)"
+            );
+        }
+        if let Some(kind) = self.widgets.get(&widget) {
+            panic!(
+                "kaya: {verb} targets {widget:?}, a live {kind:?} — a window is \
+                 reported on the container a For's rows are children of, never on a \
+                 row or a wrapper"
+            );
+        }
+        if self.stamps.values().any(|s| s.widgets.contains(&widget)) {
+            panic!(
+                "kaya: {verb} targets {widget:?}, a widget INSIDE a stamped copy — \
+                 report the For container that copy is a child of, not the copy"
+            );
+        }
+        panic!(
+            "kaya: {verb} targets {target}, which names no live widget, no stamped \
+             widget and no template node; {} For sites are registered",
+            self.for_sites.len()
+        );
+    }
+
+    /// Every windowed site's realized set is the band's rows, in order,
+    /// and each of them has a stamp. DEBUG ONLY, at the end of
+    /// `Scene::apply` and of `window_moved` — the two ways a band's
+    /// membership can move — so the whole unit suite checks it and a
+    /// shipped app pays nothing.
+    #[cfg(debug_assertions)]
+    fn assert_bands_hold(&self) {
+        for ((id, path), site) in &self.for_sites {
+            if !site.window.is_reported() {
+                continue;
+            }
+            let order = &self.coll_instances[&(*id, path.clone())].order;
+            let band = site.window.band(order.len());
+            assert_eq!(
+                site.window.realized(),
+                &order[band],
+                "kaya: a windowed For's realized set drifted from its band — \
+                 reconcile_window is the only writer of it (docs/virtualization-plan.md)"
+            );
+            for key in site.window.realized() {
+                assert!(
+                    self.stamps.contains_key(&(*id, path.clone(), key.clone())),
+                    "kaya: a windowed For lists {key:?} as realized with no stamp"
+                );
+            }
+        }
+    }
+}
+
+/// One windowed For's geometry, as a backend lays it out: the realized
+/// band, the collection's row count, the band's top offset, the whole
+/// collection's extent, and how far the anchor row has moved since the
+/// viewport parked on it.
+pub(crate) struct WindowGeometry {
+    pub(crate) first: usize,
+    pub(crate) count: usize,
+    pub(crate) total: usize,
+    pub(crate) offset: f64,
+    pub(crate) extent: f64,
+    pub(crate) anchor_shift: f64,
+    pub(crate) corrected: bool,
 }
 
 #[cfg(test)]
@@ -10380,5 +10687,412 @@ mod tests {
             Some(("draft", "drafts", "drafts", true)),
             "the run starts where the core last saw the field, not at empty"
         );
+    }
+
+    // --- Row windowing (docs/virtualization-plan.md §6.1) -----------------
+
+    /// The stream `table_scene(2)` + three accounts + a nested insert +
+    /// an update + a move + a remove produced at the base commit
+    /// (0bc8ce1, parent a5f6189), BEFORE row windowing existed.
+    const BASE_BRIDGE_STREAM: &str = r#"Create { id: WidgetId(1), kind: Column, tag: None }
+Create { id: WidgetId(4), kind: Column, tag: None }
+AddChild { parent: WidgetId(1), child: WidgetId(4) }
+Mount { window: WindowId(0), root: WidgetId(1) }
+Create { id: WidgetId(9223372036854775809), kind: Column, tag: None }
+SetColumnHeaders { id: WidgetId(9223372036854775809), sorted: 4294967295, direction: 0, titles: ["Ticker", "Qty"], tag: [20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 49, 0, 0, 0, 0, 0, 0] }
+AddChild { parent: WidgetId(4), child: WidgetId(9223372036854775809) }
+Create { id: WidgetId(9223372036854775810), kind: Column, tag: None }
+SetColumnHeaders { id: WidgetId(9223372036854775810), sorted: 4294967295, direction: 0, titles: ["Ticker", "Qty"], tag: [20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0] }
+AddChild { parent: WidgetId(4), child: WidgetId(9223372036854775810) }
+Create { id: WidgetId(9223372036854775811), kind: Column, tag: None }
+SetColumnHeaders { id: WidgetId(9223372036854775811), sorted: 4294967295, direction: 0, titles: ["Ticker", "Qty"], tag: [20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 51, 0, 0, 0, 0, 0, 0] }
+AddChild { parent: WidgetId(4), child: WidgetId(9223372036854775811) }
+Create { id: WidgetId(9223372036854775812), kind: Row, tag: None }
+Create { id: WidgetId(9223372036854775813), kind: Label, tag: None }
+SetProp { id: WidgetId(9223372036854775813), prop: Text, value: Str("AAPL") }
+Create { id: WidgetId(9223372036854775814), kind: Label, tag: None }
+SetProp { id: WidgetId(9223372036854775814), prop: Text, value: Str("10") }
+AddChild { parent: WidgetId(9223372036854775812), child: WidgetId(9223372036854775813) }
+AddChild { parent: WidgetId(9223372036854775812), child: WidgetId(9223372036854775814) }
+AddChild { parent: WidgetId(9223372036854775810), child: WidgetId(9223372036854775812) }
+Create { id: WidgetId(9223372036854775815), kind: Row, tag: None }
+Create { id: WidgetId(9223372036854775816), kind: Label, tag: None }
+SetProp { id: WidgetId(9223372036854775816), prop: Text, value: Str("MSFT") }
+Create { id: WidgetId(9223372036854775817), kind: Label, tag: None }
+SetProp { id: WidgetId(9223372036854775817), prop: Text, value: Str("20") }
+AddChild { parent: WidgetId(9223372036854775815), child: WidgetId(9223372036854775816) }
+AddChild { parent: WidgetId(9223372036854775815), child: WidgetId(9223372036854775817) }
+AddChild { parent: WidgetId(9223372036854775810), child: WidgetId(9223372036854775815) }
+MoveChild { parent: WidgetId(4), child: WidgetId(9223372036854775811), before: Some(WidgetId(9223372036854775809)) }
+Destroy { id: WidgetId(9223372036854775809) }"#;
+
+    fn bridge_stream(scene: &mut Scene) -> String {
+        let mut out = Vec::new();
+        out.extend(scene.apply(dynamic_table_scene()));
+        out.extend(scene.apply(vec![
+            insert_account("a1"),
+            insert_account("a2"),
+            insert_account("a3"),
+        ]));
+        out.extend(scene.apply(vec![
+            TxOp::CollectionInsert {
+                id: CollectionId(2),
+                path: vec![v("a2")],
+                key: v("t1"),
+                variant: 0,
+                record: vec![v("AAPL"), v("10")],
+            },
+            TxOp::CollectionInsert {
+                id: CollectionId(2),
+                path: vec![v("a2")],
+                key: v("t2"),
+                variant: 0,
+                record: vec![v("MSFT"), v("20")],
+            },
+        ]));
+        out.extend(scene.apply(vec![TxOp::CollectionUpdate {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a2"),
+            variant: 0,
+            record: vec![v("a2!")],
+        }]));
+        out.extend(scene.apply(vec![TxOp::CollectionMove {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a3"),
+            before: Some(v("a1")),
+        }]));
+        out.extend(scene.apply(vec![TxOp::CollectionRemove {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a1"),
+        }]));
+        out.iter()
+            .map(|op| format!("{op:?}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// THE §1 BRIDGE: a For with NO window report has an UNBOUNDED band,
+    /// so every existing backend, scene and lane sees the stream it
+    /// always saw. Frozen against the base commit's own output rather
+    /// than re-derived here, which would only prove this file agrees with
+    /// itself.
+    #[test]
+    fn an_unreported_for_emits_the_stream_it_did_before_windowing() {
+        let mut scene = Scene::new();
+        assert_eq!(bridge_stream(&mut scene), BASE_BRIDGE_STREAM);
+        for site in scene.for_sites.values() {
+            assert!(
+                !site.window.is_reported(),
+                "nothing in that stream reported a window"
+            );
+        }
+    }
+
+    fn row_insert(i: i64) -> TxOp {
+        TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: Value::I64(i),
+            variant: 0,
+            record: vec![v(&format!("row{i}")), v(&format!("{i}"))],
+        }
+    }
+
+    /// The live For of `table_scene(2)` (container widget 4) holding `n`
+    /// rows keyed 0..n, none of them windowed yet.
+    fn rows_scene(n: i64) -> Scene {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.apply((0..n).map(row_insert).collect());
+        scene
+    }
+
+    fn realized(scene: &Scene) -> Vec<i64> {
+        scene.for_sites[&(CollectionId(1), Vec::new())]
+            .window
+            .realized()
+            .iter()
+            .map(|k| match k {
+                Key::I64(n) => *n,
+                other => panic!("unexpected key {other:?}"),
+            })
+            .collect()
+    }
+
+    fn moves(ops: &[ApplyOp]) -> usize {
+        ops.iter()
+            .filter(|op| matches!(op, ApplyOp::MoveChild { .. }))
+            .count()
+    }
+
+    /// THE FIRST REPORT NARROWS THE BAND: everything outside the visible
+    /// range plus one viewport each side tears down, through the ordinary
+    /// teardown path.
+    #[test]
+    fn the_first_report_tears_down_everything_outside_the_band() {
+        let mut scene = rows_scene(100);
+        let ops = scene.window_moved(4, 40, 10);
+        assert!(creates(&ops).is_empty(), "the band's rows were already stamped");
+        // 100 realized, band 30..60: seventy copies of a Row and two
+        // Labels leave.
+        assert_eq!(destroys(&ops), 70 * 3);
+        assert_eq!(realized(&scene), (30..60).collect::<Vec<i64>>());
+    }
+
+    /// A SCROLL IS A DIFF: the rows that left, the rows that entered, and
+    /// nothing else — the survivors keep their places.
+    #[test]
+    fn scrolling_enters_and_leaves_exactly_the_difference() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 40, 10);
+        let ops = scene.window_moved(4, 45, 10);
+        assert_eq!(destroys(&ops), 5 * 3, "band 30..60 -> 35..65");
+        assert_eq!(creates(&ops).len(), 5 * 3);
+        assert_eq!(moves(&ops), 0, "the survivors did not move");
+        assert_eq!(realized(&scene), (35..65).collect::<Vec<i64>>());
+    }
+
+    /// SORTS MOVE ROWS THROUGH A FIXED BAND, by index and not by key: the
+    /// row the sort brought in realizes where the sort put it, and the
+    /// row it pushed past the bottom leaves.
+    #[test]
+    fn a_sort_flows_rows_through_a_fixed_band() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 40, 10);
+        let ops = scene.apply(vec![TxOp::CollectionMove {
+            id: CollectionId(1),
+            path: vec![],
+            key: Value::I64(90),
+            before: Some(Value::I64(40)),
+        }]);
+        assert_eq!(creates(&ops).len(), 3, "row 90 entered the band");
+        assert_eq!(destroys(&ops), 3, "row 59 fell out of the bottom");
+        assert_eq!(moves(&ops), 1, "and one row was repositioned, not thirty");
+        let keys = realized(&scene);
+        assert_eq!(keys.len(), 30);
+        assert_eq!(keys[10], 90, "in the place the sort gave it");
+        assert_eq!(&keys[11..], &(40..59).collect::<Vec<i64>>()[..]);
+    }
+
+    /// AN UPDATE TO AN UNREALIZED ROW IS A MODEL WRITE AND NOTHING ELSE —
+    /// and stamping-on-entry means the row arrives carrying it.
+    #[test]
+    fn an_update_to_an_unrealized_row_emits_no_apply() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 40, 10);
+        let ops = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: Value::I64(5),
+            variant: 0,
+            field: 0,
+            value: v("edited"),
+        }]);
+        assert!(ops.is_empty(), "row 5 is outside the band: {ops:?}");
+        let ops = scene.window_moved(4, 0, 10);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::SetProp { value: Value::Str(s), .. } if s == "edited"
+            )),
+            "the row realized with the data it holds now"
+        );
+    }
+
+    /// AN INSERT BELOW THE BAND IS A MODEL WRITE TOO, which is what makes
+    /// 20,000 rows cost 20,000 model entries and forty stamps.
+    #[test]
+    fn twenty_thousand_rows_realize_one_band() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.window_moved(4, 0, 20);
+        let ops = scene.apply((0..20_000).map(row_insert).collect());
+        assert_eq!(creates(&ops).len(), 40 * 3, "the band's rows and no others");
+        let g = scene.window_geometry(4);
+        assert_eq!((g.first, g.count, g.total), (0, 40, 20_000));
+    }
+
+    /// UNIFORM DATA CAN NEVER REACH THE CORRECTED PATH, which is what
+    /// makes §2.2's determinism claim honest: extent is N x pitch and
+    /// positions are multiplication.
+    #[test]
+    fn uniform_reports_never_leave_the_exact_path() {
+        let mut scene = rows_scene(200);
+        scene.window_moved(4, 0, 20);
+        scene.rows_measured(4, 0, &[24.0; 40]);
+        let g = scene.window_geometry(4);
+        assert!(!g.corrected);
+        assert_eq!(g.offset, 0.0);
+        assert_eq!(g.extent, 200.0 * 24.0);
+        for first in [40usize, 80, 120, 160] {
+            scene.window_moved(4, first, 20);
+            scene.rows_measured(4, first.saturating_sub(20), &[24.0; 60]);
+            let g = scene.window_geometry(4);
+            assert!(!g.corrected, "still uniform at {first}");
+            assert_eq!(g.offset, g.first as f64 * 24.0);
+            assert_eq!(g.extent, 200.0 * 24.0);
+        }
+    }
+
+    /// ONE MISMATCH CORRECTS, AND IT IS PERMANENT: later uniform
+    /// measurements do not put the site back on the exact path.
+    #[test]
+    fn one_mismatched_measurement_corrects_for_the_instances_life() {
+        let mut scene = rows_scene(200);
+        scene.window_moved(4, 0, 20);
+        scene.rows_measured(4, 0, &[24.0; 40]);
+        assert!(!scene.window_geometry(4).corrected);
+        scene.rows_measured(4, 3, &[48.0]);
+        let g = scene.window_geometry(4);
+        assert!(g.corrected);
+        assert_eq!(g.extent, 199.0 * 24.0 + 48.0, "one row is twice as tall");
+        scene.rows_measured(4, 0, &[24.0; 40]);
+        assert!(
+            scene.window_geometry(4).corrected,
+            "the path never goes back"
+        );
+    }
+
+    /// CORRECTED POSITIONS EQUAL A STRAIGHT SUM, at a scale where the
+    /// prefix-sum tree is the only way to answer in time.
+    #[test]
+    fn corrected_positions_equal_a_straight_sum_at_scale() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.window_moved(4, 0, 20);
+        scene.apply((0..20_000).map(row_insert).collect());
+        scene.rows_measured(4, 0, &[16.0; 40]);
+        // Walk the collection in forty-row steps, every fifth row taller.
+        for start in (0..20_000usize).step_by(40) {
+            scene.window_moved(4, start, 20);
+            let run: Vec<f64> = (start..(start + 40).min(20_000))
+                .map(|i| if i % 5 == 0 { 48.0 } else { 16.0 })
+                .collect();
+            scene.rows_measured(4, start, &run);
+        }
+        let g = scene.window_geometry(4);
+        assert!(g.corrected);
+        let straight = |upto: usize| -> f64 {
+            (0..upto).map(|i| if i % 5 == 0 { 48.0 } else { 16.0 }).sum()
+        };
+        assert_eq!(g.extent, straight(20_000));
+        for first in [0usize, 1, 5, 9_999, 19_960] {
+            scene.window_moved(4, first, 20);
+            let g = scene.window_geometry(4);
+            assert_eq!(g.offset, straight(g.first), "band top at {first}");
+        }
+    }
+
+    /// THE ANCHOR IS A ROW, NOT A PIXEL: realizing taller rows ABOVE the
+    /// viewport moves the extent and the anchor row's position, and the
+    /// difference is the scroll adjustment that keeps the row still. The
+    /// anchor itself does not move.
+    #[test]
+    fn corrections_above_the_anchor_adjust_the_extent_not_the_anchor() {
+        let mut scene = rows_scene(1_000);
+        // First layout has no geometry yet; the backend measures and
+        // reports again, and THAT is when the viewport parks.
+        scene.window_moved(4, 500, 20);
+        scene.rows_measured(4, 480, &[20.0; 60]);
+        scene.window_moved(4, 500, 20);
+        let parked = scene.window_geometry(4);
+        assert_eq!(parked.anchor_shift, 0.0);
+        let extent_before = parked.extent;
+
+        // Fifty rows above the viewport turn out to be twice as tall.
+        scene.rows_measured(4, 100, &[40.0; 50]);
+        let g = scene.window_geometry(4);
+        assert!(g.corrected);
+        assert_eq!(g.extent - extent_before, 50.0 * 20.0);
+        assert_eq!(
+            g.anchor_shift,
+            50.0 * 20.0,
+            "the whole correction is scroll adjustment, not content movement"
+        );
+        assert_eq!(
+            scene.window_geometry(4).anchor_shift,
+            g.anchor_shift,
+            "reading the shift may not consume it: the backend asks, then acts"
+        );
+        assert_eq!(realized(&scene), (480..540).collect::<Vec<i64>>());
+    }
+
+    /// scroll_to_row ADDRESSES THE ROW: an unrealized key answers exactly
+    /// like a realized one, through the collection's CURRENT order.
+    #[test]
+    fn scroll_to_row_maps_a_key_through_the_current_order() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 0, 10);
+        assert_eq!(scene.scroll_to_row(4, &Value::I64(0)), 0, "realized");
+        assert_eq!(scene.scroll_to_row(4, &Value::I64(77)), 77, "unrealized");
+        scene.apply(vec![TxOp::CollectionMove {
+            id: CollectionId(1),
+            path: vec![],
+            key: Value::I64(77),
+            before: Some(Value::I64(0)),
+        }]);
+        assert_eq!(
+            scene.scroll_to_row(4, &Value::I64(77)),
+            0,
+            "the order is data, and the index follows it"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "which this collection's 100 rows do not include")]
+    fn scroll_to_row_refuses_a_key_the_collection_does_not_hold() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 0, 10);
+        scene.scroll_to_row(4, &Value::I64(4_242));
+    }
+
+    #[test]
+    #[should_panic(expected = "a nested For's TEMPLATE NODE with 2 stamped copies")]
+    fn a_window_report_refuses_a_template_node() {
+        let mut scene = Scene::new();
+        scene.apply(dynamic_table_scene());
+        scene.apply(vec![insert_account("a1"), insert_account("a2")]);
+        scene.window_moved(20, 0, 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "a live Column — a window is reported on the container")]
+    fn a_window_report_refuses_a_live_widget_that_is_not_a_for() {
+        let mut scene = rows_scene(4);
+        scene.window_moved(1, 0, 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "a widget INSIDE a stamped copy")]
+    fn a_window_report_refuses_a_widget_inside_a_copy() {
+        let mut scene = rows_scene(4);
+        let inside = scene.stamps[&(CollectionId(1), Vec::new(), Key::I64(0))].widgets[1];
+        scene.window_moved(inside.0, 0, 10);
+    }
+
+    #[test]
+    #[should_panic(expected = "names no live widget, no stamped widget and no template node; 1 For sites")]
+    fn a_window_report_refuses_an_unknown_id() {
+        let mut scene = rows_scene(4);
+        scene.window_moved(9_999, 0, 10);
+    }
+
+    /// A REMOVE ABOVE THE BAND PULLS ONE ROW IN: the band is a position,
+    /// so every row below shifts up into it.
+    #[test]
+    fn a_remove_above_the_band_pulls_the_next_row_in() {
+        let mut scene = rows_scene(100);
+        scene.window_moved(4, 40, 10);
+        let ops = scene.apply(vec![TxOp::CollectionRemove {
+            id: CollectionId(1),
+            path: vec![],
+            key: Value::I64(0),
+        }]);
+        assert_eq!(creates(&ops).len(), 3, "key 60 arrived at the bottom");
+        assert_eq!(destroys(&ops), 3, "and key 30 slid off the top");
+        assert_eq!(realized(&scene), (31..61).collect::<Vec<i64>>());
     }
 }

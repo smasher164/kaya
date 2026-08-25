@@ -1395,6 +1395,12 @@
  */
 #define KAYA_OCCURRENCE_WOKEN 1
 
+/**
+ * `kaya_scroll_to_row_*`'s no-answer: the scene is not up, or the target
+ * or key was refused. The FAULT carries the sentence.
+ */
+#define KAYA_ROW_NOT_FOUND UINT64_MAX
+
 typedef struct BoolKind BoolKind;
 
 /**
@@ -1439,6 +1445,25 @@ typedef struct KayaRepresentation {
   const char *const *names;
   uintptr_t count;
 } KayaRepresentation;
+
+/**
+ * One windowed For's geometry, as a backend lays it out. `first`/`count`
+ * are the realized band, `total` the whole collection's rows, `offset`
+ * the band's top, `extent` the collection's, and `anchor_shift` how far
+ * the anchor row has moved since the viewport parked on it — what the
+ * backend adds to its scroll so a correction above does not move the
+ * content under the reader's eyes (§2.4). `corrected` is 0 while every
+ * measurement has equalled the pitch.
+ */
+typedef struct KayaWindowGeometry {
+  uint64_t first;
+  uint64_t count;
+  uint64_t total;
+  double offset;
+  double extent;
+  double anchor_shift;
+  uint8_t corrected;
+} KayaWindowGeometry;
 
 /**
  * Wire framing of every record, exported through the C header so direct
@@ -1606,6 +1631,21 @@ typedef struct KayaHostApi {
    * reddens.
    */
   void (*fault_watch)(void);
+  /**
+   * ROW WINDOWING (docs/virtualization-plan.md §3), backend plumbing
+   * and never app surface. `window_moved` is the report that narrows a
+   * For's band — before the first one the band is unbounded and every
+   * row realizes; `rows_measured` is the verify half, one extent per
+   * realized row; `scroll_to_row_*` map a row KEY to its index in the
+   * collection's current order (KAYA_ROW_NOT_FOUND for no answer), one
+   * entry per key type; `window_geometry` reads the band, the total
+   * and the arithmetic the core owns.
+   */
+  void (*window_moved)(uint64_t, uint64_t, uint64_t);
+  void (*rows_measured)(uint64_t, uint64_t, const double*, uintptr_t);
+  uint64_t (*scroll_to_row_str)(uint64_t, const uint8_t*, uintptr_t);
+  uint64_t (*scroll_to_row_i64)(uint64_t, int64_t);
+  void (*window_geometry)(uint64_t, struct KayaWindowGeometry*);
 } KayaHostApi;
 
 
@@ -2113,6 +2153,61 @@ void kaya_note_native_undo(uint64_t window,
                            const uint8_t *text,
                            uintptr_t text_len,
                            uint8_t can_undo);
+
+/**
+ * A For's visible range changed — scroll, resize or first layout.
+ *
+ * `for_target` is the For CONTAINER's widget id (the id its create apply
+ * carried), live or stamped. Indices are POSITIONS over the collection's
+ * current order, so rows flow through a fixed band under a sort, exactly
+ * as platform tables behave.
+ */
+void kaya_window_moved(uint64_t for_target, uint64_t first_index, uint64_t visible_count);
+
+/**
+ * The extents a backend measured for the realized rows at
+ * `first_index..`, one per row (§3.4). Produces no applies: a height
+ * moves the ARITHMETIC, never the band, which is a position over the
+ * order.
+ *
+ * # Safety
+ * `heights` must point at `count` readable doubles, or be NULL with
+ * `count` 0.
+ */
+void kaya_rows_measured(uint64_t for_target,
+                        uint64_t first_index,
+                        const double *heights,
+                        uintptr_t count);
+
+/**
+ * `scroll_to_row` for a STRING-keyed collection: the row's index in the
+ * collection's current order, for the backend to scroll to.
+ * [`KAYA_ROW_NOT_FOUND`] when there is no answer.
+ *
+ * TWO ENTRIES, ONE PER KEY TYPE, because `protocol::Key` is exactly
+ * I64|Str and a `kind` integer beside the payload is the file-modes trap
+ * (tools/check-file-modes.sh): five hand-written sites decoding a number
+ * nobody re-checks. The type is in the name instead.
+ *
+ * # Safety
+ * `key`/`key_len` must describe a valid UTF-8 byte range, or be NULL/0.
+ */
+uint64_t kaya_scroll_to_row_str(uint64_t for_target, const uint8_t *key, uintptr_t key_len);
+
+/**
+ * `scroll_to_row` for an I64-keyed collection.
+ */
+uint64_t kaya_scroll_to_row_i64(uint64_t for_target, int64_t key);
+
+/**
+ * Read one windowed For's geometry. Answers a zeroed record when the
+ * scene is not up or the target was refused; the fault carries the
+ * sentence.
+ *
+ * # Safety
+ * `out` must be a valid place to write a `KayaWindowGeometry`.
+ */
+void kaya_window_geometry(uint64_t for_target, struct KayaWindowGeometry *out);
 
 /**
  * Presentation side: block until the next transaction, resolve it

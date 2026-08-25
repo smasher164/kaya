@@ -16,6 +16,9 @@ mod fault;
 mod harness;
 mod protocol;
 mod ring;
+// The row-windowing band machine (docs/virtualization-plan.md §1-§2);
+// scene.rs owns the sites it keys on.
+mod rowwindow;
 mod scene;
 // Not harness-gated: a shipped app is where an unreported stall costs
 // the most (DESIGN.md, Threading model and protocol).

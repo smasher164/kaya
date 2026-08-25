@@ -2716,7 +2716,9 @@ pub unsafe extern "C" fn kaya_emit_menu_value_changed(
 /// them happened before whatever that batch applies, under the same lock.
 static PRESENTATION_PENDING: Mutex<Vec<crate::protocol::ApplyOp>> = Mutex::new(Vec::new());
 
-/// Queue an undo's ops for the pump and wake it.
+/// Queue a core-made batch's ops for the pump and wake it. TWO
+/// PRODUCERS reach it: the undo tier and the row window
+/// (docs/virtualization-plan.md §3.3).
 ///
 /// THE WAKE IS NOT OPTIONAL. The pump blocks on the transaction channel,
 /// and an app that registers no `on_undone` handler sends no transaction
@@ -2727,7 +2729,7 @@ static PRESENTATION_PENDING: Mutex<Vec<crate::protocol::ApplyOp>> = Mutex::new(V
 ///
 /// Called with the scene lock HELD, so the queue's order is the order the
 /// scene was mutated in.
-fn queue_undo_ops(pending: &mut Vec<crate::protocol::ApplyOp>, ops: Vec<crate::protocol::ApplyOp>) {
+fn queue_presentation_ops(pending: &mut Vec<crate::protocol::ApplyOp>, ops: Vec<crate::protocol::ApplyOp>) {
     if ops.is_empty() {
         return;
     }
@@ -2775,7 +2777,7 @@ fn with_undo_scene(
     let Some((ops, occurrence)) = f(scene) else {
         return;
     };
-    queue_undo_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
+    queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
     drop(scene_slot);
     send_undo_occurrence(occurrence);
 }
@@ -2871,6 +2873,175 @@ pub unsafe extern "C" fn kaya_note_native_undo(
             can_undo != 0,
         )
     });
+}
+
+// --- Row windowing's host entries (docs/virtualization-plan.md §3) -----
+//
+// BACKEND PLUMBING, never app surface: no binding exposes these, no guest
+// implements a callback, and nothing is supplied on demand — the
+// collection already holds every row. The applies they make ride the pump
+// as its SECOND PRODUCER: core-internal, never re-entering the guest, and
+// serialized with transaction applies by the scene lock the pump also
+// takes (§3.3). The Rust-native backends drive the same Scene methods
+// directly, the way they drive Scene::apply; only the interpreter
+// platforms cross this ABI.
+
+/// `kaya_scroll_to_row_*`'s no-answer: the scene is not up, or the target
+/// or key was refused. The FAULT carries the sentence.
+pub const KAYA_ROW_NOT_FOUND: u64 = u64::MAX;
+
+/// Mutate the presentation scene outside a transaction and put its ops in
+/// front of the pump — `with_undo_scene`'s shape without an occurrence,
+/// because the window tier tells the guest nothing.
+///
+/// THE UNWIND STOPS HERE. Every caller is an `extern "C"` frame entered
+/// from a backend's layout pass, so a refused target reddens the leg with
+/// its sentence instead of aborting (crates/kaya/src/fault.rs).
+fn with_window_scene<R: Default>(
+    what: &str,
+    f: impl FnOnce(&mut Scene) -> (Vec<crate::protocol::ApplyOp>, R),
+) -> R {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else {
+        return R::default();
+    };
+    let Some((ops, answer)) = crate::fault::guard(what, || f(scene)) else {
+        return R::default();
+    };
+    queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
+    answer
+}
+
+/// A For's visible range changed — scroll, resize or first layout.
+///
+/// `for_target` is the For CONTAINER's widget id (the id its create apply
+/// carried), live or stamped. Indices are POSITIONS over the collection's
+/// current order, so rows flow through a fixed band under a sort, exactly
+/// as platform tables behave.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_window_moved(for_target: u64, first_index: u64, visible_count: u64) {
+    with_window_scene("reporting a window range", |scene| {
+        (
+            scene.window_moved(for_target, first_index as usize, visible_count as usize),
+            (),
+        )
+    })
+}
+
+/// The extents a backend measured for the realized rows at
+/// `first_index..`, one per row (§3.4). Produces no applies: a height
+/// moves the ARITHMETIC, never the band, which is a position over the
+/// order.
+///
+/// # Safety
+/// `heights` must point at `count` readable doubles, or be NULL with
+/// `count` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_rows_measured(
+    for_target: u64,
+    first_index: u64,
+    heights: *const f64,
+    count: usize,
+) {
+    let measured: Vec<f64> = if count == 0 || heights.is_null() {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(heights, count) }.to_vec()
+    };
+    with_window_scene("reporting measured row heights", |scene| {
+        scene.rows_measured(for_target, first_index as usize, &measured);
+        (Vec::new(), ())
+    })
+}
+
+/// `scroll_to_row` for a STRING-keyed collection: the row's index in the
+/// collection's current order, for the backend to scroll to.
+/// [`KAYA_ROW_NOT_FOUND`] when there is no answer.
+///
+/// TWO ENTRIES, ONE PER KEY TYPE, because `protocol::Key` is exactly
+/// I64|Str and a `kind` integer beside the payload is the file-modes trap
+/// (tools/check-file-modes.sh): five hand-written sites decoding a number
+/// nobody re-checks. The type is in the name instead.
+///
+/// # Safety
+/// `key`/`key_len` must describe a valid UTF-8 byte range, or be NULL/0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_scroll_to_row_str(
+    for_target: u64,
+    key: *const u8,
+    key_len: usize,
+) -> u64 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else {
+        crate::fault::report(
+            "kaya: scroll_to_row was handed a key that is not UTF-8".to_owned(),
+        );
+        return KAYA_ROW_NOT_FOUND;
+    };
+    with_window_scene("resolving scroll_to_row", |scene| {
+        (
+            Vec::new(),
+            scene.scroll_to_row(for_target, &crate::protocol::Value::Str(key)) as u64,
+        )
+    })
+}
+
+/// `scroll_to_row` for an I64-keyed collection.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_scroll_to_row_i64(for_target: u64, key: i64) -> u64 {
+    with_window_scene("resolving scroll_to_row", |scene| {
+        (
+            Vec::new(),
+            scene.scroll_to_row(for_target, &crate::protocol::Value::I64(key)) as u64,
+        )
+    })
+}
+
+/// One windowed For's geometry, as a backend lays it out. `first`/`count`
+/// are the realized band, `total` the whole collection's rows, `offset`
+/// the band's top, `extent` the collection's, and `anchor_shift` how far
+/// the anchor row has moved since the viewport parked on it — what the
+/// backend adds to its scroll so a correction above does not move the
+/// content under the reader's eyes (§2.4). `corrected` is 0 while every
+/// measurement has equalled the pitch.
+#[repr(C)]
+#[derive(Default)]
+pub struct KayaWindowGeometry {
+    pub first: u64,
+    pub count: u64,
+    pub total: u64,
+    pub offset: f64,
+    pub extent: f64,
+    pub anchor_shift: f64,
+    pub corrected: u8,
+}
+
+/// Read one windowed For's geometry. Answers a zeroed record when the
+/// scene is not up or the target was refused; the fault carries the
+/// sentence.
+///
+/// # Safety
+/// `out` must be a valid place to write a `KayaWindowGeometry`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_window_geometry(for_target: u64, out: *mut KayaWindowGeometry) {
+    if out.is_null() {
+        return;
+    }
+    let g = with_window_scene("reading a window's geometry", |scene| {
+        let g = scene.window_geometry(for_target);
+        (
+            Vec::new(),
+            KayaWindowGeometry {
+                first: g.first as u64,
+                count: g.count as u64,
+                total: g.total as u64,
+                offset: g.offset,
+                extent: g.extent,
+                anchor_shift: g.anchor_shift,
+                corrected: u8::from(g.corrected),
+            },
+        )
+    });
+    unsafe { *out = g };
 }
 
 thread_local! {
