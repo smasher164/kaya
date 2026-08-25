@@ -1,0 +1,229 @@
+macOS choke measurement — non-virtualized For, stamped table rows
+guest: python (the language validate-mac's table leg runs; python3 guests/python/table.py
+       is the lane's second table leg and the maintainer named python fine here)
+       scratchpad guest: choke/macos/rows.py — 4 columns date/ticker/side/total,
+       strings from a counter, KAYA_ROWS picks the count, no asset reads
+recipe: validate-mac manual — PYTHONPATH=bindings/python,
+       KAYA_SWIFTUI_LIB=target/swiftui/libkaya_swiftui.dylib,
+       KAYA_LIB=target/debug/libkaya.dylib, KAYA_SELFTEST=rows,
+       KAYA_SELFTEST_SCRIPT inline, cwd=repo root, cap 120s then SIGKILL
+script: expect_columns column#0 "Date|Ticker|Side|Total"
+        expect_order row#last "<last row's four cells>"
+columns: wall = launch -> KAYA_SELFTEST verdict line (or process exit if none)
+         script_start = launch -> "KAYA_HARNESS: epoch" (mount admitted, script begins)
+
+RUNS
+N=3       wall=   0.22s  script_start=0.16s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-03-03|TK002|BUY|0.74)
+N=500     wall=   0.30s  script_start=  n/a  rc=-6   no verdict line; rc=-6
+N=1000    wall=   0.31s  script_start=  n/a  rc=-6   no verdict line; rc=-6
+N=2500    wall=   0.34s  script_start=  n/a  rc=-6   no verdict line; rc=-6
+N=5000    wall=   0.42s  script_start=  n/a  rc=-6   no verdict line; rc=-6
+N=10000   wall=   0.62s  script_start=  n/a  rc=-6   no verdict line; rc=-6
+N=20000   wall=   1.27s  script_start=  n/a  rc=-6   no verdict line; rc=-6
+
+-- bisect down from 500 (all of the specified sweep aborted before the script ran) --
+N=100     wall=   0.20s  script_start=0.13s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-16|TK099|SELL|36.63)
+N=150     wall=   0.22s  script_start=0.15s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-06-10|TK149|SELL|55.13)
+N=160     wall=   0.20s  script_start=0.13s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-20|TK159|SELL|58.83)
+N=165     wall=   0.30s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 67576 bytes exceeds the pump buffer of 65536
+N=170     wall=   0.30s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 69616 bytes exceeds the pump buffer of 65536
+N=200     wall=   0.34s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 81856 bytes exceeds the pump buffer of 65536
+N=250     wall=   0.36s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 102256 bytes exceeds the pump buffer of 65536
+N=300     wall=   0.35s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 122656 bytes exceeds the pump buffer of 65536
+N=400     wall=   0.34s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 163456 bytes exceeds the pump buffer of 65536
+N=161     wall=   0.30s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 65944 bytes exceeds the pump buffer of 65536
+N=162     wall=   0.30s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 66352 bytes exceeds the pump buffer of 65536
+
+-- choke-adjacent repeats (stability) --
+N=160     wall=   0.18s  script_start=0.13s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-20|TK159|SELL|58.83)
+N=161     wall=   0.29s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 65944 bytes exceeds the pump buffer of 65536
+N=160     wall=   0.19s  script_start=0.13s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-20|TK159|SELL|58.83)
+N=161     wall=   0.28s  script_start=  n/a  rc=-6   CRASH SIGABRT — kaya: apply batch of 65944 bytes exceeds the pump buffer of 65536
+N=500     wall=   0.26s  script_start=0.15s  submit_done=0.03s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-24|TK499|SELL|184.63)
+
+== PART B: past the pump wall — same For, same stamp, rows delivered in
+   KAYA_CHUNK=100-row transactions (chained app.post; guest rows_chunked.py).
+   This is the stamp/model + realization cost a virtualization slice would attack. ==
+N=500     wall=   0.22s  script_start=0.14s  submit_done=0.03s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-24|TK499|SELL|184.63)
+N=1000    wall=   0.25s  script_start=0.13s  submit_done=0.03s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-20|TK499|SELL|369.63)
+N=2500    wall=   0.44s  script_start=0.13s  submit_done=0.05s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-08|TK499|SELL|924.63)
+N=5000    wall=   0.71s  script_start=0.14s  submit_done=0.09s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-16|TK499|SELL|1849.63)
+N=10000   wall=   1.18s  script_start=0.14s  submit_done=0.23s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-04|TK499|SELL|3699.63)
+N=20000   wall=   2.89s  script_start=0.15s  submit_done=0.78s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-08|TK499|SELL|7399.63)
+N=50000   wall=   9.65s  script_start=0.15s  submit_done=4.55s  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-04-24|TK299|SELL|5465.63", wanted "2026-08-20|TK499|SELL|8499.63")
+N=100000  wall=  17.27s  script_start=0.16s  submit_done=  n/a  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-08-04|TK299|SELL|6390.63", wanted "2026-04-12|TK499|SELL|6999.63")
+N=25000   wall=   3.19s  script_start=0.17s  submit_done=1.14s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-24|TK499|SELL|9249.63)
+N=30000   wall=   5.45s  script_start=0.15s  submit_done=1.63s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-12-12|TK499|SELL|1099.63)
+N=35000   wall=   5.81s  script_start=0.14s  submit_done=2.19s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-28|TK499|SELL|2949.63)
+N=40000   wall=   6.29s  script_start=0.15s  submit_done=2.91s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-16|TK499|SELL|4799.63)
+N=27000   wall=   3.29s  script_start=0.14s  submit_done=1.34s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-12-08|TK499|SELL|9989.63)
+N=28000   wall=   3.36s  script_start=0.14s  submit_done=1.44s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-28|TK499|SELL|359.63)
+N=45000   wall=   9.70s  script_start=0.14s  submit_done=3.51s  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-08-12|TK499|SELL|6279.63", wanted "2026-12-04|TK499|SELL|6649.63")
+N=42500   wall=   6.50s  script_start=0.15s  submit_done=3.35s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-24|TK499|SELL|5724.63)
+
+-- part B repeats: degraded boundary and choke-adjacent, twice --
+N=28000   wall=   5.09s  script_start=0.17s  submit_done=1.48s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-28|TK499|SELL|359.63)
+N=29000   wall=   5.07s  script_start=0.15s  submit_done=1.66s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-20|TK499|SELL|729.63)
+N=30000   wall=   5.42s  script_start=0.15s  submit_done=1.66s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-12-12|TK499|SELL|1099.63)
+N=42500   wall=   9.64s  script_start=0.15s  submit_done=3.44s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-24|TK499|SELL|5724.63)
+N=45000   wall=  10.05s  script_start=0.16s  submit_done=3.60s  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-08-24|TK099|SELL|6501.63", wanted "2026-12-04|TK499|SELL|6649.63")
+
+-- mechanism probe: N=20000 held fixed, chunk size varied (batches = N/chunk) --
+N=20000   wall=   2.94s  script_start=0.17s  submit_done=0.77s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-08|TK499|SELL|7399.63)
+N=20000   wall=   3.04s  script_start=0.17s  submit_done=0.78s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-08|TK499|SELL|7399.63)
+N=20000   wall=   3.03s  script_start=0.17s  submit_done=0.76s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-08|TK499|SELL|7399.63)
+N=20000   wall=   2.96s  script_start=0.17s  submit_done=0.77s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-08|TK499|SELL|7399.63)
+
+-- part B pass c: third repeat of the two boundaries, plus a far-past-choke point --
+N=28000   wall=   3.56s  script_start=0.16s  submit_done=1.44s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-04-28|TK499|SELL|359.63)
+N=30000   wall=   5.13s  script_start=0.16s  submit_done=1.72s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-12-12|TK499|SELL|1099.63)
+N=42500   wall=   6.59s  script_start=0.16s  submit_done=3.22s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-24|TK499|SELL|5724.63)
+N=45000   wall=  10.04s  script_start=0.15s  submit_done=3.63s  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-12-20|TK399|SELL|6427.63", wanted "2026-12-04|TK499|SELL|6649.63")
+N=200000  wall=  17.13s  script_start=0.17s  submit_done=  n/a  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-04-08|TK399|SELL|5687.63", wanted "2026-08-24|TK499|SELL|3999.63")
+N=43750   wall=   9.53s  script_start=0.17s  submit_done=3.41s  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-04-08|TK399|SELL|5687.63", wanted "2026-10-14|TK249|SELL|6187.13")
+N=44000   wall=   7.17s  script_start=0.16s  submit_done=3.82s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-12|TK499|SELL|6279.63)
+N=43750   wall=   9.94s  script_start=0.19s  submit_done=3.75s  rc=1    KAYA_SELFTEST: FAILED (row#last ordered "2026-12-20|TK299|SELL|5650.63", wanted "2026-10-14|TK249|SELL|6187.13")
+N=44000   wall=   7.30s  script_start=0.19s  submit_done=3.85s  rc=0    KAYA_SELFTEST: OK (Date|Ticker|Side|Total, 2026-08-12|TK499|SELL|6279.63)
+
+-- mechanism control: SAME rows/cells/chunking on a PLAIN For (rows()) instead of a table (columns()) --
+N=2500    wall=   8.89s  script_start=0.20s  submit_done=0.07s  rc=0    KAYA_SELFTEST: OK (2026-04-08|TK499|SELL|924.63)
+N=5000    wall=  35.04s  script_start=0.15s  submit_done=0.10s  rc=0    KAYA_SELFTEST: OK (2026-08-16|TK499|SELL|1849.63)
+N=10000   wall= 120.08s  script_start=0.14s  submit_done=0.23s  rc=-9   CAP-KILL at 120.0s (SIGKILL)
+N=20000   wall= 120.08s  script_start=0.18s  submit_done=0.81s  rc=-9   CAP-KILL at 120.0s (SIGKILL)
+
+-- mechanism control, cont.: plain For at 20000 (watchdog fixed; see SUMMARY note 4) --
+N=20000   wall= 120.08s  script_start=0.18s  submit_done=0.81s  rc=-9   CAP-KILL at 120.0s (SIGKILL)
+
+================================ SUMMARY ================================
+PLATFORM  macOS, SwiftUI interpreter.
+TIER      NATIVE. macOS always takes the NSTableView tier (tools/check-table-tier.sh
+          holds the rule). Confirmed by measurement, not by reading: the sample of a
+          100000-row leg shows KayaNativeTable.body.getter on the main thread.
+GUEST     Python. The lane runs the table scene in all eight languages; python is the
+          one the maintainer named, and guests/python/table.py is the shape copied.
+          Numbers are comparable within macOS, not across languages: at large N a
+          large share of the wall is the Python guest building its own dataclass rows
+          (see note 2), which a Rust guest would not pay.
+
+------------------------------------------------------------------------
+PART A: the natural guest. Every row inserted inside the build closure, so
+        the whole table is ONE transaction and therefore ONE apply batch.
+        This is what guests/python/table.py does, scaled up.
+
+  DEGRADED (first N over 5s launch-to-verdict):  NEVER REACHED.
+        The failure arrives at 0.30s. Every passing N is under 0.31s.
+  CHOKE (first N that fails):  N = 161.
+        N=160 passes 3/3 (0.18s, 0.19s, 0.20s). N=161 fails 3/3.
+  FAILURE MODE: CRASH. SIGABRT (rc -6), before the harness script even starts
+        (no "KAYA_HARNESS: epoch" line, no verdict list, nothing to retry).
+        Not a retry-window timeout, not my cap.
+  FAILURE SENTENCE, verbatim (N=161):
+
+        thread '<unnamed>' (126288515) panicked at crates/kaya/src/capi.rs:2936:5:
+        kaya: apply batch of 65944 bytes exceeds the pump buffer of 65536
+        note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        fatal runtime error: failed to initiate panic, error 5, aborting
+
+  MECHANISM: neither stamp cost nor realization. A FIXED 64 KiB WIRE BUFFER.
+        swift/KayaSwiftUI.swift:2991, kayaStartCommandPump: `let cap = 64 * 1024`.
+        crates/kaya/src/capi.rs:2937 asserts the resolved batch fits it.
+        The batch size is exactly  256 + 408*N  bytes for this 4-column row, and
+        that model reproduces EVERY observed number (N=161 -> 65944, N=500 ->
+        204256, N=999 -> 407848), so the wall is at floor((65536-256)/408) = 160.
+        Rows per batch scales as 65280 / (bytes per row): a wider row chokes
+        sooner, a narrower one later, but no table of any realistic width gets
+        past a few hundred rows in one transaction.
+        A row-virtualization slice does NOT move this wall by itself. Whatever
+        virtualizes the VIEW still has to get the model over a 64 KiB pipe.
+
+------------------------------------------------------------------------
+PART B: past that wall. Same For, same stamp, same four labels per row; the
+        rows arrive 100 per transaction (chained app.post, the binding's own
+        out-of-band transaction). Chunk size proven not to matter, note 1.
+        This is the stamp/model + realization baseline.
+
+  DEGRADED (first N over 5s):  N = 30000.  (5.45s, 5.42s, 5.13s over three runs.)
+        N=28000 straddles the line (3.36s, 5.09s, 3.56s) under concurrent load.
+  CHOKE (first N that fails):  N = 43750, failed 2/2.
+        Last N passing on every repeat: 42500 (6.50s, 9.64s, 6.59s, 3/3 pass).
+        First N failing on every repeat: 45000 (9.70s, 10.05s, 10.04s, 3/3 fail).
+        NOT MONOTONE in between: 44000 passed 2/2 at 7.2s. The edge is quantized
+        by the retry cadence, not sharp (note 3).
+  FAILURE MODE: the harness expect-retry window expiring. Not a crash, not my cap.
+        The table is PARTIALLY STAMPED when the window runs out, and the harness
+        says so by naming the row it actually found. Same mode all the way up:
+        N=200000 still fails this way, at 17.13s, with no crash and no cap-kill.
+  FAILURE SENTENCE, verbatim (N=45000, pass c):
+
+        KAYA_SELFTEST: FAILED (row#last ordered "2026-12-20|TK399|SELL|6427.63", wanted "2026-12-04|TK499|SELL|6649.63")
+
+  MECHANISM: STAMP/MODEL, not row-widget realization. Four pieces of evidence.
+
+  note 1 - PER ROW, NOT PER BATCH. N=20000 held fixed, rows-per-transaction
+        varied 25/50/100/150 (800 down to 134 batches): wall 2.94 / 3.04 / 3.03 /
+        2.96s, submit_done 0.77 / 0.78 / 0.76 / 0.77s. Batch count is irrelevant.
+
+  note 2 - WHERE THE TIME GOES. `sample` of a 100000-row leg
+        (sample-100000.txt, hot frames quoted below):
+          MAIN THREAD 5523 of 5746 samples inside the SwiftUI view-graph update.
+            ~2380 (41%) in kayaTableGeometryGeneration(_:)
+                 (swift/KayaSwiftUI.swift:7701) - a RECURSIVE HASH OF THE WHOLE
+                 TABLE SUBTREE, re-run per body evaluation, reached from both
+                 KayaNativeTable.body.getter and KayaRender.widget.getter. At
+                 100k rows that is ~500k nodes hashed per evaluation.
+            ~2120 (37%) in SwiftUI per-child observation bookkeeping:
+                 ForEachChild.updateValue -> ObservationCenter.invalidate ->
+                 ObservationTracking._installTracking -> registerTracking, and
+                 ObservationGraphMutation.apply -> ObservationTracking.cancel.
+            ~0 in NSTableView row-view creation.
+          PUMP THREAD 5240 of 5746 parked in kaya_next_commands; only 452 inside
+                 Scene::apply. THE CORE IS NOT THE LIMIT.
+          PYTHON APP THREAD fully busy in dict_vectorcall / dict_merge /
+                 clone_combined_dict_keys and frame teardown - the guest building
+                 its own Txn dataclasses. That is submit_done, and it is a real
+                 share of the wall at large N (4.55s of 9.65s at N=50000). It is
+                 a Python-guest cost, not a kaya cost.
+          Physical footprint 1.3 GB at 100000 rows (~13 KB per row).
+
+  note 3 - WHY THE EDGE IS QUANTIZED. The step deadline is 5.0s on macOS
+        (swift/KayaSwiftUI.swift:5253) but it is checked AFTER the attempt returns
+        (line 7375: `failures.count > failuresBefore, parts[0].hasPrefix("expect"),
+        Date() < stepDeadline`). Each attempt is one DispatchQueue.main.sync that
+        queues behind a full main-thread update pass, 2-3s at these sizes. So an
+        attempt that STARTS at 4.9s runs to completion and passes at 7.2s or 9.6s,
+        which is why passes at 6.5-9.6s are legitimate and why 44000 can pass
+        while 43750 fails.
+
+  note 4 - THE CONTROL, and it is the one that names the tier's value. The SAME
+        rows, cells, keys and chunking on a PLAIN For (rows(), no header bar, so
+        no native table):
+              N=2500   8.89s   PASS      (table tier: 0.44s)
+              N=5000  35.04s   PASS      (table tier: 0.71s)
+              N=10000 120s     CAP-KILL  (table tier: 1.18s)
+              N=20000 120s     CAP-KILL  (table tier: 2.89s)
+        The 20000-row plain For was sampled before killing: 3.4 GB footprint, main
+        thread 2995/2995 samples in Update.dispatchActions ->
+        _AppearanceActionModifier.MergedCallbacks.updateValue -> Update.enqueueAction
+        -> _ArrayBuffer._consumeAndCreateNew -> swift_arrayInitWithCopy/retain, i.e.
+        every row's appearance action enqueued into a repeatedly-regrown array.
+        THAT is row-widget realization, and it is ~50x more expensive at N=5000 and
+        chokes at 4-9x fewer rows. The native NSTableView tier already removes it.
+        What is left in the table numbers is the model side.
+
+  ASIDE, worth its own ledger line: a hung main thread DEFEATS the harness step
+        deadline outright. The plain-For legs at 10000 and 20000 printed no verdict
+        at all and had to be killed by my own cap, because the deadline is only
+        consulted after the main.sync returns and it never returned. The same
+        harness that reddens legibly for a slow scene says nothing for a wedged one.
+
+CONDITIONS: measured with the other four choke lanes running concurrently on this
+        machine (load average 4.57 at the start of Part B; two Android emulators,
+        an iOS simulator and the Windows VM are the standing pools). Part B wall
+        times carry roughly +/- 50% run-to-run because of it, which is why every
+        boundary was repeated three times. Part A is byte-exact and unaffected.
+
+ARTIFACTS: guests choke/macos/rows.py (part A), rows_chunked.py (part B),
+        rows_plainfor.py (control); driver choke/macos/run.py; per-run logs in
+        choke/macos/logs/. The two raw `sample` traces were read into note 2 and
+        note 4 and then deleted.
+=========================================================================

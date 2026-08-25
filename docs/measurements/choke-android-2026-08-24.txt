@@ -1,0 +1,332 @@
+ANDROID / COMPOSE — non-virtualized For row-count choke baseline
+================================================================
+Measured 2026-08-24. Repo NOT edited: the guest was built from a copy of
+the tracked tree under this scratchpad and installed under its own
+applicationId (dev.kaya.choke), so the lane's dev.kaya.milestone2 was
+never touched.
+
+SETUP
+-----
+Device      : emulator-5560 (AVD "kaya", android-35 google_apis arm64-v8a,
+              headless, -gpu swiftshader_indirect, 320dp phone), one member
+              of the standing four-phone pool the matrix leaves warm.
+              Not booted by me, not killed by me; the tablet at 5562 and
+              the other three phones were never addressed.
+Guest       : the RUST guest on the COMPOSE interpreter — the language and
+              tier of the lane's `table-compose` leg, which is the lane's
+              first table leg. (The lane also runs table-jvm and table-go;
+              all three render through the same KayaCompose realization,
+              so the tier under test is the same.)
+Scene       : a 4-column table (Date, Ticker, Side, Total) — one
+              collection, declared with
+              items.rows(tx).columns(["Date","Ticker","Side","Total"],
+              Sort::none()) and a 4-label row template, grown. Every
+              string is synthesized in the guest from a counter
+              (total = "%07d.00" % i); no asset reads, no I/O.
+              Row count from KAYA_ROWS, carried as an intent extra
+              (MainActivity maps KAYA_* extras onto the environment).
+Script      : inline via KAYA_SELFTEST_SCRIPT, one step:
+                  expect label#last "<%07d.00 of N-1>";
+              the LAST row's Total cell, so a pass proves the whole stamp
+              reached the scene tree.
+Watched neg : at N=20, asking for the SECOND-to-last row's value failed
+              with `label#last reads "0000019.00", wanted "0000018.00"` —
+              the assertion is live and lands on row N-1, not on the
+              template or the header.
+Wall time   : host-side, from `am start -W` to the logcat line matching
+              KAYA_SELFTEST: (OK|FAILED) — or to the guest process dying,
+              or to a 120s cap, whichever came first.
+Tier        : SYNTHESIZED, and it realizes every row. KayaCompose.kt
+              contains no LazyColumn/LazyRow/`items(` of any kind (grep:
+              zero hits); a For is a plain Column of composed rows.
+
+THERE ARE TWO WALLS, AND THE FIRST ONE IS NOT THE RENDERER
+----------------------------------------------------------
+Wall 1 (the one the guest as specified actually hits): the interpreter's
+pump buffer is 64 KiB (KayaCompose.kt: `ByteArray(64 * 1024)`), and a
+table stamped in ONE transaction puts every row in ONE batch. The core
+asserts the batch fits and aborts the process when it does not.
+Wall 2 (what a row-virtualization slice would actually be beating): with
+the inserts split across transactions so no single batch exceeds 64 KiB,
+the app dies of a Java-heap OutOfMemoryError inside the Compose runtime.
+
+RUNS — one transaction (the guest as specified)
+-----------------------------------------------
+N=20     wall=0.8s   OK        (scene validation)
+N=100    wall=0.9s   OK
+N=150    wall=1.0s   OK
+N=155    wall=1.0s   OK
+N=156    wall=1.0s   OK        <- last passing N
+N=157    wall=0.5s   CRASH     <- CHOKE. batch 65568 B
+N=160    wall=0.5s   CRASH     batch 66816 B
+N=200    wall=0.5s   CRASH     batch 83456 B
+N=300    wall=0.5s   CRASH     batch 125056 B
+N=500    wall=0.7s   CRASH     batch 208256 B
+N=1000   wall=0.8s   CRASH     batch 416256 B
+N=2500   wall=1.7s   CRASH     batch 1040256 B
+N=5000   wall=4.6s   CRASH     batch 2080256 B
+N=10000  wall=5.7s   FAILED    "no such target label#last" (the pump
+                               aborted before delivering ANY batch, so
+                               the model was empty when the harness read
+                               it; the process then died — same wall,
+                               different surface)
+N=20000  wall=5.7s   FAILED    same
+repeats: N=156 OK/OK/OK (1.0s each); N=157 CRASH/CRASH/CRASH (0.5s each,
+identical byte count 65568). Deterministic — it is arithmetic, not timing.
+
+  The batch is exactly 416 bytes per row + 256 bytes fixed, verified at
+  five row counts, so the threshold is 416*N + 256 > 65536, i.e. N >= 157.
+
+RUNS — inserts chunked across transactions (wall 1 lifted)
+----------------------------------------------------------
+KAYA_CHUNK rows per transaction; 100 unless noted.
+N=500    wall=1.4s (1.3/1.4/1.5/1.6)   OK
+N=1000   wall=1.8s (1.6/1.8/1.9/2.2)   OK
+N=2000   wall=2.5s (2.1/2.5/2.5)       OK
+N=2500   wall=2.6s (2.5/2.6/2.7/3.2)   OK
+N=3000   wall=3.8s (3.5/3.7/3.8/4.0/4.4)  OK
+N=3500   wall=4.2s (3.7/3.7/3.8/3.8/4.6/4.7/4.8)  OK  7/7
+N=3600   wall=4.7s   OK
+N=3700   wall=4.0s (3.8/4.0/4.0/4.0/5.7)  OK 5/6, DIED 1/6
+N=3800   DIED 1/1
+N=3900   wall=4.7s (3.8/4.1/4.3/5.1/5.1/5.4)  OK 6/6
+N=4000   OK 4/7 (3.9/4.8/4.8/5.1), DIED 3/7   <- first N that ever fails
+N=4500   OK 1/4 (5.7s), DIED 3/4
+N=5000   DIED 4/4                              <- first N that ALWAYS fails
+N=6000   DIED 4/4  (6.1/7.3/7.6/8.2s to death)
+N=10000  DIED 1/1
+N=20000  DIED 1/1
+chunk-size sensitivity at N=3000, two passes each:
+  chunk=25 -> 3.7s/3.7s   chunk=50 -> 3.7s/3.7s
+  chunk=100 -> 3.8s/4.2s  chunk=150 -> 3.7s/3.2s
+  (120 transactions vs 20 transactions: no difference. The cost is
+  per-ROW, not per-batch.)
+
+PEAK JAVA HEAP (dumpsys meminfo, sampled across each run's lifetime)
+--------------------------------------------------------------------
+N=20     12,500 KB
+N=1000   62,416 KB
+N=2000  119,272 KB
+N=3000  170,840 KB
+N=3500  191,068 KB   (99.7% of ART's 196,608 KB growth limit)
+  => ~12.5 MB fixed + ~52 KB per stamped row (a row is 1 Row + 4 labels).
+  The Android View count stays at 7 for every N — the per-row objects are
+  Compose nodes, not Views.
+
+SUMMARY
+-------
+TIER: synthesized, realizes every row (no lazy list anywhere in
+      KayaCompose.kt).
+
+CHOKE (the guest as specified, one transaction):
+      N = 157 rows. FIRST FAILING N; 156 passes.
+      Mode: CRASH — an abort in the core on the interpreter's pump thread.
+      Sentence, verbatim:
+        kaya: apply batch of 65568 bytes exceeds the pump buffer of 65536
+      (crates/kaya/src/capi.rs:2936; the buffer is KayaCompose.kt's
+      `ByteArray(64 * 1024)`. The SwiftUI interpreter sizes its buffer the
+      same, `let cap = 64 * 1024`, so this wall is not Android's alone.)
+
+CHOKE (inserts chunked so no batch exceeds 64 KiB):
+      N = 4000 is the first N that ever fails; N = 5000 is the first that
+      fails on every attempt. 3500 passed 7/7.
+      Mode: CRASH — java.lang.OutOfMemoryError, process killed. Verbatim:
+        FATAL EXCEPTION: main
+        java.lang.OutOfMemoryError: Failed to allocate a 24 byte
+        allocation with 90640 free bytes and 88KB until OOM, target
+        footprint 201326592, growth limit 201326592; giving up on
+        allocation because <1% of heap free after GC.
+      The fatal throw lands on `main` or on `kaya-compose-pump`, and the
+      crash sites recorded by ActivityManager are Compose runtime
+      internals: DerivedState.kt:336, SnapshotState.android.kt:27,
+      SlotTable.kt:2862, ObjectIntMap.kt:673, plus Arrays.java (array
+      growth).
+
+DEGRADED BAND (first N over 5s launch-to-verdict):
+      One transaction: NEVER — the app is still finishing in 1.0s at
+      N=156 and is dead at 157.
+      Chunked: first individual sample over 5s at N=3900 (5.1s; median at
+      that N is 4.7s); the median first crosses 5s at N=4500 (5.7s), which
+      is inside the failure band. So on this platform there is no slow
+      band before the choke: the table is comfortable (<5s) right up to
+      the row count that kills the process.
+
+NO ANR. Not once, at any N, in either regime: zero "ANR in dev.kaya.choke"
+lines across every captured buffer. Both walls kill the process outright
+before the input dispatcher can time anything out.
+
+MECHANISM IMPLICATED
+--------------------
+Wall 1 is TRANSPORT, not the For: a fixed 64 KiB pump buffer against
+416 bytes of wire per stamped row.
+
+Wall 2 is ROW-WIDGET REALIZATION, on three pieces of evidence:
+  1. ~52 KB of Java heap per row, linear from N=20 to N=3500, against
+     ART's 192 MB growth limit — 12.5 MB + 52 KB * N hits the limit at
+     roughly 3,500-4,500 rows, exactly where the deaths start. Five model
+     objects per row cannot account for 52 KB; composition state can.
+  2. The fatal allocations are inside Compose's snapshot/slot machinery
+     (DerivedState, SnapshotState, SlotTable, ObjectIntMap) — the
+     composition, not the guest's model and not the Rust core.
+  3. Wall-clock is linear in ROWS and flat in BATCHES: 0.8s fixed plus
+     ~1.0 ms/row, and changing the transaction count at N=3000 by 6x
+     (120 transactions vs 20) moves nothing (3.7s either way).
+
+WHAT COULD NOT BE MEASURED
+--------------------------
+Splitting model cost from composition cost by building the table and
+mounting something else is refused by the core, by design:
+  kaya: widget WidgetId(1) (Some(Row)) was created by this transaction
+  and is not reachable from any mounted root — it will render NOWHERE
+  while still answering every harness read, so a scene asserting on it
+  passes against an invisible widget.
+(crates/kaya/src/scene.rs:2437.) So the 52 KB/row figure is model mirror
+plus composition together; the crash sites are what attributes it.
+
+APPENDIX — EVERY RUN, ONE LINE (raw log, in the order they ran)
+--------------------------------------------------------------
+mount=1 is the normal table; mount=0 is the refused unmounted probe.
+chunk=none is the guest as specified (one transaction).
+CAP-120s rows are deaths detected only at my cap, before the watcher
+learned to notice the process dying; DIED rows are the same event
+seen promptly. The kaya sentence for each failure follows its line.
+
+N=500 chunk=none wall=0.7s verdict=CRASH alive=no unchunked
+    08-24 15:37:53.727 23222 23240 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 208256 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=1000 chunk=none wall=0.8s verdict=CRASH alive=23285 23317 unchunked
+    08-24 15:37:55.140 23285 23303 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 416256 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=2500 chunk=none wall=1.7s verdict=CRASH alive=23350 23384 unchunked
+    08-24 15:37:57.350 23350 23369 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 1040256 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=5000 chunk=none wall=4.6s verdict=CRASH alive=23419 23454 unchunked
+    08-24 15:38:02.403 23419 23439 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 2080256 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=10000 chunk=none wall=5.7s verdict=FAILED alive=no unchunked
+    08-24 15:38:08.550 23488 23508 E kaya    : KAYA_SELFTEST: FAILED (no such target label#last)
+N=20000 chunk=none wall=5.7s verdict=FAILED alive=no unchunked
+    08-24 15:38:14.749 23549 23568 E kaya    : KAYA_SELFTEST: FAILED (no such target label#last)
+N=100 chunk=none wall=0.9s verdict=OK alive=no bisect
+N=150 chunk=none wall=1.0s verdict=OK alive=no bisect
+N=155 chunk=none wall=1.0s verdict=OK alive=no bisect
+N=156 chunk=none wall=1.0s verdict=OK alive=no bisect
+N=157 chunk=none wall=0.5s verdict=CRASH alive=no bisect
+    08-24 15:38:34.563 23808 23828 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 65568 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=160 chunk=none wall=0.5s verdict=CRASH alive=no bisect
+    08-24 15:38:35.393 23867 23886 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 66816 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=200 chunk=none wall=0.5s verdict=CRASH alive=no bisect
+    08-24 15:38:36.259 23925 23944 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 83456 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=300 chunk=none wall=0.5s verdict=CRASH alive=no bisect
+    08-24 15:38:37.171 23983 24001 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 125056 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=156 chunk=none wall=1.0s verdict=OK alive=no repeat1
+N=157 chunk=none wall=0.5s verdict=CRASH alive=no repeat1
+    08-24 15:38:46.105 24091 24109 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 65568 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=156 chunk=none wall=1.0s verdict=OK alive=no repeat2
+N=157 chunk=none wall=0.5s verdict=CRASH alive=no repeat2
+    08-24 15:38:48.206 24199 24217 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 65568 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=500 chunk=100 wall=1.5s verdict=OK alive=no chunk100
+N=1000 chunk=100 wall=2.2s verdict=OK alive=24308 chunk100
+N=2500 chunk=100 wall=3.2s verdict=OK alive=24361 chunk100
+N=5000 chunk=100 wall=120.7s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:39:19.040 24415 24415 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 24 byte allocation with 90640 free bytes and 88KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16648364 kB) 
+N=10000 chunk=100 wall=120.8s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:41:20.611 24501 24521 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 41612 byte allocation with 53760 free bytes and 52KB until OOM, target footprint 201326592, growth limit 201326592" (VmSize 16606056 kB) 08-24 15:41:20.987 24501 24521 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 41616 byte allocation with 53760 free bytes and 52KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16607396 kB) 
+N=20000 chunk=100 wall=121.6s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:43:22.363 24576 24596 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 41612 byte allocation with 53760 free bytes and 52KB until OOM, target footprint 201326592, growth limit 201326592" (VmSize 16611764 kB) 08-24 15:43:22.771 24576 24596 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 41616 byte allocation with 53760 free bytes and 52KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16590544 kB) 
+N=3000 chunk=100 wall=4.4s verdict=OK alive=24656 chunk100
+N=3500 chunk=100 wall=4.6s verdict=OK alive=24717 chunk100
+N=4000 chunk=100 wall=121.8s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:46:07.340 24772 24772 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 12800 free bytes and 12KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16650432 kB, recursive case) 08-24 15:46:07.529 24772 24780 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 56 byte allocation with 12800 free bytes and 12KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16650432 kB) 08-24 15:46:07.913 24772 24780 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 12800 free bytes and 12KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16650432 kB, recursive case) 
+N=4500 chunk=100 wall=120.7s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:48:07.241 24864 24872 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 4624 free bytes and 4624B until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16579148 kB, recursive case) 08-24 15:48:07.594 24864 24872 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 56 byte allocation with 4624 free bytes and 4624B until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16579148 kB) 08-24 15:48:07.929 24864 24872 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 4624 free bytes and 4624B until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16579148 kB, recursive case) 
+N=3600 chunk=100 wall=4.7s verdict=OK alive=no chunk100
+N=3700 chunk=100 wall=121.3s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:50:23.533 24996 25004 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 56 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16622956 kB) 08-24 15:50:23.687 24996 24996 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 120 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16622956 kB) 08-24 15:50:23.859 24996 25004 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16622956 kB, recursive case) 
+N=3800 chunk=100 wall=121.3s verdict=CAP-120s alive=no chunk100
+    
+    anr/oom: 08-24 15:52:24.723 25082 25090 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 56 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16609748 kB) 08-24 15:52:24.893 25082 25082 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16609748 kB) 08-24 15:52:25.067 25082 25090 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16609748 kB, recursive case) 
+N=3900 chunk=100 wall=5.1s verdict=OK alive=25159 chunk100
+N=3500 chunk=100 wall=3.8s verdict=OK alive=25216 oomrep1
+N=3700 chunk=100 wall=3.8s verdict=OK alive=25272 oomrep1
+N=3900 chunk=100 wall=3.8s verdict=OK alive=25327 oomrep1
+N=4000 chunk=100 wall=120.7s verdict=CAP-120s alive=no oomrep1
+    
+    anr/oom: 08-24 15:54:54.632 25381 25381 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 120 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16638244 kB) 08-24 15:54:54.779 25381 25389 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 56 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16638244 kB) 08-24 15:54:55.072 25381 25389 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16638244 kB, recursive case) 
+N=3500 chunk=100 wall=3.8s verdict=OK alive=25466 oomrep2
+N=3700 chunk=100 wall=5.7s verdict=OK alive=25523 oomrep2
+N=3900 chunk=100 wall=5.1s verdict=OK alive=25578 oomrep2
+N=4000 chunk=100 wall=120.7s verdict=CAP-120s alive=no oomrep2
+    
+    anr/oom: 08-24 15:57:11.000 25632 25632 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16611792 kB, recursive case) 08-24 15:57:11.143 25632 25640 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 56 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16611792 kB) 08-24 15:57:11.423 25632 25640 W dev.kaya.choke: Throwing OutOfMemoryError "Failed to allocate a 32 byte allocation with 21008 free bytes and 20KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC." (VmSize 16611792 kB, recursive case) 
+N=500 chunk=100 wall=1.4s verdict=OK alive=no curve1
+N=1000 chunk=100 wall=1.9s verdict=OK alive=25760 curve1
+N=2000 chunk=100 wall=2.5s verdict=OK alive=25811 curve1
+N=2500 chunk=100 wall=2.6s verdict=OK alive=25864 curve1
+N=3000 chunk=100 wall=3.5s verdict=OK alive=25919 curve1
+N=500 chunk=100 wall=1.6s verdict=OK alive=no curve2
+N=1000 chunk=100 wall=1.6s verdict=OK alive=26024 curve2
+N=2000 chunk=100 wall=2.1s verdict=OK alive=26076 curve2
+N=2500 chunk=100 wall=2.7s verdict=OK alive=26129 curve2
+N=3000 chunk=100 wall=4.0s verdict=OK alive=no curve2
+N=500 chunk=100 wall=1.3s verdict=OK alive=no curve3
+N=1000 chunk=100 wall=1.8s verdict=OK alive=26291 curve3
+N=2000 chunk=100 wall=2.5s verdict=OK alive=26342 curve3
+N=2500 chunk=100 wall=2.5s verdict=OK alive=26396 curve3
+N=3000 chunk=100 wall=3.8s verdict=OK alive=no curve3
+N=3000 mount=${KAYA_MOUNT:-1} chunk=100 wall=3.7s verdict=OK alive=no mounted-recheck
+N=4000 mount=${KAYA_MOUNT:-1} chunk=100 wall=5.1s verdict=OK alive=28270 mounted-recheck
+N=3000 mount=${KAYA_MOUNT:-1} chunk=100 wall=0.4s verdict=CRASH alive=28344 unmounted
+    08-24 16:03:04.072 28325 28343 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: widget WidgetId(1) (Some(Row)) was created by this transaction and is not reachable from any mounted root — it will render NOWHERE while still answering every harness read, so a scene asserting on it passes against an invisible widget. Mounted roots right now: WindowId(0)->WidgetId(8). Add it to a container (add_child), or mount it as a surface's root. If you built it with a container's builder, check that the body USES the handle rather than MENTIONING it: a bare expression is discarded by Swift result builders and Kotlin lambdas, which is how guests/swift/milestone2.swift and guests/swift/menus.swift both shipped invisible widgets. Nothing was applied.': crates/kaya/src/scene.rs:2437
+N=10000 mount=${KAYA_MOUNT:-1} chunk=100 wall=0.4s verdict=CRASH alive=28405 unmounted
+    08-24 16:03:04.884 28386 28404 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: widget WidgetId(1) (Some(Row)) was created by this transaction and is not reachable from any mounted root — it will render NOWHERE while still answering every harness read, so a scene asserting on it passes against an invisible widget. Mounted roots right now: WindowId(0)->WidgetId(8). Add it to a container (add_child), or mount it as a surface's root. If you built it with a container's builder, check that the body USES the handle rather than MENTIONING it: a bare expression is discarded by Swift result builders and Kotlin lambdas, which is how guests/swift/milestone2.swift and guests/swift/menus.swift both shipped invisible widgets. Nothing was applied.': crates/kaya/src/scene.rs:2437
+N=20000 mount=${KAYA_MOUNT:-1} chunk=100 wall=0.5s verdict=CRASH alive=28467 unmounted
+    08-24 16:03:05.691 28448 28466 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: widget WidgetId(1) (Some(Row)) was created by this transaction and is not reachable from any mounted root — it will render NOWHERE while still answering every harness read, so a scene asserting on it passes against an invisible widget. Mounted roots right now: WindowId(0)->WidgetId(8). Add it to a container (add_child), or mount it as a surface's root. If you built it with a container's builder, check that the body USES the handle rather than MENTIONING it: a bare expression is discarded by Swift result builders and Kotlin lambdas, which is how guests/swift/milestone2.swift and guests/swift/menus.swift both shipped invisible widgets. Nothing was applied.': crates/kaya/src/scene.rs:2437
+N=500 mount=1 chunk=100 wall=1.4s verdict=OK watchtest
+N=6000 mount=1 chunk=100 wall=7.3s verdict=DIED watchtest
+    08-24 16:03:55.860 28570 28587 E AndroidRuntime: FATAL EXCEPTION: kaya-compose-pump 08-24 16:03:55.860 28570 28587 E AndroidRuntime: java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 
+N=157 mount=1 chunk=none wall=0.5s verdict=CRASH watchtest
+    08-24 16:03:57.098 28677 28695 E kaya    : log_panics: thread '<unnamed>' panicked at 'kaya: apply batch of 65568 bytes exceeds the pump buffer of 65536': crates/kaya/src/capi.rs:2936
+N=3500 mount=1 chunk=100 wall=4.8s verdict=OK band-a
+N=4000 mount=1 chunk=100 wall=4.8s verdict=OK band-a
+N=4500 mount=1 chunk=100 wall=7.3s verdict=DIED band-a
+    08-24 16:04:20.199 28890 28890 E AndroidRuntime: FATAL EXCEPTION: main 08-24 16:04:20.199 28890 28890 E AndroidRuntime: java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 
+N=5000 mount=1 chunk=100 wall=8.4s verdict=DIED band-a
+    08-24 16:04:28.892 29002 29010 F dev.kaya.choke: java_vm_ext.cc:598] JNI DETECTED ERROR IN APPLICATION: JNI NewObjectV called with pending exception java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 08-24 16:04:29.001 29079 29079 F DEBUG   : Abort message: 'JNI DETECTED ERROR IN APPLICATION: JNI NewObjectV called with pending exception java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 
+N=6000 mount=1 chunk=100 wall=6.1s verdict=DIED band-a
+    08-24 16:04:35.085 29122 29122 E AndroidRuntime: FATAL EXCEPTION: main 08-24 16:04:35.085 29122 29122 E AndroidRuntime: java.lang.OutOfMemoryError: Failed to allocate a 24 byte allocation with 29200 free bytes and 28KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC. 
+N=3500 mount=1 chunk=100 wall=4.7s verdict=OK band-b
+N=4000 mount=1 chunk=100 wall=6.7s verdict=DIED band-b
+    08-24 16:04:46.929 29294 29302 F dev.kaya.choke: java_vm_ext.cc:598] JNI DETECTED ERROR IN APPLICATION: JNI NewObjectV called with pending exception java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 08-24 16:04:47.064 29363 29363 F DEBUG   : Abort message: 'JNI DETECTED ERROR IN APPLICATION: JNI NewObjectV called with pending exception java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 
+N=4500 mount=1 chunk=100 wall=5.7s verdict=OK band-b
+N=5000 mount=1 chunk=100 wall=7.3s verdict=DIED band-b
+    
+N=6000 mount=1 chunk=100 wall=8.2s verdict=DIED band-b
+    08-24 16:05:08.809 29604 29612 F dev.kaya.choke: java_vm_ext.cc:598] JNI DETECTED ERROR IN APPLICATION: JNI NewObjectV called with pending exception java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 08-24 16:05:08.931 29682 29682 F DEBUG   : Abort message: 'JNI DETECTED ERROR IN APPLICATION: JNI NewObjectV called with pending exception java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 
+N=3500 mount=1 chunk=100 wall=3.7s verdict=OK band-c
+N=4000 mount=1 chunk=100 wall=3.9s verdict=OK band-c
+N=4500 mount=1 chunk=100 wall=7.0s verdict=DIED band-c
+    08-24 16:05:24.322 29882 29882 E AndroidRuntime: FATAL EXCEPTION: main 08-24 16:05:24.322 29882 29882 E AndroidRuntime: java.lang.OutOfMemoryError: Failed to allocate a 32 byte allocation with 66064 free bytes and 64KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC. 
+N=5000 mount=1 chunk=100 wall=7.3s verdict=DIED band-c
+    08-24 16:05:31.967 29988 29988 E AndroidRuntime: FATAL EXCEPTION: main 08-24 16:05:31.967 29988 29988 E AndroidRuntime: java.lang.OutOfMemoryError: Failed to allocate a 32 byte allocation with 61968 free bytes and 60KB until OOM, target footprint 201326592, growth limit 201326592; giving up on allocation because <1% of heap free after GC. 
+N=6000 mount=1 chunk=100 wall=7.6s verdict=DIED band-c
+    08-24 16:05:40.065 30094 30112 E AndroidRuntime: FATAL EXCEPTION: kaya-compose-pump 08-24 16:05:40.065 30094 30112 E AndroidRuntime: java.lang.OutOfMemoryError: OutOfMemoryError thrown while trying to throw an exception; no stack trace available 
+N=3700 mount=1 chunk=100 wall=4.0s verdict=OK band2-a
+N=3900 mount=1 chunk=100 wall=4.1s verdict=OK band2-a
+N=3700 mount=1 chunk=100 wall=4.0s verdict=OK band2-b
+N=3900 mount=1 chunk=100 wall=5.4s verdict=OK band2-b
+N=3700 mount=1 chunk=100 wall=4.0s verdict=OK band2-c
+N=3900 mount=1 chunk=100 wall=4.3s verdict=OK band2-c
+N=3000 mount=1 chunk=25 wall=3.7s verdict=OK chunksens-25-a
+N=3000 mount=1 chunk=50 wall=3.7s verdict=OK chunksens-50-a
+N=3000 mount=1 chunk=100 wall=3.8s verdict=OK chunksens-100-a
+N=3000 mount=1 chunk=150 wall=3.7s verdict=OK chunksens-150-a
+N=3000 mount=1 chunk=25 wall=3.7s verdict=OK chunksens-25-b
+N=3000 mount=1 chunk=50 wall=3.7s verdict=OK chunksens-50-b
+N=3000 mount=1 chunk=100 wall=4.2s verdict=OK chunksens-100-b
+N=3000 mount=1 chunk=150 wall=3.2s verdict=OK chunksens-150-b
+
+The guest source is beside this file as android-guest-choke.rs;
+the single-run driver as android-run-one.sh.

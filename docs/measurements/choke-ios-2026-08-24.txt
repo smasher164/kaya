@@ -1,0 +1,200 @@
+iOS row-count choke — the non-virtualized For, synthesized table tier
+=====================================================================
+platform: iOS Simulator, kaya-sim-2 (3CD1C302-C686-4EC4-A10E-EE94FFE7C3A2,
+          iPhone 11 Pro, iOS 26.5). ONE pool device; it was booted before
+          this run and is left booted, with the same 27 dev.kaya.* apps
+          installed as before (pre-state.txt).
+tier:     SYNTHESIZED. The phone is a compact horizontal size class, so
+          kayaTableTier(.compact, dynamicColumns: true) = .synthesized
+          (swift/KayaSwiftUI.swift). KayaSynthesizedTable is a NON-lazy
+          ForEach(node.children) x ForEach(row.children) inside the custom
+          KayaTableLayout, with a KayaEdgeReporter background on every
+          header cell and every body cell. Nothing on this path is lazy,
+          so every stamped row is realized.
+guest:    SWIFT. The lane runs the `table` scene from three guests
+          (IOS_SWIFT_SCENES, IOS_GO_SCENES and the rust example
+          table-swiftui); Swift is one of them. All three ride the same
+          libkaya_swiftui_ios.dylib, so the interpreter numbers are
+          comparable; the GUEST-side numbers below are Swift-binding
+          specific and are reported separately for that reason.
+guest src: scratchpad/choke/ios/main.swift — guests/swift/table.swift's
+          shape with a 4-field record (Date, Ticker, Side, Total),
+          strings from a counter, row count from KAYA_ROWS, no asset
+          reads. Compiled exactly as run-sim.sh compiles a swift-suite
+          leg (same bindings, same libkaya.a, same interpreter dylib;
+          all three build-id --verify'd before use).
+script:   inline via SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT, ONE step:
+             expect label#last "<row N-1's Total>"
+          label#last resolves to the last CREATED label, i.e. the last
+          stamped row's 4th cell, so a pass proves the whole stamp
+          reached the tree. WATCHED NEGATIVE (N=5, expecting "NOPE"):
+             KAYA_SELFTEST: FAILED (label#last reads "104.04", wanted "NOPE")
+          104.04 is txnRow(4).total — the assertion is real.
+cap:      120s per run (timeout 120 xcrun simctl launch --console-pty).
+          One deliberately un-capped diagnostic run is marked as such.
+context:  the machine ran the other lanes' standing pools throughout (5
+          android emulators, the Windows UTM VM, 4 booted simulators) and
+          12.2 GB of swap was already in use before the first run. Load
+          average is recorded per run; the top of the sweep is memory
+          bound and therefore sensitive to this.
+
+TWO WALLS, and the first one is not about rendering at all
+----------------------------------------------------------
+WALL 1 — THE PUMP BUFFER, at 161 rows in ONE transaction.
+swift/KayaSwiftUI.swift's kayaStartCommandPump allocates `let cap = 64 *
+1024` and hands it to kaya_next_commands; capi.rs:2936 asserts the batch
+fits. A stamped 4-column row costs 408 bytes on the wire (measured
+exactly: batch = 256 + 408N), so N=160 fills the buffer to the byte
+(65536) and N=161 aborts the process:
+
+  thread '<unnamed>' panicked at crates/kaya/src/capi.rs:2936:5:
+  kaya: apply batch of 65944 bytes exceeds the pump buffer of 65536
+  fatal runtime error: failed to initiate panic, error 5, aborting
+
+No verdict line and no harness step — the app is gone before the scene
+starts. This is the wall the NATURAL spelling hits: every kaya guest and
+example, guests/swift/table.swift included, declares its collection and
+inserts its rows inside one build closure. It is a property of the
+SwiftUI interpreter (mac and iOS share that constant), not of the device.
+
+WALL 2 — the rendering wall, reachable only by chunking the inserts so
+no single batch exceeds 64 KiB (150 rows per transaction here). The core
+refuses to defer the mount — scene.rs:2437's orphan barrier: "widget
+WidgetId(1) (Some(Row)) was created by this transaction and is not
+reachable from any mounted root" — so the only legal chunking is: mount
+an empty table first, then insert. Every chunk therefore lands in a
+mounted tree, which is a property of this design, not a choice of this
+harness.
+
+runs (N, wall launch->verdict, verdict)
+---------------------------------------
+one transaction (the natural spelling), chunk=0:
+N=3      wall=1.2s  guest-build=5ms guest-submitted=9ms  PASS  (smoke)
+N=100    wall=1.2s  guest-build=4ms guest-submitted=8ms  PASS
+N=160    wall=1.2s  PASS   (batch = 65536 bytes, exactly the cap)
+N=160    wall=1.2s  PASS   (repeat)
+N=160    wall=1.2s  PASS   (repeat, after a rebuild)
+N=161    wall=1.2s  ABORT  apply batch of 65944 bytes exceeds the pump buffer of 65536
+N=161    wall=1.2s  ABORT  (repeat)
+N=161    wall=1.2s  ABORT  (repeat, after a rebuild)
+N=163    wall=1.2s  ABORT  66760 bytes
+N=165    wall=1.2s  ABORT  67576 bytes
+N=170    wall=1.2s  ABORT  69616 bytes
+N=180    wall=1.2s  ABORT  73696 bytes
+N=200    wall=1.2s  ABORT  81856 bytes
+N=500    wall=1.2s  ABORT  204256 bytes
+
+chunked at 150 rows/transaction (mount first, then insert), guest-chunks
+is the guest's own submit time, peak is the guest process's peak RSS:
+N=500    wall=1.2s    guest-chunks=23ms     PASS
+N=1000   wall=2.2s    guest-chunks=50ms     PASS
+N=1000   wall=2.2s    guest-chunks=49ms     PASS   peak 286 MB
+N=2500   wall=5.2s    guest-chunks=250ms    PASS   (load 5.2)
+N=2500   wall=4.2s    guest-chunks=249ms    PASS   peak 797 MB (load 4.0)
+N=2500   wall=4.2s    guest-chunks=253ms    PASS   peak 757 MB
+N=3000   wall=6.2s    guest-chunks=349ms    PASS   peak 819 MB   <- first over 5s
+N=4000   wall=7.2s    guest-chunks=581ms    PASS   peak 1092 MB
+N=5000   wall=11.2s   guest-chunks=949ms    PASS
+N=5000   wall=11.2s   guest-chunks=944ms    PASS   peak 1315 MB
+N=5000   wall=13.2s   guest-chunks=939ms    PASS   peak 1526 MB
+N=10000  wall=37.2s   guest-chunks=3629ms   PASS
+N=10000  wall=39.2s   guest-chunks=3574ms   PASS   peak 2343 MB
+N=15000  wall=87.2s   guest-chunks=7915ms   PASS   peak 3752 MB
+N=15000  wall=85.2s   guest-chunks=7800ms   PASS   peak 3197 MB
+N=15000  wall=75.2s   guest-chunks=7859ms   PASS   peak 4235 MB
+N=20000  wall=27.2s   guest-chunks=14073ms  PASS   (the only 20000 that finished
+                                                    inside the cap; first run of
+                                                    the session)
+N=20000  wall=120.0s  guest-chunks=14265ms  FAIL — my 120s cap  peak 3903 MB
+N=20000  wall=120.0s  guest-chunks=14480ms  FAIL — my 120s cap  peak 3904 MB
+N=20000  wall=120.0s  guest-chunks=14080ms  FAIL — my 120s cap  peak 3815 MB
+N=20000  wall=120.0s  guest-chunks=13893ms  FAIL — my 120s cap  peak 4191 MB
+N=20000  wall=144.2s  guest-chunks=13930ms  PASS — DIAGNOSTIC, cap raised to
+                                                    400s: 20000 is SLOW, not
+                                                    wedged.  peak 5099 MB
+N=30000  wall=120.0s  guest-chunks=31495ms  FAIL — my 120s cap  peak 5141 MB
+N=40000  wall=86.2s   guest-chunks=57708ms  FAIL — KILLED, no verdict line
+N=40000  wall=99.2s   guest-chunks=58790ms  FAIL — KILLED, no verdict line
+
+SUMMARY
+-------
+DEGRADED AT (first N over 5s launch->verdict): N=3000 (6.2s). 2500 sits
+  on the line: 4.2s, 4.2s under load ~4, 5.2s under load ~5.2.
+CHOKE AT: N=20000. It failed 4 of its 5 capped runs; the fifth (the
+  session's first, on the least loaded machine) passed at 27.2s, and an
+  un-capped diagnostic finished at 144.2s. N=15000 passed three times
+  (87.2 / 85.2 / 75.2s). N=40000 is killed outright.
+  AND ABOVE IT, THE NATURAL SPELLING'S WALL IS 161: without chunking,
+  the process aborts at 161 rows in one transaction, which is the number
+  an app author actually meets.
+FAILURE MODES, distinguished:
+  - 161 rows, one transaction: ABORT, verbatim —
+      "kaya: apply batch of 65944 bytes exceeds the pump buffer of 65536"
+      "fatal runtime error: failed to initiate panic, error 5, aborting"
+  - 20000 and 30000 rows, chunked: MY 120s CAP. The process is alive,
+    ~4-5 GB resident, the harness has printed "+0ms expect label#last",
+    and no verdict has been reached. Not the expect-retry window: the
+    step's 15s deadline is only consulted after a FAILED attempt, and
+    each attempt blocks inside DispatchQueue.main.sync while the main
+    thread realizes rows, so the retry never gets to time out.
+  - 40000 rows, chunked: KILLED by the OS. No verdict line, no .ips
+    crash report (every SIGABRT above wrote one), so SIGKILL — the
+    simulated device's memory ceiling, reached at ~4.5 GB.
+TIER: synthesized (compact phone). The iPad pool device would take the
+  native tier; not measured here — one pool phone only, as charged.
+
+MECHANISM: ROW-WIDGET REALIZATION, not stamp/model cost.
+  Evidence 1 (the A/B that isolates the view layer): the same 5000 rows,
+  the same node count, the same guest work (guest-chunks 939ms vs 927ms)
+  — but with the column headers declared (synthesized table tier)
+  wall=13.2s / peak 1526 MB, and with them off (the generic KayaFlex
+  container path) wall=34.2s / peak 1692 MB. The model side is identical
+  to the millisecond while the wall moves 2.6x, so the wall is being
+  spent in the view layer. Both paths realize every row; neither is lazy.
+  Evidence 2 (memory is per realized row, not per apply): 5000 rows in
+  34 transactions peaks at 1315 MB; the same 5000 rows in 200
+  transactions peaks at 1292 MB. Six times the batches, the same memory
+  — so the ~250-300 KB/row is the realized row's view machinery, not
+  churn from re-applying.
+  Evidence 3 (when the memory arrives): at N=40000 the guest had
+  submitted every row while RSS was 107 MB; the climb to 1.28 GB ->
+  3.2 GB -> 4.37 GB -> 4.54 GB and the kill all happened in the ~35s
+  AFTER the guest was done, i.e. during interpreter apply + realization.
+  Time scaling: wall minus the 1.15s launch floor is 0.05s @500, 3.05s
+  @2500, 10s @5000, 36s @10000, 82s @15000, 143s @20000 — about N^1.85,
+  superlinear in rows.
+
+A SECOND, SEPARATE SCALING BUG, guest side (Swift binding):
+  guest-chunks — the guest's own submit time, before the core or the
+  interpreter sees anything — is 0.25s @2500, 0.94s @5000, 3.6s @10000,
+  14.1s @20000, 57.7s @40000: quadratic in rows. It is
+  KayaAppTx.insertRecordRaw -> KayaApp.modelSet
+  (bindings/swift/KayaApp.swift:1078), which does
+  `instances[at].entries.firstIndex(where: { $0.key == key })` — a
+  linear scan of every entry inserted so far, on every insert, plus a
+  copy-out/copy-back of the instances array. Row virtualization would
+  not touch this; it is the binding's own model bookkeeping, and the
+  other seven bindings want the same look (invariant 1). At 20000 rows
+  it is 14s of the 144s wall; at 40000 it is 58s.
+
+CLEANUP (proved, not asserted)
+------------------------------
+processes: `ps -Ao pid,etime,pcpu,command | grep -iE
+  "chokeswift|watch-rss|sweep.sh|run.sh|simctl launch"` prints NOTHING
+  after the last run. Every launch was `timeout`-bounded and every run
+  ends with `simctl terminate`; the RSS watcher exits when the guest is
+  gone. The android emulators, the Windows UTM VM and the four booted
+  simulators were up before this measurement and are untouched — none of
+  them is mine.
+device:   kaya-sim-2 is still Booted, as are kaya-sim-0, kaya-sim-1 and
+  kaya-sim-pad; the other three were never used. dev.kaya.chokeswift is
+  uninstalled: the dev.kaya.* listing on kaya-sim-2 is byte-identical to
+  the pre-run capture (pre-state.txt) — 27 before, 27 after, added [],
+  removed [].
+disk:     scratchpad/choke/ios went 49M -> 320K (the 23M binary, the 25M
+  .app and the 912K pch module cache deleted; main.swift, the three run
+  scripts, the 25 per-run logs and the RSS traces kept, 320K total). The
+  15 chokeswift-*.ips crash reports this run generated in
+  ~/Library/Logs/DiagnosticReports (660K) are deleted; zero remain. No
+  repo file was written: the build read crates/, bindings/, swift/ and
+  the two prebuilt artifacts, and wrote only into the scratchpad.

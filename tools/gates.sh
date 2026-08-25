@@ -205,6 +205,10 @@ EXCLUDED = {
 # runs. Order matters: the interpreter compiles against libkaya's header
 # and loads the library at run time.
 BUILD = [
+    # Derived, never committed (maintainer 2026-08-24): the market data
+    # regenerates only when its generator's bytes move; check-assets
+    # holds the stamp honest.
+    ("market data", ["python3", "tools/gen-market.py", "--ensure"]),
     ("libkaya", ["cargo", "build", "--locked", "--lib"]),
     ("libkaya id", ["tools/build-id.sh", "--verify", "target/debug/libkaya.dylib"]),
     ("SwiftUI interpreter", ["tools/swiftui/build-dylib.sh"]),

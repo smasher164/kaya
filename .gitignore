@@ -63,3 +63,4 @@ guests/haskell/dist-newstyle/
 # Written per-run by tools/android/run-emulator.sh (the interpreter's
 # build-id marker); never committed.
 /android/kaya/generated
+guests/assets/market/transactions.csv

@@ -1,0 +1,207 @@
+WINDOWS / WinUI 3 — row-count choke of the existing non-virtualized For
+======================================================================
+Device: the lane's UTM VM, akhil@192.168.64.2 (Windows 11 ARM64, 6 vCPU),
+        staged current from today's matrix — C:\kaya\kaya.dll is
+        byte-identical to target/aarch64-pc-windows-msvc/release/kaya.dll
+        (BFB6D958...03E8), harness feature on.
+Guest:  PYTHON. The lane runs table_{rust,python,go,csharp,java}; python is
+        the one that needs no compile step and was already staged, and the
+        numbers below are only compared within this platform.
+Scene:  inline via KAYA_SELFTEST_SCRIPT (`;` is the harness's newline
+        stand-in), never a .steps file, never a shared launcher:
+          expect_columns column#0 "Date|Ticker|Side|Total"
+          expect label#last "<last row's total cell>"
+        `label#last` is the most recently stamped TextBlock — the last
+        row's 4th cell — read out of the real XAML tree by
+        WinUiStage::read_label (crates/kaya/src/winui/mod.rs:14304). A pass
+        therefore proves the whole stamp reached the tree.
+Rows:   4 columns (date, ticker, side, total), generated in the guest from
+        a counter, deterministic, no asset reads. Count from
+        KAYA_CHOKE_ROWS (plain env — this lane's transport).
+Timing: every guest output line is stamped with ms since the guest process
+        was launched, so the KAYA_SELFTEST verdict line carries its own
+        launch-to-verdict wall time. Cap: 120s per run, then I kill it.
+Files:  everything of mine under C:\kaya\choke\ (own dir, own launcher,
+        own hidden-window shim, own schtasks name); nothing shared was
+        written, no lane script was edited or run.
+
+THE TWO NUMBERS
+---------------
+DEGRADED at N = 2550   (first N over 5s on every run: 5.26s, 6.07s.
+                        2500 straddles the line — 4.74 / 4.90 / 5.12 —
+                        and 2400 is under it on both runs.)
+CHOKE    at N = 12000  (first N that fails on every run, under a 120s cap.
+                        11500 passes twice at 110.14s / 112.91s; 11000
+                        passes twice at 112.47s / 110.86s.)
+
+RUNS (N, launch-to-verdict wall, verdict / failure mode)
+--------------------------------------------------------
+50       0.25s   OK (smoke test of the rig, not part of the sweep)
+500      0.45s   OK (Date|Ticker|Side|Total, $3593.99)   [guest insert 2ms, UI apply ~305ms]
+1000     1.05s   OK (Date|Ticker|Side|Total, $7093.99)   [guest insert 5ms, UI apply ~885ms]
+2500     4.74s   OK (Date|Ticker|Side|Total, $17593.99)  [guest insert 20ms, UI apply ~4572ms]
+5000    18.99s   OK (Date|Ticker|Side|Total, $35093.99)  [guest insert 63ms, UI apply ~18784ms]
+10000   77.58s   OK (Date|Ticker|Side|Total, $70093.99)  [guest insert 209ms, UI apply ~77248ms]
+20000  >120.00s  CHOKE — killed at my 120s cap, no verdict [guest insert 902ms]
+
+DEGRADED-BAND BISECT (first N whose launch-to-verdict exceeds 5s)
+-----------------------------------------------------------------
+2400     4.56s   OK
+2400     4.69s   OK
+2500     4.74s   OK   (the sweep run above)
+2500     5.12s   OK
+2500     4.90s   OK
+2550     6.07s   OK
+2550     5.26s   OK
+2600     6.13s   OK
+
+CHOKE BISECT (first N that fails; my cap is 120s)
+--------------------------------------------------
+10000    77.58s   OK
+11000   112.47s   OK
+11000   110.86s   OK
+11500   110.14s   OK
+11500   112.91s   OK
+12000  >120.00s   CHOKE — killed at the cap, no verdict (119.94s at kill)
+12000  >120.00s   CHOKE — killed at the cap, no verdict (121.23s at kill)
+12500  >120.00s   CHOKE — killed at the cap, no verdict
+20000  >120.00s   CHOKE — killed at the cap, no verdict
+
+CONTROLS (mechanism discriminator — same rows, three shapes, same rig)
+----------------------------------------------------------------------
+2500 table (a For with .columns())        4.74s   OK
+2500 plain (the SAME For, no columns)     4.78s   OK
+2500 live  (no collection at all)         4.91s   OK
+5000 table                               18.99s   OK
+5000 live                                21.73s   OK
+
+FAILURE MODE — MY CAP, NEVER THE RETRY WINDOW, AND WHY
+-------------------------------------------------------
+harness::POLL_DEADLINE is 15s, but no run above can reach it. Every harness
+read on this backend goes through WinUiStage::on_ui_read
+(crates/kaya/src/winui/mod.rs:12894), which enqueues onto the
+DispatcherQueue and then does a bare `rx.recv()` — no timeout. While the UI
+thread is still draining the transaction the read does not return, and
+harness::poll only consults its deadline AFTER the closure returns. So the
+scene cannot fail by retry-window expiry while the UI thread is busy: it
+waits, and something outside has to end it. On the real lane that something
+is wait-exit.ps1's 290s leg deadline (run_one_suite in
+tools/deploy-win.sh); here it is my 120s cap.
+
+There is no harness failure sentence to quote, because the harness never
+got to write one. The verbatim tail of every capped transcript is the step
+log for the FIRST assertion (printed just before the read blocks), then my
+kill:
+
+  513 KAYA_HARNESS: +0ms ExpectColumns(Target { kind: Column, index: 0, id: None, keys: None }, "Date|Ticker|Side|Total")
+  WALLMS=121371
+  EXIT=1
+
+(EXIT=1 is my `taskkill /f /im python.exe`, not the guest's own code. Not a
+crash: no WerFault, no dump, no 0xC0000409 — the process was alive and
+working when I killed it.)
+
+TIER
+----
+SYNTHESIZED, and it realizes every row. There is no native table control
+anywhere in the WinUI backend — no ItemsRepeater, no ListView, no
+ItemsControl in crates/kaya/src/winui/mod.rs. A table IS the For's Grid
+with a header Grid and a rule appended in front of the rows
+(mint_table_header / reindex's `head = 2`), each row is its own Grid, and
+each cell is a TextBlock. At N=11500 that is 11,500 row Grids and 46,000
+TextBlocks, all live.
+
+MECHANISM — ROW-WIDGET REALIZATION, AND MORE PRECISELY THE RE-INDEX
+--------------------------------------------------------------------
+Not the stamp/model cost. Three independent pieces of evidence:
+
+1. THE GUEST-SIDE HALF IS LINEAR AND NEGLIGIBLE. Encoding the records and
+   submitting the transaction, measured in the guest itself:
+     N=500 2ms | 1000 5ms | 2500 20ms | 5000 63ms | 10000 209ms | 20000 902ms
+   At N=10000 that is 209ms of 77,580ms — 0.3%. Everything else is the UI
+   thread applying the batch.
+
+2. THE SHAPE CONTROLS AGREE (see CONTROLS above). A For with a header, the
+   same For without one, and the same widgets built live in the build
+   closure with no collection at all, all cost the same at the same widget
+   count. So it is neither the table's measure/stamp pass nor the For's
+   stamping — the cost tracks the WIDGET COUNT.
+
+3. THE SCALING IS QUADRATIC. UI-side apply, doubling N:
+     500 0.305s -> 1000 0.885s (2.90x) -> 2500 4.57s -> 5000 18.78s (4.11x)
+     -> 10000 77.25s (4.11x). log2 of 4.11 is 2.04.
+
+WHAT IN THE CODE PRODUCES AN N^2: `ApplyOp::AddChild`
+(crates/kaya/src/winui/mod.rs:11231) ends every single child append with
+`reindex(core, parent)`, and `reindex` (line 1763) CLEARS the parent Grid's
+whole RowDefinitions collection, rebuilds one RowDefinition per existing
+child, and then re-stamps `Grid::SetRow` on every existing child. Appending
+N rows to one container is therefore sum(k=1..N) = N^2/2 RowDefinition
+constructions plus N^2/2 attached-property writes, every one of them a
+WinRT interop round trip. The measured constant backs it: 2*T/N^2 is
+1.46us at N=2500, 1.50us at N=5000 and 1.55us at N=10000 — one flat
+per-iteration cost across a 16x span of total time, which is what a COM
+call pair costs on this VM. Above ~10k rows it steepens a little further
+(11000 lands at ~112s where N^2 alone predicts ~93s), consistent with the
+working set of ~46,000 live TextBlocks starting to bite.
+
+So a row-virtualization slice on this platform has two distinct wins
+available, and the second is the cheaper one: realize fewer rows, and stop
+re-indexing every sibling on every append.
+
+BASELINE TO BEAT (WinUI, this VM)
+----------------------------------
+  1000 rows   1.05s
+  2500 rows   4.74s        <- 5s is crossed at N ~ 2500-2550
+  5000 rows  19.0s
+ 10000 rows  77.6s
+ 11500 rows 112.9s         <- last N that finishes inside 120s
+ 12000 rows  never finishes inside 120s
+
+CLEANUP — PROVEN, NOT ASSERTED
+-------------------------------
+ON THE VM
+  schtasks /query /tn kaya_choke
+    -> ERROR: The system cannot find the file specified.   (my task is gone)
+  cmd /c dir C:\kaya\choke
+    -> File Not Found                                       (my dir is gone)
+  cmd /c dir /b C:\kaya | grep -i "choke|rows.txt|shape.txt|script.txt"
+    -> nothing                                    (no file of mine in the root)
+  tasklist, counted for python/pythonw/wscript/cscript/go/java/dotnet/
+  kaya-guests/WerFault
+    -> 0 matching processes                     (no guest, no corpse, no WER)
+  The ~210 other kaya_* scheduled tasks listed on the guest are the lane's
+  own (deploy-win.sh creates one per leg); none of them is mine.
+
+THE SHARED STATE IS EXACTLY AS FOUND
+  C:\kaya\deploy.stamp        3d25b238e979a795      (same as before my runs)
+  C:\kaya\kaya.dll SHA256     BFB6D958CCF66A5358E143B6B4B79D05B489D2E362A150DE9FD48DB0784603E8
+  C:\kaya\scenes\*.steps      43 files
+  HKCU\Environment KAYA_*      only KAYA_SCENES_DIR, KAYA_DIALOGDRIVE,
+                               KAYA_ASSET_DIR — I persisted nothing (every
+                               variable of mine was process-local inside my
+                               own PowerShell; I never called setx)
+  C:\Windows\Minidump          newest entries are 2026-08-04; nothing from
+                               today, so no run of mine bugchecked the guest
+  No lane script was edited and no lane was run.
+
+ON THE HOST
+  ssh -O exit on my ControlPath, socket /tmp/.kaya-choke-mux removed; no
+  ssh master and no drive.py process remain (ps listing empty).
+  git status --porcelain: the only entries are the pre-existing staged
+  market data asset the task described. I edited nothing tracked — every
+  file I wrote is under the scratchpad.
+  Disk: this whole measurement is 72 KB —
+    choke/windows/      72 KB   (the rig plus every raw run transcript;
+                                 largest single file 5.2 KB)
+    choke/windows.txt   12 KB   (this report)
+  Nothing large was ever written, on either machine.
+
+FINAL LISTING (taken after everything above)
+  ssh akhil@192.168.64.2 'tasklist /fo table'
+    | grep -iE "python|wscript|cscript|dotnet|java|^go.exe|kaya|WerFault"
+  -> (none — the filter matched no line)
+  query session
+  ->  console   Akhil   1   Active
+  The console session is still signed in, which is what the lane's
+  interactive (/it) scheduled tasks need; the VM is exactly as I found it.

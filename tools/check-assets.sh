@@ -448,6 +448,37 @@ if gradle_path.is_file():
                    "the leg that runs without a staged root would fall through to a "
                    "path the device does not have (docs/assets-plan.md A4)")
 
+# ------------------------------------------------------------------ C8
+# The market artifact is DERIVED (maintainer 2026-08-24): the generator
+# is committed, the csv is not. The honest check regenerates into a
+# scratch and byte-compares — target/'s stamp is only --ensure's fast
+# path and is deliberately not read here (shadows carry no target/).
+import subprocess
+import tempfile
+gen = root / "tools" / "gen-market.py"
+art = root / "guests" / "assets" / "market" / "transactions.csv"
+if not gen.is_file():
+    bad.append("tools/gen-market.py is gone while the market family exists — "
+               "the derived artifact would have no regeneration story")
+elif not art.is_file():
+    bad.append("guests/assets/market/transactions.csv is missing — it is "
+               "derived, never committed: run `python3 tools/gen-market.py "
+               "--ensure` (docs, guests/assets/market/README.md)")
+else:
+    with tempfile.TemporaryDirectory() as td:
+        scratch = pathlib.Path(td) / "t.csv"
+        env = dict(os.environ, KAYA_GEN_MARKET_OUT=str(scratch))
+        r = subprocess.run([sys.executable, str(gen)], env=env,
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            bad.append("tools/gen-market.py failed to run for the derivation "
+                       "check: " + r.stderr.strip()[:200])
+        elif scratch.read_bytes() != art.read_bytes():
+            bad.append("guests/assets/market/transactions.csv does not match "
+                       "what tools/gen-market.py generates — the artifact is "
+                       "derived, never hand-edited: run `python3 "
+                       "tools/gen-market.py --ensure`")
+
 for b in bad:
     print("check-assets: " + b, file=sys.stderr)
 sys.exit(1 if bad else 0)
@@ -632,7 +663,20 @@ hits="$(doctor "$s" android/build.gradle.kts 'assets\.srcDir' 'assets.ignored')"
 applied "$hits" "N11's removed assets source directory"
 refuses "$s" "never adds an assets source directory" "N11 (an APK carrying no assets)"
 
-echo "check-assets: self-test: 11 watched negatives, each with its" \
+# N12 — C8: the generator's seed moves while the artifact stays — a
+# stale derived artifact must be refused with the regeneration named.
+s="$(fresh n12)"
+hits="$(doctor "$s" tools/gen-market.py '0x6B617961' '0x6B617962')"
+applied "$hits" "N12's reseeded generator"
+refuses "$s" "does not match what tools/gen-market.py generates" "N12 (a stale derived artifact)"
+
+# N13 — C8: the artifact is absent entirely (the fresh-clone state
+# before any build) and the refusal names the ensure command.
+s="$(fresh n13)"
+rm "$s/guests/assets/market/transactions.csv"
+refuses "$s" "derived, never committed" "N13 (a missing derived artifact)"
+
+echo "check-assets: self-test: 13 watched negatives, each with its" \
     "perturbation proven applied"
 
 # ---------------------------------------------------------------------

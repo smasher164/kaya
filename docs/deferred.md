@@ -6181,3 +6181,81 @@ this is documentation debt, not a defect: the C floor exists to teach
 the explicit calls, and it currently teaches the pre-rule numbering.
 Renumbering is mechanical, only the lanes verify it, and it should ride
 the next C-floor touch rather than its own matrix run.
+
+
+## BUG — one build transaction over ~160 table rows ABORTS the app on the interpreter platforms (measured 2026-08-24)
+KEY: pump buffer 64 KiB, apply batch exceeds, capi.rs abort, interpreter ring cap, chunked inserts, transport wall
+
+Both interpreter dylibs read applies through a fixed 64 KiB pump buffer
+(SwiftUI `let cap = 64 * 1024`, Compose `ByteArray(64 * 1024)`), and
+crates/kaya/src/capi.rs asserts when a batch exceeds it: one build
+transaction inserting 161 four-column rows (408-416 wire bytes each)
+kills the process on macOS, iOS and Android before any harness step
+runs — byte-exact, load-independent, measured on all three
+(docs/measurements/choke-*-2026-08-24.txt). The GTK and WinUI pumps
+have no such cap, so the same guest bytes run on Linux and abort on
+mac: a uniform-semantics break in the transport, not the For. The fix
+direction is a growable or streamed pump (or a core-side batch split);
+guest-side chunking is the workaround the choke bench used, not the
+answer. FIRST of the pre-virtualization fixes (maintainer 2026-08-24):
+the portfolio's transactions view dies on this wall today at 2,645
+rows.
+
+## BUG — WinUI's child append is quadratic: reindex on every AddChild (measured 2026-08-24)
+KEY: reindex RowDefinitions, AddChild quadratic, COM round trips, winui append, N squared
+
+`ApplyOp::AddChild` in crates/kaya/src/winui/mod.rs ends every append
+with `reindex(core, parent)`, which clears the parent Grid's whole
+RowDefinitions, rebuilds one per existing child and re-stamps
+Grid::SetRow on every existing child — N appends cost N²/2 WinRT round
+trips, measured flat at ~1.5 µs per call pair from N=500 to 10,000
+(docs/measurements/choke-windows-2026-08-24.txt). Defer the reindex to
+batch end. This is why Windows' choke sits at 12,000 rows; fixing it
+moves the platform's whole baseline and must land BEFORE the
+virtualization slice so the before/after measures virtualization, not
+this bug.
+
+## BUG — a wedged main thread produces NO verdict: the step deadline is consulted only after a blocking hop returns (measured 2026-08-24, four platforms)
+KEY: POLL_DEADLINE, main.sync, on_ui_read recv no timeout, no verdict, harness loses legibly, wedged main thread
+
+The harness's expect deadline is checked after an attempt returns, and
+an attempt hops to the platform main thread with no timeout (SwiftUI
+`DispatchQueue.main.sync`; WinUI `on_ui_read` blocks on a bare
+`rx.recv()`; GTK's expect blocks in a main-thread hop). An app whose
+main thread is saturated therefore prints NOTHING — no FAILED, no
+timeout sentence — until something external kills it (the bench's own
+120s cap; on the windows lane wait-exit.ps1's 290s leg deadline).
+Measured on macOS, Linux, Windows and iOS
+(docs/measurements/choke-*-2026-08-24.txt). The harness must lose
+legibly here: a deadline on the HOP (or a watchdog thread that
+publishes the timeout verdict) in all three harness implementations.
+
+## BUG — the Swift binding's insert is quadratic (measured 2026-08-24)
+KEY: modelSet linear scan, swift insert quadratic, bindings/swift KayaApp insert
+
+bindings/swift/KayaApp.swift's `modelSet` linear-scans every entry
+inserted so far on each insert, so N inserts cost N²/2 comparisons —
+guest-side, before the wire (docs/measurements/
+choke-ios-2026-08-24.txt). A dictionary keyed the way every other
+binding keys it. Small, isolated, and it pollutes any large-data
+measurement made through Swift guests until fixed.
+
+## PERF — mac's table model cost is dominated by the generation hash re-hashing the whole subtree per body evaluation (measured 2026-08-24)
+KEY: kayaTableGeometryGeneration recursive hash, ObservationTracking churn, mac model-side choke, 42500 rows
+
+At 100k rows the mac main thread spends ~41% of its samples inside
+`kayaTableGeometryGeneration` — the geometry-generation hash (added
+2026-08-24 for stale-geometry rejection) recursively hashes the entire
+table subtree and is re-run per SwiftUI body evaluation — and ~37% in
+per-child ObservationTracking register/cancel; NSTableView's own row
+realization is unmeasurable
+(docs/measurements/choke-macos-2026-08-24.txt, sample hot frames in
+the report). The native tier's choke (42,500 rows chunked) is
+model-side. An incremental or cached generation (bumped at apply
+boundaries instead of recomputed by walk) is the fix shape; the
+census's stale-geometry guarantees must survive it — the table-tier
+probe holds them. Also recorded there: the GTK synthesized table path
+is 47× slower than a plain For with identical widget counts, and an
+unbounded natural-height For crashes X11 at 1,361 rows (window height
+crosses the 32,767px protocol ceiling) — both shape the virtualization
+design.

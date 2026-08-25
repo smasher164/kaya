@@ -1,0 +1,257 @@
+LINUX / GTK4 — non-virtualized For choke measurement
+====================================================
+Platform lane: tools/linux (docker image kaya-linux), X11 leg under Xvfb
+1600x1000x24, GDK_BACKEND=x11 — one leg mimicked by hand from
+tools/linux/run-suites.sh's run_one; the lane script itself was never run
+and never edited. Repo mounted READ-ONLY at /work.
+
+Guest language: PYTHON. tools/linux/run-suites.sh runs the table scene in
+rust/python/go/csharp/ocaml/haskell/java; python is one of them
+(`table-python ... python3 guests/python/table.py`), so the guest here is
+modelled on guests/python/table.py minus its sort policy.
+Guest: /scratch/linux/choke_guest.py — one collection, one 4-column table
+(Date, Ticker, Side, Total), strings generated in the guest from a counter
+(choke_rows.py), row count from KAYA_CHOKE_N (plain env, this lane's
+transport).
+Script: inline via KAYA_SELFTEST_SCRIPT, one step —
+  expect label#last "<total of row N-1>"
+(label#last is the last stamped cell of the last stamped row, so a pass
+proves the whole stamp reached the widget tree.)
+
+libkaya.so build id verified before the sweep: tools/build-id.sh --verify
+=> rc 0.
+
+WATCHED NEGATIVE (the assertion is not vacuous): with the guest stamping
+3 rows and the script asserting row 5's total, the leg fails, and the
+failure shows the retry-window shape —
+  N=3 mode=content verdict=FAIL-verdict wall_to_verdict=15.09s
+  :: KAYA_SELFTEST: FAILED (Target { kind: Label, index: -1, id: None,
+     keys: None } reads "26.02", wanted "52.04")
+15.09s == harness::POLL_DEADLINE (15s). So an incomplete stamp reports at
+first-expect + 15s, which is how "retry-window timeout" will look below.
+
+Columns below: N, mode, verdict, wall from guest launch to the
+KAYA_SELFTEST verdict line, wall to process exit, guest-side model build
+(python + wire records, before the core lowers anything), peak RSS of the
+guest process, and the verdict sentence.
+
+RUNS
+----
+N=500    mode=content verdict=PASS           wall_to_verdict=0.41s wall_to_exit=0.58s guest_build=29ms peak_rss=215MB :: KAYA_SELFTEST: OK (6487.99)
+N=1000   mode=content verdict=PASS           wall_to_verdict=1.12s wall_to_exit=1.77s guest_build=29ms peak_rss=265MB :: KAYA_SELFTEST: OK (12987.99)
+N=2500   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=1.86s guest_build=53ms peak_rss=197MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+
+(The three lines above predate the shell split below and are shell=bare.)
+
+MEASURED, NOT INFERRED — why N=2500 died at 1.86s. The un-virtualized For
+is a GtkBox with one child widget per row, and its natural height becomes
+the TOPLEVEL's height when the guest declares no window size (which is
+exactly what guests/python/table.py does). xwininfo on a live N=500 leg:
+
+  Window id: 0x600004 "kaya milestone 2"  Width: 540  Height: 12113
+
+12113px for 500 rows = 24.2px/row. X11 window geometry is 16-bit, so the
+window crosses 32767px somewhere near N=1350 and the X server answers
+ConfigureWindow with BadAlloc. That is a real choke of the existing
+implementation, but it says nothing about how expensive a row IS — so the
+sweep below runs three shells:
+
+  bare   — guests/python/table.py's exact shape: no window size.
+  sized  — same, window pinned to the lane's 1600x1000.
+  scroll — pinned window, the For inside kaya.scroll(grow=1): what an app
+           showing a long table would actually write, and the shape whose
+           numbers are comparable with the other four platforms.
+
+N=500    shell=bare   mode=content verdict=PASS           wall_to_verdict=0.41s wall_to_exit=0.58s guest_build=22ms peak_rss=216MB :: KAYA_SELFTEST: OK (6487.99)
+N=1000   shell=bare   mode=content verdict=PASS           wall_to_verdict=1.15s wall_to_exit=1.83s guest_build=25ms peak_rss=265MB :: KAYA_SELFTEST: OK (12987.99)
+N=1250   shell=bare   mode=content verdict=PASS           wall_to_verdict=1.66s wall_to_exit=2.63s guest_build=27ms peak_rss=291MB :: KAYA_SELFTEST: OK (16237.49)
+N=1300   shell=bare   mode=content verdict=PASS           wall_to_verdict=1.98s wall_to_exit=3.04s guest_build=31ms peak_rss=294MB :: KAYA_SELFTEST: OK (16887.99)
+N=1350   shell=bare   mode=content verdict=PASS           wall_to_verdict=2.04s wall_to_exit=3.17s guest_build=29ms peak_rss=299MB :: KAYA_SELFTEST: OK (17537.49)
+N=1400   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.66s guest_build=29ms peak_rss=169MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=2500   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=2.19s guest_build=40ms peak_rss=197MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1360   shell=bare   mode=content verdict=PASS           wall_to_verdict=2.24s wall_to_exit=3.52s guest_build=29ms peak_rss=300MB :: KAYA_SELFTEST: OK (17667.59)
+N=1370   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.69s guest_build=29ms peak_rss=169MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1355   shell=bare   mode=content verdict=PASS           wall_to_verdict=2.38s wall_to_exit=3.62s guest_build=30ms peak_rss=299MB :: KAYA_SELFTEST: OK (17602.54)
+N=1358   shell=bare   mode=content verdict=PASS           wall_to_verdict=1.97s wall_to_exit=3.07s guest_build=28ms peak_rss=300MB :: KAYA_SELFTEST: OK (17641.57)
+N=1365   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.61s guest_build=28ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1363   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.60s guest_build=27ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1364   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.61s guest_build=27ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1366   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.63s guest_build=38ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1361   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.68s guest_build=29ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1362   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.73s guest_build=28ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1361   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.70s guest_build=30ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1362   shell=bare   mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=0.79s guest_build=31ms peak_rss=168MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=1360   shell=bare   mode=content verdict=PASS           wall_to_verdict=2.09s wall_to_exit=3.45s guest_build=32ms peak_rss=299MB :: KAYA_SELFTEST: OK (17667.59)
+N=1360   shell=bare   mode=content verdict=PASS           wall_to_verdict=2.17s wall_to_exit=3.29s guest_build=28ms peak_rss=300MB :: KAYA_SELFTEST: OK (17667.59)
+N=500    shell=sized  mode=content verdict=PASS           wall_to_verdict=0.44s wall_to_exit=0.64s guest_build=21ms peak_rss=264MB :: KAYA_SELFTEST: OK (6487.99)
+N=2500   shell=sized  mode=content verdict=NOVERDICT-rc1  wall_to_verdict=n/a wall_to_exit=2.06s guest_build=40ms peak_rss=197MB :: exited 1 with no verdict; tail:    that is, you will receive the error a while after causing it. |    To debug your program, run it with the GDK_SYNCHRONIZE environment |    variable to change this behavior. You can then get a meaningful |    backtrace from your debugger if you break on the gdk_x_error() function.)
+N=500    shell=scroll mode=content verdict=PASS           wall_to_verdict=0.39s wall_to_exit=0.58s guest_build=22ms peak_rss=187MB :: KAYA_SELFTEST: OK (6487.99)
+N=1000   shell=scroll mode=content verdict=PASS           wall_to_verdict=1.18s wall_to_exit=1.86s guest_build=25ms peak_rss=204MB :: KAYA_SELFTEST: OK (12987.99)
+N=2500   shell=scroll mode=content verdict=PASS           wall_to_verdict=7.32s wall_to_exit=12.68s guest_build=40ms peak_rss=245MB :: KAYA_SELFTEST: OK (32487.99)
+N=5000   shell=scroll mode=content verdict=PASS           wall_to_verdict=41.74s wall_to_exit=78.21s guest_build=82ms peak_rss=327MB :: KAYA_SELFTEST: OK (64987.99)
+N=10000  shell=scroll mode=content verdict=CAP-120s       wall_to_verdict=n/a wall_to_exit=120.01s guest_build=236ms peak_rss=384MB :: no verdict line before the 120s cap; SIGKILLed
+N=20000  shell=scroll mode=content verdict=CAP-120s       wall_to_verdict=n/a wall_to_exit=120.01s guest_build=867ms peak_rss=673MB :: no verdict line before the 120s cap; SIGKILLed
+N=1500   shell=scroll mode=content verdict=PASS           wall_to_verdict=3.25s wall_to_exit=5.78s guest_build=35ms peak_rss=215MB :: KAYA_SELFTEST: OK (19487.99)
+N=2000   shell=scroll mode=content verdict=PASS           wall_to_verdict=6.05s wall_to_exit=11.61s guest_build=40ms peak_rss=231MB :: KAYA_SELFTEST: OK (25987.99)
+N=1750   shell=scroll mode=content verdict=PASS           wall_to_verdict=4.58s wall_to_exit=8.75s guest_build=41ms peak_rss=222MB :: KAYA_SELFTEST: OK (22737.49)
+N=2250   shell=scroll mode=content verdict=PASS           wall_to_verdict=9.84s wall_to_exit=19.28s guest_build=46ms peak_rss=236MB :: KAYA_SELFTEST: OK (29237.49)
+N=1850   shell=scroll mode=content verdict=PASS           wall_to_verdict=4.60s wall_to_exit=8.32s guest_build=42ms peak_rss=225MB :: KAYA_SELFTEST: OK (24037.49)
+N=1900   shell=scroll mode=content verdict=PASS           wall_to_verdict=3.86s wall_to_exit=6.80s guest_build=33ms peak_rss=226MB :: KAYA_SELFTEST: OK (24687.99)
+N=1850   shell=scroll mode=content verdict=PASS           wall_to_verdict=4.15s wall_to_exit=7.41s guest_build=34ms peak_rss=225MB :: KAYA_SELFTEST: OK (24037.49)
+N=1900   shell=scroll mode=content verdict=PASS           wall_to_verdict=4.12s wall_to_exit=7.52s guest_build=36ms peak_rss=226MB :: KAYA_SELFTEST: OK (24687.99)
+N=1950   shell=scroll mode=content verdict=PASS           wall_to_verdict=5.01s wall_to_exit=8.85s guest_build=36ms peak_rss=228MB :: KAYA_SELFTEST: OK (25337.49)
+N=2000   shell=scroll mode=content verdict=PASS           wall_to_verdict=5.50s wall_to_exit=10.60s guest_build=38ms peak_rss=231MB :: KAYA_SELFTEST: OK (25987.99)
+N=1950   shell=scroll mode=content verdict=PASS           wall_to_verdict=7.28s wall_to_exit=13.18s guest_build=37ms peak_rss=227MB :: KAYA_SELFTEST: OK (25337.49)
+N=2000   shell=scroll mode=content verdict=PASS           wall_to_verdict=6.96s wall_to_exit=12.44s guest_build=39ms peak_rss=230MB :: KAYA_SELFTEST: OK (25987.99)
+N=7500   shell=scroll mode=content verdict=CAP-120s       wall_to_verdict=n/a wall_to_exit=120.01s guest_build=159ms peak_rss=364MB :: no verdict line before the 120s cap; SIGKILLed
+N=6000   shell=scroll mode=content verdict=CAP-120s       wall_to_verdict=103.63s wall_to_exit=120.01s guest_build=112ms peak_rss=379MB :: no verdict line before the 120s cap; SIGKILLed
+N=5500   shell=scroll mode=content verdict=CAP-120s       wall_to_verdict=100.21s wall_to_exit=120.02s guest_build=96ms peak_rss=325MB :: no verdict line before the 120s cap; SIGKILLed
+N=5000   shell=scroll mode=content verdict=PASS           wall_to_verdict=47.64s wall_to_exit=111.22s guest_build=87ms peak_rss=357MB :: KAYA_SELFTEST: OK (64987.99)
+N=5500   shell=scroll mode=content verdict=PASS           wall_to_verdict=56.69s wall_to_exit=114.79s guest_build=101ms peak_rss=368MB :: KAYA_SELFTEST: OK (71487.99)
+N=4500   shell=scroll mode=content verdict=PASS           wall_to_verdict=35.95s wall_to_exit=66.04s guest_build=73ms peak_rss=303MB :: KAYA_SELFTEST: OK (58487.99)
+N=5500   shell=scroll mode=content verdict=PASS           wall_to_verdict=40.49s wall_to_exit=92.29s guest_build=94ms peak_rss=329MB :: KAYA_SELFTEST: OK (71487.99)
+N=6000   shell=scroll mode=content verdict=CAP-120s       wall_to_verdict=68.62s wall_to_exit=120.02s guest_build=108ms peak_rss=379MB :: no verdict line before the 120s cap; SIGKILLed
+
+MECHANISM PROBE — same rows, a quarter of the cells (KAYA_CHOKE_COLS=1
+stamps one Total cell per row instead of four). Not the protocol shape;
+it is here only to say whether the curve is driven by ROW count or by
+WIDGET count.
+N=2500   cols=1 shell=scroll mode=content verdict=PASS           wall_to_verdict=1.59s wall_to_exit=2.57s guest_build=42ms peak_rss=201MB :: KAYA_SELFTEST: OK (32487.99)
+N=2500   cols=1 shell=scroll mode=content verdict=PASS           wall_to_verdict=1.59s wall_to_exit=2.60s guest_build=42ms peak_rss=201MB :: KAYA_SELFTEST: OK (32487.99)
+N=5000   cols=1 shell=scroll mode=content verdict=PASS           wall_to_verdict=6.53s wall_to_exit=11.18s guest_build=83ms peak_rss=228MB :: KAYA_SELFTEST: OK (64987.99)
+
+MECHANISM PROBE 2 — the SAME rows and the same four labels per row, but
+through a plain For with no declared columns (KAYA_CHOKE_TABLE=0), so
+the GTK backend builds no GtkTable and therefore no per-column
+GtkSizeGroup. Same widget count, same model, same inserts.
+N=2500   cols=4 table=0 shell=scroll mode=content verdict=PASS           wall_to_verdict=0.52s wall_to_exit=0.58s guest_build=44ms peak_rss=240MB :: KAYA_SELFTEST: OK (32487.99)
+N=5000   cols=4 table=0 shell=scroll mode=content verdict=PASS           wall_to_verdict=1.01s wall_to_exit=1.05s guest_build=88ms peak_rss=308MB :: KAYA_SELFTEST: OK (64987.99)
+N=10000  cols=4 table=0 shell=scroll mode=content verdict=PASS           wall_to_verdict=1.95s wall_to_exit=2.01s guest_build=235ms peak_rss=444MB :: KAYA_SELFTEST: OK (129987.99)
+N=20000  cols=4 table=0 shell=scroll mode=content verdict=PASS           wall_to_verdict=4.22s wall_to_exit=4.32s guest_build=798ms peak_rss=718MB :: KAYA_SELFTEST: OK (259987.99)
+N=40000  cols=4 table=0 shell=scroll mode=content verdict=PASS           wall_to_verdict=10.36s wall_to_exit=10.60s guest_build=3312ms peak_rss=1268MB :: KAYA_SELFTEST: OK (519987.99)
+N=80000  cols=4 table=0 shell=scroll mode=content verdict=PASS           wall_to_verdict=32.98s wall_to_exit=33.42s guest_build=18752ms peak_rss=2365MB :: KAYA_SELFTEST: OK (39987.99)
+
+
+SUMMARY
+=======
+
+TIER: SYNTHESIZED, and every stamped row is realized. kaya's GTK table
+is not a toolkit table — crates/kaya/src/gtk.rs:1125 records that
+GtkColumnView was measured and rejected (a GtkListItem OWNS its child,
+so a widget kaya's stamp already parented fails
+gtk_widget_set_parent's parent==NULL assertion). What the backend builds
+instead (gtk.rs, GtkTable / reflow_table / table_rows) is a plain
+GtkBox: a composed header GtkBox, a GtkSeparator, then ONE GtkBox per
+stamped row, plus one horizontal GtkSizeGroup per column holding every
+cell in that column. Nothing recycles.
+
+Two shells, two different walls. Both are the existing non-virtualized
+For; they fail for different reasons and both numbers matter.
+
+A. THE LANE'S OWN SHAPE (shell=bare — guests/python/table.py declares no
+   window size)
+   degraded at: NEVER. The last passing run is 2.38s.
+   choke at:    N = 1361 rows. Sharp and deterministic —
+                1355/1358/1360 pass (1360 three times, 2.04-2.38s),
+                1361/1362 fail twice each, 1363/1364/1365/1366/1370/
+                1400/2500 all fail first try.
+   failure mode: CRASH — the X server refuses, the guest dies at ~0.6s
+                with no verdict, exit 1. Verbatim:
+
+     (python3:329): Gdk-WARNING **: The program 'python3' received an X
+     Window System error.
+     This probably reflects a bug in the program.
+     The error was 'BadAlloc (insufficient resources for operation)'.
+       (Details: serial 261 error_code 11 request_code 12 (core
+        protocol) minor_code 0)
+
+   Cause, MEASURED not inferred: the For's natural height becomes the
+   TOPLEVEL's height. xwininfo on a live leg at the last passing count:
+
+     N=1360  Window id: 0x600004 "kaya milestone 2"  Width: 540
+             Height: 32753
+
+   32753 is 14px under X11's 16-bit 32767 ceiling; one more 24.1px row
+   crosses it and ConfigureWindow (request_code 12) answers BadAlloc.
+   PINNING THE WINDOW DOES NOT HELP: shell=sized (1600x1000 declared)
+   fails at 2500 with the identical BadAlloc, because GTK will not
+   present a toplevel below its minimum and the un-virtualized For's
+   minimum is the sum of every row's.
+
+B. THE COMPARABLE SHAPE (shell=scroll — pinned window, the For inside
+   kaya.scroll(grow=1), which is what an app showing a long table would
+   write, and the only shell whose numbers mean the same thing as the
+   other four platforms')
+   degraded at: N ~= 1950 rows (first N over 5s launch-to-verdict).
+                1850: 4.60s, 4.15s | 1900: 3.86s, 4.12s
+                1950: 5.01s, 7.28s | 2000: 5.50s, 6.05s, 6.96s
+   choke at:    N = 6000 rows stable (2 of 2 runs fail); N = 5500 is the
+                FIRST failure seen, but it is 1 of 3 (100.21s capped,
+                then 56.69s and 40.49s passing). N = 5000 passes twice
+                (41.74s, 47.64s). 7500 / 10000 / 20000 all fail.
+   failure mode: MY 120s CAP, not the harness's retry window and not a
+                crash. Verbatim, the driver's own line:
+
+     no verdict line before the 120s cap; SIGKILLed
+
+                At 6000 the assertion itself still PASSED — the log
+                holds "KAYA_SELFTEST: OK (77987.99)" at 103.63s — and it
+                was the process exit that never came, because
+                GtkStage::finish hops request_exit to the main thread
+                and queues behind the same layout work. From 7500 up
+                there is no verdict line at all inside 120s.
+                THE RETRY WINDOW CANNOT FIRE HERE: harness::POLL_DEADLINE
+                is 15s, but a GTK expect BLOCKS in a hop to the main
+                thread, so a single poll can outlast the deadline and the
+                deadline is never reached. (The watched negative at the
+                top of this file is what a real retry-window timeout
+                looks like: 15.09s and a FAILED verdict.)
+
+MECHANISM — it is NOT row realization, and it is NOT the stamp/model
+path. It is the synthesized TABLE tier's per-column size groups.
+
+  1. The guest-side model build (python objects + the wire records for
+     every insert) is 40ms at 2500 rows and ~90ms at 5000 — under 0.25%
+     of wall. The stamp/model path is not where the time is.
+  2. Essentially all of the wall CPU is inside the guest process, i.e.
+     GTK, and none of it is X protocol or rendering (cpu_probe.py):
+       N=2500  wall 13.5s  guest_cpu 13.3s  xvfb_cpu 0.0s
+       N=5000  wall 69.1s  guest_cpu 68.9s  xvfb_cpu 0.0s
+  3. At a FIXED row count, quartering the cells per row (one Total cell
+     instead of four) cuts the time 4.6-7x — 2500: 7.32s -> 1.59s;
+     5000: 41.7s -> 6.53s — while guest_build is unchanged (42ms, 83ms).
+     The cost tracks CELLS, not rows or inserts.
+  4. THE DECIDING PERTURBATION: the same rows and the same four labels
+     per row through a plain For with NO declared columns
+     (KAYA_CHOKE_TABLE=0) builds no GtkTable and therefore no
+     GtkSizeGroups. Same widget count, same model, same inserts — and it
+     is LINEAR and 14-47x faster:
+
+       N       table (4 cols)      plain For (4 labels)
+       2500    7.32s               0.52s
+       5000    41.7 / 47.6s        1.01s
+       10000   >120s, no verdict   1.95s
+       20000   >120s, no verdict   4.22s
+       40000   —                   10.36s
+       80000   —                   32.98s
+
+     40000 realized row widgets and 160000 labels cost the plain For
+     10.4s. The table cannot finish 10000 rows in 120s.
+
+  So the choke is quadratic work inside the TABLE path, not the cost of
+  realizing rows. The shape that fits is gtk.rs's reflow_table (line
+  1322): on every applied batch it removes every member from each
+  column's GtkSizeGroup and re-adds every cell, and a size group
+  resolves each add and remove against all its current members —
+  O(cols x N^2) for one pass over N rows. NOT ISOLATED BY PERTURBATION
+  (the repo was read-only for this run), so that last sentence names the
+  candidate the numbers point at; what would isolate it is one run with
+  the size-group membership loop skipped.
+
+CAVEAT ON THE ABSOLUTE SECONDS: the sibling platform measurements ran on
+this host at the same time (two Android emulators, an iOS simulator, the
+Windows UTM VM, the macOS lane). Host load average was 3.9-6.8
+throughout, and that is why the 5000-6000 band is wide and why 2250
+(9.84s) once came in slower than 2500 (7.32s). The ORDERING and the
+SHAPES above are stable across repeats; a quiet host would move the
+choke up somewhat, not change which mechanism it is.
