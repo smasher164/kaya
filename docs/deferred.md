@@ -6330,3 +6330,15 @@ ruling). X11's 32,767px window ceiling and the GTK 47x table-path
 factor are in the choke reports (docs/measurements/). These are the
 design entry's constraints, recorded so the proposal argues from
 measurements.
+
+
+## Row-window breadth (§6.3) — the depth stubs it will strike
+
+- **DEPTH STUB: ledger on gtk** — the GTK tier realizes every row and
+  has no band to read; §6.3's spacer+band lowering closes it.
+- **DEPTH STUB: varied on gtk** — same wall, the corrected path's
+  scene; closes with the same lowering.
+- **DEPTH STUB: ledger on winui** — the WinUI tier realizes every row;
+  §6.3's spacer+band lowering closes it.
+- **DEPTH STUB: varied on winui** — same wall, the corrected path's
+  scene; closes with the same lowering.

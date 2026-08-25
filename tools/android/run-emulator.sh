@@ -2168,7 +2168,7 @@ ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
 # (official upstream support exists, PEP 738). The legs wire when it
 # lands.
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-ANDROID_UNWIRED_SCENES="portfolio"
+ANDROID_UNWIRED_SCENES="portfolio ledger varied"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"

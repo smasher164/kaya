@@ -2,6 +2,12 @@
 per account, a deterministic "Day tick", and integer-cent money so the
 byte-frozen scene asserts exact strings.
 
+The app's other screen is guests/python/ledger.py — the transactions
+view over guests/assets/market/transactions.csv, which is where row
+windowing is forced. It is a separate guest because a Python guest
+serves one scene and a 15,000-row For here would be stamped by THIS
+scene on every lane.
+
 Build the library first (cargo build), then:
     KAYA_SELFTEST=portfolio python3 guests/python/portfolio.py
 """

@@ -1059,6 +1059,20 @@ export KAYA_SELFTEST_SCRIPT
 run portfolio-python-swiftui env KAYA_SELFTEST=portfolio python3 guests/python/portfolio.py
 drain
 
+# THE ROW-WINDOW SCENES (docs/virtualization-plan.md §5-§6.2): python
+# alone at depth like the portfolio — the uniform 15k ledger drives the
+# exact path, the structurally varied guest drives correction and the
+# anchoring sentence. Neither is in SCENES/DEPTH_SCENES for the same
+# reason the portfolio is not.
+KAYA_SELFTEST_SCRIPT="$(scene_script ledger)"
+export KAYA_SELFTEST_SCRIPT
+run ledger-python-swiftui env KAYA_SELFTEST=ledger python3 guests/python/ledger.py
+drain
+KAYA_SELFTEST_SCRIPT="$(scene_script varied)"
+export KAYA_SELFTEST_SCRIPT
+run varied-python-swiftui env KAYA_SELFTEST=varied python3 guests/python/varied.py
+drain
+
 # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two
 # entries stamped from one template, each carrying its own row's a11y
 # identity, read back from the platform's real tree. A SEPARATE scene

@@ -169,6 +169,28 @@ def _journal_once(obj, restore):
         _journal[id(obj)] = restore
 
 
+def _journal_instances(coll):
+    """_journal_once for the one restore whose SNAPSHOT costs O(model).
+
+    THE SNAPSHOT IS TAKEN INSIDE THE `not in` TEST, never before it: a
+    collection's whole instance table is copied once per transaction, not
+    once per mutation. Built eagerly it made every insert/update/move/
+    remove/read O(entries) — 15,000 inserts cost 15,000 whole-model dict
+    copies, quadratic, measured (docs/deferred.md, "the Python binding's
+    insert is quadratic"). The scaling clause in
+    bindings/python/kaya_app_checks.py is what fails if it comes back.
+    """
+    if _journal is None or id(coll) in _journal:
+        return
+    old = {path: dict(entries) for path, entries in coll._instances.items()}
+
+    def restore():
+        coll._instances.clear()
+        coll._instances.update(old)
+
+    _journal[id(coll)] = restore
+
+
 def _guard_tracer_escape():
     """Element tracers are record-time blueprints; one captured into a
     handler is a stale reference to the template, not to any stamped
@@ -763,13 +785,7 @@ class _BoundCollection:
 
     def _mirror(self):
         owner = self._owner
-        old = {path: dict(entries) for path, entries in owner._instances.items()}
-
-        def restore():
-            owner._instances.clear()
-            owner._instances.update(old)
-
-        _journal_once(owner, restore)
+        _journal_instances(owner)
         return owner._instances.setdefault(tuple(self._path), {})
 
     def _encode(self, value):
@@ -1224,13 +1240,7 @@ class Collection(_BoundCollection):
         return _BoundCollection(self, list(path))
 
     def _purge(self, prefix):
-        old = {path: dict(entries) for path, entries in self._instances.items()}
-
-        def restore():
-            self._instances.clear()
-            self._instances.update(old)
-
-        _journal_once(self, restore)
+        _journal_instances(self)
         for path in [p for p in self._instances if p[: len(prefix)] == prefix]:
             del self._instances[path]
         for child in self._children:

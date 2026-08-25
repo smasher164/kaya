@@ -4714,3 +4714,17 @@ ran, and stayed GREEN through a check that decoded the nested
 template's whole record window. Watch such a twin with something the
 records can disagree about (a shifted exact-index token) instead of
 with which handle it passed.
+
+
+## The anchoring race reproduces under the matrix and not under spinners (2026-08-25)
+
+varied.steps' deep scroll (r200 into unmeasured rows) drifted to r128
+once under the five-lane matrix — corrections landed after the scroll
+and AppKit's own note-heights position keeping lost the race — and the
+explicit anchor re-park (KayaTableDriver.reparkAnchor) is the fix. The
+trap: the un-anchored build passes 5/5 under six CPU spinners; the
+race needs the matrix's contention SHAPE (memory pressure and
+main-thread latency together), so the observed field red in the matrix
+log is the negative's record, and the varied leg in every matrix run
+is its standing regression coverage. Do not claim a synthetic-load
+repro that was not measured.

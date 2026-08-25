@@ -231,6 +231,10 @@ pub struct KayaHostApi {
     pub scroll_to_row_str: unsafe extern "C" fn(u64, *const u8, usize) -> u64,
     pub scroll_to_row_i64: extern "C" fn(u64, i64) -> u64,
     pub window_geometry: unsafe extern "C" fn(u64, *mut crate::capi::KayaWindowGeometry),
+    /// One row's height, measured or presumed. The row-height delegate
+    /// asks per row over the WHOLE collection, which the band-shaped
+    /// geometry read cannot answer.
+    pub row_extent: extern "C" fn(u64, u64) -> f64,
 }
 
 unsafe extern "C" {
@@ -345,6 +349,7 @@ pub(crate) fn run() -> i32 {
         scroll_to_row_str: crate::capi::kaya_scroll_to_row_str,
         scroll_to_row_i64: crate::capi::kaya_scroll_to_row_i64,
         window_geometry: crate::capi::kaya_window_geometry,
+        row_extent: crate::capi::kaya_row_extent,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

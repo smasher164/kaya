@@ -1646,6 +1646,12 @@ typedef struct KayaHostApi {
   uint64_t (*scroll_to_row_str)(uint64_t, const uint8_t*, uintptr_t);
   uint64_t (*scroll_to_row_i64)(uint64_t, int64_t);
   void (*window_geometry)(uint64_t, struct KayaWindowGeometry*);
+  /**
+   * One row's height, measured or presumed. The row-height delegate
+   * asks per row over the WHOLE collection, which the band-shaped
+   * geometry read cannot answer.
+   */
+  double (*row_extent)(uint64_t, uint64_t);
 } KayaHostApi;
 
 
@@ -2208,6 +2214,18 @@ uint64_t kaya_scroll_to_row_i64(uint64_t for_target, int64_t key);
  * `out` must be a valid place to write a `KayaWindowGeometry`.
  */
 void kaya_window_geometry(uint64_t for_target, struct KayaWindowGeometry *out);
+
+/**
+ * One row's height in the core's arithmetic — measured if that row has
+ * been, presumed from the pitch otherwise, and 0 before this For has
+ * been measured at all.
+ *
+ * A ROW-HEIGHT DELEGATE ASKS PER ROW, over the whole collection and not
+ * just the band (the macOS native tier, §4), so the geometry read cannot
+ * serve: a backend without this would keep a height cache of its own,
+ * which is the second estimator §2 exists to remove.
+ */
+double kaya_row_extent(uint64_t for_target, uint64_t index);
 
 /**
  * Presentation side: block until the next transaction, resolve it

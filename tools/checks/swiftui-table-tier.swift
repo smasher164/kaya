@@ -481,6 +481,79 @@ enum KayaTableTierProbe {
         drew(KayaRender(node: plain, flexVertical: true, flexStretch: false), false,
             "a widget tree with no table draws no NSTableView (the finder discriminates)")
 
+        // --- Half 4: the tier's window contract at the view layer. -----
+        // Ruled 2026-08-25: expect_window carries first-visible and
+        // total only; the band-width arithmetic (visible plus one
+        // viewport of overscan each side) is held by the CORE's own
+        // watched tests (crates/kaya/src/rowwindow.rs), because a
+        // hand-built probe node has no core window to have arithmetic
+        // about. What the VIEW layer owes, and this clause holds: with
+        // no core window reported, the driver answers the UNREPORTED
+        // fallback — every row realized, band (0, N, N) — which is the
+        // compatibility bridge's tier half; and firstVisible reads the
+        // real visible range, not the band.
+        let bandTable = KayaNode(
+            id: 40, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("band".utf8))
+        bandTable.tableColumns = ["Only"]
+        for i in 0..<400 {
+            let row = KayaNode(
+                id: UInt64(41_000 + i), kind: UInt32(KAYA_KIND_ROW),
+                tag: Array("band-r\(i)".utf8))
+            let cell = KayaNode(
+                id: UInt64(42_000 + i), kind: UInt32(KAYA_KIND_LABEL),
+                tag: Array("band-c\(i)".utf8))
+            cell.text = "row \(i)"
+            row.children.append(cell)
+            bandTable.children.append(row)
+        }
+        bandTable.grow = 1
+        let bandWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        bandWindow.contentView = NSHostingView(
+            rootView: KayaRender(node: bandTable, flexVertical: true, flexStretch: false))
+        bandWindow.orderFront(nil)
+        let bandDeadline = Date().addingTimeInterval(5)
+        while Date() < bandDeadline, kayaTableDrivers[bandTable.id] == nil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        if let driver = kayaTableDrivers[bandTable.id] {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            let band = driver.band()
+            let visible = driver.firstVisible()
+            print("  window contract: band (\(band.first), \(band.count), "
+                + "\(band.total)), first visible \(visible.first) of \(visible.total)")
+            if band.first != 0 || band.count != 400 || band.total != 400 {
+                print("swiftui-table-tier: FAIL — an UNREPORTED table must answer "
+                    + "the fallback band (0, 400, 400), got (\(band.first), "
+                    + "\(band.count), \(band.total)) — the bridge's tier half")
+                failures += 1
+            }
+            if visible.total != 400 {
+                print("swiftui-table-tier: FAIL — firstVisible's total "
+                    + "\(visible.total), wanted the collection's 400")
+                failures += 1
+            }
+            // 400 rows at 24pt in a ~300pt window: the visible range is
+            // a strict subset, so a firstVisible that echoed the band
+            // would be indistinguishable from realized-everything —
+            // scroll and demand the read moves with the viewport.
+            driver.scroll(toRow: 200)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            let scrolled = driver.firstVisible()
+            if scrolled.first != 200 {
+                print("swiftui-table-tier: FAIL — after scroll(toRow: 200) "
+                    + "firstVisible reads \(scrolled.first), wanted 200 — the "
+                    + "verb's number must be the viewport's, not the band's")
+                failures += 1
+            }
+        } else {
+            print("swiftui-table-tier: FAIL — no driver materialized for the "
+                + "window-contract clause, so it was checked against nothing")
+            failures += 1
+        }
+        bandWindow.orderOut(nil)
+
         if failures == 0 {
             print("swiftui-table-tier: OK — rule, geometry, this host's branch, "
                 + "and the rendered tier")

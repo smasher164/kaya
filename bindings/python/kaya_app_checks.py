@@ -4,6 +4,7 @@ The core is never entered: records queue and the process exits."""
 import dataclasses
 import struct
 import sys
+import time
 from dataclasses import dataclass
 
 import kaya
@@ -2144,6 +2145,66 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         ok = "must be one of" in str(exc)
     _rewind(before_bad)
     check("add_section refuses a bad symbol at the call, not at the with", ok)
+
+# ---- a mutation costs the same at 32,000 entries as at 2,000 --------
+#
+# THE ONLY GUARD AVAILABLE IS A MEASUREMENT. The defect this replaces
+# was a whole-model dict copy taken per mutation for the rollback
+# journal (`_journal_instances` now takes it once per transaction):
+# every insert was O(entries), so N inserts cost N²/2 and the
+# transactions view's 15,000 rows cost 385ms of pure bookkeeping
+# (docs/deferred.md, "the Python binding's insert is quadratic").
+# Python has no compiler to refuse the eager copy the way Swift's
+# `private` refuses its own bypass, and no deterministic observable
+# distinguishes one snapshot from N — both leave ONE restore in the
+# journal. So the clause measures per-row cost at two sizes 16x apart:
+# quadratic shows up as growth (measured 9.7-12.6x with the old body
+# spliced back in), linear as none (measured 0.97-1.01x). The bound has
+# ~3x headroom on both sides, and the numbers print on every run so a
+# red says what was measured.
+BULK_SMALL = 2_000
+BULK_LARGE = 32_000
+BULK_GROWTH = 3.0
+
+
+@dataclass
+class Bulk:
+    a: str
+
+
+def _bulk_per_row_ms(n):
+    """ms per insert into a fresh collection, the transaction abandoned.
+
+    The rows are built BEFORE the clock starts: what is being timed is
+    the binding's accumulation path, not Python's f-strings."""
+    class _Stop(Exception):
+        pass
+
+    took = None
+    try:
+        with app.build():
+            table = kaya.collection(Bulk).at()
+            rows = [(f"k{i:07d}", Bulk(a=f"a{i}")) for i in range(n)]
+            start = time.perf_counter()
+            for key, value in rows:
+                table.insert(key, value)
+            took = time.perf_counter() - start
+            raise _Stop()
+    except _Stop:
+        pass
+    return took * 1000 / n
+
+
+bulk_small = _bulk_per_row_ms(BULK_SMALL)
+bulk_large = _bulk_per_row_ms(BULK_LARGE)
+bulk_growth = bulk_large / bulk_small
+print(f"bulk insert: {BULK_SMALL} rows {bulk_small:.5f} ms/row, "
+      f"{BULK_LARGE} rows {bulk_large:.5f} ms/row, "
+      f"growth {bulk_growth:.2f}x (bound {BULK_GROWTH}x)")
+check(
+    "an insert costs the same at 32,000 entries as at 2,000",
+    bulk_growth < BULK_GROWTH,
+)
 
 # ---- the capability query ------------------------------------------
 #

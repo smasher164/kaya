@@ -137,6 +137,23 @@ impl RowWindow {
         self.position(order, order.len())
     }
 
+    /// ONE row's height: what it measured, else the presumption, else 0
+    /// before anything has been measured at all.
+    ///
+    /// The tier that asks AppKit's question — a row height per row,
+    /// realized or not (docs/virtualization-plan.md §4) — reads it here
+    /// rather than keeping a cache of its own, which would be the second
+    /// estimator §2 exists to remove.
+    pub(crate) fn row_extent(&self, order: &[Key], index: usize) -> f64 {
+        let Some(key) = order.get(index) else {
+            return 0.0;
+        };
+        self.heights
+            .get(key)
+            .copied()
+            .unwrap_or_else(|| self.pitch.unwrap_or(0.0))
+    }
+
     /// Park the viewport on the row at `first`: its identity, and the
     /// position it has right now.
     ///
@@ -372,6 +389,20 @@ mod tests {
             50.0 * 20.0,
             "and reading it does not consume it"
         );
+    }
+
+    /// The per-row read the row-height delegate asks: measured, else the
+    /// presumption, and 0 only before anything has been measured.
+    #[test]
+    fn a_row_extent_is_measured_then_presumed() {
+        let order = keys(10);
+        let mut w = RowWindow::default();
+        assert_eq!(w.row_extent(&order, 0), 0.0, "nothing is presumed yet");
+        w.measured(0, &order[0..2], &[20.0, 44.0]);
+        assert_eq!(w.row_extent(&order, 0), 20.0);
+        assert_eq!(w.row_extent(&order, 1), 44.0);
+        assert_eq!(w.row_extent(&order, 9), 20.0, "unmeasured rows take the pitch");
+        assert_eq!(w.row_extent(&order, 10), 0.0, "and past the end is not a row");
     }
 
     /// A permuted order invalidates the sums: the tree is indexed by

@@ -1,10 +1,14 @@
 # market — the portfolio app's synthetic transaction ledger
 
-- `transactions.csv` — 2,645 transactions across the portfolio book's
-  three accounts and five tickers, three years ending 2026-08-24,
-  integer cents, oldest first. The price walk runs BACKWARD from
+- `transactions.csv` — 15,000 transactions across the portfolio book's
+  three accounts and five tickers, 2023-10-12 to 2026-08-24, integer
+  cents, oldest first. The price walk runs BACKWARD from
   guests/python/portfolio.py's live book, so the last day of history
-  meets the dashboard's present.
+  meets the dashboard's present. The size is DECLARED (gen-market.py's
+  `ROWS`) and kept from the recent end: the per-day lot count is a
+  draw, so the walk overshoots and the tail is taken. 15,000 is above
+  WinUI's measured 12,000-row choke, which is the size row windowing
+  exists to make ordinary (docs/virtualization-plan.md §5).
 
 WHERE THEY CAME FROM: generated, not gathered — no upstream exists;
 every byte was written by `python3 tools/gen-market.py`, which

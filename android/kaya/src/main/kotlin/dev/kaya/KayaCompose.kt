@@ -5546,6 +5546,41 @@ object KayaCompose {
                         }
                         if (off != null) failures.add("header_click: $off")
                     }
+                    "expect_window" -> {
+                        // THE FIRST VISIBLE ROW AND THE DECLARED
+                        // TOTAL (docs/virtualization-plan.md §5; the
+                        // realized count left the verb 2026-08-25 — a
+                        // band width is a viewport metric). This tier
+                        // does not window yet — §6.3 carries the
+                        // spacer+band shape here — so every row is
+                        // realized, the first is visible at rest, and
+                        // "0 n" is what it actually drew rather than a
+                        // stub's silence.
+                        val want = parts.drop(2).joinToString(" ")
+                        val got = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
+                                "0 ${node.children.size}"
+                            }
+                        }
+                        if (got != null && got == want) {
+                            observed.add("${parts[1]} window $want")
+                        } else if (got != null) {
+                            failures.add("${parts[1]} windows \"$got\", wanted \"$want\"")
+                        } else {
+                            failures.add("no such target ${parts[1]}")
+                        }
+                    }
+                    "scroll_to_row" -> {
+                        // Nothing to scroll to while every row is
+                        // realized and no band follows the viewport:
+                        // this says so in the sentence the step fails
+                        // with, rather than passing silently
+                        // (docs/virtualization-plan.md §6.3).
+                        failures.add(
+                            "scroll_to_row: the Compose tier does not window rows yet " +
+                                "(docs/virtualization-plan.md §6.3)"
+                        )
+                    }
                     "expect_shares" -> {
                         // Percent of the CHILDREN'S SUM, not of the
                         // container, so spacing and padding (platform

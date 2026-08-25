@@ -305,6 +305,76 @@ if track_handoff_count != 2:
                f"construction sites, found {track_handoff_count}. The vertical and "
                "horizontal flex paths must tag the same observation.")
 
+# THE OBSERVATION FUNNEL, and the reason it is a clause: the mac
+# native tier reports NSTableView's own frames while the synthesized one
+# reports SwiftUI's, so the displaced-cells negative below can only move
+# BOTH with one perturbation while both go through one recorder. A second
+# writer would leave that negative proving one tier and reporting the
+# other.
+for field, writer in (
+    ("tableCellFrames", "kayaRecordTableCell"),
+    ("tableViewport", "kayaRecordTableViewport"),
+):
+    recorder = braced(text, r"func " + writer + r"\s*\(")
+    if recorder is None:
+        bad.append(f"{path}: no `func {writer}(` — the one writer of `{field}` is gone "
+                   "or renamed, so this gate's displacement negative would perturb a "
+                   "path only one tier reads.")
+        continue
+    writes = list(re.finditer(rf"\.{field}(?:\[[^\]]*\])?\s*=(?!=)", text))
+    print(f"check-table-tier: {field} write sites found {len(writes)}")
+    if not writes:
+        bad.append(f"{path}: no write to `{field}` at all — this census is reading a "
+                   "name the interpreter no longer uses, so it agrees with anything.")
+    for m in writes:
+        if recorder[0] <= m.start() < recorder[1]:
+            continue
+        bad.append(f"{path}:{line_of(m.start())}: `{field}` is written outside "
+                   f"{writer}. Both tiers record through ONE writer so that one "
+                   "displacement moves both; a second one is a tier whose geometry "
+                   "no negative here can perturb.")
+
+# THE WINDOW LOOP IS WIRED (docs/virtualization-plan.md §3-§4). The mac
+# native tier drives three links and only ONE of them has a scene
+# observable. MEASURED 2026-08-25, each removed in turn with the probe
+# scene watched: without the RANGE report the band never narrows and
+# expect_window reddens ("windows \"0 3 3\", wanted \"1 2 3\"); without the
+# HEIGHT report the core's arithmetic is simply empty — extent 0.0,
+# corrected 0 — and every scene stays green, because a height moves the
+# arithmetic and never the band; without the row-height READ every row
+# draws at the tier's floor and the taller ones clip, which is pixels and
+# no assertion. So the two silent links are held here, statically, the way
+# check-native-undo holds the pair no scene can fail.
+loop = braced(text, r"final class KayaTableDriver\s*:")
+if loop is None:
+    bad.append(f"{path}: no `final class KayaTableDriver:` — the mac tier's window "
+               "loop was renamed or moved, and the two links no scene can see are "
+               "unheld.")
+else:
+    driver = text[loop[0]:loop[1]]
+    height_arm = braced(
+        text, r"func tableView\(\s*_ tableView: NSTableView, heightOfRow row: Int\)",
+        loop[0], loop[1])
+    for call, where, why in (
+        ("KayaHost.windowMoved(", driver,
+         "the visible range is never reported, so the core's band can never narrow"),
+        ("KayaHost.rowsMeasured(", driver,
+         "the extents this tier laid out are never reported, so the core presumes "
+         "forever: measured extent 0.0 and corrected 0, with every scene green"),
+        ("KayaHost.rowExtent(", text[height_arm[0]:height_arm[1]] if height_arm else None,
+         "the row-height delegate stops asking the core, so every row draws at the "
+         "tier's floor and a taller one clips — the second estimator §2 exists to "
+         "remove"),
+    ):
+        if where is None:
+            bad.append(f"{path}: no `heightOfRow` arm inside KayaTableDriver — the "
+                       "row-height delegate this gate reads is gone.")
+            continue
+        print(f"check-table-tier: window-loop link `{call}` found "
+              f"{where.count(call)} time(s)")
+        if call not in where:
+            bad.append(f"{path}: KayaTableDriver never calls `{call}` — {why}.")
+
 invalidation_match = braced(text, r"func kayaInvalidateTableGeometry\s*\(")
 if invalidation_match is None:
     bad.append(f"{path}: no `func kayaInvalidateTableGeometry(` — layout-only changes "
@@ -743,6 +813,40 @@ applied "$hits" "one flex path stopped handing table generations to its track re
 refuses "$T/untagged-flex-track.swift" "wanted the table-generation handoff" \
     "one flex orientation recording untagged table tracks"
 
+hits="$(perturb "$SWIFTUI" \
+    '                KayaHost\.windowMoved\(node\.id, visible\.location, visible\.length\)\n' \
+    '' "$T/no-range-report.swift")"
+applied "$hits" "the visible-range report removed" \
+    "struct KayaNativeTable > class KayaTableDriver > func report"
+refuses "$T/no-range-report.swift" "never calls \`KayaHost.windowMoved(\`" \
+    "a tier whose band can never narrow"
+
+hits="$(perturb "$SWIFTUI" \
+    '            KayaHost\.rowsMeasured\(node\.id, visible\.location, heights\)\n' \
+    '' "$T/no-height-report.swift")"
+applied "$hits" "the measured-extent report removed" \
+    "struct KayaNativeTable > class KayaTableDriver > func measureRows"
+refuses "$T/no-height-report.swift" "never calls \`KayaHost.rowsMeasured(\`" \
+    "a tier that leaves the core presuming forever"
+
+hits="$(perturb "$SWIFTUI" \
+    '            let extent = KayaHost\.rowExtent\(node\.id, row\)\n            return extent > 0 \? CGFloat\(extent\) : kayaNativeRowHeight' \
+    '            return kayaNativeRowHeight' "$T/unasked-row-height.swift")"
+applied "$hits" "the row-height delegate ignoring the core" \
+    "struct KayaNativeTable > class KayaTableDriver > func tableView"
+refuses "$T/unasked-row-height.swift" "never calls \`KayaHost.rowExtent(\`" \
+    "a second estimator beside the core's"
+
+hits="$(perturb "$SWIFTUI" \
+    'kayaRecordTableCell\(\n                        node, kayaTableCellKey\(stamped, column, cell\), generation, frame\)' \
+    'node.tableCellFrames[kayaTableCellKey(stamped, column, cell)] =
+                        KayaTableCellObservation(generation: generation, frame: frame)' \
+    "$T/second-cell-writer.swift")"
+applied "$hits" "the native tier writing cell geometry past the recorder" \
+    "struct KayaNativeTable > class KayaTableDriver > func recordGeometry"
+refuses "$T/second-cell-writer.swift" "is written outside kayaRecordTableCell" \
+    "a tier recording its cells where no displacement negative can reach them"
+
 hits="$(perturb "$SWIFTUI" 'struct KayaFlex: Layout \{' \
     'let kayaEscapedTier = KayaNativeTable(node: node)
 struct KayaFlex: Layout {' "$T/escaped-tier.swift")"
@@ -937,6 +1041,20 @@ runtime_refuses "$T/unkeyed-table-track-task.swift" "unkeyed-table-track-task" \
     "a same-size layout invalidation republishes geometry and track" \
     "a table-track task that cannot republish at the same size"
 
+# The window-contract clause (ruled 2026-08-25: expect_window says
+# first-visible and total; the band width is the core's tests' to
+# hold). Its negative: a firstVisible that echoes the BAND's first
+# would be indistinguishable from the verb reading realized-everything,
+# and the probe's scroll step must catch exactly that.
+hits="$(perturb "$SWIFTUI" \
+    'return \(visible\.length > 0 \? visible\.location : 0, declared\)' \
+    'return (first, declared)' "$T/band-echoing-first-visible.swift")"
+applied "$hits" "firstVisible echoing the band's first instead of the viewport's" \
+    "struct KayaNativeTable > class KayaTableDriver > func firstVisible"
+runtime_refuses "$T/band-echoing-first-visible.swift" "band-echoing-first-visible" \
+    "the verb's number must be the viewport's, not the band's" \
+    "a firstVisible read that echoes the band"
+
 # Geometry guards share this watched shadow; every perturbation's count
 # is printed before the one doctored interpreter is compiled.
 hits="$(perturb "$SWIFTUI" 'abs\(Double\(viewport\.width\) - track\) <= tolerance' \
@@ -956,11 +1074,19 @@ hits="$(perturb "$T/unkeyed-columns.swift" \
     'if next == previous { return false }' "$T/unordered-columns.swift")"
 applied "$hits" "descending column representatives accepted" \
     "func kayaTableColumnRepresentativesIncrease"
-hits="$(perturb "$T/unordered-columns.swift" 'let frame = geo\.frame\(in: \.global\)' \
-    'let frame = geo.frame(in: .global).offsetBy(dx: 1000, dy: 1000)' \
+# THE RECORDER, not either tier's reader: the mac native tier reports
+# NSTableView's own cell rects and the synthesized one SwiftUI's frames,
+# so a perturbation inside KayaEdgeReporter — where this one used to sit —
+# displaces the synthesized tier alone and leaves the probe's live NATIVE
+# clauses green about an unperturbed path (measured 2026-08-25, when the
+# mac tier stopped being a SwiftUI Table).
+hits="$(perturb "$T/unordered-columns.swift" \
+    'node\.tableCellFrames\[key\] = KayaTableCellObservation\(\n        generation: generation, frame: frame\)' \
+    'node.tableCellFrames[key] = KayaTableCellObservation(
+        generation: generation, frame: frame.offsetBy(dx: 1000, dy: 1000))' \
     "$T/displaced-cells.swift")"
 applied "$hits" "live cell geometry displaced outside its viewport" \
-    "struct KayaEdgeReporter > var body"
+    "func kayaRecordTableCell"
 # The ROW-CELL filter, anchored on the lookup above it: the bare
 # `observation.generation == generation` matches the TRACK filter first,
 # which the standalone unversioned-table-track negative already owns.

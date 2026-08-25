@@ -2929,6 +2929,56 @@ enum KayaHost {
         }
     }
 
+    // --- ROW WINDOWING (docs/virtualization-plan.md §3) ---------------
+    //
+    // Backend plumbing: no binding spells any of it and no guest hears
+    // it. EVERY ONE IS NIL-GUARDED — the tools/checks probes host this
+    // render path with no core behind it (none of them sets `api`), so
+    // an unguarded call would crash the gate rather than the app.
+
+    /// A For's visible range changed: scroll, resize or first layout.
+    static func windowMoved(_ container: UInt64, _ first: Int, _ count: Int) {
+        guard api != nil else { return }
+        api.window_moved(container, UInt64(max(0, first)), UInt64(max(0, count)))
+    }
+
+    /// The extents this tier laid out for the realized rows at `first…`.
+    static func rowsMeasured(_ container: UInt64, _ first: Int, _ heights: [Double]) {
+        guard api != nil, !heights.isEmpty else { return }
+        heights.withUnsafeBufferPointer { buffer in
+            api.rows_measured(container, UInt64(max(0, first)), buffer.baseAddress, UInt(buffer.count))
+        }
+    }
+
+    /// The keyed row's index in the collection's CURRENT order; nil when
+    /// there is no answer (the core's fault carries the sentence).
+    static func scrollToRow(_ container: UInt64, _ key: String) -> Int? {
+        guard api != nil else { return nil }
+        let bytes = Array(key.utf8)
+        let answer = bytes.withUnsafeBufferPointer { buffer in
+            api.scroll_to_row_str(container, buffer.baseAddress, UInt(buffer.count))
+        }
+        return answer == KAYA_ROW_NOT_FOUND ? nil : Int(answer)
+    }
+
+    /// The band, the declared total and the arithmetic the core owns.
+    /// nil when there is no core; a `total` of 0 is an answer about a
+    /// For this core does not know, which reads the same way.
+    static func windowGeometry(_ container: UInt64) -> KayaWindowGeometry? {
+        guard api != nil else { return nil }
+        var geometry = KayaWindowGeometry()
+        api.window_geometry(container, &geometry)
+        return geometry
+    }
+
+    /// One row's height, measured or presumed — the row-height
+    /// delegate's question. 0 means the core has nothing to say yet and
+    /// the tier's own floor stands.
+    static func rowExtent(_ container: UInt64, _ index: Int) -> Double {
+        guard api != nil, index >= 0 else { return 0 }
+        return api.row_extent(container, UInt64(index))
+    }
+
     /// An entry edit, with the three facts the core's undo ledger cannot
     /// derive (docs/undo-plan.md §3).
     ///
@@ -5733,6 +5783,72 @@ private func kayaRunScript(_ script: String) {
                     return nil
                 }
                 if let off { failures.append("header_click: \(off)") }
+            case "expect_window":
+                // THE REALIZED BAND AND THE DECLARED TOTAL
+                // (docs/virtualization-plan.md §5), read from the tier
+                // that drew: the core owns the arithmetic — it is the
+                // one that decides which rows are realized — and the
+                // TIER is asked for the count it actually holds, so a
+                // band the core believes in but nobody stamped reads as
+                // the disagreement it is rather than as agreement.
+                let want = parts[2...].joined(separator: " ")
+                let got = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
+                        return nil
+                    }
+                    #if os(macOS)
+                        if let driver = kayaTableDrivers[node.id] {
+                            let v = driver.firstVisible()
+                            return "\(v.first) \(v.total)"
+                        }
+                    #endif
+                    // A For no tier of this backend windows: the whole
+                    // collection is realized and its first row is
+                    // visible at rest, which is what an unreported
+                    // window answers too.
+                    guard let geometry = KayaHost.windowGeometry(node.id),
+                        geometry.total > 0
+                    else {
+                        return "0 \(node.children.count)"
+                    }
+                    return "\(geometry.first) \(geometry.total)"
+                }
+                if let got, got == want {
+                    observed.append("\(parts[1]) window \(want)")
+                } else if let got {
+                    failures.append("\(parts[1]) windows \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "scroll_to_row":
+                // The core maps the KEY to an index in the collection's
+                // current order and the tier scrolls that row to the
+                // viewport's TOP. An action, silent like click: the
+                // expect_window after it is the observable. The key is a
+                // string, exactly as a kind@id[key] target's is, and
+                // quoted only when it needs to be (harness.rs's parse is
+                // the norm).
+                let rawKey = parts[2...].joined(separator: " ")
+                let key = rawKey.hasPrefix("\"") ? kayaQuoted(Array(parts[2...])) : rawKey
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
+                        return "no such target \(parts[1])"
+                    }
+                    guard let index = KayaHost.scrollToRow(node.id, key) else {
+                        return "no row of \(parts[1]) carries the key \"\(key)\""
+                    }
+                    #if os(macOS)
+                        guard let driver = kayaTableDrivers[node.id] else {
+                            return "\(parts[1]) is not a windowed tier on this backend"
+                        }
+                        driver.scroll(toRow: index)
+                        return nil
+                    #else
+                        return "the iOS tier does not window rows yet "
+                            + "(docs/virtualization-plan.md §6.3)"
+                    #endif
+                }
+                if let off { failures.append("scroll_to_row: \(off)") }
             case "expect_shares":
                 // The container's children as whole-percentage shares of
                 // their sum. Percent of the children's sum and not of the
@@ -8081,27 +8197,74 @@ struct KayaTableSurface: View {
     }
 }
 
-/// The native macOS Table's fixed metrics, MEASURED 2026-08-24 by a
-/// real-window probe (inset-style NSTableView under SwiftUI Table:
-/// rowHeight 24, intercell 0, header 28, 5pt content insets above and
-/// below) — the content-height ruling: an UNGROWN table hugs
-/// header + rows, a GROWN one stays the fill-and-scroll viewport
-/// (docs/tables-plan.md, the empty-row ruling). The trailing 5 is the
-/// APRON, not scroll inset: NSTableView paints its next phantom stripe
-/// from the last row's edge, so table height past the rows shows that
-/// stripe (grey sliver at odd parity) while height cut to the rows
-/// leaves a grey LAST stripe flush against the table edge (asymmetric
-/// at even parity) — both viewed on 2026-08-24 captures. The
-/// safeAreaInset in KayaNativeTable owns those 5pt and paints them in
-/// the table's own base color, so neither parity can show. iOS metrics
-/// are unpinned until a scene exercises an ungrown native table there.
-private func kayaNativeTableContentHeight(rows: Int) -> CGFloat {
-    #if os(macOS)
-        return 28 + 5 + CGFloat(rows) * 24 + 5
-    #else
-        return 28 + 5 + CGFloat(rows) * 44 + 5
-    #endif
-}
+/// The mac native tier's fixed metrics, MEASURED 2026-08-24 by a
+/// real-window probe of the inset-style NSTableView SwiftUI's Table was
+/// made of — rowHeight 24, intercell 0, header 28, 5pt above the first
+/// row and below the last — and kept when the tier became kaya's OWN
+/// inset-style NSTableView (docs/virtualization-plan.md §4). The
+/// content-height ruling: an UNGROWN table hugs header + rows, a GROWN
+/// one stays the fill-and-scroll viewport (docs/tables-plan.md, the
+/// empty-row ruling). The trailing 5 is the APRON, not scroll inset:
+/// NSTableView paints its next phantom stripe from the last row's edge,
+/// so table height past the rows shows that stripe (grey sliver at odd
+/// parity) while height cut to the rows leaves a grey LAST stripe flush
+/// against the table edge (asymmetric at even parity) — both viewed on
+/// 2026-08-24 captures. The safeAreaInset in KayaNativeTable owns those
+/// 5pt and paints them in the table's own base color, so neither parity
+/// can show. THE 5 ABOVE THE FIRST ROW IS THE STYLE'S OWN (re-measured
+/// 2026-08-25: rect(ofRow: 0).minY is 5 with zero content insets), so
+/// setting a content inset as well double-counts and pushes the last row
+/// out of the hug. iOS metrics are unpinned until a scene exercises an
+/// ungrown native table there.
+#if os(macOS)
+    /// The mac tier's own metrics, the measured numbers above named: the
+    /// row-height FLOOR (a row measures TALLER when its content is,
+    /// which is what moves a For onto the corrected path), the header,
+    /// the inset over the first row, and the apron under the last.
+    let kayaNativeRowHeight: CGFloat = 24
+    let kayaNativeHeaderHeight: CGFloat = 28
+    let kayaNativeTopInset: CGFloat = 5
+    let kayaNativeApronHeight: CGFloat = 5
+
+    /// The WHOLE collection's height, realized or not: the core's
+    /// arithmetic when it has any (N x pitch on the exact path, a prefix
+    /// sum on the corrected one), and the tier's floor before the first
+    /// measurement — which is also what the gate probes get, since they
+    /// host this render path with no core behind it.
+    private func kayaNativeTableExtent(_ node: KayaNode) -> CGFloat {
+        if let geometry = KayaHost.windowGeometry(node.id), geometry.total > 0,
+            geometry.extent > 0
+        {
+            return CGFloat(geometry.extent)
+        }
+        return CGFloat(node.children.count) * kayaNativeRowHeight
+    }
+
+    private func kayaNativeTableContentHeight(_ node: KayaNode) -> CGFloat {
+        kayaNativeHeaderHeight + kayaNativeTopInset + kayaNativeTableExtent(node)
+            + kayaNativeApronHeight
+    }
+
+    /// An AppKit rect in the SPACE THE HARNESS COMPARES IN: the window's
+    /// content view, y DOWN from its top-left, which is what SwiftUI's
+    /// `.global` means and therefore what every rule written against
+    /// these observations assumes. AppKit's y runs the other way, and a
+    /// rule like expect_fills' hug ("the slack BELOW the last row") reads
+    /// an unflipped rect as 33pt of chrome ABOVE it — measured, before
+    /// this existed.
+    func kayaHarnessRect(_ rect: CGRect, in view: NSView) -> CGRect {
+        guard let content = view.window?.contentView else { return rect }
+        let inContent = view.convert(rect, to: content)
+        if content.isFlipped { return inContent }
+        return CGRect(
+            x: inContent.minX, y: content.bounds.height - inContent.maxY,
+            width: inContent.width, height: inContent.height)
+    }
+#else
+    private func kayaNativeTableContentHeight(_ node: KayaNode) -> CGFloat {
+        28 + 5 + CGFloat(node.children.count) * 44 + 5
+    }
+#endif
 
 private var kayaNativeTableApron: Color {
     #if os(macOS)
@@ -8111,102 +8274,700 @@ private var kayaNativeTableApron: Color {
     #endif
 }
 
+/// The header record BOTH native paths publish — "<titles|joined>
+/// [^N|vN]" — written by the path that DREW, never a model echo, so
+/// expect_columns proves a table rendered. No size-class prefix: headers
+/// render at every width (ratified 2026-08-21, docs/tables-plan.md).
+private func kayaTablePresented(_ node: KayaNode) -> String {
+    var presented = node.tableColumns.joined(separator: "|")
+    if node.tableSorted != kayaSortNone {
+        presented += node.tableDirection == 0 ? " ^" : " v"
+        presented += String(node.tableSorted)
+    }
+    return presented
+}
+
 @available(macOS 14.4, iOS 17.4, *)
 private struct KayaNativeTable: View {
     let node: KayaNode
 
-    private var specs: [KayaColumnSpec] {
-        node.tableColumns.enumerated().map { KayaColumnSpec(id: $0.offset, title: $0.element) }
-    }
-
-    private var sortOrder: Binding<[KayaColumnComparator]> {
-        Binding(
-            get: {
-                node.tableSorted == kayaSortNone
-                    ? []
-                    : [
-                        KayaColumnComparator(
-                            column: Int(node.tableSorted),
-                            order: node.tableDirection == 0 ? .forward : .reverse)
-                    ]
-            },
-            set: { requested in
-                // The user clicked a header: SwiftUI proposes a new
-                // order, and the proposal's COLUMN is the whole
-                // message — direction cycling is the guest's policy.
-                if let first = requested.first {
-                    KayaHost.emitSortRequested(node.sortTag, UInt32(first.column))
+    var body: some View {
+        // READ IN THE BODY, all of it: these are what make SwiftUI
+        // re-evaluate — and on macOS re-enter updateNSView — when the
+        // model or the geometry generation moves.
+        let generation = kayaTableGeometryGeneration(node)
+        #if os(macOS)
+            KayaMacNativeTable(
+                node: node, generation: generation, columns: node.tableColumns,
+                sorted: node.tableSorted, direction: node.tableDirection
+            )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if node.grow <= 0 {
+                    kayaNativeTableApron.frame(height: kayaNativeApronHeight)
                 }
             }
-        )
+            .frame(
+                height: node.grow > 0 ? nil : kayaNativeTableContentHeight(node),
+                alignment: .top)
+        #else
+            KayaTableColumns(node: node, generation: generation)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if node.grow <= 0 {
+                        kayaNativeTableApron.frame(height: 5)
+                    }
+                }
+                .frame(
+                    height: node.grow > 0 ? nil : kayaNativeTableContentHeight(node),
+                    alignment: .top)
+                .background(
+                    KayaTableViewportReporter(
+                        node: node, generation: generation, synthesized: false))
+                .onAppear { node.tablePresented = kayaTablePresented(node) }
+                .onChange(of: node.tableColumns) {
+                    node.tablePresented = kayaTablePresented(node)
+                }
+                .onChange(of: node.tableSorted) {
+                    node.tablePresented = kayaTablePresented(node)
+                }
+                .onChange(of: node.tableDirection) {
+                    node.tablePresented = kayaTablePresented(node)
+                }
+        #endif
     }
+}
 
-    var body: some View {
-        let generation = kayaTableGeometryGeneration(node)
-        Table(node.children, sortOrder: sortOrder) {
-            TableColumnForEach(specs) { spec in
-                TableColumn(
-                    Text(spec.title),
-                    sortUsing: KayaColumnComparator(column: spec.id, order: .forward)
-                ) { (row: KayaNode) in
-                    // The core held every row template to the declared
-                    // arity; the guard is positional safety, never a
-                    // reachable state (check-empty-child's rule: one
-                    // node stays one widget even when it cannot show).
-                    if spec.id < row.children.count {
-                        KayaRender(
-                            node: row.children[spec.id], flexVertical: false,
-                            flexStretch: false
-                        )
-                        .background(
-                            KayaEdgeReporter(
-                                node: node,
-                                key: kayaTableCellKey(row, spec.id, row.children[spec.id]),
-                                generation: generation))
+#if !os(macOS)
+    /// The iOS native tier: SwiftUI's own Table, which is what a regular
+    /// iPad width takes at or above TableColumnForEach's floor. The mac's
+    /// per-row attribute-graph cost is not iOS's residue to pay yet —
+    /// docs/virtualization-plan.md §6.3 carries the phones' tiers.
+    @available(macOS 14.4, iOS 17.4, *)
+    private struct KayaTableColumns: View {
+        let node: KayaNode
+        let generation: Int
+
+        private var specs: [KayaColumnSpec] {
+            node.tableColumns.enumerated().map { KayaColumnSpec(id: $0.offset, title: $0.element) }
+        }
+
+        private var sortOrder: Binding<[KayaColumnComparator]> {
+            Binding(
+                get: {
+                    node.tableSorted == kayaSortNone
+                        ? []
+                        : [
+                            KayaColumnComparator(
+                                column: Int(node.tableSorted),
+                                order: node.tableDirection == 0 ? .forward : .reverse)
+                        ]
+                },
+                set: { requested in
+                    // The user clicked a header: SwiftUI proposes a new
+                    // order, and the proposal's COLUMN is the whole
+                    // message — direction cycling is the guest's policy.
+                    if let first = requested.first {
+                        KayaHost.emitSortRequested(node.sortTag, UInt32(first.column))
+                    }
+                }
+            )
+        }
+
+        var body: some View {
+            Table(node.children, sortOrder: sortOrder) {
+                TableColumnForEach(specs) { spec in
+                    TableColumn(
+                        Text(spec.title),
+                        sortUsing: KayaColumnComparator(column: spec.id, order: .forward)
+                    ) { (row: KayaNode) in
+                        // The core held every row template to the declared
+                        // arity; the guard is positional safety, never a
+                        // reachable state (check-empty-child's rule: one
+                        // node stays one widget even when it cannot show).
+                        if spec.id < row.children.count {
+                            KayaRender(
+                                node: row.children[spec.id], flexVertical: false,
+                                flexStretch: false
+                            )
+                            .background(
+                                KayaEdgeReporter(
+                                    node: node,
+                                    key: kayaTableCellKey(row, spec.id, row.children[spec.id]),
+                                    generation: generation))
+                        }
                     }
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if node.grow <= 0 {
-                kayaNativeTableApron.frame(height: 5)
-            }
+    }
+#endif
+
+#if os(macOS)
+    /// Every live mac table's driver, by container widget id — how the
+    /// harness verbs reach the tier that drew (scroll_to_row's scroll,
+    /// expect_window's realized count). Main thread only, like every
+    /// other registry here.
+    nonisolated(unsafe) var kayaTableDrivers: [UInt64: KayaTableDriver] = [:]
+
+    /// THE MAC NATIVE TIER (docs/virtualization-plan.md §4): NSTableView
+    /// through NSViewRepresentable with a REAL DATA SOURCE. numberOfRows
+    /// is the COLLECTION's count, cells are recycled by AppKit, and each
+    /// hosts the stamped row's own widgets while that row is realized.
+    ///
+    /// It replaced SwiftUI's Table, which is one attribute-graph node per
+    /// row by design — 39% of the mac frame at scale
+    /// (docs/measurements/choke-macos-2026-08-24.txt).
+    private struct KayaMacNativeTable: NSViewRepresentable {
+        let node: KayaNode
+        /// Everything below is read in the BODY that builds this, so a
+        /// model change or a geometry invalidation re-enters
+        /// updateNSView — which is what republishes the observations at
+        /// the current generation even when no frame moved.
+        let generation: Int
+        let columns: [String]
+        let sorted: UInt32
+        let direction: UInt32
+
+        func makeCoordinator() -> KayaTableDriver {
+            KayaTableDriver(node: node)
         }
-        .frame(
-            height: node.grow > 0
-                ? nil : kayaNativeTableContentHeight(rows: node.children.count),
-            alignment: .top
-        )
-        .background(
-            KayaTableViewportReporter(
-                node: node, generation: generation, synthesized: false))
-        .onAppear { record() }
-        .onChange(of: node.tableColumns) { record() }
-        .onChange(of: node.tableSorted) { record() }
-        .onChange(of: node.tableDirection) { record() }
+
+        func makeNSView(context: Context) -> NSScrollView {
+            context.coordinator.build()
+        }
+
+        func updateNSView(_ view: NSScrollView, context: Context) {
+            context.coordinator.update(node: node, generation: generation)
+        }
+
+        static func dismantleNSView(_ view: NSScrollView, coordinator: KayaTableDriver) {
+            coordinator.dismantle()
+        }
     }
 
-    /// The presented record expect_columns reads — written by THIS
-    /// path only, so the observation proves the table rendered: the
-    /// titles in visual order and the indicator (^N asc / vN desc)
-    /// when shown. No size-class prefix — headers render at every
-    /// width (ratified 2026-08-21, docs/tables-plan.md).
-    private func record() {
-        var presented = node.tableColumns.joined(separator: "|")
-        if node.tableSorted != kayaSortNone {
-            presented += node.tableDirection == 0 ? " ^" : " v"
-            presented += String(node.tableSorted)
+    /// The scroll view that says when it laid out. NSViewRepresentable
+    /// has no layout callback, and the report has to run after the rows
+    /// have their frames rather than before.
+    final class KayaTableScrollView: NSScrollView {
+        var onLayout: () -> Void = {}
+        override func layout() {
+            super.layout()
+            onLayout()
         }
-        let target = node
-        DispatchQueue.main.async { target.tablePresented = presented }
     }
-}
+
+    /// One recycled cell: an NSHostingView over the stamped cell's own
+    /// KayaRender. A row outside the band keeps its cell and shows
+    /// nothing rather than dropping out of the table's geometry — one
+    /// node is one widget (tools/check-empty-child.sh), one tier over.
+    final class KayaTableCellView: NSTableCellView {
+        private let host = NSHostingView(rootView: AnyView(Color.clear))
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            host.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(host)
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: leadingAnchor),
+                host.trailingAnchor.constraint(equalTo: trailingAnchor),
+                host.topAnchor.constraint(equalTo: topAnchor),
+                host.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        func present(_ cell: KayaNode?) {
+            guard let cell else {
+                host.rootView = AnyView(Color.clear)
+                return
+            }
+            // LEADING, and vertically centred in the row: the cell fills
+            // its column and the content sits under its own header, which
+            // is what the SwiftUI Table this replaced drew (compared on
+            // 2026-08-25 captures of the portfolio dashboard — an
+            // unaligned host centres every cell instead) and what the
+            // synthesized tier's own layout places.
+            host.rootView = AnyView(
+                KayaRender(node: cell, flexVertical: false, flexStretch: false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading))
+        }
+
+        /// What this cell's content ASKS for, which is what the row's
+        /// measured extent is made of. The IDEAL size, not the fitting
+        /// one: the host is pinned to the cell's edges so it can align
+        /// its content, and a fitting size read through those constraints
+        /// would answer the cell's own box back.
+        var contentHeight: CGFloat { host.intrinsicContentSize.height }
+        var contentWidth: CGFloat { host.intrinsicContentSize.width }
+    }
+
+    /// The mac table's data source, delegate, window reporter and
+    /// geometry reporter — ONE object, because they are one loop:
+    /// AppKit asks the CORE for every row's height, the core's band
+    /// decides which rows carry widgets, and this hands back the range
+    /// AppKit is showing and the extents this tier laid out.
+    final class KayaTableDriver: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        private(set) var node: KayaNode
+        private var generation = 0
+        private let scrollView = KayaTableScrollView()
+        private let tableView = NSTableView()
+        /// The core's band and the collection's declared total, read
+        /// TOGETHER and held for the length of a layout pass: AppKit's
+        /// row count may not change under it.
+        private var first = 0
+        private var realized = 0
+        private var total = 0
+        /// The last range handed to the core. A layout that moved
+        /// nothing reports nothing, so the report -> stamp -> layout
+        /// loop cannot run away.
+        private var reported: NSRange?
+        /// True while this object is writing the sort indicator, so
+        /// restoring the model's own indicator is not read back as
+        /// another header click.
+        private var applyingIndicator = false
+        /// One report per main-queue turn, however many layout and
+        /// scroll callbacks asked for it.
+        private var reportScheduled = false
+
+        init(node: KayaNode) {
+            self.node = node
+            super.init()
+        }
+
+        func build() -> NSScrollView {
+            tableView.dataSource = self
+            tableView.delegate = self
+            tableView.style = .inset
+            tableView.usesAlternatingRowBackgroundColors = true
+            tableView.gridStyleMask = []
+            tableView.intercellSpacing = NSSize(width: 0, height: 0)
+            tableView.rowHeight = kayaNativeRowHeight
+            tableView.allowsColumnReordering = false
+            tableView.allowsMultipleSelection = false
+            tableView.columnAutoresizingStyle = .noColumnAutoresizing
+            let header = NSTableHeaderView(
+                frame: NSRect(x: 0, y: 0, width: 0, height: kayaNativeHeaderHeight))
+            tableView.headerView = header
+            scrollView.documentView = tableView
+            scrollView.hasVerticalScroller = true
+            scrollView.hasHorizontalScroller = false
+            scrollView.drawsBackground = true
+            scrollView.automaticallyAdjustsContentInsets = false
+            // ZERO, deliberately: the 5pt above the first row is the
+            // INSET STYLE'S OWN padding (measured 2026-08-25 —
+            // rect(ofRow: 0).minY is 5), so a content inset on top of it
+            // double-counts and pushes the last row out of the hug.
+            scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(boundsMoved),
+                name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+            scrollView.onLayout = { [weak self] in self?.scheduleReport() }
+            kayaTableDrivers[node.id] = self
+            syncColumns()
+            return scrollView
+        }
+
+        func dismantle() {
+            NotificationCenter.default.removeObserver(self)
+            if kayaTableDrivers[node.id] === self {
+                kayaTableDrivers.removeValue(forKey: node.id)
+            }
+        }
+
+        func update(node: KayaNode, generation: Int) {
+            self.node = node
+            self.generation = generation
+            kayaTableDrivers[node.id] = self
+            syncColumns()
+            applyIndicator()
+            refresh()
+            tableView.reloadData()
+            let presented = kayaTablePresented(node)
+            let target = node
+            DispatchQueue.main.async { target.tablePresented = presented }
+            // A same-size invalidation moves no frame, so the layout
+            // callback may never come: the report rides the next
+            // main-queue turn as well.
+            scheduleReport()
+        }
+
+        // --- The data source: the COLLECTION's rows, not the band's. --
+
+        func numberOfRows(in tableView: NSTableView) -> Int {
+            total > 0 ? total : node.children.count
+        }
+
+        /// The stamped row at a POSITION in the collection's order, or
+        /// nil where the band has not realized it.
+        private func row(at index: Int) -> KayaNode? {
+            guard index >= 0 else { return nil }
+            if total > 0 {
+                let offset = index - first
+                guard offset >= 0, offset < node.children.count else { return nil }
+                return node.children[offset]
+            }
+            return index < node.children.count ? node.children[index] : nil
+        }
+
+        /// THE CORE IS THE ONLY ESTIMATOR (§2): measured where this row
+        /// has been measured, the pitch where it has not, and the tier's
+        /// own floor before anything has been measured at all.
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            let extent = KayaHost.rowExtent(node.id, row)
+            return extent > 0 ? CGFloat(extent) : kayaNativeRowHeight
+        }
+
+        func tableView(
+            _ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int
+        ) -> NSView? {
+            guard let tableColumn,
+                let column = tableView.tableColumns.firstIndex(of: tableColumn)
+            else { return nil }
+            let identifier = NSUserInterfaceItemIdentifier("kaya-cell")
+            let cell =
+                (tableView.makeView(withIdentifier: identifier, owner: self)
+                as? KayaTableCellView) ?? KayaTableCellView(frame: .zero)
+            cell.identifier = identifier
+            let stamped = self.row(at: row)
+            cell.present(
+                (stamped?.children.count ?? 0) > column ? stamped?.children[column] : nil)
+            return cell
+        }
+
+        func tableView(
+            _ tableView: NSTableView, sortDescriptorsDidChange old: [NSSortDescriptor]
+        ) {
+            guard !applyingIndicator else { return }
+            // A header click is a REQUEST: nothing sorts here. The guest
+            // reorders by key and re-declares, so the indicator goes
+            // straight back to what the model says until it does.
+            if let key = tableView.sortDescriptors.first?.key,
+                let column = Int(key.dropFirst(kayaSortKeyPrefix.count))
+            {
+                KayaHost.emitSortRequested(node.sortTag, UInt32(column))
+            }
+            applyIndicator()
+        }
+
+        // --- The report loop. ------------------------------------------
+
+        @objc private func boundsMoved() {
+            // A scroll the harness did not issue is the user's: the
+            // anchor yields to free scrolling.
+            if !inProgrammaticScroll { anchorRow = nil }
+            scheduleReport()
+        }
+
+        /// THE REPORT NEVER RUNS INSIDE A LAYOUT PASS. It writes the
+        /// node's observations, the node is @Observable, and a SwiftUI
+        /// invalidation raised from inside -[NSView layout] reaches
+        /// -[NSWindow _postWindowNeedsLayout] and AppKit throws — the
+        /// probe died there with an EXC_BREAKPOINT and no output at all
+        /// (measured 2026-08-25). One coalesced hop per turn instead,
+        /// which is what the SwiftUI reporters' `.task` was doing.
+        private func scheduleReport() {
+            guard !reportScheduled else { return }
+            reportScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reportScheduled = false
+                self.report()
+            }
+        }
+
+        /// Once per layout and once per scroll: refresh the band from the
+        /// core, hand back the visible range and the extents this tier
+        /// laid out, and record the geometry the harness reads.
+        ///
+        /// THE RANGE LEADS AND THE HEIGHTS FOLLOW (§3.4): the entering
+        /// rows have to start stamping before they can be measured.
+        /// §2.4's anchor, the driver's half: scroll_to_row parks a ROW,
+        /// and every correction cycle re-parks it — AppKit's own
+        /// note-heights position keeping is best-effort and lost the
+        /// race under matrix load (measured 2026-08-25: scroll to r200,
+        /// corrections landed, the viewport drifted to r128 and
+        /// stabilized there). A scroll the harness did not issue clears
+        /// the anchor: the user owns free scrolling.
+        private var anchorRow: Int?
+        private var inProgrammaticScroll = false
+
+        func report() {
+            guard scrollView.window != nil else { return }
+            refresh()
+            layoutColumns()
+            reparkAnchor()
+            let visible = visibleRows()
+            if reported.map({ !NSEqualRanges($0, visible) }) ?? true {
+                reported = visible
+                KayaHost.windowMoved(node.id, visible.location, visible.length)
+            }
+            measureRows(visible)
+            recordGeometry(visible)
+        }
+
+        private func reparkAnchor() {
+            guard let anchor = anchorRow, anchor < numberOfRows(in: tableView) else { return }
+            let want = tableView.rect(ofRow: anchor).minY
+            let clip = scrollView.contentView
+            if abs(clip.bounds.origin.y - want) > 0.5 {
+                inProgrammaticScroll = true
+                clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: want))
+                scrollView.reflectScrolledClipView(clip)
+                inProgrammaticScroll = false
+            }
+        }
+
+        private func refresh() {
+            guard let geometry = KayaHost.windowGeometry(node.id), geometry.total > 0 else {
+                first = 0
+                realized = node.children.count
+                total = 0
+                return
+            }
+            first = Int(geometry.first)
+            realized = Int(geometry.count)
+            total = Int(geometry.total)
+        }
+
+        /// What the reader can actually SEE. The clip view keeps its
+        /// full height and reserves the header by shifting its bounds
+        /// origin (measured: origin.y -28 for a 28pt header), so
+        /// documentVisibleRect covers a band the header is drawn over —
+        /// rows hidden behind it would otherwise report as visible, and
+        /// after a scroll_to_row the row named would not be the first.
+        private func visibleRect() -> CGRect {
+            var rect = scrollView.contentView.documentVisibleRect
+            let header = tableView.headerView?.frame.height ?? 0
+            rect.origin.y += header
+            rect.size.height = max(0, rect.size.height - header)
+            return rect
+        }
+
+        private func visibleRows() -> NSRange {
+            let range = tableView.rows(in: visibleRect())
+            guard range.location != NSNotFound, range.length > 0 else {
+                return NSRange(location: 0, length: 0)
+            }
+            return range
+        }
+
+        /// The extents this tier laid the realized rows out at, reported
+        /// only when they DISAGREE with what the core already holds —
+        /// exactly, no tolerance (§2.3), which is also what stops the
+        /// note-heights round trip below from repeating forever.
+        private func measureRows(_ visible: NSRange) {
+            guard visible.length > 0 else { return }
+            var heights: [Double] = []
+            var moved = false
+            for offset in 0..<visible.length {
+                let row = visible.location + offset
+                let height = Double(measuredHeight(row))
+                heights.append(height)
+                if KayaHost.rowExtent(node.id, row) != height { moved = true }
+            }
+            guard moved else { return }
+            KayaHost.rowsMeasured(node.id, visible.location, heights)
+            tableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(
+                    integersIn: visible.location..<(visible.location + visible.length)))
+        }
+
+        /// A row's extent along the scroll axis: what its cells ask for,
+        /// floored by the tier's own row height. The FLOOR is why uniform
+        /// single-line rows never leave the exact path, and the max is why
+        /// a structurally taller row moves its For onto the corrected one.
+        private func measuredHeight(_ row: Int) -> CGFloat {
+            var height = kayaNativeRowHeight
+            for column in tableView.tableColumns.indices {
+                guard
+                    let cell = tableView.view(atColumn: column, row: row, makeIfNecessary: false)
+                        as? KayaTableCellView
+                else { continue }
+                height = max(height, cell.contentHeight)
+            }
+            return height.rounded(.up)
+        }
+
+        /// docs/tables-plan.md decision 6, the mac tier's spelling: a
+        /// column's content is its width FLOOR, leftover distributes, and
+        /// the table spans its viewport. The realized rows are what can
+        /// be measured, which is exactly what NSTableView's own
+        /// auto-sizing would have to settle for too.
+        private func layoutColumns() {
+            let columns = tableView.tableColumns
+            guard !columns.isEmpty else { return }
+            var widths = columns.map { max(24, $0.headerCell.cellSize.width + 16) }
+            let visible = visibleRows()
+            for offset in 0..<visible.length {
+                let row = visible.location + offset
+                for column in columns.indices {
+                    guard
+                        let cell = tableView.view(
+                            atColumn: column, row: row, makeIfNecessary: false)
+                            as? KayaTableCellView
+                    else { continue }
+                    widths[column] = max(widths[column], cell.contentWidth + 16)
+                }
+            }
+            // THE STYLE'S OWN ROW INSET COMES OUT OF THE TRACK FIRST.
+            // An inset-style NSTableView indents every cell from the row's
+            // edges, so columns summing to the clip width overflow it by
+            // twice that inset and the table scrolls sideways — measured
+            // here as "cells occupy 32...480pt outside viewport
+            // 16...464pt". It is a system metric with no accessor, so it
+            // is READ from the first cell's own leading edge.
+            let inset =
+                tableView.numberOfRows > 0
+                ? max(0, min(tableView.frameOfCell(atColumn: 0, row: 0).minX, 32)) : 0
+            let track = scrollView.contentView.bounds.width - 2 * inset
+            let total = widths.reduce(0, +)
+            if track > total {
+                let share = (track - total) / CGFloat(columns.count)
+                for column in widths.indices { widths[column] += share }
+            }
+            for (column, width) in zip(columns, widths) where abs(column.width - width) > 0.5 {
+                column.minWidth = 24
+                column.maxWidth = .greatestFiniteMagnitude
+                column.width = width
+            }
+        }
+
+        /// The geometry the harness reads, from the TIER'S OWN frames:
+        /// NSTableView's cell rects and the scroll view's box, both in
+        /// window coordinates so they are comparable. SwiftUI's `.global`
+        /// could not serve — inside a per-cell hosting view it is that
+        /// cell's own space, so every column would report the same edge.
+        private func recordGeometry(_ visible: NSRange) {
+            let generation = kayaTableGeometryGeneration(node)
+            kayaRecordTableViewport(
+                node, generation, kayaHarnessRect(scrollView.bounds, in: scrollView), false)
+            guard visible.length > 0 else { return }
+            for offset in 0..<visible.length {
+                let index = visible.location + offset
+                guard let stamped = row(at: index) else { continue }
+                for column in tableView.tableColumns.indices
+                where column < stamped.children.count {
+                    let cell = stamped.children[column]
+                    let frame = kayaHarnessRect(
+                        tableView.frameOfCell(atColumn: column, row: index), in: tableView)
+                    kayaRecordTableCell(
+                        node, kayaTableCellKey(stamped, column, cell), generation, frame)
+                }
+            }
+        }
+
+        // --- What the harness verbs drive. -----------------------------
+
+        /// The realized band and the declared total as THIS TIER has
+        /// them: the core's arithmetic, checked against the rows the
+        /// table actually holds. The compiled table-tier gate's band
+        /// clause reads this; the harness verb does not (ruled
+        /// 2026-08-25 — the band's width is a viewport metric).
+        func band() -> (first: Int, count: Int, total: Int) {
+            refresh()
+            if total > 0 { return (first, min(realized, node.children.count), total) }
+            return (0, node.children.count, node.children.count)
+        }
+
+        /// What expect_window compares: the first VISIBLE row and the
+        /// declared total — the pair a byte-shared scene can freeze.
+        /// The overscan above the viewport is the band's business, not
+        /// the verb's.
+        func firstVisible() -> (first: Int, total: Int) {
+            refresh()
+            let visible = tableView.rows(in: tableView.visibleRect)
+            let declared = total > 0 ? total : node.children.count
+            return (visible.length > 0 ? visible.location : 0, declared)
+        }
+
+        /// Scroll so the row at `index` is the viewport's FIRST VISIBLE
+        /// row — the top, which is what makes the first-visible row
+        /// deterministic even where pixel positions are not.
+        func scroll(toRow index: Int) {
+            guard index >= 0, index < numberOfRows(in: tableView) else { return }
+            anchorRow = index
+            let rect = tableView.rect(ofRow: index)
+            let clip = scrollView.contentView
+            // The header FLOATS above the clip; subtracting its height
+            // here over-scrolled by two rows (measured: expect_window
+            // read 7498 for a scroll to 7500) — the row's own minY IS
+            // the top.
+            inProgrammaticScroll = true
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: rect.minY))
+            scrollView.reflectScrolledClipView(clip)
+            inProgrammaticScroll = false
+            report()
+        }
+
+        // --- Columns and the sort indicator. ---------------------------
+
+        private func syncColumns() {
+            let titles = node.tableColumns
+            if tableView.tableColumns.count != titles.count {
+                for column in tableView.tableColumns { tableView.removeTableColumn(column) }
+                for (index, title) in titles.enumerated() {
+                    let column = NSTableColumn(
+                        identifier: NSUserInterfaceItemIdentifier("kaya-column-\(index)"))
+                    column.title = title
+                    column.minWidth = 24
+                    column.sortDescriptorPrototype = NSSortDescriptor(
+                        key: "\(kayaSortKeyPrefix)\(index)", ascending: true)
+                    tableView.addTableColumn(column)
+                }
+            } else {
+                for (index, title) in titles.enumerated()
+                where tableView.tableColumns[index].title != title {
+                    tableView.tableColumns[index].title = title
+                }
+            }
+        }
+
+        private func applyIndicator() {
+            applyingIndicator = true
+            defer { applyingIndicator = false }
+            let column = Int(node.tableSorted)
+            guard node.tableSorted != kayaSortNone, column < tableView.tableColumns.count else {
+                tableView.sortDescriptors = []
+                return
+            }
+            tableView.sortDescriptors = [
+                NSSortDescriptor(
+                    key: "\(kayaSortKeyPrefix)\(column)", ascending: node.tableDirection == 0)
+            ]
+        }
+    }
+
+    /// The sort descriptor key's prefix — the column index rides behind
+    /// it, and the header-click handler reads it back.
+    let kayaSortKeyPrefix = "kaya-sort-"
+#endif
 
 /// The reporters' task id — a struct, not an interpolated string: this is
 /// one format per cell per layout pass, for a comparison CGRect answers.
 private struct KayaGeometryStamp: Equatable {
     let generation: Int
     let frame: CGRect
+}
+
+/// THE ONE WRITER of a table's cell geometry, for BOTH tiers: SwiftUI's
+/// reporter below on the synthesized one, NSTableView's own frames on the
+/// mac native one. One writer because one displacement has to move both —
+/// tools/check-table-tier.sh's displaced-cells negative perturbs here.
+func kayaRecordTableCell(
+    _ node: KayaNode, _ key: String, _ generation: Int, _ frame: CGRect
+) {
+    node.tableCellFrames[key] = KayaTableCellObservation(
+        generation: generation, frame: frame)
+}
+
+/// Its viewport twin — `synthesized` is what tells the realization census
+/// which tier owes how many rows.
+func kayaRecordTableViewport(
+    _ node: KayaNode, _ generation: Int, _ frame: CGRect, _ synthesized: Bool
+) {
+    node.tableViewport = KayaTableViewportObservation(
+        generation: generation, frame: frame, synthesized: synthesized)
 }
 
 /// docs/traps.md, "A table viewport contains rows".
@@ -8218,8 +8979,7 @@ private struct KayaEdgeReporter: View {
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
             Color.clear.task(id: KayaGeometryStamp(generation: generation, frame: frame)) {
-                node.tableCellFrames[key] = KayaTableCellObservation(
-                    generation: generation, frame: frame)
+                kayaRecordTableCell(node, key, generation, frame)
             }
         }
     }
@@ -8234,8 +8994,7 @@ private struct KayaTableViewportReporter: View {
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
             Color.clear.task(id: KayaGeometryStamp(generation: generation, frame: frame)) {
-                node.tableViewport = KayaTableViewportObservation(
-                    generation: generation, frame: frame, synthesized: synthesized)
+                kayaRecordTableViewport(node, generation, frame, synthesized)
             }
         }
     }

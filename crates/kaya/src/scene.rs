@@ -5064,6 +5064,15 @@ impl Scene {
         }
     }
 
+    /// One row's height, measured or presumed — the row-height delegate's
+    /// question, asked per row over the whole collection
+    /// (docs/virtualization-plan.md §4, the macOS native tier).
+    pub(crate) fn row_extent(&mut self, target: u64, index: usize) -> f64 {
+        let site = self.window_site(target, "kaya_row_extent");
+        let order = &self.coll_instances[&site].order;
+        self.for_sites[&site].window.row_extent(order, index)
+    }
+
     /// A windowed site's realized set is exactly the band's rows, and its
     /// container's children are those rows in band order.
     fn reconcile_window(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {

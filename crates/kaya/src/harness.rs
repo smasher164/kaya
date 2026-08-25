@@ -230,6 +230,18 @@ pub enum Step {
     /// viewport. A misaligned column splits its cluster and the count
     /// moves; a content-hugging layout comes up short of its track.
     ExpectColumnEdges(Target, usize),
+    /// Expect the For's REALIZED BAND and its collection's declared
+    /// total — `<first> <count> <total>` — read from the tier's own
+    /// geometry (docs/virtualization-plan.md §5). expect_rows keeps
+    /// asserting DATA; this is the only verb that says how much of it
+    /// is widgets.
+    ExpectWindow(Target, usize, usize),
+    /// Scroll the For so the keyed row lands at the viewport's TOP.
+    /// It addresses the ROW as data, so an unrealized row scrolls
+    /// exactly like a realized one — and the top placement is what
+    /// makes the first visible row deterministic on the corrected
+    /// path, where pixel positions legitimately are not.
+    ScrollToRow(Target, String),
     /// Click the table's column header at the 0-based index through
     /// the platform's real header path, so it emits sort_requested
     /// (select_section's drive-and-emit precedent).
@@ -629,6 +641,7 @@ impl Step {
             | Step::ExpectColumns(t, _)
             | Step::ExpectRows(t, _)
             | Step::ExpectColumnEdges(t, _)
+            | Step::ScrollToRow(t, _)
             | Step::HeaderClick(t, _)
             | Step::ExpectShares(t, _)
             | Step::ExpectAligned(t, _)
@@ -640,6 +653,7 @@ impl Step {
             | Step::ExpectSelection(t, _)
             | Step::Compose(t, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
+            Step::ExpectWindow(t, _, _) => vec![t],
             Step::ExpectInset { target, .. } => target.iter_mut().collect(),
             Step::Settle(..)
             | Step::ExpectStall
@@ -709,6 +723,8 @@ impl Step {
             Step::ExpectColumns { .. } => true,
             Step::ExpectRows { .. } => true,
             Step::ExpectColumnEdges { .. } => true,
+            Step::ExpectWindow { .. } => true,
+            Step::ScrollToRow { .. } => false,
             Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
@@ -849,6 +865,22 @@ pub trait Stage: Send + 'static {
     /// every cluster exactly right while drawing in a corner of its
     /// viewport.
     fn column_edges(&self, target: Target, want: usize) -> String;
+    /// The For's realized band and its collection's declared total, as
+    /// this tier lays them out: `"<first> <count> <total>"`
+    /// (docs/virtualization-plan.md §5). A tier that realizes every row
+    /// answers `0 <n> <n>` — true, and exactly what an unwindowed
+    /// backend draws.
+    ///
+    /// A BACKEND THAT DOES NOT WINDOW YET ANSWERS A SENTENCE naming what
+    /// it does not do. It cannot equal a triple, so the leg reddens
+    /// carrying it; a stub that ABORTED would take the whole verdict
+    /// list with it (tools/lib/hand-rolled-stubs.py: a refusal is not a
+    /// sentinel).
+    fn window_band(&self, target: Target) -> String;
+    /// Scroll the For so the keyed row is the viewport's FIRST VISIBLE
+    /// row. The empty string when it happened; otherwise a sentence
+    /// naming what stopped it, which the step turns into its failure.
+    fn scroll_to_row(&self, target: Target, key: &str) -> String;
     /// The creation index of the FIRST widget of `kind` carrying the
     /// authored a11y_id `id`, and (when present) whose table sort tag
     /// carries `keys`, or None while no such widget exists — how a
@@ -1693,6 +1725,46 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                         .parse()
                         .map_err(|_| format!("expect_grid_columns wants a count: {line:?}"))?,
                 )
+            }
+            "expect_window" => {
+                let mut words = rest.split_whitespace();
+                let target = words
+                    .next()
+                    .ok_or_else(|| format!("expect_window wants a target: {line:?}"))?;
+                let mut number = |what: &str| -> Result<usize, String> {
+                    words
+                        .next()
+                        .and_then(|w| w.parse().ok())
+                        .ok_or_else(|| format!("expect_window wants a {what}: {line:?}"))
+                };
+                let first = number("first visible index")?;
+                let total = number("declared total")?;
+                if words.next().is_some() {
+                    return Err(format!(
+                        "expect_window takes a target and exactly two numbers \
+                         (first visible index, declared total): {line:?}"
+                    ));
+                }
+                Step::ExpectWindow(parse_target(target)?, first, total)
+            }
+            "scroll_to_row" => {
+                let (target, key) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("scroll_to_row wants a target and a row key: {line:?}")
+                })?;
+                let key = key.trim();
+                // The key is a STRING, quoted only when it needs to be:
+                // the keyed-target grammar this shares its addressing
+                // with is string-key-only (table_tag_identity).
+                let key = if key.starts_with('"') {
+                    parse_string(key)?
+                } else if key.is_empty() || key.split_whitespace().count() != 1 {
+                    return Err(format!(
+                        "scroll_to_row wants ONE row key, quoted if it has spaces: {line:?}"
+                    ));
+                } else {
+                    key.to_owned()
+                };
+                Step::ScrollToRow(parse_target(target)?, key)
             }
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
@@ -3059,6 +3131,32 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
+            Step::ExpectWindow(t, first, total) => {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    Some(Err(format!("{t:?} is not a collection container target")))
+                } else {
+                    let want = format!("{first} {total}");
+                    Some(poll(|| {
+                        let got = stage.window_band(*t);
+                        if got == want {
+                            Ok(format!("{} window {want}", target_spec(t)))
+                        } else {
+                            Err(format!("{} windows {got:?}, wanted {want:?}", target_spec(t)))
+                        }
+                    }))
+                }
+            }
+            Step::ScrollToRow(t, key) => {
+                // An action, silent like click — the expect_window after
+                // it is the observable — but a backend that cannot do it
+                // says so HERE, where the sentence still names the verb.
+                let off = stage.scroll_to_row(*t, key);
+                if off.is_empty() {
+                    None
+                } else {
+                    Some(Err(format!("scroll_to_row {key:?}: {off}")))
+                }
+            }
             Step::HeaderClick(t, column) => {
                 stage.header_click(*t, *column);
                 None
@@ -4366,6 +4464,19 @@ mod tests {
         fn column_edges(&self, _: Target, _: usize) -> String {
             String::new()
         }
+        /// A windowed tier: three of twelve rows realized from index 4.
+        fn window_band(&self, _: Target) -> String {
+            "4 12".into()
+        }
+        /// "" is done; the one key this stage cannot find answers the
+        /// sentence a backend would, so the refusal path is a test too.
+        fn scroll_to_row(&self, _: Target, key: &str) -> String {
+            self.seen.lock().unwrap().push(format!("scroll_to_row {key}"));
+            if key == "missing" {
+                return "no row carries that key".into();
+            }
+            String::new()
+        }
         fn resolve_id(&self, kind: TargetKind, id: &str, keys: Option<&str>) -> Option<isize> {
             if id == "missing" {
                 return None;
@@ -4847,6 +4958,12 @@ mod tests {
             fn column_edges(&self, _: Target, _: usize) -> String {
                 String::new()
             }
+            fn window_band(&self, _: Target) -> String {
+                String::new()
+            }
+            fn scroll_to_row(&self, _: Target, _: &str) -> String {
+                String::new()
+            }
             fn resolve_id(&self, _: TargetKind, _: &str, _: Option<&str>) -> Option<isize> {
                 Some(0)
             }
@@ -5066,6 +5183,12 @@ mod tests {
             fn column_edges(&self, _: Target, _: usize) -> String {
                 String::new()
             }
+            fn window_band(&self, _: Target) -> String {
+                String::new()
+            }
+            fn scroll_to_row(&self, _: Target, _: &str) -> String {
+                String::new()
+            }
             fn resolve_id(&self, _: TargetKind, _: &str, _: Option<&str>) -> Option<isize> {
                 Some(0)
             }
@@ -5262,6 +5385,110 @@ mod tests {
         assert_eq!(code, 1);
         assert!(verdict.contains("textarea#1 is short of its track"), "{verdict}");
         assert!(verdict.contains("96pt of a 126pt track"), "{verdict}");
+    }
+
+    /// expect_window compares the first VISIBLE row and the declared
+    /// total — the pair a byte-shared scene can freeze (the realized
+    /// count is a viewport metric; the compiled table-tier gate holds
+    /// the band-width arithmetic; ruled 2026-08-25). The failure text
+    /// carries both sides — a band off by a row is unreadable from a
+    /// bare "false".
+    #[test]
+    fn expect_window_compares_first_visible_and_total() {
+        let steps = parse("expect_window column#0 4 12").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectWindow(
+                Target { kind: TargetKind::Column, index: 0, id: None, keys: None },
+                4,
+                12
+            )
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("column#0 window 4 12"), "{verdict}");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_window column#0 0 12").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("\"4 12\""), "{verdict}");
+        assert!(verdict.contains("wanted \"0 12\""), "{verdict}");
+    }
+
+    /// Both numbers are required, and nothing else is — a third number
+    /// is the realized count this verb deliberately cannot say.
+    #[test]
+    fn expect_window_wants_exactly_two_numbers() {
+        for line in [
+            "expect_window column#0",
+            "expect_window column#0 4",
+            "expect_window column#0 4 3 12",
+            "expect_window column#0 4 many",
+            "expect_window column#0 -1 12",
+        ] {
+            assert!(parse(line).is_err(), "accepted {line:?}");
+        }
+        assert!(parse("expect_window column@ledger[august] 0 15000").is_ok());
+    }
+
+    /// scroll_to_row is an ACTION — it records nothing on success — but a
+    /// backend that cannot do it reddens the step with its own sentence
+    /// rather than passing silently.
+    #[test]
+    fn scroll_to_row_drives_the_stage_and_reports_a_refusal() {
+        let steps = parse("scroll_to_row column#0 tx-4200").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ScrollToRow(
+                Target { kind: TargetKind::Column, index: 0, id: None, keys: None },
+                "tx-4200".to_owned()
+            )
+        );
+        SEEN.lock().unwrap().clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_window column#0 4 12\nscroll_to_row column#0 tx-4200").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(
+            SEEN.lock().unwrap().iter().any(|s| s == "scroll_to_row tx-4200"),
+            "{:?}",
+            SEEN.lock().unwrap()
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_window column#0 4 12\nscroll_to_row column#0 missing").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("no row carries that key"), "{verdict}");
+        assert!(verdict.contains("\"missing\""), "{verdict}");
+    }
+
+    /// A key with spaces has to be quoted, and a bare one may not be two
+    /// words — the grammar refuses at parse rather than scrolling to a
+    /// key nobody wrote.
+    #[test]
+    fn scroll_to_row_takes_one_key() {
+        assert!(parse("scroll_to_row column#0").is_err());
+        assert!(parse("scroll_to_row column#0 a b").is_err());
+        assert_eq!(
+            parse("scroll_to_row column#0 \"a b\"").unwrap()[0],
+            Step::ScrollToRow(
+                Target { kind: TargetKind::Column, index: 0, id: None, keys: None },
+                "a b".to_owned()
+            )
+        );
     }
 
     /// Authored targets preserve their script spelling, and malformed

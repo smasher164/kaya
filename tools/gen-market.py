@@ -34,6 +34,20 @@ ACCOUNTS = ["brokerage", "retirement", "savings"]
 DAYS = 1096  # three years, fixed span ending 2026-08-24
 SEED = 0x6B617961  # "kaya"
 
+# The ledger's DECLARED size, kept from the most recent end. The per-day
+# lot count is a draw, so the walk overshoots and the tail is taken:
+# without a declared number every density tweak would move `total` in
+# three byte-frozen scenes at once. 15,000 is above WinUI's measured
+# 12,000-row choke (docs/measurements/choke-windows-2026-08-24.txt),
+# which is the size row windowing exists to make ordinary
+# (docs/virtualization-plan.md §5).
+ROWS = 15_000
+# Lots per account-day, 1..LOTS. ODD ON PURPOSE: this LCG's low bits
+# have short periods (bit 0 alternates), so an even modulus draws a
+# visibly periodic pattern — `below(8)` and `below(6)` produce the same
+# skip sequence here, measured.
+LOTS = 11
+
 
 class Lcg:
     """Numerical Recipes constants; 32-bit state, spelled out so every
@@ -118,21 +132,25 @@ def generate():
     rows = []
     for i, day in enumerate(span):
         for account in ACCOUNTS:
-            # Dense on purpose: ~2,600 rows is where stamping every row
-            # visibly costs, which is the honest case for the row
-            # window this file exists to force.
+            # A quiet day for this account, so per-day row counts vary.
             if rng.below(5) == 0:
                 continue
-            ticker, _ = TICKERS[rng.below(len(TICKERS))]
-            price = prices[ticker][i]
-            side = ("buy", "sell", "div")[rng.below(3)]
-            qty = 1 + rng.below(40)
-            if side == "div":
-                qty = 0
-                total = (1 + rng.below(90)) * 25  # cents
-            else:
-                total = qty * price
-            rows.append((day, account, ticker, side, qty, price, total))
+            for _ in range(1 + rng.below(LOTS)):
+                ticker, _ = TICKERS[rng.below(len(TICKERS))]
+                price = prices[ticker][i]
+                side = ("buy", "sell", "div")[rng.below(3)]
+                qty = 1 + rng.below(40)
+                if side == "div":
+                    qty = 0
+                    total = (1 + rng.below(90)) * 25  # cents
+                else:
+                    total = qty * price
+                rows.append((day, account, ticker, side, qty, price, total))
+    if len(rows) < ROWS:
+        raise SystemExit(
+            f"gen-market: the walk produced {len(rows)} rows, fewer than the "
+            f"declared {ROWS} — raise LOTS or DAYS")
+    rows = rows[-ROWS:]
 
     lines = ["date,account,ticker,side,qty,price_cents,total_cents"]
     for day, account, ticker, side, qty, price, total in rows:

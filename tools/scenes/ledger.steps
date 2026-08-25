@@ -1,0 +1,77 @@
+# The transactions view — row windowing's UNIFORM scene
+# (docs/virtualization-plan.md §5). 15,000 rows in one For, above
+# WinUI's measured 12,000-row choke, with the guest writing no
+# windowing code at all: guests/python/ledger.py declares a table and
+# inserts every row it has.
+#
+# EVERY STRING BELOW IS THE GENERATOR'S ARITHMETIC, not an observation.
+# tools/gen-market.py writes guests/assets/market/transactions.csv
+# byte-stably, the guest formats integer cents dollars-dot-cents, and
+# tools/check-assets.sh re-derives the frozen halves from the CSV on
+# every run — so regenerating the artifact without moving this file
+# fails at a gate, naming this file, instead of on five lanes.
+#
+# expect_window says the FIRST VISIBLE row and the DECLARED TOTAL —
+# both data (ruled 2026-08-25). The realized band's WIDTH is the
+# viewport in rows, a text metric no shared scene may sample; the
+# compiled table-tier gate holds that arithmetic instead, the
+# pane-ladder pattern. After scroll_to_row the first visible row IS
+# the scrolled-to row, which is what makes it data on both the exact
+# and the corrected paths.
+#
+# No opening settle: the first expect's bounded retry IS the
+# scene-ready wait.
+expect label#0 "15000 of 15000 transactions"
+expect label#1 "first 2023-10-12 VTI sell $218.86"
+expect label#2 "last 2026-08-24 BND sell $144.20"
+expect_columns column@ledger "Date|Ticker|Side|Total"
+expect_column_edges column@ledger 4
+# The whole collection arrived: 15,000 rows of DATA behind a band that
+# realizes a few dozen widgets. label#0 counts what the guest holds.
+expect_window column@recent 0 12
+expect_rows column@recent "2026-08-23,BND,sell,$2686.20|2026-08-23,BND,div,$18.75|2026-08-23,VTI,div,$1.25|2026-08-23,AAPL,div,$6.75|2026-08-23,AAPL,sell,$6150.60|2026-08-23,VTI,div,$3.50|2026-08-24,VXUS,buy,$798.20|2026-08-24,VTI,sell,$5725.50|2026-08-24,VXUS,sell,$1657.80|2026-08-24,NVDA,buy,$19010.00|2026-08-24,BND,sell,$72.10|2026-08-24,BND,sell,$144.20"
+# The band at rest sits at the top of a 15,000-row collection.
+expect_window column@ledger 0 15000
+# The middle, addressed by the ROW and not by a pixel: t07500 is the
+# 7,501st line of the CSV, realized or not.
+scroll_to_row column@ledger t07500
+expect_window column@ledger 7500 15000
+# The end. At a clamped scroll the first VISIBLE row is the viewport
+# in rows below the last — a metric — so this scroll runs unasserted
+# and the filter steps below carry the proof it happened.
+scroll_to_row column@ledger t14999
+# The filter narrows the DECLARED TOTAL under a live window: 9,979 rows
+# leave the collection and the band re-fills from what is left.
+choose select#0 2
+expect label#0 "5021 of 15000 transactions"
+expect label#1 "first 2023-10-12 AAPL sell $130.08"
+expect label#2 "last 2026-08-23 AAPL div $2.25"
+# Scrolled to the FIRST row, so `first` is 0 whichever end of the band
+# the tier reports — the one scroll in this file with no ambiguity.
+scroll_to_row column@ledger t00007
+expect_window column@ledger 0 5021
+# A sort moves 5,021 rows THROUGH a fixed band: the order is data, the
+# band is a position, and the header's indicator is the guest's.
+header_click column@ledger 3
+expect_columns column@ledger "Date|Ticker|Side|Total ^3"
+expect label#1 "first 2023-12-14 AAPL div $0.25"
+expect label#2 "last 2026-01-06 NVDA buy $42346.59"
+# t01925 is the 2,001st row of the SORTED order — a row the band has
+# never realized, reached by identity.
+scroll_to_row column@ledger t01925
+expect_window column@ledger 2000 5021
+header_click column@ledger 3
+expect_columns column@ledger "Date|Ticker|Side|Total v3"
+expect label#1 "first 2026-01-06 NVDA buy $42346.59"
+expect label#2 "last 2023-12-14 AAPL div $0.25"
+# The tick posts one transaction per account at the dashboard's own
+# book (AAPL 10 @ $180.00, BND 20 @ $72.10, VTI 6 @ $260.25 — the three
+# totals portfolio.steps asserts), so the ledger gains three rows and
+# this account's view gains one. The small table shifts by three; the
+# big one's declared total moves under the window.
+click button#0
+expect label#0 "5022 of 15003 transactions"
+expect_rows column@recent "2026-08-23,AAPL,div,$6.75|2026-08-23,AAPL,sell,$6150.60|2026-08-23,VTI,div,$3.50|2026-08-24,VXUS,buy,$798.20|2026-08-24,VTI,sell,$5725.50|2026-08-24,VXUS,sell,$1657.80|2026-08-24,NVDA,buy,$19010.00|2026-08-24,BND,sell,$72.10|2026-08-24,BND,sell,$144.20|2026-08-25,AAPL,buy,$1800.00|2026-08-25,BND,buy,$1442.00|2026-08-25,VTI,buy,$1561.50"
+expect_window column@recent 0 12
+scroll_to_row column@ledger t11741
+expect_window column@ledger 0 5022

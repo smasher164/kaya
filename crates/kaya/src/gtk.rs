@@ -9436,6 +9436,21 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+
+    /// The row window is §6.3's breadth slice; this backend realizes
+    /// every row and has no band to read. THE STUB IS A CALL, not a
+    /// sentence (tools/check-stubs.sh) — check-steps reads these two
+    /// literals and stops demanding the ledger/varied legs here. The
+    /// scene named is the one a hand-run would wire first; neither leg
+    /// is wired on this lane, so the wall exists for a hand-run alone
+    /// (crate::depth_stub("varied") is the same wall one scene over).
+    fn window_band(&self, _t: crate::harness::Target) -> String {
+        crate::depth_stub("ledger")
+    }
+
+    fn scroll_to_row(&self, _t: crate::harness::Target, _key: &str) -> String {
+        crate::depth_stub("varied")
+    }
     fn header_click(&self, t: crate::harness::Target, column: u32) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.columns.len());

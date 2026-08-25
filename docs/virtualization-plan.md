@@ -113,13 +113,23 @@ One machine, two paths, chosen per For by measurement:
 
 ## §5 — Observables and the two scenes
 
-- `expect_rows` keeps asserting DATA — all N rows, realized or not. A
-  windowed leg proves the whole collection arrived without realizing
-  it.
-- New byte-shared verb `expect_window <target> <first> <count> <N>`:
-  the realized band's position, width and declared total, read from
-  the tier's own geometry (spacer arithmetic on synthesized tiers, the
-  data source's range on mac).
+- `expect_rows` reads REALIZED WIDGETS (amended 2026-08-25 — the
+  implementations walk real children, and a band-wide listing's length
+  is a viewport metric), so scenes assert it only where the band
+  covers the whole collection; whole-collection facts ride labels and
+  totals computed from data.
+- New byte-shared verb `expect_window <target> <first_visible> <N>`
+  (RULED 2026-08-25, after the first live run showed the two depth
+  halves splitting exactly here): the FIRST VISIBLE row and the
+  declared total, both data — after scroll_to_row the first visible
+  row IS the scrolled-to row, on either arithmetic path. The realized
+  band's WIDTH is a viewport metric and left the verb: the band
+  arithmetic is held by the core's own watched tests (rowwindow.rs),
+  and the compiled table-tier probe holds the view layer's contract —
+  the unreported fallback band, and a firstVisible that reads the
+  viewport rather than the band (an echoing firstVisible reds the
+  probe). A scroll clamped at the collection's end leaves first
+  visible metric-dependent, so end-scrolls run unasserted.
 - `scroll_to_row <target> <key>`: the companion admission the ledger
   already pairs with this milestone — core maps key to index, backend
   scrolls, band follows. Addresses the ROW (data), so unrealized rows
@@ -160,8 +170,15 @@ One machine, two paths, chosen per For by measurement:
    path's tests watched red first, then the corrected path's.
 2. Mac depth: the NSTableView data-source tier, expect_window +
    scroll_to_row on the mac stage, ledger.steps AND varied.steps, the
-   Python transactions view in the portfolio (with the Python insert
-   fix, which is on this path). validate-mac green.
+   Python transactions view (with the Python insert fix, which is on
+   this path) — AS ITS OWN GUEST, guests/python/ledger.py, until
+   breadth: portfolio.steps runs on the linux and windows lanes today,
+   where an un-windowed 15k-row stamp still chokes; the view joins the
+   portfolio when §6.3 lands (amended 2026-08-25). varied.steps is a
+   ONE-COLUMN TABLE, not a plain For — §6.2 windows the mac table
+   tier; the plain-For band is §6.3's. GTK and WinUI carry the
+   depth_stub calls meanwhile, and the python guests keep ledger and
+   varied on the mobile lanes' UNWIRED lists. validate-mac green.
 3. Breadth: the four synthesized spacer+band tiers in parallel
    worktrees; no binding surface moves (there is nothing to spell —
    the census's job is confirming NOTHING appeared). Matrix.

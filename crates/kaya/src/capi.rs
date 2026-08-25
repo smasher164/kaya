@@ -3044,6 +3044,21 @@ pub unsafe extern "C" fn kaya_window_geometry(for_target: u64, out: *mut KayaWin
     unsafe { *out = g };
 }
 
+/// One row's height in the core's arithmetic — measured if that row has
+/// been, presumed from the pitch otherwise, and 0 before this For has
+/// been measured at all.
+///
+/// A ROW-HEIGHT DELEGATE ASKS PER ROW, over the whole collection and not
+/// just the band (the macOS native tier, §4), so the geometry read cannot
+/// serve: a backend without this would keep a height cache of its own,
+/// which is the second estimator §2 exists to remove.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_row_extent(for_target: u64, index: u64) -> f64 {
+    with_window_scene("reading a row's extent", |scene| {
+        (Vec::new(), scene.row_extent(for_target, index as usize))
+    })
+}
+
 thread_local! {
     /// Where the batch handed out by the last `kaya_next_commands`
     /// lives. THREAD-LOCAL for HELD_OCCURRENCE's reason: the borrow's

@@ -479,6 +479,61 @@ else:
                        "derived, never hand-edited: run `python3 "
                        "tools/gen-market.py --ensure`")
 
+# ------------------------------------------------------------------ C9
+# THE SCENE IS DERIVED FROM THE ARTIFACT TOO. C8 holds the CSV to its
+# generator; nothing held tools/scenes/ledger.steps to the CSV, so
+# retuning the generator left a byte-frozen scene asserting last month's
+# ledger — a red that would arrive on every windowed lane at once, with
+# five failing strings and no file named. This re-derives the four
+# expectations that come from the artifact alone and prints the line the
+# CSV asks for.
+#
+# The money rule and RECENT are written here as well as in
+# guests/python/ledger.py: the alternative is importing a guest that
+# builds a window at import time. They are one line and one integer, and
+# a guest that moves either reddens this clause naming the file.
+SCENE = "tools/scenes/ledger.steps"
+RECENT = 12
+scene_path = root / SCENE
+if art.is_file() and not scene_path.is_file():
+    bad.append(f"{SCENE} is gone while the market artifact whose rows it "
+               "freezes is still here — the uniform windowing scene is the "
+               "only run-time observation that the ledger arrived whole")
+elif art.is_file():
+    csv_rows = [line.split(",")
+                for line in art.read_text().splitlines()[1:]]
+
+    def _money(cents):
+        return f"${cents // 100}.{cents % 100:02d}"
+
+    def _edge(word, row):
+        date, _account, ticker, side, _qty, _price, total = row
+        return f"{word} {date} {ticker} {side} {_money(int(total))}"
+
+    def _cells(row):
+        date, _account, ticker, side, _qty, _price, total = row
+        return f"{date},{ticker},{side},{_money(int(total))}"
+
+    scene_text = scene_path.read_text()
+    derived = [
+        (f'expect label#0 "{len(csv_rows)} of {len(csv_rows)} transactions"',
+         "the ledger's declared size"),
+        (f'expect label#1 "{_edge("first", csv_rows[0])}"',
+         "the ledger's first row"),
+        (f'expect label#2 "{_edge("last", csv_rows[-1])}"',
+         "the ledger's last row"),
+        ('expect_rows column@recent "'
+         + "|".join(_cells(r) for r in csv_rows[-RECENT:]) + '"',
+         f"the {RECENT} most recent rows"),
+    ]
+    for line, what in derived:
+        if line not in scene_text:
+            bad.append(f"{SCENE} no longer freezes {what} the way the "
+                       "generated artifact has it. That scene is DERIVED from "
+                       "guests/assets/market/transactions.csv — move the "
+                       "expectation, never the artifact. The line the CSV "
+                       f"asks for is:\n    {line}")
+
 for b in bad:
     print("check-assets: " + b, file=sys.stderr)
 sys.exit(1 if bad else 0)
@@ -676,7 +731,29 @@ s="$(fresh n13)"
 rm "$s/guests/assets/market/transactions.csv"
 refuses "$s" "derived, never committed" "N13 (a missing derived artifact)"
 
-echo "check-assets: self-test: 13 watched negatives, each with its" \
+# N14 — C9: the scene's frozen last row drifts from the artifact's. The
+# SCENE is doctored rather than the CSV, so C8 stays green and this red
+# can only be C9's.
+s="$(fresh n14)"
+hits="$(doctor "$s" tools/scenes/ledger.steps 'expect label#2 "last [^"]*"' \
+    'expect label#2 "last 1999-01-01 AAPL buy $1.00"')"
+applied "$hits" "N14's drifted last row"
+refuses "$s" "the ledger's last row" "N14 (a scene that outlived its artifact)"
+
+# N15 — C9: the same, one string over — the twelve most recent rows,
+# which is the expectation a regenerated ledger moves every time.
+s="$(fresh n15)"
+hits="$(doctor "$s" tools/scenes/ledger.steps '(expect_rows column@recent ")[^"]*"' \
+    '\1nothing,here,at,$0.00"')"
+applied "$hits" "N15's drifted recent rows"
+refuses "$s" "the 12 most recent rows" "N15 (a stale recent table)"
+
+# N16 — C9: the scene is deleted while the artifact stays.
+s="$(fresh n16)"
+rm "$s/tools/scenes/ledger.steps"
+refuses "$s" "is gone while the market artifact" "N16 (a deleted scene)"
+
+echo "check-assets: self-test: 16 watched negatives, each with its" \
     "perturbation proven applied"
 
 # ---------------------------------------------------------------------
