@@ -351,6 +351,11 @@ pub(crate) fn run() -> i32 {
         window_geometry: crate::capi::kaya_window_geometry,
         row_extent: crate::capi::kaya_row_extent,
     };
+    // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
+    // entry): both of its tiers do, and the declaration has to beat the
+    // first transaction rather than the first layout. One site serves mac
+    // and iOS — the same dylib, the same run.
+    crate::capi::declare_windowing();
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };
     run(&api)

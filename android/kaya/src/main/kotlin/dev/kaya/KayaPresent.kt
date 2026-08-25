@@ -205,6 +205,67 @@ object KayaPresent {
      * kaya_emit_menu_value_changed's JNI spelling. */
     @JvmStatic external fun emitMenuValueChanged(item: Long, noun: ByteArray, index: Double)
 
+    // ---- Row windowing (docs/virtualization-plan.md §3) -------------
+    //
+    // BACKEND PLUMBING: no binding spells any of it and no guest hears
+    // it. [container] is always a For CONTAINER's widget id — the core
+    // faults on anything else — so the tier asks only about a node it
+    // knows is one (on this backend, a declared table).
+
+    /** A For's visible range changed: scroll, resize or first layout.
+     *  Indices are POSITIONS over the collection's current order.
+     *  kaya_window_moved's JNI spelling. */
+    @JvmStatic external fun windowMoved(container: Long, first: Long, count: Long)
+
+    /** The extents this tier laid out for the realized rows at
+     *  [first]…, one per row, in the same unit every other number here
+     *  is (this backend reports PIXELS). Produces no applies: a height
+     *  moves the arithmetic, never the band.
+     *  kaya_rows_measured's JNI spelling. */
+    @JvmStatic external fun rowsMeasured(container: Long, first: Long, heights: DoubleArray)
+
+    /** The keyed row's index in the collection's CURRENT order, or
+     *  [ROW_NOT_FOUND]. Addresses the ROW, so an unrealized row answers
+     *  exactly like a realized one. kaya_scroll_to_row_str's JNI
+     *  spelling. */
+    @JvmStatic external fun scrollToRow(container: Long, key: String): Long
+
+    /**
+     * One windowed For's geometry, written into [out] — which must hold
+     * at least [GEOMETRY_SLOTS] doubles, in the order the GEOMETRY_*
+     * constants name.
+     *
+     * FILLED IN PLACE rather than returned: this is read on the layout
+     * path of every frame a table scrolls, and a fresh array per frame
+     * is garbage the OOM this milestone exists to fix would rather not
+     * have. kaya_window_geometry's JNI spelling.
+     */
+    @JvmStatic external fun windowGeometry(container: Long, out: DoubleArray)
+
+    /** One row's height in the core's arithmetic — measured if that row
+     *  has been, presumed from the pitch otherwise, and 0 before this
+     *  For has been measured at all. THE CORE IS THE ONLY ESTIMATOR
+     *  (§2), so the tier keeps no height cache of its own.
+     *  kaya_row_extent's JNI spelling. */
+    @JvmStatic external fun rowExtent(container: Long, index: Long): Double
+
+    /** [scrollToRow]'s no-answer: KAYA_ROW_NOT_FOUND (u64::MAX) as the
+     *  jlong it crosses as. */
+    const val ROW_NOT_FOUND = -1L
+
+    // KayaWindowGeometry's fields, in the order windowGeometry writes
+    // them. The three counts cross as doubles with the three lengths
+    // because one array is one JNI call; a row index is exact in a
+    // double past any collection that fits in memory.
+    const val GEOMETRY_FIRST = 0
+    const val GEOMETRY_COUNT = 1
+    const val GEOMETRY_TOTAL = 2
+    const val GEOMETRY_OFFSET = 3
+    const val GEOMETRY_EXTENT = 4
+    const val GEOMETRY_ANCHOR_SHIFT = 5
+    const val GEOMETRY_CORRECTED = 6
+    const val GEOMETRY_SLOTS = 7
+
     /** The core's protocol fingerprint, for the stale-APK assert. */
     @JvmStatic external fun specHash(): Long
 

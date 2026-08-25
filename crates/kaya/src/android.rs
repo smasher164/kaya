@@ -257,6 +257,11 @@ pub(crate) fn apk_assets_shown() -> String {
 // The presentation-side C API over JNI for the Compose interpreter:
 // emissions in, resolved apply-op records out.
 fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
+    // THE COMPOSE TIER WINDOWS ROWS (docs/deferred.md, the
+    // declares-windowing entry). Declared where the interpreter's own
+    // surface is installed, so both attach paths carry it and it beats
+    // the pump's first transaction.
+    crate::capi::declare_windowing();
     let class = env.find_class("dev/kaya/KayaPresent")?;
     // Remembered HERE, on the thread that can still resolve an app class.
     let _ = JVM.set(env.get_java_vm()?);
@@ -375,6 +380,32 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 name: "specHash".into(),
                 sig: "()J".into(),
                 fn_ptr: crate::jvm::ring_spec_hash as *mut _,
+            },
+            // Row windowing (docs/virtualization-plan.md §3).
+            NativeMethod {
+                name: "windowMoved".into(),
+                sig: "(JJJ)V".into(),
+                fn_ptr: present_window_moved as *mut _,
+            },
+            NativeMethod {
+                name: "rowsMeasured".into(),
+                sig: "(JJ[D)V".into(),
+                fn_ptr: present_rows_measured as *mut _,
+            },
+            NativeMethod {
+                name: "scrollToRow".into(),
+                sig: "(JLjava/lang/String;)J".into(),
+                fn_ptr: present_scroll_to_row as *mut _,
+            },
+            NativeMethod {
+                name: "windowGeometry".into(),
+                sig: "(J[D)V".into(),
+                fn_ptr: present_window_geometry as *mut _,
+            },
+            NativeMethod {
+                name: "rowExtent".into(),
+                sig: "(JJ)D".into(),
+                fn_ptr: present_row_extent as *mut _,
             },
             // The undo tier (docs/undo-plan.md D6/§3).
             NativeMethod {
@@ -614,6 +645,92 @@ extern "system" fn present_note_native_undo(
             u8::from(can_undo != 0),
         )
     };
+}
+
+// --- Row windowing (docs/virtualization-plan.md §3) ------------------
+//
+// Straight-through to the C entries, like the undo tier above: the core
+// owns the band, the presumption and the arithmetic, and the tier owns
+// only the geometry it laid out. A refused target FAULTS rather than
+// aborting (crates/kaya/src/fault.rs), so the leg reddens with the
+// sentence — which is why the Compose tier asks only about a node it
+// knows is a For container.
+
+extern "system" fn present_window_moved(
+    _env: JNIEnv,
+    _class: JClass,
+    container: jlong,
+    first: jlong,
+    count: jlong,
+) {
+    crate::capi::kaya_window_moved(container as u64, first.max(0) as u64, count.max(0) as u64);
+}
+
+extern "system" fn present_rows_measured(
+    env: JNIEnv,
+    _class: JClass,
+    container: jlong,
+    first: jlong,
+    heights: jni::objects::JDoubleArray,
+) {
+    let len = env.get_array_length(&heights).unwrap_or(0).max(0) as usize;
+    let mut out = vec![0f64; len];
+    if len > 0 && env.get_double_array_region(&heights, 0, &mut out).is_err() {
+        return;
+    }
+    unsafe {
+        crate::capi::kaya_rows_measured(container as u64, first.max(0) as u64, out.as_ptr(), len)
+    };
+}
+
+extern "system" fn present_scroll_to_row(
+    mut env: JNIEnv,
+    _class: JClass,
+    container: jlong,
+    key: JString,
+) -> jlong {
+    let Ok(key) = env.get_string(&key) else {
+        return crate::capi::KAYA_ROW_NOT_FOUND as jlong;
+    };
+    let key: String = key.into();
+    unsafe { crate::capi::kaya_scroll_to_row_str(container as u64, key.as_ptr(), key.len()) as jlong }
+}
+
+/// KayaPresent.windowGeometry: the record's fields written into the
+/// caller's `double[]`, in KayaPresent's GEOMETRY_* order. The counts
+/// cross as doubles beside the three lengths because ONE array is one
+/// JNI call, and a row index is exact in a double past any collection
+/// that fits in memory.
+extern "system" fn present_window_geometry(
+    env: JNIEnv,
+    _class: JClass,
+    container: jlong,
+    out: jni::objects::JDoubleArray,
+) {
+    let mut geometry = crate::capi::KayaWindowGeometry::default();
+    unsafe { crate::capi::kaya_window_geometry(container as u64, &mut geometry) };
+    let slots = [
+        geometry.first as f64,
+        geometry.count as f64,
+        geometry.total as f64,
+        geometry.offset,
+        geometry.extent,
+        geometry.anchor_shift,
+        f64::from(geometry.corrected),
+    ];
+    if (env.get_array_length(&out).unwrap_or(0) as usize) < slots.len() {
+        return;
+    }
+    let _ = env.set_double_array_region(&out, 0, &slots);
+}
+
+extern "system" fn present_row_extent(
+    _env: JNIEnv,
+    _class: JClass,
+    container: jlong,
+    index: jlong,
+) -> jni::sys::jdouble {
+    crate::capi::kaya_row_extent(container as u64, index.max(0) as u64)
 }
 
 extern "system" fn present_emit_value_changed(

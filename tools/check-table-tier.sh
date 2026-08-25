@@ -375,6 +375,92 @@ else:
         if call not in where:
             bad.append(f"{path}: KayaTableDriver never calls `{call}` — {why}.")
 
+# THE SYNTHESIZED TIER'S WINDOW, held the same way and for a STRONGER
+# reason: here not ONE of the links has a scene observable. MEASURED
+# 2026-08-25 on the iOS-compact tier with windowed.steps watched — take
+# the RANGE report away and the band never narrows, every row of the
+# collection stays realized, and the scene stays GREEN, because
+# expect_window reads the viewport and a viewport scrolling over a fully
+# realized list answers exactly what a windowed one does. The difference
+# is memory, and no verb reads memory. Take the HEIGHT report away and
+# the core's arithmetic stays empty (offset 0, extent 0) with the scene
+# still green. Compute the spacers HERE instead of reading the core's,
+# and the rows land in the same places until the two arithmetics
+# disagree, which is the divergence §2 exists to make impossible.
+band = braced(text, r"@Observable final class KayaSynthesizedWindow\s*\{")
+if band is None:
+    bad.append(f"{path}: no `@Observable final class KayaSynthesizedWindow {{` — the "
+               "synthesized tier's window loop was renamed or moved, and not one of "
+               "its links has a scene that could see it go.")
+else:
+    report_arm = braced(text, r"private func report\(_ node: KayaNode\)", band[0], band[1])
+    measure_arm = braced(text, r"private func measure\(_ node: KayaNode", band[0], band[1])
+    if report_arm is None or measure_arm is None:
+        bad.append(f"{path}: KayaSynthesizedWindow has no `report(_ node:)` / "
+                   "`measure(_ node:)` pair — the loop this gate reads is gone.")
+    else:
+        report_body = text[report_arm[0]:report_arm[1]]
+        measure_body = text[measure_arm[0]:measure_arm[1]]
+        for call, where, arm, why in (
+            ("KayaHost.windowMoved(", report_body, "report",
+             "the visible range is never reported, so the core's band can never "
+             "narrow — every row stays realized and every scene stays green"),
+            ("KayaHost.rowsMeasured(", measure_body, "measure",
+             "the extents this tier laid out are never reported, so the core "
+             "presumes forever and its offset and extent stay 0"),
+            ("KayaHost.rowExtent(", report_body, "report",
+             "the band's own height stops being the core's arithmetic — the second "
+             "estimator §2 exists to remove"),
+            ("top: geometry.offset", report_body, "report",
+             "the top spacer stops being the core's band offset and becomes a "
+             "number this tier derived"),
+            ("geometry.extent - geometry.offset - spanned", report_body, "report",
+             "the bottom spacer stops being what the core says is left below the "
+             "band and becomes a number this tier derived"),
+        ):
+            print(f"check-table-tier: synthesized window link `{call}` found "
+                  f"{where.count(call)} time(s) in {arm}")
+            if call not in where:
+                bad.append(f"{path}: KayaSynthesizedWindow's {arm} never names "
+                           f"`{call}` — {why}.")
+
+tier = braced(text, r"private struct KayaSynthesizedTable\s*:\s*View\s*\{")
+if tier is None:
+    bad.append(f"{path}: no `private struct KayaSynthesizedTable: View {{` — the tier "
+               "whose spacer geometry this gate holds is gone.")
+else:
+    tier_body = text[tier[0]:tier[1]]
+    for name, why in (
+        ("window.top", "the top spacer never reaches the layout"),
+        ("window.bottom", "the bottom spacer never reaches the layout"),
+        ("window.placement", "the layout's own placement never reaches the report, so "
+                             "the range this tier reports is a guess about geometry "
+                             "nobody read"),
+    ):
+        if name not in tier_body:
+            bad.append(f"{path}: KayaSynthesizedTable never hands `{name}` to its "
+                       f"layout — {why}.")
+
+spacers = braced(text, r"private struct KayaTableLayout\s*:\s*Layout\s*\{")
+if spacers is None:
+    bad.append(f"{path}: no `private struct KayaTableLayout: Layout {{` — the layout "
+               "that draws the band between its two spacers is gone.")
+else:
+    for arm, wanted, why in (
+        (r"func placeSubviews\(", "+ top",
+         "the band is placed at the content's top whatever the core said, so every "
+         "realized row draws one whole spacer out of place"),
+        (r"func sizeThatFits\(", "+ bottom",
+         "the content stops being as tall as the collection, so the scroll bar and "
+         "every seek past the band are about a shorter list than there is"),
+    ):
+        found = braced(text, arm, spacers[0], spacers[1])
+        if found is None:
+            bad.append(f"{path}: KayaTableLayout has no `{arm}` — this gate cannot "
+                       "read where the spacers land.")
+        elif wanted not in text[found[0]:found[1]]:
+            bad.append(f"{path}: KayaTableLayout's {arm} never adds `{wanted}` — {why}.")
+
 invalidation_match = braced(text, r"func kayaInvalidateTableGeometry\s*\(")
 if invalidation_match is None:
     bad.append(f"{path}: no `func kayaInvalidateTableGeometry(` — layout-only changes "
@@ -836,6 +922,60 @@ applied "$hits" "the row-height delegate ignoring the core" \
     "struct KayaNativeTable > class KayaTableDriver > func tableView"
 refuses "$T/unasked-row-height.swift" "never calls \`KayaHost.rowExtent(\`" \
     "a second estimator beside the core's"
+
+# The synthesized tier's five, one per link. None of them has a scene
+# that can see it go: windowed.steps was watched staying GREEN with the
+# range report removed, because expect_window reads the viewport and a
+# viewport over a fully realized list reads the same.
+hits="$(perturb "$SWIFTUI" \
+    '            KayaHost\.windowMoved\(node\.id, claim\.first, claim\.count\)\n' \
+    '' "$T/synth-no-range-report.swift")"
+applied "$hits" "the synthesized tier's visible-range report removed" \
+    "class KayaSynthesizedWindow > func report"
+refuses "$T/synth-no-range-report.swift" "report never names \`KayaHost.windowMoved(\`" \
+    "a synthesized tier whose band can never narrow"
+
+hits="$(perturb "$SWIFTUI" \
+    '        KayaHost\.rowsMeasured\(node\.id, first, heights\)\n' \
+    '' "$T/synth-no-height-report.swift")"
+applied "$hits" "the synthesized tier's measured-extent report removed" \
+    "class KayaSynthesizedWindow > func measure"
+refuses "$T/synth-no-height-report.swift" "measure never names \`KayaHost.rowsMeasured(\`" \
+    "a synthesized tier that leaves the core presuming forever"
+
+hits="$(perturb "$SWIFTUI" \
+    '        for index in band \{ spanned \+= KayaHost\.rowExtent\(node\.id, index\) \}' \
+    '        for _ in band { spanned += Double(pitches.first ?? 0) }' \
+    "$T/synth-second-estimator.swift")"
+applied "$hits" "the band's height taken from the tier instead of the core" \
+    "class KayaSynthesizedWindow > func report"
+refuses "$T/synth-second-estimator.swift" "report never names \`KayaHost.rowExtent(\`" \
+    "a second estimator beside the core's, one tier over"
+
+hits="$(perturb "$SWIFTUI" \
+    '            windowed: true, top: geometry\.offset,' \
+    '            windowed: true, top: Double(geometry.first) * (pitches.first.map(Double.init) ?? 0),' \
+    "$T/synth-derived-spacer.swift")"
+applied "$hits" "the top spacer derived here instead of read from the core" \
+    "class KayaSynthesizedWindow > func report"
+refuses "$T/synth-derived-spacer.swift" "report never names \`top: geometry.offset\`" \
+    "a tier that draws its band where its own arithmetic says"
+
+hits="$(perturb "$SWIFTUI" \
+    '        var y = dividerY \+ dividerH \+ rowGap \+ top' \
+    '        var y = dividerY + dividerH + rowGap' "$T/synth-unspaced-band.swift")"
+applied "$hits" "the band placed at the content's top, ignoring the core's offset" \
+    "struct KayaTableLayout > func placeSubviews"
+refuses "$T/synth-unspaced-band.swift" 'never adds `+ top`' \
+    "a band drawn one whole spacer out of place"
+
+hits="$(perturb "$SWIFTUI" \
+    '            windowed: window\.windowed, top: window\.top, bottom: window\.bottom,' \
+    '            windowed: false, top: 0, bottom: 0,' "$T/synth-unwired-spacers.swift")"
+applied "$hits" "the window's spacers never handed to the layout" \
+    "struct KayaSynthesizedTable > func rows"
+refuses "$T/synth-unwired-spacers.swift" 'never hands `window.top`' \
+    "a tier whose layout cannot know where its band starts"
 
 hits="$(perturb "$SWIFTUI" \
     'kayaRecordTableCell\(\n                        node, kayaTableCellKey\(stamped, column, cell\), generation, frame\)' \

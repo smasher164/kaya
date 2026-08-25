@@ -191,6 +191,7 @@ GATES = [
      "key that cheap to invalidate is a cache that never hits"),
     ("check-jni", ["tools/check-jni.sh"], True, ""),
     ("check-stubs", ["tools/check-stubs.sh"], True, ""),
+    ("check-staging", ["tools/check-staging.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),
     ("check-detekt", ["tools/check-detekt.sh"], True, ""),
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),

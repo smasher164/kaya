@@ -72,6 +72,18 @@ enum TplOp {
     ContextAttachNode { node: u64, item: MenuItemId },
 }
 
+/// Does this body declare collection state of its own — a nested For,
+/// at any depth, including under a When? Such a copy owns model
+/// instances that live and die with it, which is what keeps its table
+/// off the seed (`seed_window`).
+fn body_owns_a_collection(body: &TplBody) -> bool {
+    body.ops.iter().any(|op| match op {
+        TplOp::Collection { .. } | TplOp::For { .. } => true,
+        TplOp::When { body, .. } => body_owns_a_collection(body),
+        _ => false,
+    })
+}
+
 #[derive(Debug)]
 struct TplBody {
     ops: Vec<TplOp>,
@@ -162,6 +174,21 @@ struct CollInstance {
     /// variant is asserted against it.
     entries: HashMap<Key, (u32, Record)>,
 }
+
+/// THE SEED: how many rows a windowed-capable For realizes before its
+/// backend has laid anything out, on a backend that declared it windows
+/// (docs/deferred.md, the declares-windowing entry).
+///
+/// A GENEROUS SCREENFUL, and generous is the whole argument. Two tiers
+/// read their first VISIBLE COUNT off the rows they have realized (the
+/// iOS synthesized table's placement walk, Compose's laid-out cells), so
+/// a seed smaller than one viewport is handed straight back as the first
+/// report and the band then converges by DOUBLING (docs/traps.md, "A
+/// window seed smaller than one viewport"). 128 rows clears a 2,560pt
+/// viewport at kaya's shortest row, a bare label's ~20pt pitch. The cost
+/// is bounded and paid once: ~6.7 MB of Compose state against ART's
+/// 192 MB limit, against the whole collection under the bridge.
+const WINDOW_SEED_ROWS: usize = 128;
 
 /// A live rendering site of a For: the (collection, instance path) it
 /// renders, its container widget, and the element chain it was stamped
@@ -524,6 +551,12 @@ pub(crate) struct Scene {
     /// what it watched go past, and it exists because an episode's
     /// before-image is the text as of the event BEFORE the run's first.
     field_text: HashMap<WidgetId, String>,
+    /// THE BACKEND DECLARED THAT IT WINDOWS ROWS (docs/deferred.md, the
+    /// declares-windowing entry). Core-internal, set once at the
+    /// backend's own init: it rides no wire record, no binding spells it
+    /// and no guest hears it. It seeds a windowed-capable For's band —
+    /// see `seed_window`.
+    windowing: bool,
 }
 
 /// The choice kinds: one selection among label-children options.
@@ -1203,6 +1236,16 @@ fn check_type(current: &Value, incoming: &Value, what: &str) {
 impl Scene {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// This backend windows rows: seed every windowed-capable For it
+    /// renders from here on (docs/deferred.md, the declares-windowing
+    /// entry). Called at the backend's own init — gtk.rs's and
+    /// winui/mod.rs's CoreState, swiftui_host::run for mac and iOS,
+    /// android.rs's register_present_natives for Compose — so a backend
+    /// that runs cannot skip it.
+    pub(crate) fn declare_windowing(&mut self) {
+        self.windowing = true;
     }
 
     fn alloc_internal(&mut self) -> WidgetId {
@@ -2218,6 +2261,11 @@ impl Scene {
                     };
                     if let Some(site) = live {
                         Self::validate_row_arity(&site.bodies, count);
+                        // A LIVE FOR BECOMES WINDOWED-CAPABLE HERE: this
+                        // is the declaration all four windowing tiers
+                        // read, and on a declared backend it seeds the
+                        // band before the guest's own inserts arrive.
+                        self.seed_window_at(widget, &mut out);
                         out.push(ApplyOp::SetColumnHeaders {
                             id: widget,
                             sorted,
@@ -2259,6 +2307,10 @@ impl Scene {
                                 .map(|((_, keys), wid)| (keys.clone(), *wid))
                                 .collect();
                             for (keys, wid) in live {
+                                // The same declaration, one copy at a
+                                // time: a stamped copy that becomes a
+                                // table is windowed-capable from now on.
+                                self.seed_window_at(wid, &mut out);
                                 out.push(ApplyOp::SetColumnHeaders {
                                     id: wid,
                                     sorted: bar.sorted,
@@ -4051,7 +4103,8 @@ impl Scene {
                             body,
                         });
                     }
-                    // Top level: the live site starts rendering now.
+                    // Top level: the live site starts rendering now. Its
+                    // columns, if it has any, are declared after this.
                     (None, ClosedScope::For { id, collection, bodies }) => {
                         self.register_for_site(
                             collection,
@@ -4059,6 +4112,7 @@ impl Scene {
                             WidgetId(id),
                             bodies,
                             vec![],
+                            false,
                             out,
                         );
                     }
@@ -4215,6 +4269,11 @@ impl Scene {
 
     /// A For starts rendering a collection instance: register the site
     /// and stamp any entries already in the table.
+    ///
+    /// `table` says the site is windowed-capable AT BIRTH — a nested For
+    /// whose template node already carries a header bar. A live For's
+    /// columns arrive after its CreateFor, so that one is seeded from the
+    /// `set_column_headers` arm instead.
     fn register_for_site(
         &mut self,
         collection: CollectionId,
@@ -4222,6 +4281,7 @@ impl Scene {
         container: WidgetId,
         bodies: Vec<Arc<TplBody>>,
         chain: Vec<EntryRef>,
+        table: bool,
         out: &mut Vec<ApplyOp>,
     ) {
         assert!(
@@ -4248,6 +4308,17 @@ impl Scene {
                 window: crate::rowwindow::RowWindow::default(),
             },
         );
+        // RECONCILE IS A SEEDED SITE'S ONLY STAMPER: seed_window stamps
+        // the band out of the order, so the whole-table walk below — the
+        // bridge's — must not run beside it. On an UNDECLARED backend
+        // nothing is seeded and the walk is still the whole of it, which
+        // is the arm the bridge test takes.
+        if table {
+            self.seed_window(collection, &path, out);
+            if self.windowed(collection, &path) {
+                return;
+            }
+        }
         for key in existing {
             self.stamp_entry(collection, &path, &key, out);
         }
@@ -4710,25 +4781,30 @@ impl Scene {
                         tag: None,
                     });
                     stamp.for_sites.push((*collection, copy_path.clone()));
+                    // The copy's header bar, template-or-override, and the
+                    // instance record a late template declaration re-stamps
+                    // through (docs/tables-plan.md, dynamic tables). The
+                    // tag is sort_requested's identity: the template node
+                    // plus this copy's keys, outermost first.
+                    //
+                    // READ BEFORE THE SITE REGISTERS: a copy that IS a
+                    // table is windowed-capable from its first row, so
+                    // the seed has to be in place before anything stamps.
+                    let bar = self
+                        .bar_overrides
+                        .get(&(*node, copy_path.clone()))
+                        .or_else(|| self.tpl_headers.get(node))
+                        .cloned();
                     self.register_for_site(
                         *collection,
                         copy_path.clone(),
                         container,
                         bodies.clone(),
                         chain.to_vec(),
+                        bar.is_some(),
                         out,
                     );
-                    // The copy's header bar, template-or-override, and the
-                    // instance record a late template declaration re-stamps
-                    // through (docs/tables-plan.md, dynamic tables). The
-                    // tag is sort_requested's identity: the template node
-                    // plus this copy's keys, outermost first.
                     self.bar_instances.insert((*node, copy_path.clone()), container);
-                    let bar = self
-                        .bar_overrides
-                        .get(&(*node, copy_path.clone()))
-                        .or_else(|| self.tpl_headers.get(node))
-                        .cloned();
                     if let Some(bar) = bar {
                         out.push(ApplyOp::SetColumnHeaders {
                             id: container,
@@ -4963,15 +5039,94 @@ impl Scene {
 
     // --- Row windowing (docs/virtualization-plan.md §1-§3) ---------------
     //
-    // A For with NO window report has an UNBOUNDED band: every row
-    // realizes, and every path above stays the one it was. The report is
-    // what narrows it, and from then on the site's realized set is
-    // exactly the band's rows.
+    // A For with NO window report and NO seed has an UNBOUNDED band:
+    // every row realizes, and every path above stays the one it was —
+    // §1's bridge, which is exactly right for a backend that never
+    // windows. The report is what narrows it, and from then on the
+    // site's realized set is exactly the band's rows.
 
     fn windowed(&self, id: CollectionId, path: &PathKey) -> bool {
         self.for_sites
             .get(&(id, path.clone()))
-            .is_some_and(|s| s.window.is_reported())
+            .is_some_and(|s| s.window.is_bounded())
+    }
+
+    /// A windowed-capable For on a DECLARED backend starts at the seed
+    /// rather than unbounded (docs/deferred.md, the declares-windowing
+    /// entry): its first k rows realize and every row past them is DATA
+    /// until the backend's first report replaces the seed with a measured
+    /// band.
+    ///
+    /// WINDOWED-CAPABLE IS A DECLARED TABLE, which is what all four
+    /// windowing tiers window and what nothing else does. Seeding a plain
+    /// For would cap it at k rows on a tier that never reports on one,
+    /// and nothing the guest can read would say so.
+    ///
+    /// AND ITS ROWS MUST OWN NO NESTED COLLECTION. A nested For's
+    /// instance is born with its copy and dies with it, so an unrealized
+    /// row HAS no instance — `lines.at("r128")` then dies naming a path
+    /// that was never stamped (measured here on varied.py, 300 rows,
+    /// which writes every row's inner lines inside the build
+    /// transaction). The band already loses a realized row's nested rows
+    /// when it leaves; making rows unrealized from birth turns that into
+    /// a fault, so a table whose template owns collection state stays on
+    /// the bridge until instances outlive their stamps (docs/traps.md).
+    fn seed_window(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
+        if !self.windowing {
+            return;
+        }
+        let site = (id, path.clone());
+        match self.for_sites.get(&site) {
+            Some(s) if !s.window.is_bounded() => {
+                if s.bodies.iter().any(|b| body_owns_a_collection(b)) {
+                    return;
+                }
+            }
+            _ => return,
+        }
+        // A site seeded after its rows were stamped (columns declared
+        // late) still owes the teardown of everything past the band, and
+        // reconcile_window can only diff against a realized set that says
+        // what is actually stamped.
+        self.inherit_realized(&site);
+        self.for_sites
+            .get_mut(&site)
+            .unwrap()
+            .window
+            .plant_seed(WINDOW_SEED_ROWS);
+        self.reconcile_window(id, path, out);
+    }
+
+    /// The same, addressed the way `set_column_headers` addresses a live
+    /// table: by the For CONTAINER's widget id.
+    fn seed_window_at(&mut self, container: WidgetId, out: &mut Vec<ApplyOp>) {
+        if !self.windowing {
+            return;
+        }
+        let Some((id, path)) = self
+            .for_sites
+            .iter()
+            .find(|(_, s)| s.container == container)
+            .map(|(site, _)| site.clone())
+        else {
+            return;
+        };
+        self.seed_window(id, &path, out);
+    }
+
+    /// The realized set of a site whose band was UNBOUNDED: every row
+    /// that actually has a stamp, in the collection's order. Once only,
+    /// so the walk over every row is paid once — after it the band's own
+    /// reconciliation is the only writer.
+    fn inherit_realized(&mut self, site: &(CollectionId, PathKey)) {
+        let (id, path) = site.clone();
+        let realized: Vec<Key> = self.coll_instances[site]
+            .order
+            .iter()
+            .filter(|k| self.stamps.contains_key(&(id, path.clone(), (*k).clone())))
+            .cloned()
+            .collect();
+        self.for_sites.get_mut(site).unwrap().window.set_realized(realized);
     }
 
     /// A backend's report of what is on screen. The band moves, entering
@@ -4980,19 +5135,24 @@ impl Scene {
     /// ordinary applies, and this is the pump's SECOND PRODUCER (§3.3).
     pub(crate) fn window_moved(&mut self, target: u64, first: usize, count: usize) -> Vec<ApplyOp> {
         let site = self.window_site(target, "kaya_window_moved");
+        // A BACKEND THAT REPORTS IS A BACKEND THAT WINDOWS, and it says
+        // so at its init or not at all. Without the declaration the seed
+        // never plants and the first fill realizes the whole collection
+        // again — the failure this wall exists to name, which cost two
+        // fan-out agents a bench run each to find from the symptom.
+        assert!(
+            self.windowing,
+            "kaya: a window report arrived from a backend that never declared it \
+             windows rows — call Scene::declare_windowing() at the backend's own \
+             init (docs/deferred.md, the declares-windowing entry)"
+        );
         // THE FIRST REPORT INHERITS WHAT THE UNBOUNDED BAND REALIZED.
         // Until it arrives every row is stamped, and the realized set has
-        // to say so or the rows outside the new band never leave. Once
-        // only, so the walk over every row is paid once.
-        if !self.for_sites[&site].window.is_reported() {
-            let (id, path) = site.clone();
-            let seeded: Vec<Key> = self.coll_instances[&site]
-                .order
-                .iter()
-                .filter(|k| self.stamps.contains_key(&(id, path.clone(), (*k).clone())))
-                .cloned()
-                .collect();
-            self.for_sites.get_mut(&site).unwrap().window.set_realized(seeded);
+        // to say so or the rows outside the new band never leave. A
+        // SEEDED site is already banded and already keeps that set, so it
+        // never pays this walk.
+        if !self.for_sites[&site].window.is_bounded() {
+            self.inherit_realized(&site);
         }
         self.for_sites.get_mut(&site).unwrap().window.report(first, count);
         let mut out = Vec::new();
@@ -5214,7 +5374,7 @@ impl Scene {
     #[cfg(debug_assertions)]
     fn assert_bands_hold(&self) {
         for ((id, path), site) in &self.for_sites {
-            if !site.window.is_reported() {
+            if !site.window.is_bounded() {
                 continue;
             }
             let order = &self.coll_instances[&(*id, path.clone())].order;
@@ -10814,6 +10974,9 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
     /// rows keyed 0..n, none of them windowed yet.
     fn rows_scene(n: i64) -> Scene {
         let mut scene = Scene::new();
+        // A report comes from a backend that windows, and window_moved
+        // refuses one from a backend that never said so.
+        scene.declare_windowing();
         scene.apply(table_scene(2));
         scene.apply((0..n).map(row_insert).collect());
         scene
@@ -10835,6 +10998,253 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         ops.iter()
             .filter(|op| matches!(op, ApplyOp::MoveChild { .. }))
             .count()
+    }
+
+    // --- The seed (docs/deferred.md, the declares-windowing entry) -------
+
+    /// The rows of collection 1 that actually have a stamped copy.
+    fn stamped_rows(scene: &Scene) -> usize {
+        scene
+            .stamps
+            .keys()
+            .filter(|(id, path, _)| *id == CollectionId(1) && path.is_empty())
+            .count()
+    }
+
+    /// `table_scene(2)`'s For DECLARED AS A TABLE, then filled — the
+    /// windowed-capable shape, on a backend that says so or one that
+    /// does not.
+    fn filled_table(declaring: bool, rows: i64) -> Scene {
+        let mut scene = Scene::new();
+        if declaring {
+            scene.declare_windowing();
+        }
+        scene.apply(table_scene(2));
+        scene.apply(vec![set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0)]);
+        scene.apply((0..rows).map(row_insert).collect());
+        scene
+    }
+
+    /// THE DECLARATION DECIDES. The same guest, the same table, the same
+    /// 1,000 inserts: a backend that windows starts at the seed, one that
+    /// never does keeps §1's unbounded bridge.
+    #[test]
+    fn the_declaration_decides_whether_a_new_table_is_seeded() {
+        let declared = filled_table(true, 1_000);
+        assert_eq!(
+            realized(&declared),
+            (0..WINDOW_SEED_ROWS as i64).collect::<Vec<i64>>()
+        );
+        assert_eq!(stamped_rows(&declared), WINDOW_SEED_ROWS);
+
+        let bridged = filled_table(false, 1_000);
+        assert_eq!(stamped_rows(&bridged), 1_000, "the bridge realizes every row");
+        assert!(
+            realized(&bridged).is_empty(),
+            "and an unbounded band keeps no realized set at all"
+        );
+    }
+
+    /// THE COLLECTION IS WHOLE (§1): inserts past the seed are DATA. The
+    /// band is a screenful, the total is every row, and a row nothing
+    /// stamped is addressable by key.
+    #[test]
+    fn rows_past_the_seed_are_data_and_still_addressable() {
+        let mut scene = filled_table(true, 1_000);
+        let g = scene.window_geometry(4);
+        assert_eq!(g.total, 1_000, "every row is in the collection");
+        assert_eq!((g.first, g.count), (0, WINDOW_SEED_ROWS), "a screenful is realized");
+        assert_eq!(
+            scene.scroll_to_row(4, &Value::I64(900)),
+            900,
+            "an unrealized row answers by key exactly like a realized one"
+        );
+    }
+
+    /// THE SEED'S OWN STAMP STREAM: exactly rows [0, k), and the 872
+    /// inserts behind them emit nothing at all.
+    #[test]
+    fn a_seeded_table_stamps_the_first_rows_and_no_others() {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(table_scene(2));
+        scene.apply(vec![set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0)]);
+        let ops = scene.apply((0..1_000).map(row_insert).collect());
+        // One Row and two Labels per realized row, and nothing else.
+        assert_eq!(creates(&ops).len(), WINDOW_SEED_ROWS * 3);
+        let text = ops.iter().map(|op| format!("{op:?}")).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("row127"), "the seed's last row is stamped");
+        assert!(!text.contains("row128"), "the row after it is data and nothing else");
+        assert!(!text.contains("row999"), "and so is the collection's last");
+    }
+
+    /// THE BRIDGE TEST'S TWIN: a DECLARED backend's unreported For emits
+    /// only the seed's stamps. Same scene, same inserts, one declaration
+    /// apart — the frozen stream above is what the other half emits.
+    #[test]
+    fn a_declared_backends_unreported_for_emits_only_the_seed() {
+        let mut declared = Scene::new();
+        declared.declare_windowing();
+        let seeded = bridge_stream(&mut declared);
+        // The bridge scene's collections are smaller than the seed, so
+        // the seed covers them whole and windowing is observably
+        // invisible (§1) — byte-for-byte, not merely in count.
+        assert_eq!(seeded, BASE_BRIDGE_STREAM);
+
+        // Past the seed the two halves part, and this is the whole
+        // difference: 128 rows of widgets against 1,000.
+        assert_eq!(stamped_rows(&filled_table(true, 1_000)), WINDOW_SEED_ROWS);
+        assert_eq!(stamped_rows(&filled_table(false, 1_000)), 1_000);
+    }
+
+    /// A PLAIN FOR IS NOT WINDOWED-CAPABLE: no tier windows one, so a
+    /// seed there would cap the collection at k rows for the app's whole
+    /// life with nothing to report it away.
+    #[test]
+    fn a_declared_backend_does_not_seed_a_plain_for() {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(table_scene(2));
+        let ops = scene.apply((0..300).map(row_insert).collect());
+        assert_eq!(creates(&ops).len(), 300 * 3, "every row, as before");
+        assert_eq!(stamped_rows(&scene), 300);
+    }
+
+    /// A STAMPED COPY THAT IS A TABLE IS SEEDED AT BIRTH: the nested
+    /// For's bar is read before its site registers, so the copy's own
+    /// rows arrive into a band rather than into an unbounded one.
+    #[test]
+    fn a_stamped_copy_that_is_a_table_is_seeded_too() {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(dynamic_table_scene());
+        scene.apply(vec![insert_account("a1")]);
+        let ops = scene.apply(
+            (0..500)
+                .map(|i| TxOp::CollectionInsert {
+                    id: CollectionId(2),
+                    path: vec![v("a1")],
+                    key: Value::I64(i),
+                    variant: 0,
+                    record: vec![v("AAPL"), v(&format!("{i}"))],
+                })
+                .collect(),
+        );
+        assert_eq!(creates(&ops).len(), WINDOW_SEED_ROWS * 3);
+        let copy = scene.for_sites[&(CollectionId(2), vec![Key::Str("a1".into())])]
+            .window
+            .realized()
+            .len();
+        assert_eq!(copy, WINDOW_SEED_ROWS);
+    }
+
+    /// COLUMNS DECLARED LATE still seed, and the rows the unbounded band
+    /// already stamped tear down: the seed inherits what was realized
+    /// before it, exactly as a first report does.
+    #[test]
+    fn a_table_declared_after_its_rows_tears_the_extra_ones_down() {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(table_scene(2));
+        scene.apply((0..300).map(row_insert).collect());
+        assert_eq!(stamped_rows(&scene), 300, "a plain For, unbounded");
+        let ops = scene.apply(vec![set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0)]);
+        assert_eq!(destroys(&ops), (300 - WINDOW_SEED_ROWS) * 3);
+        assert_eq!(stamped_rows(&scene), WINDOW_SEED_ROWS);
+        assert_eq!(
+            realized(&scene),
+            (0..WINDOW_SEED_ROWS as i64).collect::<Vec<i64>>()
+        );
+    }
+
+    /// A TABLE WHOSE ROWS OWN A COLLECTION STAYS ON THE BRIDGE: a nested
+    /// For's instance is born with its copy, so an unrealized row has
+    /// none and the guest's write to it dies naming a path nothing
+    /// stamped. Measured on varied.py, which writes every row's inner
+    /// lines inside the build transaction (docs/traps.md).
+    #[test]
+    fn a_table_whose_rows_own_a_collection_stays_on_the_bridge() {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        // varied.py's shape: a one-column table whose cell is a column
+        // of the row's own inner For.
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(12), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(12),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::AddChild { parent: WidgetId(11), child: WidgetId(12) },
+            TxOp::CreateCollection {
+                id: CollectionId(2),
+                variants: vec![vec![ValueType::Str, ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 20, collection: CollectionId(2) },
+            TxOp::CreateWidget { id: WidgetId(21), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(21),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(11), child: WidgetId(20) },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![TxOp::SetColumnHeaders {
+            widget: WidgetId(4),
+            sorted: crate::wire::SORT_NONE,
+            direction: 0,
+            path: Vec::new(),
+            titles: vec!["Account".into()],
+        }]);
+        scene.apply(
+            (0..200)
+                .map(|i| insert_account(&format!("a{i:03}")))
+                .collect(),
+        );
+        assert_eq!(stamped_rows(&scene), 200, "every row, so every row has its instance");
+        // The write the seed would have faulted: the 200th row's own
+        // nested collection.
+        scene.apply(vec![TxOp::CollectionInsert {
+            id: CollectionId(2),
+            path: vec![v("a199")],
+            key: v("t1"),
+            variant: 0,
+            record: vec![v("AAPL"), v("10")],
+        }]);
+    }
+
+    /// THE FIRST REPORT REPLACES THE SEED, wherever it lands: the rows
+    /// that left, the rows that entered, and the realized set the band
+    /// says it should be.
+    #[test]
+    fn the_first_report_replaces_the_seed() {
+        // Overlapping the seed: rows 0..80 leave, 128..140 enter.
+        let mut near = filled_table(true, 1_000);
+        let ops = near.window_moved(4, 100, 20);
+        assert_eq!(realized(&near), (80..140).collect::<Vec<i64>>());
+        assert_eq!(destroys(&ops), 80 * 3);
+        assert_eq!(creates(&ops).len(), (140 - WINDOW_SEED_ROWS) * 3);
+
+        // Clean past it: the whole seed leaves and the band is the
+        // report's own, with no trace of where it started.
+        let mut far = filled_table(true, 1_000);
+        let ops = far.window_moved(4, 400, 20);
+        assert_eq!(realized(&far), (380..440).collect::<Vec<i64>>());
+        assert_eq!(destroys(&ops), WINDOW_SEED_ROWS * 3);
+        assert_eq!(creates(&ops).len(), 60 * 3);
     }
 
     /// THE FIRST REPORT NARROWS THE BAND: everything outside the visible
@@ -10916,6 +11326,7 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
     #[test]
     fn twenty_thousand_rows_realize_one_band() {
         let mut scene = Scene::new();
+        scene.declare_windowing();
         scene.apply(table_scene(2));
         scene.window_moved(4, 0, 20);
         let ops = scene.apply((0..20_000).map(row_insert).collect());
@@ -10970,6 +11381,7 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
     #[test]
     fn corrected_positions_equal_a_straight_sum_at_scale() {
         let mut scene = Scene::new();
+        scene.declare_windowing();
         scene.apply(table_scene(2));
         scene.window_moved(4, 0, 20);
         scene.apply((0..20_000).map(row_insert).collect());
@@ -11058,10 +11470,22 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         scene.scroll_to_row(4, &Value::I64(4_242));
     }
 
+    /// THE DECLARATION IS NOT OPTIONAL FOR A BACKEND THAT REPORTS: the
+    /// seed and the report are one mechanism, and a backend carrying
+    /// half of it is the bug this milestone closed, silently.
+    #[test]
+    #[should_panic(expected = "never declared it windows rows")]
+    fn a_report_from_an_undeclared_backend_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(table_scene(2));
+        scene.window_moved(4, 0, 10);
+    }
+
     #[test]
     #[should_panic(expected = "a nested For's TEMPLATE NODE with 2 stamped copies")]
     fn a_window_report_refuses_a_template_node() {
         let mut scene = Scene::new();
+        scene.declare_windowing();
         scene.apply(dynamic_table_scene());
         scene.apply(vec![insert_account("a1"), insert_account("a2")]);
         scene.window_moved(20, 0, 10);

@@ -99,6 +99,33 @@ ENTRIES = (
     ("classifier wired into the harness arm",
      "match table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned) {",
      "match table_horizontal_issue(0.0, min_drawn, max_drawn, viewport, viewport) {"),
+    # THE ROW WINDOW'S THREE LINKS, NONE OF WHICH ANY SCENE CAN SEE.
+    # MEASURED 2026-08-25 on the real X11 leg, each perturbed alone with
+    # the substitution count printed: with the range report gone, with
+    # the height report gone, and with the top spacer's core-supplied
+    # size gone, `windowed.steps` PASSED every time — because
+    # expect_window reads the FIRST VISIBLE row, which is a fact about
+    # the viewport and stays true whether or not the band ever narrowed
+    # (the ruling of 2026-08-25 took the band's width out of the verb on
+    # purpose, docs/virtualization-plan.md §5). The mac tier hit the same
+    # wall and answered it the same way, in check-table-tier. So they are
+    # held here or nowhere.
+    #
+    # Each perturbation below is a plausible SILENT bug rather than a
+    # deletion: a report that always says "all of it", heights filed
+    # against the wrong rows, a spacer that forgets the offset.
+    ("window range reported to the core",
+     "scene.window_moved(id, first, count)",
+     "scene.window_moved(id, 0, usize::MAX)"),
+    ("measured row extents reported to the core",
+     "scene.rows_measured(id, band.first, &heights);",
+     "scene.rows_measured(id, 0, &heights);"),
+    ("top spacer sized by the core's arithmetic",
+     "let above = (band.offset - spacing).max(0.0);",
+     "let above = 0.0;"),
+    ("bottom spacer sized by the core's arithmetic",
+     "let below = (band.extent - band.offset - realized).max(0.0);",
+     "let below = 0.0;"),
 )
 
 

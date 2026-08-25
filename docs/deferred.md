@@ -6334,11 +6334,69 @@ measurements.
 
 ## Row-window breadth (§6.3) — the depth stubs it will strike
 
-- **DEPTH STUB: ledger on gtk** — the GTK tier realizes every row and
-  has no band to read; §6.3's spacer+band lowering closes it.
-- **DEPTH STUB: varied on gtk** — same wall, the corrected path's
-  scene; closes with the same lowering.
-- **DEPTH STUB: ledger on winui** — the WinUI tier realizes every row;
-  §6.3's spacer+band lowering closes it.
-- **DEPTH STUB: varied on winui** — same wall, the corrected path's
-  scene; closes with the same lowering.
+- ~~**DEPTH STUB: ledger on gtk**~~ — CLOSED 2026-08-25: the spacer+band
+  lowering landed; ledger-python runs green on both rings.
+- ~~**DEPTH STUB: varied on gtk**~~ — CLOSED 2026-08-25 with the same
+  lowering; the corrected path and the anchor run green on both rings.
+- ~~**DEPTH STUB: ledger on winui**~~ — CLOSED 2026-08-25: the band
+  panel's spacer tracks landed; ledger_python passes at 15,000 rows.
+- ~~**DEPTH STUB: varied on winui**~~ — CLOSED 2026-08-25 with the same
+  lowering; the corrected path and the anchoring assertion pass.
+
+
+## ~~GAP — a single-transaction fill realizes every row before any layout can report (found 2026-08-25, by the breadth fan-out, twice)~~
+KEY: pre-report stamping, one-transaction fill, pump-side seed, backend declares windowing, model mirror OOM
+
+FIXED 2026-08-25, the same day, by the ruled flag: a windowing backend
+DECLARES itself at init (core-internal, four Rust sites, no wire) and
+a declared backend's new table seeds its band to WINDOW_SEED_ROWS =
+128 — a generous screenful, argued from the tiers that read their
+first visible count off realized rows and converge by doubling — with
+inserts beyond the seed data-only until the first real report. The
+iOS pump hack and Compose's composition cap are deleted; an
+undeclared backend keeps the bridge, byte-for-byte, and window_moved
+refuses a report from a backend that never declared. Windows'
+ledger_python: FAIL at 58s under matrix load before, PASS 9-13s five
+times after. 456 core tests, 9/9 watched reds.
+
+AND A GENEROUS SEED WAS NOT ENOUGH BY ITSELF: WinUI's report cycle
+echoed the REALIZED BAND's own count back as the visible range whenever
+the collection had no measured extent, and the core adds an overscan to
+every report — so the band doubled 128 -> 15,000 before the first
+layout and the seed bought nothing there. Fixed 2026-08-25
+(docs/traps.md, "The band that fed itself"), held by
+`winui::tests::a_report_may_not_be_the_band_it_was_given`.
+
+Two tiers hit it independently: on Android, 15,000 rows inserted in
+ONE transaction die of the model mirror (~75,000 KayaNodes exist
+before the band is ever reported — ART's limit, not composition,
+which the band bounds); on iOS the pump resolves 15,000 rows in 152ms
+while the main thread is on its first batch, so no layout-triggered
+report can bound the first fill — that agent added a PUMP-SIDE SEED
+(cross-platform; the mac legs re-ran green under it) and recommends
+the clean replacement: a backend DECLARES it windows, and the core
+seeds the band instead of stamping everything while unreported. The
+compatibility bridge (no report = realize all) is exactly right for
+backends that never window and exactly wrong as the transient state
+of ones that do. THE DECISION IS THE MAINTAINER'S: the
+declares-windowing flag deletes the seed hack and bounds the
+single-transaction fill everywhere; until then, guests chunk (the
+wired scenes do) and no wired leg inserts at the dying scale.
+
+
+## GAP — an unrealized row has no nested-collection instance (found 2026-08-25, by the seed slice)
+KEY: nested collection instance, unrealized row write, template-owned collection state, bridge exemption
+
+A nested For's collection instance is born WITH its stamped copy, so a
+row outside the band has none: varied.py's write to row 128 died with
+"no instance of CollectionId(2) at path [r128]" the moment the seed
+made unrealized rows reachable — and the same hole was already open
+under any report (a row leaving the band returns with its inner rows
+gone; varied.steps asserts identity and totals, never inner content,
+which is why nobody had met it). The seed slice's ruling, on the
+record in docs/traps.md with a test: a table whose row template OWNS
+collection state stays on the bridge (realize-everything) until the
+design answers where windowed rows' nested data lives — either
+instances survive teardown as data (the §1 rule extended one level
+down) or the template constraint is walled at declaration. The
+maintainer picks; the trap's test keeps the current line honest.

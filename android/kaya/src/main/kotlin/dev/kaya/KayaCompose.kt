@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1412,6 +1413,18 @@ object KayaCompose {
 
     private fun apply(batch: ByteArray, blobs: Map<Long, ByteArray>) {
         val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
+        // THE BATCH'S DESTROYED IDS, AND THE PARENTS THAT HELD THEM —
+        // detached once at the end rather than one by one.
+        //
+        // MEASURED 2026-08-25, and it is why windowing needed it: a
+        // SnapshotStateList removal copies the whole list, so N removals
+        // from one parent are O(N^2) with an allocation per element. The
+        // first band report on a 2,000-row table tears down ~1,950 rows
+        // (5,850 widgets) in ONE batch, and per-widget removal wedged the
+        // UI thread past the harness's 60s step ceiling — intermittently,
+        // from about 2,000 rows up. One pass per parent instead.
+        val doomed = HashSet<Long>()
+        val bereaved = HashSet<Long>()
         while (b.remaining() >= 8) {
             val start = b.position()
             val size = b.int
@@ -1932,7 +1945,8 @@ object KayaCompose {
                 APPLY_DESTROY -> {
                     val id = b.long
                     KayaSceneModel.parents.remove(id)?.let { parent ->
-                        KayaSceneModel.nodes[parent]?.children?.removeAll { it.id == id }
+                        doomed.add(id)
+                        bereaved.add(parent)
                     }
                     KayaSceneModel.nodes.remove(id)
                     // A destroyed anchor takes its context attachment
@@ -2083,6 +2097,9 @@ object KayaCompose {
                 else -> error("kaya: unknown apply record kind $kind")
             }
             b.position(start + size)
+        }
+        for (parent in bereaved) {
+            KayaSceneModel.nodes[parent]?.children?.removeAll { it.id in doomed }
         }
         // THE APP ANSWERED. An action verb waits for this before it
         // returns (see kayaAwaitAnswer) — written last, so the count
@@ -5550,16 +5567,23 @@ object KayaCompose {
                         // THE FIRST VISIBLE ROW AND THE DECLARED
                         // TOTAL (docs/virtualization-plan.md §5; the
                         // realized count left the verb 2026-08-25 — a
-                        // band width is a viewport metric). This tier
-                        // does not window yet — §6.3 carries the
-                        // spacer+band shape here — so every row is
-                        // realized, the first is visible at rest, and
-                        // "0 n" is what it actually drew rather than a
-                        // stub's silence.
+                        // band width is a viewport metric). The
+                        // WINDOWED tier here is the declared table, and
+                        // it is asked for the row a reader can see, off
+                        // the edges it laid out. A For no tier of this
+                        // backend windows realizes the whole collection
+                        // and its first row is visible at rest, which
+                        // is what "0 n" says — true, not a stub.
                         val want = parts.drop(2).joinToString(" ")
                         val got = onUi(activity) {
                             target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
-                                "0 ${node.children.size}"
+                                val window = kayaTableWindows[node.id]
+                                if (window != null) {
+                                    val seen = window.firstVisible(node.children.size)
+                                    "${seen.first} ${seen.second}"
+                                } else {
+                                    "0 ${node.children.size}"
+                                }
                             }
                         }
                         if (got != null && got == want) {
@@ -5571,15 +5595,35 @@ object KayaCompose {
                         }
                     }
                     "scroll_to_row" -> {
-                        // Nothing to scroll to while every row is
-                        // realized and no band follows the viewport:
-                        // this says so in the sentence the step fails
-                        // with, rather than passing silently
-                        // (docs/virtualization-plan.md §6.3).
-                        failures.add(
-                            "scroll_to_row: the Compose tier does not window rows yet " +
-                                "(docs/virtualization-plan.md §6.3)"
-                        )
+                        // The core maps the KEY to an index in the
+                        // collection's current order and the tier
+                        // scrolls that row to the viewport's TOP. An
+                        // action, silent like click: the expect_window
+                        // after it is the observable. Addresses the ROW,
+                        // so an unrealized row scrolls exactly like a
+                        // realized one — the band moves first and the
+                        // park is honoured by the correction cycle.
+                        val rawKey = parts.drop(2).joinToString(" ")
+                        val key = if (rawKey.startsWith("\"")) quoted(parts.drop(2)) else rawKey
+                        val off = onUi(activity) {
+                            val node = target(parts[1], "column", KayaSceneModel.columns)
+                            val window = node?.let { kayaTableWindows[it.id] }
+                            when {
+                                node == null -> "no such target ${parts[1]}"
+                                window == null ->
+                                    "${parts[1]} is not a windowed tier on this backend"
+                                else -> {
+                                    val index = KayaPresent.scrollToRow(node.id, key)
+                                    if (index == KayaPresent.ROW_NOT_FOUND) {
+                                        "no row of ${parts[1]} carries the key \"$key\""
+                                    } else {
+                                        window.park(index.toInt())
+                                        null
+                                    }
+                                }
+                            }
+                        }
+                        if (off != null) failures.add("scroll_to_row: $off")
                     }
                     "expect_shares" -> {
                         // Percent of the CHILDREN'S SUM, not of the
@@ -7644,6 +7688,255 @@ private fun kayaTableHorizontalSelftest(): String? {
 }
 
 /**
+ * A row showing less than this is not visible. The first-visible row is
+ * read from laid-out edges against a scroll offset the platform rounds
+ * to whole pixels, so an exact `bottom > scroll` names the row ABOVE
+ * whenever a scroll_to_row lands half a pixel low.
+ */
+private const val KAYA_WINDOW_VISIBLE_PX = 1.0
+
+/** Every live windowed table, by node id — what the harness's
+ *  expect_window and scroll_to_row arms reach. UI thread only (they go
+ *  through `onUi`, and the composition is there too). */
+internal val kayaTableWindows = HashMap<Long, KayaTableWindow>()
+
+/**
+ * ONE TABLE'S WINDOW: the report loop, the numbers the spacers are cut
+ * from, and the anchor (docs/virtualization-plan.md §2.4, §3).
+ *
+ * The loop is the mac tier's contract in this tier's spelling — the
+ * visible range to `windowMoved` on every scroll, resize and first
+ * layout; the realized rows' laid-out extents to `rowsMeasured` after
+ * layout, EXACT and only where they disagree with what the core already
+ * holds, which is also what stops the report -> stamp -> layout cycle
+ * repeating. Nothing here estimates a row height or a position: this
+ * tier reports what it laid out and asks the core for everything else.
+ *
+ * THE REPORT NEVER RUNS INSIDE MEASURE OR PLACEMENT. It writes snapshot
+ * state and drives a scroll, and a snapshot write from inside the layout
+ * phase invalidates the pass that made it. One coalesced main-looper hop
+ * per turn instead, however many callbacks asked for it — the SwiftUI
+ * driver's scheduleReport, one platform over, where the same write from
+ * inside -[NSView layout] was fatal.
+ */
+internal class KayaTableWindow(private val node: KayaNode) {
+    /**
+     * THE SPACERS' NUMBERS, and the only place the composition learns
+     * them: where the band's first row sits, how tall the whole
+     * collection is, and which rows the band holds. Published HERE, by
+     * the report loop, so no layout pass ever calls across the ABI and a
+     * correction that moved only the arithmetic still re-cuts the
+     * spacers.
+     */
+    var bandStart by mutableStateOf(0)
+        private set
+    var bandCount by mutableStateOf(0)
+        private set
+    var offsetPx by mutableStateOf(0.0)
+        private set
+    var extentPx by mutableStateOf(0.0)
+        private set
+
+    private val slots = DoubleArray(KayaPresent.GEOMETRY_SLOTS)
+    private val scope = kotlinx.coroutines.MainScope()
+
+    // What the LAYOUT wrote, for the report that follows it. Plain
+    // fields: written during measure, read on the next main-looper hop.
+    /** Where the collection's row 0 sits inside the scrolled content:
+     *  header, gap, divider, gap. */
+    @Volatile var rowsTopPx = 0
+    /** The band THIS LAYOUT drew, and the realized rows' tops (in rows
+     *  space, the core's offset included) and extents — each row's
+     *  top-to-top repeat distance, spacing included, which is what §2.1
+     *  means by pitch. */
+    @Volatile var laidOutFirst = 0
+    @Volatile var rowTops: IntArray = IntArray(0)
+    @Volatile var rowExtents: IntArray = IntArray(0)
+    /** The scroll container's own height — the viewport, read one
+     *  modifier OUTSIDE the scroll, where the box is what the reader
+     *  sees rather than what the content asked for. */
+    @Volatile var viewportPx = 0
+
+    private var lastFirst = -1
+    private var lastCount = -1
+    private var anchorRow = -1
+    private var anchorScroll = -1
+    private var scheduled = false
+
+    fun schedule() {
+        if (scheduled) return
+        scheduled = true
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            scheduled = false
+            report()
+        }
+    }
+
+    /**
+     * §2.4: `scroll_to_row` parks a ROW. THE BAND MOVES FIRST — the
+     * target may be a row no layout has realized, and only a realized
+     * row has a laid-out top to scroll to — and every correction cycle
+     * after this re-parks on the same row.
+     */
+    fun park(row: Int) {
+        anchorRow = row
+        anchorScroll = -1
+        val count = if (lastCount > 0) lastCount else 1
+        lastFirst = row
+        lastCount = count
+        KayaPresent.windowMoved(node.id, row.toLong(), count.toLong())
+        schedule()
+    }
+
+    /** The laid-out top of a realized row, in the scrolled content's own
+     *  space; -1 while that row is not realized. */
+    private fun contentTopOf(row: Int): Int {
+        val at = row - laidOutFirst
+        val tops = rowTops
+        if (at < 0 || at >= tops.size) return -1
+        return rowsTopPx + tops[at]
+    }
+
+    /**
+     * The rows this viewport actually shows, as COLLECTION indices.
+     *
+     * Read off the edges THIS TIER LAID OUT, which is what a report is
+     * (`NSTableView.rows(in:)`, one platform over). The fallback under it
+     * is for a viewport that left the band entirely — a fling, or a
+     * resize — where there is nothing laid out to read: the CORE's own
+     * extents answer instead, multiplication on the exact path and a walk
+     * from the band's edge on the corrected one, and the report that
+     * follows brings the band back under the viewport.
+     */
+    private fun visibleRange(scroll: Int): Pair<Int, Int> {
+        val tops = rowTops
+        val extents = rowExtents
+        var first = -1
+        var count = 0
+        for (at in tops.indices) {
+            val top = rowsTopPx + tops[at]
+            val bottom = top + extents[at]
+            if (bottom - scroll > KAYA_WINDOW_VISIBLE_PX && top < scroll + viewportPx) {
+                if (first < 0) first = laidOutFirst + at
+                count++
+            }
+        }
+        if (first >= 0) return Pair(first, count)
+        val total = slots[KayaPresent.GEOMETRY_TOTAL].toInt()
+        val pitch = if (total > 0) KayaPresent.rowExtent(node.id, 0) else 0.0
+        if (pitch <= 0.0) return Pair(0, 0)
+        val want = (scroll - rowsTopPx).toDouble().coerceAtLeast(0.0)
+        var index = laidOutFirst.coerceIn(0, total - 1)
+        if (slots[KayaPresent.GEOMETRY_CORRECTED] == 0.0) {
+            index = (want / pitch).toInt()
+        } else {
+            var y = slots[KayaPresent.GEOMETRY_OFFSET]
+            while (y > want && index > 0) {
+                index--
+                y -= KayaPresent.rowExtent(node.id, index.toLong())
+            }
+            var next = KayaPresent.rowExtent(node.id, index.toLong())
+            while (y + next <= want && index < total - 1) {
+                y += next
+                index++
+                next = KayaPresent.rowExtent(node.id, index.toLong())
+            }
+        }
+        return Pair(index.coerceIn(0, total - 1), (viewportPx / pitch).toInt().coerceAtLeast(1))
+    }
+
+    /**
+     * Once per layout and once per scroll: re-park the anchor, hand the
+     * core the visible range, hand it the extents this tier laid out, and
+     * publish the geometry the spacers are cut from.
+     *
+     * THE RANGE LEADS AND THE HEIGHTS FOLLOW (§3.4): the entering rows
+     * have to start stamping before there is anything to measure.
+     */
+    fun report() {
+        if (viewportPx <= 0) return
+        // PUBLISHED BEFORE ANY EARLY RETURN. The park below waits for
+        // the band it just asked for, and the band only ever arrives
+        // through these four numbers: publishing them last deadlocked
+        // the wait against itself (measured — scroll_to_row r200 sat at
+        // "0 400" until the step's deadline, the layout never learning
+        // the band the core had already moved).
+        publish()
+        val scroll = node.scrollState.value
+        if (anchorRow >= 0) {
+            if (anchorScroll >= 0 && scroll != anchorScroll) {
+                // A scroll this tier did not issue: the reader owns free
+                // scrolling, and the park yields to it.
+                anchorRow = -1
+            } else {
+                val want = contentTopOf(anchorRow)
+                // NOTHING IS REPORTED WHILE A PARK IS OUTSTANDING. The
+                // parked row may not be laid out yet — [park] moved the
+                // band and its stamps are still in flight — and the
+                // range this viewport shows meanwhile is the one the
+                // park is leaving, so reporting it would send the band
+                // straight back where it came from (measured: scroll to
+                // r200 landed on "0 400" every time).
+                if (want < 0) return
+                if (want != scroll) {
+                    val state = node.scrollState
+                    scope.launch {
+                        state.scrollTo(want)
+                        anchorScroll = state.value
+                        // A scroll clamped at the collection's end
+                        // cannot honour the park, and re-trying it is a
+                        // live loop; the park yields (§5's unasserted
+                        // end-scroll).
+                        if (state.value != want) anchorRow = -1
+                        schedule()
+                    }
+                    return
+                }
+            }
+        }
+        val (first, count) = visibleRange(scroll)
+        if (first != lastFirst || count != lastCount) {
+            lastFirst = first
+            lastCount = count
+            KayaPresent.windowMoved(node.id, first.toLong(), count.toLong())
+        }
+        val extents = rowExtents
+        if (extents.isNotEmpty()) {
+            val heights = DoubleArray(extents.size)
+            var moved = false
+            for (at in extents.indices) {
+                heights[at] = extents[at].toDouble()
+                if (KayaPresent.rowExtent(node.id, (laidOutFirst + at).toLong()) != heights[at]) {
+                    moved = true
+                }
+            }
+            if (moved) KayaPresent.rowsMeasured(node.id, laidOutFirst.toLong(), heights)
+        }
+        publish()
+    }
+
+    /** The core's answer, into the four snapshot fields the composition
+     *  cuts its spacers from. */
+    private fun publish() {
+        KayaPresent.windowGeometry(node.id, slots)
+        bandStart = slots[KayaPresent.GEOMETRY_FIRST].toInt()
+        bandCount = slots[KayaPresent.GEOMETRY_COUNT].toInt()
+        offsetPx = slots[KayaPresent.GEOMETRY_OFFSET]
+        extentPx = slots[KayaPresent.GEOMETRY_EXTENT]
+    }
+
+    /** What expect_window compares: the first VISIBLE row and the
+     *  DECLARED total. The band's width is a viewport metric and left the
+     *  verb (ruled 2026-08-25). */
+    fun firstVisible(children: Int): Pair<Int, Int> {
+        KayaPresent.windowGeometry(node.id, slots)
+        val total = slots[KayaPresent.GEOMETRY_TOTAL].toInt()
+        if (total <= 0) return Pair(0, children)
+        return Pair(visibleRange(node.scrollState.value).first, total)
+    }
+}
+
+/**
  * The declared table's surface (docs/tables-plan.md): the synthesized
  * header — Material dropped its data-table component, so this is the
  * tier-3 lowering DESIGN.md files — over CONTENT-SIZED columns: one
@@ -7654,6 +7947,15 @@ private fun kayaTableHorizontalSelftest(): String? {
  * compact degrade, and it cost the phones their headers). A header tap
  * hands the core-minted sort tag back verbatim with the column index —
  * a REQUEST; the indicator moves only when the guest re-declares.
+ *
+ * AND IT IS THE WINDOWED TIER (docs/virtualization-plan.md §4): top
+ * spacer, the realized band's real widgets, bottom spacer, inside the
+ * scroll container a grown table already meant by "fill and scroll"
+ * (tools/scenes/table.steps). BOTH SPACERS ARE CUT FROM THE CORE'S
+ * ARITHMETIC — `offset` is the band's top, `extent` the whole
+ * collection's height — so the scrollbar is about N rows while about
+ * three viewports of them carry widgets. LazyColumn stays rejected (§7):
+ * one observable mechanism, and the core owns the band.
  */
 @Composable
 private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
@@ -7668,6 +7970,27 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         }
     }
     SideEffect { node.tablePresented = presented }
+    val window = remember(node.id) { KayaTableWindow(node) }
+    DisposableEffect(window) {
+        kayaTableWindows[node.id] = window
+        onDispose { if (kayaTableWindows[node.id] === window) kayaTableWindows.remove(node.id) }
+    }
+    // A scroll moves nothing this composition reads, so nothing else
+    // here would notice one.
+    LaunchedEffect(window) {
+        snapshotFlow { node.scrollState.value }.collect { window.schedule() }
+    }
+    // THE CORE'S ARITHMETIC, and the composition's dependency on it: a
+    // correction moves these without moving `children`, and the spacers
+    // below are cut from them.
+    val bandFirst = window.bandStart
+    val offsetPx = window.offsetPx
+    val extentPx = window.extentPx
+    // EVERY REALIZED ROW, no cap of this tier's own: the core seeds a
+    // declared table's band at a screenful before any layout can report
+    // one (docs/deferred.md, the declares-windowing entry), so
+    // `children` is a band's worth from the first frame.
+    val rows = node.children
     val cols = node.tableColumns.size
     val geometryGeneration = "${node.tableGeometryGeneration}:"
     val density = LocalDensity.current.density
@@ -7683,8 +8006,8 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             node.tableColumns.forEachIndexed { index, title ->
                 val indicator = when {
                     node.tableSorted != index -> ""
-                    node.tableDirection == 0 -> " \u25B2"
-                    else -> " \u25BC"
+                    node.tableDirection == 0 -> " ▲"
+                    else -> " ▼"
                 }
                 Text(
                     title + indicator,
@@ -7697,25 +8020,34 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 )
             }
             HorizontalDivider()
-            node.children.forEach { row ->
+            Spacer(Modifier)
+            rows.forEach { row ->
                 row.children.forEachIndexed { index, cell ->
                     Box(Modifier.edge("$geometryGeneration${row.id}/$index")) { KayaRender(cell) }
                 }
             }
+            Spacer(Modifier)
         },
-        modifier = modifier.onGloballyPositioned {
-            val left = it.positionInWindow().x / density
-            node.tableViewportLeftX = left
-            node.tableViewportRightX = left + it.size.width / density
-            kayaContainerExtents[node.id] = it.size.height.toDouble()
-            kayaContainerCross[node.id] = it.size.width.toDouble()
-        },
+        modifier = modifier
+            .onGloballyPositioned {
+                val left = it.positionInWindow().x / density
+                node.tableViewportLeftX = left
+                node.tableViewportRightX = left + it.size.width / density
+                node.tableViewportH = it.size.height / density
+                kayaContainerExtents[node.id] = it.size.height.toDouble()
+                kayaContainerCross[node.id] = it.size.width.toDouble()
+                window.viewportPx = it.size.height
+                window.schedule()
+            }
+            .verticalScroll(node.scrollState),
     ) { measurables, constraints ->
         // Children arrive in content order: cols headers, the divider,
-        // then the stamped cells row-major (the core held every row to
-        // the declared arity, so the % below cannot skew).
+        // the top spacer, the realized band's cells row-major (the core
+        // held every row to the declared arity, so the % below cannot
+        // skew), then the bottom spacer.
         val headers = measurables.take(cols).map { it.measure(Constraints()) }
-        val cells = measurables.drop(cols + 1).map { it.measure(Constraints()) }
+        val cells = measurables.subList(cols + 2, measurables.size - 1)
+            .map { it.measure(Constraints()) }
         val colWidth = IntArray(cols)
         headers.forEachIndexed { c, p -> colWidth[c] = maxOf(colWidth[c], p.width) }
         cells.forEachIndexed { i, p ->
@@ -7748,22 +8080,72 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         node.tableContentW = acc / density
         val divider = measurables[cols].measure(Constraints(minWidth = totalW, maxWidth = totalW))
         val headerH = headers.maxOfOrNull { it.height } ?: 0
+        // A ROW'S EXTENT IS ITS TOP-TO-TOP REPEAT DISTANCE, spacing
+        // included (§2.1): a sum of these IS where the next row starts,
+        // so the core's prefix sums and this placement are ONE
+        // arithmetic. Uniform rows therefore never leave the exact path.
         val rowHeights = cells.chunked(cols).map { row -> row.maxOfOrNull { it.height } ?: 0 }
-        val contentH = headerH + rowGapPx + divider.height + rowGapPx +
-            rowHeights.sum() + rowGapPx * (rowHeights.size - 1).coerceAtLeast(0)
+        val rowExtents = IntArray(rowHeights.size) { rowHeights[it] + rowGapPx }
+        val bandH = rowExtents.sum()
+        // The trailing gap the last row of the COLLECTION does not draw:
+        // the extent counts one per row, the layout draws one BETWEEN
+        // them, and taking it off the bottom keeps a table that fits its
+        // viewport exactly as tall as it was before it could scroll.
+        val tail = if (rowExtents.isEmpty()) 0 else rowGapPx
+        val spacers = kayaWindowSpacers(offsetPx, extentPx, bandH, tail)
+        val topH = spacers.first
+        val top = measurables[cols + 1].measure(Constraints.fixed(totalW, spacers.first))
+        val bottom = measurables[measurables.size - 1]
+            .measure(Constraints.fixed(totalW, spacers.second))
+        val rowsTop = headerH + rowGapPx + divider.height + rowGapPx
+        val contentH = rowsTop + topH + bandH - tail + spacers.second
         val totalH = contentH.coerceIn(constraints.minHeight, constraints.maxHeight)
         node.tableContentH = contentH / density
-        node.tableViewportH = totalH / density
+        val tops = IntArray(rowExtents.size)
+        var y = topH
+        for (r in rowExtents.indices) {
+            tops[r] = y
+            y += rowExtents[r]
+        }
+        window.rowsTopPx = rowsTop
+        window.laidOutFirst = bandFirst
+        window.rowExtents = rowExtents
+        window.rowTops = tops
+        window.schedule()
         layout(totalW, totalH) {
             headers.forEachIndexed { c, p -> p.place(colX[c], 0) }
             divider.place(0, headerH + rowGapPx)
-            var y = headerH + rowGapPx + divider.height + rowGapPx
+            top.place(0, rowsTop)
             cells.chunked(cols).forEachIndexed { r, row ->
-                row.forEachIndexed { c, p -> p.place(colX[c], y) }
-                y += rowHeights[r] + rowGapPx
+                row.forEachIndexed { c, p -> p.place(colX[c], rowsTop + tops[r]) }
             }
+            bottom.place(0, rowsTop + topH + bandH - tail)
         }
     }
+}
+
+/**
+ * THE TWO SPACERS, from the CORE'S ARITHMETIC AND NOTHING ELSE
+ * (docs/virtualization-plan.md §4). [offset] is where the band's first
+ * row sits and [extent] the whole collection's height — both out of
+ * kaya_window_geometry, which is the only estimator (§2). [band] is what
+ * this layout measured for the rows it actually holds, and [tail] the
+ * trailing gap the last row of the collection does not draw.
+ *
+ * ITS OWN FUNCTION BECAUSE NO SCENE CAN SEE IT: with both spacers zeroed
+ * the windowed scene stays green (measured 2026-08-25 — expect_window
+ * reads the row at the viewport's top, and a tier whose rows are laid
+ * out at the wrong y is internally consistent about which one that is).
+ * tools/check-verbs.sh holds the call site instead, with that
+ * perturbation as its self-test.
+ */
+internal fun kayaWindowSpacers(offset: Double, extent: Double, band: Int, tail: Int):
+    Pair<Int, Int> {
+    val top = Math.round(offset).toInt().coerceAtLeast(0)
+    val bottom =
+        (Math.round(extent - offset).toInt().coerceAtLeast(band) - band - tail)
+            .coerceAtLeast(0)
+    return Pair(top, bottom)
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)

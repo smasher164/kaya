@@ -5802,6 +5802,12 @@ private func kayaRunScript(_ script: String) {
                             return "\(v.first) \(v.total)"
                         }
                     #endif
+                    // The synthesized tier's own reading (§4's spacer +
+                    // band): the row its viewport shows first, MEASURED
+                    // against the placement, never the band's first.
+                    if let window = kayaTableWindows[node.id] {
+                        return "\(window.visible?.first ?? 0) \(window.total)"
+                    }
                     // A For no tier of this backend windows: the whole
                     // collection is realized and its first row is
                     // visible at rest, which is what an unreported
@@ -5838,15 +5844,20 @@ private func kayaRunScript(_ script: String) {
                         return "no row of \(parts[1]) carries the key \"\(key)\""
                     }
                     #if os(macOS)
-                        guard let driver = kayaTableDrivers[node.id] else {
-                            return "\(parts[1]) is not a windowed tier on this backend"
+                        if let driver = kayaTableDrivers[node.id] {
+                            driver.scroll(toRow: index)
+                            return nil
                         }
-                        driver.scroll(toRow: index)
-                        return nil
-                    #else
-                        return "the iOS tier does not window rows yet "
-                            + "(docs/virtualization-plan.md §6.3)"
                     #endif
+                    if let window = kayaTableWindows[node.id] {
+                        window.scroll(node, toRow: index)
+                        return nil
+                    }
+                    // Neither tier of this backend has a window here: the
+                    // mac native driver and the synthesized one are the
+                    // two that do, and iOS's REGULAR-width native tier is
+                    // still SwiftUI's own Table (§4 names macOS's).
+                    return "\(parts[1]) is not a windowed tier on this backend"
                 }
                 if let off { failures.append("scroll_to_row: \(off)") }
             case "expect_shares":
@@ -8397,6 +8408,24 @@ private struct KayaNativeTable: View {
                     }
                 }
             }
+            // A TIER REPORTS WHAT IT REALIZES, and this one realizes the
+            // WHOLE collection: SwiftUI's Table reads every row of
+            // node.children, so the band that keeps it correct is all of
+            // them. §4 does not window this tier (it names macOS's native
+            // one), and silence is no longer the same as "everything" —
+            // this backend DECLARES that it windows rows, so a table's
+            // band starts at a screenful (docs/deferred.md, the
+            // declares-windowing entry) and a tier that never reported
+            // would show that screenful forever. Measured under the
+            // seed's one-row ancestor: the iPad's table leg read
+            // "banana,30" for a three-row scene, twice.
+            .onAppear { reportWholeCollection() }
+            .onChange(of: node.children.count) { reportWholeCollection() }
+        }
+
+        private func reportWholeCollection() {
+            let total = KayaHost.windowGeometry(node.id).map { Int($0.total) } ?? 0
+            KayaHost.windowMoved(node.id, 0, max(total, node.children.count))
         }
     }
 #endif
@@ -9011,6 +9040,27 @@ private struct KayaTableLayout: Layout {
     let cols: Int
     let colGap: CGFloat
     let rowGap: CGFloat
+    /// THE WINDOW'S TWO SPACERS (docs/virtualization-plan.md §4), in the
+    /// CORE's arithmetic and never this file's: `top` is where the band
+    /// starts inside the collection's extent, `bottom` what is left below
+    /// it. `windowed` is what makes a row's slot its PITCH — the
+    /// top-to-top repeat distance including the gap under it (§2.1) — so
+    /// the core's `index x pitch` and this layout's placement are one
+    /// number. All three are 0/false for the §1 bridge, where the band is
+    /// every row and this draws what it always drew.
+    var windowed = false
+    var top: CGFloat = 0
+    var bottom: CGFloat = 0
+    /// The band index `top` belongs to. It rides the placement so the
+    /// report reads the band THIS PASS DREW: the core's own geometry has
+    /// already moved on by then (it moves when the report moves it), and
+    /// a walk that mixed a fresh band index with a stale placement was
+    /// measured answering row 197 for a viewport parked on row 200.
+    var first = 0
+    /// What this layout PLACED, for the report that follows it, and the
+    /// ask for that report.
+    var placement: KayaTablePlacement?
+    var placed: KayaTablePlaced?
 
     private func columnWidths(
         _ subviews: Subviews, _ proposal: ProposedViewSize
@@ -9045,14 +9095,22 @@ private struct KayaTableLayout: Layout {
         return (headerH, dividerH, rows)
     }
 
+    /// The rows' own region. WINDOWED: every row's slot is its pitch, so
+    /// the band's height is in the same unit as the core's `offset` and
+    /// `extent` and the two spacers add up to the whole collection.
+    /// UNWINDOWED: the gaps sit BETWEEN the rows, which is what this tier
+    /// drew before there was a window.
+    private func rowsExtent(_ rows: [CGFloat]) -> CGFloat {
+        rows.reduce(0, +) + rowGap * CGFloat(windowed ? rows.count : max(0, rows.count - 1))
+    }
+
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
         let (_, total) = columnWidths(subviews, proposal)
         let (headerH, dividerH, rows) = rowHeights(subviews)
         let height =
-            headerH + rowGap + dividerH + rowGap + rows.reduce(0, +)
-            + rowGap * CGFloat(max(0, rows.count - 1))
+            headerH + rowGap + dividerH + rowGap + top + rowsExtent(rows) + bottom
         return CGSize(width: total, height: height)
     }
 
@@ -9076,7 +9134,16 @@ private struct KayaTableLayout: Layout {
         subviews[cols].place(
             at: CGPoint(x: bounds.minX, y: dividerY), anchor: .topLeading,
             proposal: ProposedViewSize(width: bounds.width, height: dividerH))
-        var y = dividerY + dividerH + rowGap
+        var y = dividerY + dividerH + rowGap + top
+        // What the report reads back: where the band starts inside this
+        // content, and the pitch this pass gave each realized row.
+        if let placement {
+            placement.bandFirst = first
+            placement.bandOffset = top
+            placement.bandTop = y - bounds.minY
+            placement.rowPitches = rows.map { $0 + rowGap }
+            placed?()
+        }
         let cells = Array(subviews.dropFirst(cols + 1))
         for (r, rowH) in rows.enumerated() {
             for c in 0..<cols where r * cols + c < cells.count {
@@ -9085,6 +9152,359 @@ private struct KayaTableLayout: Layout {
                     proposal: .unspecified)
             }
             y += rowH + rowGap
+        }
+    }
+}
+
+/// Every live SYNTHESIZED table's window, by container widget id — the
+/// mac driver's twin (kayaTableDrivers, one tier over): how the harness
+/// verbs reach the tier that drew. Main thread only, like every other
+/// registry here.
+nonisolated(unsafe) var kayaTableWindows: [UInt64: KayaSynthesizedWindow] = [:]
+
+/// The scroll container's coordinate space: the content's frame in it IS
+/// the scroll offset.
+private func kayaTableScrollSpace(_ node: KayaNode) -> String { "kaya-table-\(node.id)" }
+
+/// A row's scroll anchor. Its own type, so an id here cannot collide
+/// with the ForEach's own element ids (KayaNode.ID is a UInt64 too).
+private struct KayaRowAnchor: Hashable {
+    let row: UInt64
+    let col: Int
+}
+
+/// What KayaTableLayout PLACED, for the report that follows it: where
+/// the band starts inside the content, and the pitch each realized row
+/// got. NOT @Observable — this is written from inside placeSubviews, and
+/// a SwiftUI invalidation raised during a layout pass is fatal (the mac
+/// tier's EXC_BREAKPOINT, docs/traps.md).
+final class KayaTablePlacement {
+    var bandFirst = 0
+    var bandOffset: CGFloat = 0
+    var bandTop: CGFloat = 0
+    var rowPitches: [CGFloat] = []
+}
+
+/// What KayaTableLayout tells the window when it has placed a band: ITS
+/// OWN TRIGGER, because the other two do not cover it — a scroll never
+/// re-runs this layout, and a band change need not move the content's
+/// box at all (the spacers are sized to keep it exactly as tall as the
+/// collection).
+typealias KayaTablePlaced = () -> Void
+
+/// THE SYNTHESIZED TIER'S WINDOW (docs/virtualization-plan.md §4): top
+/// spacer, the realized band's real widgets, bottom spacer, inside the
+/// scroll container the tier owns. THE CORE OWNS THE ARITHMETIC — both
+/// spacers are its `offset` and its `extent`, and a row's height is its
+/// `row_extent` — and this object owns the loop that feeds it: the range
+/// the viewport shows, and the extents the layout gave the band's rows.
+@Observable final class KayaSynthesizedWindow {
+    /// The two spacers, and whether the core answers for this For at all.
+    /// False is §1's bridge: nothing narrowed, every row realized, and
+    /// this tier draws exactly what it drew before there was a window.
+    var top = 0.0
+    var bottom = 0.0
+    var windowed = false
+    /// The band index `top` is the offset of — it goes to the layout, so
+    /// what the layout places and what the report reads back are one
+    /// band even while the core's has moved on.
+    var first = 0
+    /// The collection's declared total — expect_window's second number.
+    var total = 0
+
+    @ObservationIgnored let placement = KayaTablePlacement()
+    @ObservationIgnored private var proxy: ScrollViewProxy?
+    /// The scroll container's own box, in the space the harness compares
+    /// in. The report records it through the ONE writer, exactly as the
+    /// mac driver records NSScrollView's: a viewport that rides only a
+    /// `task(id:)` is dropped when the generation churns, and this tier's
+    /// band moves the generation several times a second while it settles.
+    @ObservationIgnored private var viewportRect = CGRect.zero
+    @ObservationIgnored private var viewportHeight = 0.0
+    @ObservationIgnored private var scrollTop = 0.0
+    /// The last range handed to the core. A pass that moved nothing
+    /// reports nothing, so the report -> stamp -> layout loop cannot run
+    /// away (the mac driver's rule).
+    @ObservationIgnored private var reported: (first: Int, count: Int)?
+    /// What the last pass MEASURED — the viewport's own first row and how
+    /// many rows it shows. expect_window reads the first of these: never
+    /// the band's first, and never the park's claim below.
+    @ObservationIgnored private(set) var visible: (first: Int, count: Int)?
+    /// §2.4's anchor: scroll_to_row parks a ROW and every pass re-parks it
+    /// until the viewport's first visible row IS that row. `landedAt` is
+    /// the offset the park arrived at, nil while it is still in flight.
+    @ObservationIgnored private var anchorRow: Int?
+    @ObservationIgnored private var landedAt: Double?
+    @ObservationIgnored private var scheduled = false
+    /// Consecutive passes that found an input missing. BOUNDED because
+    /// the re-arm below hops the main queue: a table that never gets
+    /// geometry would otherwise spin it forever.
+    @ObservationIgnored private var misses = 0
+
+    /// The scroll container appeared or resized: the viewport this window
+    /// is a window ON.
+    func attach(_ node: KayaNode, proxy: ScrollViewProxy, viewport: CGRect) {
+        kayaTableWindows[node.id] = self
+        self.proxy = proxy
+        viewportRect = viewport
+        viewportHeight = Double(viewport.height)
+        arrived(node)
+    }
+
+    func detach(_ node: KayaNode) {
+        if kayaTableWindows[node.id] === self { kayaTableWindows.removeValue(forKey: node.id) }
+    }
+
+    /// The content moved inside the container: a scroll, or a resize.
+    func note(_ node: KayaNode, scrollTop: Double) {
+        self.scrollTop = scrollTop
+        arrived(node)
+    }
+
+    /// The layout placed a band. THE THIRD TRIGGER, and the one the other
+    /// two cannot stand in for: a scroll does not re-run the layout, and
+    /// a band change does not move the content's box.
+    func placed(_ node: KayaNode) {
+        arrived(node)
+    }
+
+    /// A real input landed, so the re-arm budget below starts over: it
+    /// exists to stop a table with no geometry spinning the main queue,
+    /// not to stop a table that keeps being told things.
+    private func arrived(_ node: KayaNode) {
+        misses = 0
+        schedule(node)
+    }
+
+    /// One report per main-queue turn, however many readers asked for it.
+    /// NEVER INSIDE A LAYOUT PASS, for the reason KayaTablePlacement is
+    /// not @Observable.
+    private func schedule(_ node: KayaNode) {
+        guard !scheduled else { return }
+        scheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scheduled = false
+            self.report(node)
+        }
+    }
+
+    /// THE RANGE LEADS AND THE HEIGHTS FOLLOW (§3.4): the band moves on
+    /// what the viewport shows, and the rows it stamped are measured on
+    /// the pass after they laid out.
+    private func report(_ node: KayaNode) {
+        // THE VIEWPORT FIRST, and past every early return below: it is a
+        // geometric fact about the container, not about the band, and the
+        // harness reads it for expect_column_edges whatever the window is
+        // doing.
+        if viewportRect.width > 0, viewportRect.height > 0 {
+            kayaRecordTableViewport(
+                node, kayaTableGeometryGeneration(node), viewportRect, true)
+        }
+        guard let geometry = KayaHost.windowGeometry(node.id), geometry.total > 0 else {
+            // No core (the gate's probes host this render path with none)
+            // or a For it does not know: the bridge.
+            publish(windowed: false, top: 0, bottom: 0, first: 0, total: node.children.count)
+            visible = nil
+            return
+        }
+        let pitches = placement.rowPitches
+        guard viewportHeight > 0, pitches.count == node.children.count else {
+            // The other reader has not landed yet, or the layout has not
+            // placed this band. Both resolve on the next turn; the budget
+            // is what keeps a table that never gets geometry from spinning
+            // the main queue, and every real input resets it.
+            misses += 1
+            if misses < 8 { schedule(node) }
+            return
+        }
+        misses = 0
+        let band = Int(geometry.first)..<Int(geometry.first) + Int(geometry.count)
+        var spanned = 0.0
+        for index in band { spanned += KayaHost.rowExtent(node.id, index) }
+        publish(
+            windowed: true, top: geometry.offset,
+            bottom: max(0, geometry.extent - geometry.offset - spanned),
+            first: Int(geometry.first), total: Int(geometry.total))
+
+        // WHERE THE VIEWPORT SITS IN THE BAND THAT WAS DRAWN — the band's
+        // top inside the content, the pitch each row got, and the index
+        // those belong to, all from the SAME layout pass. The core's own
+        // band has already moved on by now (the report above is what
+        // moves it), and a walk that read the fresh index against the
+        // drawn placement was measured answering 197 for a viewport
+        // parked on 200. The header block above the rows is inside
+        // `bandTop`, so a viewport showing it starts before row `first`.
+        let drawnFirst = placement.bandFirst
+        let into = scrollTop - Double(placement.bandTop)
+        let below = into + viewportHeight
+        let span = pitches.reduce(0, +)
+        var measured: (first: Int, count: Int)
+        if pitches.isEmpty || below <= 0.5 || into >= Double(span) - 0.5 {
+            // THE VIEWPORT IS OUTSIDE THE BAND — the reader jumped to
+            // rows nothing has stamped. Nothing is measured here, so
+            // nothing is claimed: the seek asks the CORE where that
+            // offset lands (its own extent over its own row count) and
+            // the next pass reports what it then measures.
+            let pitch = geometry.extent / Double(geometry.total)
+            let at = Double(placement.bandOffset) + into
+            let index = pitch > 0 ? Int((at / pitch).rounded(.down)) : 0
+            measured = (min(Int(geometry.total) - 1, max(0, index)), visible?.count ?? 1)
+        } else {
+            var y = 0.0
+            var k = 0
+            while k < pitches.count, y + Double(pitches[k]) <= max(0, into) + 0.5 {
+                y += Double(pitches[k])
+                k += 1
+            }
+            var count = 0
+            while k + count < pitches.count, y < below - 0.5 {
+                y += Double(pitches[k + count])
+                count += 1
+            }
+            // THE BAND CAN BE SHORTER THAN THE VIEWPORT: at the first
+            // report it is ONE row, the core's minimum for a tier that
+            // has measured nothing. What the walk saw is then a FLOOR and
+            // not the answer, and reporting it alone climbs to the real
+            // count one doubling at a time — EIGHT generation bumps in
+            // 80ms, which cancels every geometry reporter's `task(id:)`
+            // before it runs and left expect_column_edges reading a table
+            // that had recorded no viewport at all (measured 2026-08-25,
+            // 2 runs in 11). So the rows the walk could not see are
+            // counted at the pitch the core holds — an estimate about
+            // rows nothing has stamped, and the next pass measures them.
+            if k + count >= pitches.count, y < below {
+                let pitch = Double(geometry.total) > 0 && geometry.extent > 0
+                    ? geometry.extent / Double(geometry.total)
+                    : Double(pitches.last ?? 0)
+                if pitch > 0 { count += Int(((below - y) / pitch).rounded(.up)) }
+            }
+            measured = (drawnFirst + k, max(1, count))
+        }
+        visible = measured
+        // WHILE A PARK IS IN FLIGHT THE BAND IS HELD WHERE IT IS AIMED,
+        // not where the viewport still is: reporting the old place would
+        // tear down the very row the scroll is travelling to, and the
+        // park would then have nothing to land on (measured here — the
+        // band snapped back to 0 and the scroll stuck).
+        var claim = measured
+        if let anchor = anchorRow, landedAt == nil { claim = (anchor, measured.count) }
+        if reported.map({ $0 != claim }) ?? true {
+            reported = claim
+            KayaHost.windowMoved(node.id, claim.first, claim.count)
+        }
+        measure(node, first: drawnFirst, pitches: pitches)
+        repark(node, drawnFirst: drawnFirst, measured: measured)
+    }
+
+    /// The verify half (§2.2): the extents this tier laid the band's rows
+    /// out at, reported only when they DISAGREE with what the core
+    /// already holds — exactly, no tolerance (§2.3), which is also what
+    /// stops this round trip repeating.
+    private func measure(_ node: KayaNode, first: Int, pitches: [CGFloat]) {
+        var heights: [Double] = []
+        var moved = false
+        for (k, pitch) in pitches.enumerated() {
+            let height = Double(pitch)
+            heights.append(height)
+            if KayaHost.rowExtent(node.id, first + k) != height { moved = true }
+        }
+        guard moved else { return }
+        KayaHost.rowsMeasured(node.id, first, heights)
+    }
+
+    /// §2.4, this tier's spelling. A park is re-issued until the row it
+    /// names IS the viewport's first visible row, and re-issued AGAIN
+    /// whenever that row stops being first while the reader has not
+    /// touched the scroll — which is what a correction landing above it
+    /// looks like from here, and is the whole point of parking on a row.
+    /// An offset that MOVED after the park landed is the reader's own
+    /// scroll, and the park yields to it.
+    private func repark(
+        _ node: KayaNode, drawnFirst: Int, measured: (first: Int, count: Int)
+    ) {
+        guard let anchor = anchorRow, let proxy else { return }
+        if measured.first == anchor {
+            if landedAt == nil { landedAt = scrollTop }
+            return
+        }
+        if let landed = landedAt, abs(scrollTop - landed) > 0.5 {
+            anchorRow = nil
+            landedAt = nil
+            return
+        }
+        landedAt = nil
+        guard anchor >= drawnFirst, anchor < drawnFirst + node.children.count else { return }
+        proxy.scrollTo(
+            KayaRowAnchor(row: node.children[anchor - drawnFirst].id, col: 0), anchor: .top)
+    }
+
+    /// scroll_to_row's tier half: park the row and move the band to it.
+    /// The row is addressed as DATA — the core already turned the key into
+    /// this index — so a row nothing has stamped scrolls exactly like a
+    /// realized one.
+    func scroll(_ node: KayaNode, toRow index: Int) {
+        anchorRow = index
+        landedAt = nil
+        let count = visible?.count ?? 1
+        reported = (index, count)
+        KayaHost.windowMoved(node.id, index, count)
+        schedule(node)
+    }
+
+    /// Observation writes only when a number MOVED: @Observable notifies
+    /// on assignment, not on change, and this is read from the body that
+    /// draws the spacers.
+    private func publish(
+        windowed: Bool, top: Double, bottom: Double, first: Int, total: Int
+    ) {
+        if self.windowed != windowed { self.windowed = windowed }
+        if self.top != top { self.top = top }
+        if self.bottom != bottom { self.bottom = bottom }
+        if self.first != first { self.first = first }
+        if self.total != total { self.total = total }
+    }
+}
+
+/// The grown table's viewport box (§4): it takes the extent it is
+/// offered along the scroll axis and claims NONE of its own.
+///
+/// A ScrollView answers an UNSPECIFIED height proposal with its
+/// CONTENT's — 11,362pt for the 400-row scene, measured here — and that
+/// number travels up through KayaFlex's cross-axis fill
+/// (`max(naturalCross, filledCross)`), so the ROOT becomes as tall as
+/// the collection, the container is never smaller than what it holds,
+/// and nothing scrolls: the window is a window on nothing.
+private struct KayaScrollBox: Layout {
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let natural = subviews.first?.sizeThatFits(.unspecified) ?? .zero
+        return CGSize(width: proposal.width ?? natural.width, height: proposal.height ?? 0)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+    }
+}
+
+/// The content's own box inside the scroll container — how far it is
+/// scrolled and how tall it is. INSIDE the content on purpose: a reader
+/// on the container itself does not move when the reader scrolls.
+private struct KayaTableContentReporter: View {
+    let node: KayaNode
+    let window: KayaSynthesizedWindow
+    let generation: Int
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .named(kayaTableScrollSpace(node)))
+            Color.clear.task(id: KayaGeometryStamp(generation: generation, frame: frame)) {
+                window.note(node, scrollTop: -Double(frame.minY))
+            }
         }
     }
 }
@@ -9098,6 +9518,7 @@ private struct KayaTableLayout: Layout {
 /// and the indicator moves only when the guest re-declares.
 private struct KayaSynthesizedTable: View {
     let node: KayaNode
+    @State private var window = KayaSynthesizedWindow()
 
     private var presented: String {
         var p = node.tableColumns.joined(separator: "|")
@@ -9113,9 +9534,13 @@ private struct KayaSynthesizedTable: View {
         return title + (node.tableDirection == 0 ? " ▲" : " ▼")
     }
 
-    var body: some View {
-        let generation = kayaTableGeometryGeneration(node)
-        KayaTableLayout(cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing) {
+    private func rows(_ generation: Int) -> some View {
+        KayaTableLayout(
+            cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing,
+            windowed: window.windowed, top: window.top, bottom: window.bottom,
+            first: window.first, placement: window.placement,
+            placed: { window.placed(node) }
+        ) {
             ForEach(Array(node.tableColumns.enumerated()), id: \.offset) { col, title in
                 Text(headerText(col, title))
                     .fontWeight(.semibold)
@@ -9134,15 +9559,61 @@ private struct KayaSynthesizedTable: View {
                             KayaEdgeReporter(
                                 node: node, key: kayaTableCellKey(row, col, cell),
                                 generation: generation))
+                        // The park's target (§2.4): the anchor is column
+                        // 0's cell, whose top IS the row's top. Every
+                        // cell carries its own so no two share an id.
+                        .id(KayaRowAnchor(row: row.id, col: col))
                 }
             }
         }
-        .background(
-            KayaTableViewportReporter(
-                node: node, generation: generation, synthesized: true))
+    }
+
+    var body: some View {
+        let generation = kayaTableGeometryGeneration(node)
+        Group {
+            if node.grow > 0 {
+                // THE SCROLL CONTAINER THIS TIER OWNS (§4). A GROWN table
+                // IS the viewport (docs/tables-plan.md, the empty-row
+                // ruling) and a window is a window on a viewport; an
+                // UNGROWN one hugs its rows, has none, and stays on §1's
+                // bridge — every row realized, exactly as before.
+                KayaScrollBox {
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical) {
+                            rows(generation)
+                                .background(
+                                    KayaTableContentReporter(
+                                        node: node, window: window, generation: generation))
+                        }
+                        .coordinateSpace(name: kayaTableScrollSpace(node))
+                        .background(
+                            KayaTableViewportReporter(
+                                node: node, generation: generation, synthesized: true))
+                        .background(
+                            GeometryReader { geo in
+                                let box = geo.frame(in: .global)
+                                Color.clear.task(id: box) {
+                                    window.attach(node, proxy: proxy, viewport: box)
+                                }
+                            })
+                    }
+                }
+                // EVERY BATCH ASKS FOR A REPORT — and onChange, not a
+                // task: a task is cancelled and restarted by the next
+                // generation, and the band settling moves the generation
+                // several times inside one frame.
+                .onChange(of: generation) { window.placed(node) }
+            } else {
+                rows(generation)
+                    .background(
+                        KayaTableViewportReporter(
+                            node: node, generation: generation, synthesized: true))
+            }
+        }
         // task(id:), not onChange: this tier compiles at the macOS 13 /
         // iOS 16 floor, below the zero-parameter onChange.
         .task(id: presented) { node.tablePresented = presented }
+        .onDisappear { window.detach(node) }
     }
 }
 

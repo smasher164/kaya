@@ -4728,3 +4728,94 @@ main-thread latency together), so the observed field red in the matrix
 log is the negative's record, and the varied leg in every matrix run
 is its standing regression coverage. Do not claim a synthetic-load
 repro that was not measured.
+
+
+## A nested For's rows live in the STAMP, so a windowed row loses them (2026-08-25)
+
+A nested For's collection instance is created when its copy is stamped
+(`TplOp::Collection`) and destroyed with it, so it exists only while its
+row is REALIZED. Windowing makes that transient: a row that leaves the
+band takes its inner rows with it and comes back EMPTY, and a row that
+was never realized has no instance at all — a guest write to it dies
+with `kaya: no instance of CollectionId(2) at path [Str("r128")]`.
+
+MEASURED landing the declares-windowing seed: varied.py writes every
+row's inner lines inside the build transaction, so seeding that table
+faulted on the first row past the seed. varied.steps could not see the
+already-open half, because it asserts row identity and totals and never
+a realized row's inner CONTENT — which is also why nobody had met it.
+
+The ruling for now (docs/deferred.md, the declares-windowing entry): a
+table whose row template owns collection state — a nested For at any
+depth, `When` included — stays on §1's bridge and is not seeded
+(`seed_window`'s `body_owns_a_collection`). The real fix is a nested
+instance that outlives its stamp, which is a model change and not a
+band change; until then, a scene that scrolls such a table away and
+back should assert the inner rows and will fail.
+
+
+## A window seed smaller than one viewport converges by DOUBLING (2026-08-25)
+
+Two tiers read their first visible COUNT off the rows they have already
+realized (the iOS synthesized table's placement walk, Compose's
+laid-out cells), so a band seeded below one viewport is handed straight
+back as the first report: the band then grows 1, 2, 4, 8, 16, 32, 40 —
+eight generation bumps inside 80ms on iOS, each cancelling every
+geometry reporter's `task(id:)` before it ran, and `expect_column_edges`
+read a table that had recorded no viewport at all in 2 runs of 11.
+That is why `WINDOW_SEED_ROWS` is a GENEROUS screenful (128 rows clears
+a 2,560pt viewport at a bare label's ~20pt pitch) rather than the
+minimum that bounds the fill: the first report has to be a measurement,
+not an echo. The two hacks this replaced were 1 row (a pump-side
+`windowMoved(id, 0, 0)`) and 64 (a Compose composition cap, measured
+sufficient for a 640px emulator and short of a desktop).
+A GENEROUS SEED IS NOT ENOUGH ON ITS OWN — see the next entry, where the
+echo happens with no viewport recorded at all and the seed's size is
+therefore irrelevant.
+
+## The band that fed itself: an unmeasured report is a doubling (2026-08-25)
+
+A report is what the core BANDS, and `RowWindow::band` adds an overscan
+to every report (crates/kaya/src/rowwindow.rs, `OVERSCAN = 1`): a report of `(0, k)`
+bands `0..2k`. So a tier that answers a cycle with the realized band's
+own `count` has not reported a measurement — it has asked for twice the
+band, and the next cycle reads the bigger number and asks again.
+
+WinUI's `table_visible_rows` did exactly that in its last arm,
+`(geometry.first, geometry.count.max(1))`, whenever the collection had
+no measured extent yet. Measured on the lane with `KAYA_WINUI_TRACE=1`,
+ledger_python's first seven report cycles:
+
+    winui window 19 band 0+128  of 15000 ... vh 0.0 -> visible (0, 128)
+    winui window 19 band 0+256  of 15000 ... vh 0.0 -> visible (0, 256)
+    winui window 19 band 0+512  of 15000 ... vh 0.0 -> visible (0, 512)
+    winui window 19 band 0+1024 of 15000 ... vh 0.0 -> visible (0, 1024)
+    winui window 19 band 0+2048 of 15000 ... vh 0.0 -> visible (0, 2048)
+    winui window 19 band 0+4096 of 15000 ... vh 0.0 -> visible (0, 4096)
+    winui table [...] widths [166,132,117,158] inner 644.0 ROWS 15000
+
+`vh 0.0` on every line: this is the pre-layout state, so the seed's SIZE
+could not have helped — the echo does not need a viewport, it needs a
+band. THE SEED IS WHAT MADE IT BITE. Before it, an unreported site was
+unbounded, `geometry.count` WAS the total, and echoing it back was a
+fixpoint; the seed bounds the first fill to 128 and the arm hands the
+128 straight back, so the collection realizes whole anyway.
+
+THE COST, all measured on the windows lane VM, unloaded: 15,000 realized
+rows made `column_edges` walk 60,004 cells at 2.57s and 2.70s a read,
+XAML spend 2.93s laying the same cells out (read as hop latency on the
+second read), `table_measure` 286–494ms a pass and `table_band_to`
+363ms a move. `expect_column_edges` burned 5,812ms of its 15s retry
+window standalone, and under the five-lane matrix went past it twice
+with "column#3 misaligned (cell edges cluster at [0], wanted 4
+columns)" — the sentence the FIRST of those two reads prints.
+
+THE RULE: a report is a measurement. A cycle with no live viewport and
+no extent has none to make and reports nothing, which leaves the seed's
+band standing until a layout can be read. Held by
+`winui::tests::a_report_may_not_be_the_band_it_was_given`, which drives
+the real `RowWindow` for seven pre-layout cycles — NO SCENE CAN FAIL
+THIS, because the band's width deliberately left `expect_window`
+(docs/virtualization-plan.md §5), so a tier that realizes every row
+answers every windowing observable correctly and merely loses the leg on
+a loaded machine.

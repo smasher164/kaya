@@ -1781,6 +1781,19 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     Ok(())
 }
 
+/// WHICH PANEL A CONTAINER'S CHILDREN ACTUALLY LIVE IN. For a declared
+/// table that is the band panel inside its scroll host, so the rows
+/// scroll and the header does not; for everything else it is the
+/// container's own Grid. `reindex` places into the same panel.
+fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
+    let own = match core.widgets.get(&parent) {
+        Some(NativeWidget::Column(g)) => g.clone(),
+        Some(NativeWidget::Row(g)) => return Some(g.clone()),
+        _ => return None,
+    };
+    Some(TABLES.with_borrow(|t| t.get(&parent.0).map(|w| w.band.clone())).unwrap_or(own))
+}
+
 /// Rebuild one container's tracks and re-place every child on them.
 /// Reached from `flush_tracks` — a structural change marks its container
 /// instead of calling this, because running it per child is N^2
@@ -1794,28 +1807,60 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         _ => return Ok(()),
     };
     let order = core.child_order.children(parent);
-    // A DECLARED TABLE OWNS THE FIRST TWO TRACKS — the header row and the
-    // rule under it — and every stamped row shifts down by them. This is
-    // the only place a Column's children are placed, so it is the only
-    // place that can know (docs/tables-plan.md).
-    let head = if vertical && TABLES.with_borrow(|t| t.contains_key(&parent.0)) {
-        2
+    // A DECLARED TABLE OWNS THREE TRACKS OF ITS OWN — the header, the
+    // rule and the scroll host — and its rows are placed inside the
+    // host's band panel, one track down past the top spacer
+    // (docs/virtualization-plan.md §4). This is the only place a Column's
+    // children are placed, so it is the only place that can know
+    // (docs/tables-plan.md).
+    let table = if vertical {
+        TABLES.with_borrow(|t| {
+            t.get(&parent.0)
+                .map(|w| (w.band.clone(), w.spacer_top, w.spacer_bottom, w.gap))
+        })
     } else {
-        0
+        None
     };
+    let head = if table.is_some() { 1 } else { 0 };
 
     if vertical {
-        let defs = grid.RowDefinitions()?;
-        defs.Clear()?;
-        for _ in 0..head {
+        if let Some((band, top, bottom, _)) = &table {
+            let defs = grid.RowDefinitions()?;
+            defs.Clear()?;
+            for length in [track(0.0), track(0.0), track(1.0)] {
+                let def = RowDefinition::new()?;
+                def.SetHeight(length)?;
+                defs.Append(&def)?;
+            }
+            // THE SPACERS ARE TRACKS, NOT WIDGETS: an empty pixel track
+            // reserves its height, and both numbers are the CORE's
+            // arithmetic (`table_spacer_targets`). NO SCENE CAN SEE THEM
+            // — `expect_window` says which row is first and how many
+            // exist, both of which a tier that reserved nothing still
+            // answers correctly — so this pair is held statically, in
+            // `every_link_of_the_report_loop_is_still_wired`.
+            let defs = band.RowDefinitions()?;
+            defs.Clear()?;
+            let spacer = |h: f64| GridLength { Value: h.max(0.0), GridUnitType: GridUnitType::Pixel };
             let def = RowDefinition::new()?;
-            def.SetHeight(track(0.0))?;
+            def.SetHeight(spacer(*top))?;
             defs.Append(&def)?;
-        }
-        for child in order {
+            for child in order {
+                let def = RowDefinition::new()?;
+                def.SetHeight(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
+                defs.Append(&def)?;
+            }
             let def = RowDefinition::new()?;
-            def.SetHeight(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
+            def.SetHeight(spacer(*bottom))?;
             defs.Append(&def)?;
+        } else {
+            let defs = grid.RowDefinitions()?;
+            defs.Clear()?;
+            for child in order {
+                let def = RowDefinition::new()?;
+                def.SetHeight(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
+                defs.Append(&def)?;
+            }
         }
     } else {
         let defs = grid.ColumnDefinitions()?;
@@ -1841,6 +1886,12 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
             Grid::SetRow(&element, track)?;
         } else {
             Grid::SetColumn(&element, track)?;
+        }
+        // A WINDOWED ROW'S TRACK IS ITS PITCH: the gap rides the row's
+        // own bottom margin, uniformly (an odd last row would report a
+        // different extent and correct a table whose data is uniform).
+        if let Some((_, _, _, gap)) = &table {
+            element.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: *gap })?;
         }
         // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES
         // IT. 240x96 is the size all four backends declare, and on the
@@ -2091,6 +2142,13 @@ struct WinTable {
     grid: Grid,
     header: Grid,
     rule: Grid,
+    /// THE SCROLL CONTAINER THIS TIER OWNS (docs/virtualization-plan.md
+    /// §4). The header and the rule stay pinned as the container's first
+    /// two tracks; everything that scrolls is inside this.
+    host: ScrollViewer,
+    /// The band panel: the top spacer track, one track per REALIZED row,
+    /// the bottom spacer track. `reindex` is its only structural writer.
+    band: Grid,
     /// The header cells, one per title, in visual order.
     cells: Vec<Button>,
     /// The stamped row containers, refreshed from the core each drain.
@@ -2120,7 +2178,48 @@ struct WinTable {
     /// may cost, because each measure invalidates layout and asks for
     /// another one.
     probes: u32,
+
+    // --- The row window (docs/virtualization-plan.md §3-§4). ----------
+    /// The two spacer tracks, in the core's own arithmetic: the band's
+    /// top offset and what the collection has left below it. NEVER
+    /// computed here — the core owns presume/verify/correct, and a second
+    /// estimator is what §2 exists to remove.
+    spacer_top: f64,
+    spacer_bottom: f64,
+    /// The gap each row carries as its own bottom margin, so a row's
+    /// TRACK is its pitch (top-to-top, spacing included) and the band
+    /// panel needs no RowSpacing of its own.
+    gap: f64,
+    /// The last visible range handed to `kaya_window_moved`, so an
+    /// unchanged range produces no applies (which is also what stops the
+    /// report loop from repeating).
+    reported: Option<(usize, usize)>,
+    /// What `expect_window` compares: the first VISIBLE row and the
+    /// collection's declared total, refreshed by every report.
+    first_visible: usize,
+    total: usize,
+    /// The ROW the viewport is parked on (§2.4) and the offset this tier
+    /// last commanded. A correction moves the row and the re-park follows
+    /// it; an offset we did not command is the user's scroll, and the
+    /// anchor yields to it.
+    anchor: Option<usize>,
+    at: f64,
+    /// Cycles left for a commanded scroll to land. THIS BACKEND CANNOT
+    /// SEE A SCROLL EVENT — its bindings project no `ViewChanged`
+    /// (tools/winui-bindgen; the add is a vtable pad) — so a scroll is
+    /// observed as an OFFSET, and an offset that is neither where we put
+    /// it nor where the anchor says it belongs is the user's. This bounds
+    /// how long a command that never lands (a clamp at the end) may
+    /// suppress that reading.
+    commanded: u8,
+    /// One coalesced report per main-loop turn.
+    scheduled: bool,
 }
+
+/// How many settle rounds one report drives. Each round acts on at most
+/// one thing — re-park, re-band, measure, re-spacer — and stops when
+/// nothing moved, so this only bounds a tier that never converges.
+const TABLE_SETTLE_ROUNDS: usize = 6;
 
 /// How many layout passes a table may spend trying to measure real
 /// content before it settles for what it has.
@@ -2155,7 +2254,7 @@ fn declare_table(
         return Ok(());
     };
     let grid = grid.clone();
-    let mut minted: Option<(Grid, Grid, Vec<Button>)> = None;
+    let mut minted: Option<(Grid, Grid, ScrollViewer, Grid, Vec<Button>)> = None;
     let remint = TABLES.with_borrow(|tables| match tables.get(&id.0) {
         Some(live) => live.titles.len() != titles.len(),
         None => true,
@@ -2165,6 +2264,24 @@ fn declare_table(
         header.SetColumnSpacing(TABLE_COL_GAP)?;
         header.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
         let rule: Grid = XamlReader::Load(&HSTRING::from(TABLE_RULE_XAML))?.cast()?;
+        // THE SCROLL CONTAINER (§4). Vertical only, and its scrollbar is
+        // an OVERLAY (Auto, never Visible): a reserved gutter would take
+        // its width out of the rows and leave them narrower than the
+        // pinned header, which `column_edges` reads as an underfilled
+        // track.
+        let host = ScrollViewer::new()?;
+        host.SetHorizontalScrollMode(ScrollMode::Disabled)?;
+        host.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
+        host.SetVerticalScrollMode(ScrollMode::Enabled)?;
+        host.SetVerticalScrollBarVisibility(ScrollBarVisibility::Auto)?;
+        host.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        let band = Grid::new()?;
+        // NO RowSpacing: a row's own bottom margin carries the gap, so
+        // the TRACK is the pitch and the spacers are the core's numbers
+        // with nothing added (`reindex`).
+        band.SetRowSpacing(0.0)?;
+        band.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        host.SetContent(&band)?;
         let mut cells = Vec::new();
         for (column, _) in titles.iter().enumerate() {
             let cell: Button = XamlReader::Load(&HSTRING::from(TABLE_HEADER_CELL_XAML))?.cast()?;
@@ -2192,11 +2309,12 @@ fn declare_table(
             cell.Click(&handler)?;
             cells.push(cell);
         }
-        minted = Some((header, rule, cells));
+        minted = Some((header, rule, host, band, cells));
     }
     let fresh = minted.is_some();
+    let gap = core.spacings.get(&id).copied().unwrap_or(8.0);
     TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
-        if let Some((header, rule, cells)) = minted {
+        if let Some((header, rule, host, band, cells)) = minted {
             tables.insert(
                 id.0,
                 WinTable {
@@ -2207,6 +2325,8 @@ fn declare_table(
                     grid: grid.clone(),
                     header,
                     rule,
+                    host,
+                    band,
                     cells,
                     rows: Vec::new(),
                     pad: 0.0,
@@ -2215,6 +2335,16 @@ fn declare_table(
                     stamped: Vec::new(),
                     dirty: true,
                     probes: 0,
+                    spacer_top: 0.0,
+                    spacer_bottom: 0.0,
+                    gap,
+                    reported: None,
+                    first_visible: 0,
+                    total: 0,
+                    anchor: None,
+                    at: 0.0,
+                    commanded: 0,
+                    scheduled: false,
                 },
             );
         } else if let Some(table) = tables.get_mut(&id.0) {
@@ -2234,14 +2364,26 @@ fn declare_table(
     })?;
     if fresh {
         let children = grid.Children()?;
-        let (header, rule) = TABLES.with_borrow(|tables| {
+        let (header, rule, host) = TABLES.with_borrow(|tables| {
             let table = &tables[&id.0];
-            (table.header.clone(), table.rule.clone())
+            (table.header.clone(), table.rule.clone(), table.host.clone())
         });
         Grid::SetRow(&header.cast::<FrameworkElement>()?, 0)?;
         Grid::SetRow(&rule.cast::<FrameworkElement>()?, 1)?;
+        Grid::SetRow(&host.cast::<FrameworkElement>()?, 2)?;
         children.Append(&header)?;
         children.Append(&rule)?;
+        children.Append(&host)?;
+        // A scroll moves no frame of the container, so its LayoutUpdated
+        // cannot be the only report trigger: the host's own is where a
+        // view change lands (this backend's bindings project no
+        // ViewChanged — see `schedule_report`).
+        let host_id = id.0;
+        let scrolled = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            schedule_report(host_id);
+            Ok(())
+        });
+        host.LayoutUpdated(&scrolled)?;
         // The first real layout is where a measure stops reading zeros
         // (the baseline-compensation lesson), and LayoutUpdated is where
         // a later resize is seen — this backend projects no SizeChanged.
@@ -2285,6 +2427,440 @@ fn sync_tables(core: &CoreState) {
             }
         });
         table_pass(id);
+        schedule_report(id);
+    }
+}
+
+// ---------------------------------------------------------------------
+// THE ROW WINDOW (docs/virtualization-plan.md §3-§4), this tier's
+// spelling: top spacer, the realized band's real widgets, bottom spacer,
+// inside the scroll container the table owns.
+//
+// THE REPORT LOOP. Visible range -> kaya_window_moved on every scroll,
+// resize and first layout; the realized rows' measured extents ->
+// kaya_rows_measured, EXACTLY, no tolerance — which is also what stops
+// this loop repeating, since a report that agrees with the core produces
+// nothing.
+//
+// EVERY NUMBER LAID OUT HERE IS THE CORE'S. The spacers come from
+// `kaya_window_geometry`'s offset and extent; this file owns no height
+// cache, no pitch and no prefix sum (§2's one estimator).
+// ---------------------------------------------------------------------
+
+/// One coalesced report per main-loop turn.
+///
+/// IT MAY NOT RUN INSIDE A LAYOUT PASS: the report applies ops, which
+/// re-enters the Grid whose layout callback called us. The dispatcher hop
+/// is what keeps them apart — the mac tier's `scheduleReport` for the
+/// same reason one toolkit over (an @Observable write from inside
+/// -[NSView layout] aborts AppKit outright).
+fn schedule_report(id: u64) {
+    let due = TABLES.with(|tables| match tables.try_borrow_mut() {
+        Ok(mut tables) => match tables.get_mut(&id) {
+            Some(table) if !table.scheduled => {
+                table.scheduled = true;
+                true
+            }
+            _ => false,
+        },
+        // Borrowed by the pass that is about to schedule its own.
+        Err(_) => false,
+    });
+    if !due {
+        return;
+    }
+    if let Some(dispatcher) = DISPATCHER.get() {
+        let handler = DispatcherQueueHandler::new(move || {
+            TABLES.with(|tables| {
+                if let Ok(mut tables) = tables.try_borrow_mut() {
+                    if let Some(table) = tables.get_mut(&id) {
+                        table.scheduled = false;
+                    }
+                }
+            });
+            CORE.with_borrow_mut(|core| {
+                if let Some(core) = core.as_mut() {
+                    table_settle(core, id);
+                }
+            });
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+}
+
+/// The band panel's live track geometry: the top spacer's height and one
+/// height per realized row, in track order.
+fn band_tracks(band: &Grid) -> windows_core::Result<(f64, Vec<f64>)> {
+    let defs = band.RowDefinitions()?;
+    let n = defs.Size()?;
+    if n < 2 {
+        return Ok((0.0, Vec::new()));
+    }
+    let top = defs.GetAt(0)?.ActualHeight()?;
+    let mut rows = Vec::with_capacity((n - 2) as usize);
+    for at in 1..n - 1 {
+        rows.push(defs.GetAt(at)?.ActualHeight()?);
+    }
+    Ok((top, rows))
+}
+
+/// The two spacer heights the core's arithmetic currently implies.
+/// Reached from layout callbacks that cannot unwind, so the window
+/// reads sit under the fault guard like every other report caller
+/// (the cross-caller census in fault.rs found this one unguarded on
+/// the breadth merge — the two worktrees never saw each other).
+fn table_spacer_targets(core: &mut CoreState, id: u64) -> (f64, f64) {
+    crate::fault::guard("reading window geometry for the spacer tracks", || {
+        let geometry = core.scene.window_geometry(id);
+        let mut banded = 0.0;
+        for index in geometry.first..geometry.first + geometry.count {
+            banded += core.scene.row_extent(id, index);
+        }
+        band_spacers(geometry.offset, geometry.extent, banded)
+    })
+    .unwrap_or_default()
+}
+
+/// Write them onto the band panel's two spacer tracks; answers whether
+/// they moved.
+fn table_write_spacers(
+    core: &mut CoreState,
+    id: u64,
+    band: &Grid,
+) -> windows_core::Result<bool> {
+    let (top, bottom) = table_spacer_targets(core, id);
+    let (was_top, was_bottom) = TABLES
+        .with_borrow(|t| t.get(&id).map(|w| (w.spacer_top, w.spacer_bottom)))
+        .unwrap_or((0.0, 0.0));
+    if (was_top - top).abs() <= 0.5 && (was_bottom - bottom).abs() <= 0.5 {
+        return Ok(false);
+    }
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.spacer_top = top;
+            w.spacer_bottom = bottom;
+        }
+    });
+    let defs = band.RowDefinitions()?;
+    let n = defs.Size()?;
+    if n >= 2 {
+        let pixel = |h: f64| GridLength { Value: h, GridUnitType: GridUnitType::Pixel };
+        defs.GetAt(0)?.SetHeight(pixel(top))?;
+        defs.GetAt(n - 1)?.SetHeight(pixel(bottom))?;
+    }
+    Ok(true)
+}
+
+/// THE VERIFY HALF (§2.2): the extents this tier laid the realized rows
+/// out at, reported only when they DISAGREE with what the core already
+/// holds — exactly, no tolerance (§2.3), which is also what stops the
+/// report loop repeating.
+fn table_measure_rows(
+    core: &mut CoreState,
+    id: u64,
+    band: &Grid,
+) -> windows_core::Result<bool> {
+    let (_, tracks) = band_tracks(band)?;
+    if tracks.is_empty() || tracks.iter().any(|h| *h <= 0.0) {
+        // A track measured before the tree is live reads ZERO (the
+        // baseline-compensation lesson); a zero pitch would presume every
+        // unrealized row at nothing.
+        return Ok(false);
+    }
+    Ok(crate::fault::guard("reporting measured row tracks", || {
+        let first = core.scene.window_geometry(id).first;
+        if !tracks
+            .iter()
+            .enumerate()
+            .any(|(i, h)| core.scene.row_extent(id, first + i) != *h)
+        {
+            return false;
+        }
+        core.scene.rows_measured(id, first, &tracks);
+        true
+    })
+    .unwrap_or(false))
+}
+
+/// One report cycle. Answers whether anything moved, so the settle loop
+/// below knows to look again.
+///
+/// THE LAYOUT FOLLOWS THE CORE, THEN THE RANGE FOLLOWS THE LAYOUT, and
+/// the order is the whole correctness of this file. `y0` is measured in
+/// the BAND PANEL's own coordinates — the top spacer is what puts the
+/// realized rows where the core says they are — so a range read while
+/// that spacer still holds the PREVIOUS band's number is arithmetic over
+/// two different collections. Measured on the lane 2026-08-25: after one
+/// band move the tier read the stale 15,795dip spacer, found no track
+/// under the viewport, estimated a row from the mean, reported THAT, and
+/// moved the band again — 2,254 report cycles alternating between two
+/// bands, for the whole 15s retry window, with `expect_window` answering
+/// "6 300" where the scene wanted "200 300".
+fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool> {
+    let Some((host, band)) =
+        TABLES.with_borrow(|tables| tables.get(&id).map(|w| (w.host.clone(), w.band.clone())))
+    else {
+        return Ok(false);
+    };
+    // Measure/arrange are lazy; force them or this cycle reads the
+    // previous layout's tracks (the child_shares precedent).
+    band.UpdateLayout()?;
+    if table_measure_rows(core, id, &band)? {
+        return Ok(true);
+    }
+    if table_write_spacers(core, id, &band)? {
+        band.UpdateLayout()?;
+        return Ok(true);
+    }
+    let (spacer_top, tracks) = band_tracks(&band)?;
+    let y0 = host.VerticalOffset()?;
+    let viewport = host.ViewportHeight()?;
+    let Some(geometry) =
+        crate::fault::guard("reading window geometry in the report cycle", || {
+            core.scene.window_geometry(id)
+        })
+    else {
+        // The fault already reddened the leg; nothing may be read.
+        return Ok(true);
+    };
+    if (spacer_top - geometry.offset).abs() > 0.5 {
+        // The spacer this tier asked for is not the height the toolkit
+        // gave it yet. Nothing may be read off that: come back when the
+        // layout has caught up.
+        return Ok(true);
+    }
+
+    // --- §2.4's anchor: the scroll follows a ROW. -------------------
+    let (anchor, at, commanded) =
+        TABLES.with_borrow(|t| t.get(&id).map(|w| (w.anchor, w.at, w.commanded)).unwrap_or((None, 0.0, 0)));
+    let landed = (y0 - at).abs() <= 0.5;
+    let want = anchor.and_then(|row| {
+        let offset = row.checked_sub(geometry.first)?;
+        (offset <= tracks.len()).then(|| spacer_top + tracks[..offset].iter().sum::<f64>())
+    });
+    if commanded > 0 || landed {
+        TABLES.with_borrow_mut(|t| {
+            if let Some(w) = t.get_mut(&id) {
+                w.commanded = if landed { 0 } else { commanded - 1 };
+            }
+        });
+    } else if want.is_none_or(|w| (y0 - w).abs() > 0.5) {
+        // Neither where this tier put it nor where the anchor says the
+        // parked row now is: the reader scrolled, and the anchor yields
+        // to free scrolling.
+        TABLES.with_borrow_mut(|t| {
+            if let Some(w) = t.get_mut(&id) {
+                w.anchor = None;
+                w.at = y0;
+            }
+        });
+    }
+    if let Some(want) = want {
+        if (y0 - want).abs() > 0.5 {
+            // The parked row moved under a correction, or the last
+            // command has not landed: put the viewport back on the ROW
+            // and read nothing off an offset that is on its way
+            // somewhere.
+            table_scroll_to(&host, id, want)?;
+            return Ok(true);
+        }
+    }
+
+    // --- The report: the visible range (§3.2). ----------------------
+    let visible = table_visible_rows(&geometry, spacer_top, &tracks, y0, viewport);
+    if trace_enabled() {
+        eprintln!(
+            "kaya: winui window {id} band {}+{} of {} offset {:.1} extent {:.1} corrected {} \
+             | spacer {spacer_top:.1} tracks {} y0 {y0:.1} vh {viewport:.1} \
+             | anchor {anchor:?} want {want:?} at {at:.1} cmd {commanded} -> visible {visible:?}",
+            geometry.first,
+            geometry.count,
+            geometry.total,
+            geometry.offset,
+            geometry.extent,
+            geometry.corrected as u8,
+            tracks.len()
+        );
+    }
+    // THE TOTAL IS THE CORE'S OWN NUMBER and survives an unmeasured
+    // cycle; the first VISIBLE row does not, so nothing publishes one
+    // this cycle did not read.
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.total = geometry.total;
+        }
+    });
+    let Some(visible) = visible else {
+        // No live viewport and no extent: nothing to report, and an
+        // invented report comes back as a bigger band (see
+        // `table_visible_rows`). The next layout schedules the cycle
+        // that can measure.
+        return Ok(false);
+    };
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.first_visible = visible.0;
+        }
+    });
+    let last = TABLES.with_borrow(|t| t.get(&id).and_then(|w| w.reported));
+    if last == Some(visible) {
+        return Ok(false);
+    }
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.reported = Some(visible);
+        }
+    });
+    table_band_to(core, id, visible)?;
+    Ok(true)
+}
+
+/// Move the band to a reported range and put the applies it produces on
+/// screen. THE SECOND PRODUCER (§3.3), on this backend's own pump: the
+/// ops are ordinary stamp and teardown applies and go through the same
+/// `apply` the drain uses, with the same one re-stamp at the end.
+fn table_band_to(
+    core: &mut CoreState,
+    id: u64,
+    visible: (usize, usize),
+) -> windows_core::Result<()> {
+    let ops = crate::fault::guard("reporting a window range", || {
+        core.scene.window_moved(id, visible.0, visible.1)
+    })
+    .unwrap_or_default();
+    for op in ops {
+        let what = op_head(&op);
+        if let Err(e) = apply(core, op) {
+            crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+            return Ok(());
+        }
+    }
+    // THE SPACERS MOVE BEFORE THE RE-STAMP, not after it. `reindex`
+    // rebuilds the band panel's two spacer tracks from these stored
+    // numbers, and a re-stamp carrying the PREVIOUS band's would collapse
+    // the content for one layout pass — long enough for the ScrollViewer
+    // to clamp the offset out from under the reader (measured on the lane
+    // 2026-08-25: a scroll parked at 20,574dip came back at 540).
+    let (top, bottom) = table_spacer_targets(core, id);
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.spacer_top = top;
+            w.spacer_bottom = bottom;
+        }
+    });
+    flush_tracks(core)?;
+    sync_tables(core);
+    Ok(())
+}
+
+/// THE TWO SPACER HEIGHTS, from the core's three numbers: where the band
+/// starts, how far the whole collection reaches, and what the band's own
+/// rows occupy between them.
+///
+/// The identity this keeps is what makes the scrollbar honest and every
+/// realized row land where the core says: `top + banded + bottom` is the
+/// collection's extent, and the row at the band's start sits at `offset`.
+/// A band whose rows measure MORE than the extent below them (a
+/// correction landing between the geometry read and the layout) clamps
+/// rather than reserving negative space.
+fn band_spacers(offset: f64, extent: f64, banded: f64) -> (f64, f64) {
+    (offset.max(0.0), (extent - offset - banded).max(0.0))
+}
+
+/// The rows the reader can actually SEE, as `(first, count)` over the
+/// COLLECTION's order — or `None` when this cycle measured NOTHING.
+///
+/// Read off the realized band's own tracks wherever the viewport sits
+/// inside it, which is every settled state — the band is the visible
+/// range plus one viewport each side. A viewport that has landed in a
+/// SPACER (a jump this tier has not banded for yet) has no row to read,
+/// so it says so with the only thing it can measure: the collection's
+/// mean row, from the core's own extent. The next cycle reads real
+/// tracks.
+///
+/// A REPORT IS A MEASUREMENT, so a cycle with no live viewport and no
+/// extent has none to make and answers `None`. The arm this replaces
+/// answered `(geometry.first, geometry.count.max(1))` — the REALIZED
+/// BAND's own count, handed back as the visible range — and
+/// `RowWindow::band` adds an overscan to every report, so a report of
+/// `(0, k)` bands `0..2k` and the next cycle reads `2k` and reports THAT.
+/// Measured on the lane 2026-08-25 (docs/traps.md, "The band that fed
+/// itself"): 128 -> 256 -> 512 -> 1024 -> 2048 -> 4096 -> 15,000 in
+/// seven cycles, every line carrying `vh 0.0`, undoing the
+/// declares-windowing seed before the first layout ever ran. The whole
+/// collection then cost 2.6s per `column_edges` read and 2.9s of XAML
+/// layout, and ledger_python's edges step burned 5.8s of its 15s retry
+/// window unloaded — which is what went red under the matrix.
+fn table_visible_rows(
+    geometry: &crate::scene::WindowGeometry,
+    spacer_top: f64,
+    tracks: &[f64],
+    y0: f64,
+    viewport: f64,
+) -> Option<(usize, usize)> {
+    if geometry.total == 0 {
+        return Some((0, 0));
+    }
+    if viewport > 0.0 {
+        let mut top = spacer_top;
+        let mut first = None;
+        let mut count = 0usize;
+        for (i, h) in tracks.iter().enumerate() {
+            let bottom = top + h;
+            if bottom > y0 + 0.5 && top < y0 + viewport - 0.5 {
+                first.get_or_insert(geometry.first + i);
+                count += 1;
+            }
+            top = bottom;
+        }
+        if let Some(first) = first {
+            return Some((first, count));
+        }
+    }
+    let mean = if geometry.extent > 0.0 {
+        geometry.extent / geometry.total as f64
+    } else {
+        0.0
+    };
+    if viewport <= 0.0 || mean <= 0.0 {
+        return None;
+    }
+    let first = ((y0 / mean) as usize).min(geometry.total - 1);
+    Some((first, ((viewport / mean).ceil() as usize).max(1)))
+}
+
+/// Command the host to `offset`, with no animation: an animated scroll
+/// would be a moving target for the very next report.
+fn table_scroll_to(host: &ScrollViewer, id: u64, offset: f64) -> windows_core::Result<()> {
+    let target: IReference<f64> = PropertyValue::CreateDouble(offset.max(0.0))?.cast()?;
+    host.ChangeViewWithOptionalAnimation(
+        None::<&IReference<f64>>,
+        &target,
+        None::<&IReference<f32>>,
+        true,
+    )?;
+    TABLES.with_borrow_mut(|t| {
+        if let Some(w) = t.get_mut(&id) {
+            w.at = offset.max(0.0);
+            w.commanded = 3;
+        }
+    });
+    Ok(())
+}
+
+/// Drive one table's report to a fixpoint. Each round acts on at most one
+/// thing and answers whether it moved, so a settled tier costs one round.
+fn table_settle(core: &mut CoreState, id: u64) {
+    for _ in 0..TABLE_SETTLE_ROUNDS {
+        match table_report_once(core, id) {
+            Ok(true) => continue,
+            Ok(false) => return,
+            Err(e) => {
+                crate::fault::report(format!("kaya: reporting a row window failed: {e}"));
+                return;
+            }
+        }
     }
 }
 
@@ -2507,6 +3083,10 @@ fn table_pass(id: u64) {
         }
         let _ = table_stamp(table);
     });
+    // The container's own layout is also a window event — a resize
+    // changes how many rows fit, and the first one is where a band that
+    // has never been reported gets its viewport.
+    schedule_report(id);
 }
 
 /// A user-driven back on the window's top entry: an intercept_back-armed
@@ -10055,9 +10635,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             before,
         } => {
             use bindings::Microsoft::UI::Xaml::UIElement;
-            let panel = match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(panel) | NativeWidget::Row(panel) => panel.clone(),
-                _ => panic!("kaya: move_child parent is not a container"),
+            let panel = match container_panel(core, parent) {
+                Some(panel) => panel,
+                None => panic!("kaya: move_child parent is not a container"),
             };
             let as_element = |core: &CoreState, id: WidgetId| -> UIElement {
                 match core.widgets.get(&id).expect("scene validated the id") {
@@ -11232,9 +11812,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 core.select_options.insert(child.0, (combo, item));
                 return Ok(());
             }
-            let panel = match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(panel) | NativeWidget::Row(panel) => panel.clone(),
-                _ => panic!("kaya: add_child parent is not a container"),
+            let panel = match container_panel(core, parent) {
+                Some(panel) => panel,
+                None => panic!("kaya: add_child parent is not a container"),
             };
             let children = panel.Children()?;
             match core.widgets.get(&child).expect("scene validated the id") {
@@ -12644,7 +13224,15 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             inset: 16.0,
             container_insets: HashMap::new(),
             transactions: tx_rx,
-            scene: Scene::new(),
+            // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
+            // declares-windowing entry): every declared table gets the
+            // spacer+band tier, so a table's band starts at a screenful
+            // instead of at the whole collection.
+            scene: {
+                let mut scene = Scene::new();
+                scene.declare_windowing();
+                scene
+            },
             occurrences: occ_tx,
             pending_dialog_dir: RefCell::new(None),
             widgets: HashMap::new(),
@@ -12941,6 +13529,31 @@ impl WinUiStage {
         rx.recv().expect("the dispatcher applied the step")
     }
 
+    /// on_ui_read's mutable twin, for the window verbs: they DRIVE the
+    /// tier's report to a fixpoint before answering (`table_settle`),
+    /// which applies core ops and therefore needs the core mutably —
+    /// and, like every observation, a mid-materialization error is a
+    /// retryable miss rather than a panic.
+    fn on_ui_settled<T: Send + 'static>(
+        f: impl FnOnce(&mut CoreState) -> windows_core::Result<T> + Send + 'static,
+    ) -> windows_core::Result<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dispatcher = DISPATCHER.get().expect("the dispatcher is up");
+        let cell = std::sync::Mutex::new(Some((f, tx)));
+        let handler = DispatcherQueueHandler::new(move || {
+            if let Some((f, tx)) = cell.lock().unwrap().take() {
+                flush_before_hop();
+                CORE.with_borrow_mut(|core| {
+                    let core = core.as_mut().expect("core state initialized");
+                    let _ = tx.send(f(core));
+                });
+            }
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+        rx.recv().expect("the dispatcher applied the step")
+    }
+
     fn on_ui_read<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> windows_core::Result<T> {
@@ -12979,6 +13592,23 @@ fn table_of<T>(
     TABLES.with_borrow(|tables| tables.values().find(|table| table.grid == grid).map(f))
 }
 
+/// The WIDGET ID a `column#N`/`row#N` target names — the id the window
+/// verbs report on and the id TABLES is keyed by. Recovered by COM
+/// identity from the creation-ordered registry, the `cross_mode` idiom.
+#[cfg(feature = "harness")]
+fn container_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
+    let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+    if !vertical && !matches!(t.kind, crate::harness::TargetKind::Row) {
+        return None;
+    }
+    let registry = if vertical { &core.columns } else { &core.rows };
+    let grid = registry[crate::harness::try_resolve(t.index, registry.len())?].clone();
+    core.widgets.iter().find_map(|(id, w)| match w {
+        NativeWidget::Column(g) | NativeWidget::Row(g) if *g == grid => Some(id.0),
+        _ => None,
+    })
+}
+
 /// A table's stamped rows in the order the TOOLKIT places them — by
 /// attached track, never by the registry, because a sort is a MOVE and a
 /// creation-order registry cannot see one (expect_order's whole reason,
@@ -12988,7 +13618,11 @@ fn table_rows_in_track_order(
     core: &CoreState,
     t: crate::harness::Target,
 ) -> windows_core::Result<Option<Vec<Grid>>> {
-    let Some(grid) = table_of(core, t, |table| table.grid.clone()) else {
+    // THE BAND PANEL, not the container: a windowed table's rows are the
+    // scroll host's children (docs/virtualization-plan.md §4), so a walk
+    // over the container would find the header and the rule and no row
+    // at all.
+    let Some(grid) = table_of(core, t, |table| table.band.clone()) else {
         return Ok(None);
     };
     let children = grid.Children()?;
@@ -14577,19 +15211,101 @@ impl crate::harness::Stage for WinUiStage {
     }
 
 
-    /// The row window is §6.3's breadth slice; this backend realizes
-    /// every row and has no band to read. THE STUB IS A CALL, not a
-    /// sentence (tools/check-stubs.sh) — check-steps reads these two
-    /// literals and stops demanding the ledger/varied legs here. The
-    /// scene named is the one a hand-run would wire first; neither leg
-    /// is wired on this lane, so the wall exists for a hand-run alone
-    /// (crate::depth_stub("varied") is the same wall one scene over).
-    fn window_band(&self, _t: crate::harness::Target) -> String {
-        crate::depth_stub("ledger")
+    fn window_band(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_settled(move |core| {
+            let Some(id) = container_id(core, t) else {
+                return Ok("<no such target>".to_string());
+            };
+            if TABLES.with_borrow(|tables| tables.contains_key(&id)) {
+                table_settle(core, id);
+                let (first, total) = TABLES
+                    .with_borrow(|tables| tables.get(&id).map(|w| (w.first_visible, w.total)))
+                    .unwrap_or((0, 0));
+                if total > 0 {
+                    return Ok(format!("{first} {total}"));
+                }
+            }
+            // A For no tier of this backend windows: every row is
+            // realized and the first of them is visible at rest, which
+            // is what an unreported window answers too.
+            Ok(format!("0 {}", core.child_order.children(WidgetId(id)).len()))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn scroll_to_row(&self, _t: crate::harness::Target, _key: &str) -> String {
-        crate::depth_stub("varied")
+    fn scroll_to_row(&self, t: crate::harness::Target, key: &str) -> String {
+        let key = key.to_owned();
+        Self::on_ui_settled(move |core| {
+            let Some(id) = container_id(core, t) else {
+                return Ok(format!("no such target {t:?}"));
+            };
+            let Some((host, band)) = TABLES
+                .with_borrow(|tables| tables.get(&id).map(|w| (w.host.clone(), w.band.clone())))
+            else {
+                return Ok("that For is not a windowed tier on this backend \
+                           (docs/virtualization-plan.md §4 windows declared tables here)"
+                    .to_owned());
+            };
+            // The core maps the KEY to an index in the collection's
+            // CURRENT order and this tier scrolls that row to the
+            // viewport's TOP. A key the collection does not hold is the
+            // caller's bug and the core's fault sentence says so; this
+            // one names the verb.
+            let scene = &mut core.scene;
+            let Some(index) =
+                crate::fault::guard("scroll_to_row", || scene.scroll_to_row(id, &Value::Str(key.clone())))
+            else {
+                return Ok(format!("no row carries the key {key:?}"));
+            };
+            // SETTLE BEFORE MOVING. The viewport count this hands the
+            // core has to be a real one: a table whose first layout has
+            // not run yet reports no viewport at all, and the band it
+            // would ask for is the whole collection (measured on the lane
+            // 2026-08-25 — `scroll_to_row r200` carried a count of 300 on
+            // a 300-row scene, so the band never narrowed and the scroll
+            // had nothing to land on).
+            table_settle(core, id);
+            let count = TABLES
+                .with_borrow(|t| t.get(&id).and_then(|w| w.reported).map(|(_, c)| c))
+                .unwrap_or(1)
+                .max(1);
+            // THE BAND FOLLOWS THE ROW NEXT: the target is unrealized
+            // until it does, so there is nothing to scroll to yet — and
+            // the visible range may NOT be re-read in between, because
+            // the viewport is still where it was and would band straight
+            // back.
+            TABLES.with_borrow_mut(|t| {
+                if let Some(w) = t.get_mut(&id) {
+                    w.reported = Some((index, count));
+                    w.anchor = None;
+                }
+            });
+            table_band_to(core, id, (index, count))?;
+            band.UpdateLayout()?;
+            for _ in 0..TABLE_SETTLE_ROUNDS {
+                let measured = table_measure_rows(core, id, &band)?;
+                let spaced = table_write_spacers(core, id, &band)?;
+                if !measured && !spaced {
+                    break;
+                }
+                band.UpdateLayout()?;
+            }
+            let (spacer_top, tracks) = band_tracks(&band)?;
+            let first = core.scene.window_geometry(id).first;
+            let offset = index.saturating_sub(first);
+            let want = spacer_top + tracks[..offset.min(tracks.len())].iter().sum::<f64>();
+            table_scroll_to(&host, id, want)?;
+            // Parked on the ROW, not on the pixel: every correction cycle
+            // re-parks it (§2.4, and docs/traps.md "The anchoring race").
+            TABLES.with_borrow_mut(|t| {
+                if let Some(w) = t.get_mut(&id) {
+                    w.anchor = Some(index);
+                }
+            });
+            table_settle(core, id);
+            Ok(String::new())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn header_click(&self, t: crate::harness::Target, column: u32) {
         // THE HEADER BUTTON'S OWN INVOKE, so the emission comes out of
@@ -16395,9 +17111,11 @@ mod tests {
     /// reason: only the per-batch comparison can see it.
     ///
     /// The frozen rows beside them are what makes this more than the two
-    /// runs agreeing: they pin the table's two head tracks (a declared
-    /// table's rows start at 2, behind the header and the rule) and the
-    /// order every edit leaves.
+    /// runs agreeing: they pin the table's head track (a declared table's
+    /// rows are placed in its BAND PANEL, one track down past the top
+    /// spacer — docs/virtualization-plan.md §4; the header and the rule
+    /// are the CONTAINER's own two tracks, in front of the scroll host
+    /// the band lives in) and the order every edit leaves.
     #[test]
     fn the_deferred_rebuild_places_every_child_where_the_eager_one_did() {
         use std::collections::BTreeMap;
@@ -16460,7 +17178,7 @@ mod tests {
             order: &ChildOrder,
             container: WidgetId,
         ) {
-            let head = if container == TABLE { 2 } else { 0 };
+            let head = if container == TABLE { 1 } else { 0 };
             into.insert(
                 container.0,
                 order
@@ -16503,12 +17221,12 @@ mod tests {
             &[Grow(r1), Forget(TABLE)],
         ];
         let want: [&[(u64, &[(u64, i32)])]; 6] = [
-            &[(1, &[(10, 0), (11, 1), (12, 2)]), (2, &[(20, 2), (21, 3), (22, 4)])],
-            &[(1, &[(12, 0), (10, 1), (11, 2)]), (2, &[(22, 2), (20, 3), (21, 4)])],
-            &[(1, &[(12, 0), (11, 1)]), (2, &[(22, 2), (21, 3)])],
-            &[(1, &[(12, 0), (11, 1)]), (2, &[(22, 2), (21, 3)])],
-            &[(1, &[(13, 0), (12, 1)]), (2, &[(20, 2), (21, 3)])],
-            &[(1, &[(13, 0), (12, 1)]), (2, &[(20, 2), (21, 3)])],
+            &[(1, &[(10, 0), (11, 1), (12, 2)]), (2, &[(20, 1), (21, 2), (22, 3)])],
+            &[(1, &[(12, 0), (10, 1), (11, 2)]), (2, &[(22, 1), (20, 2), (21, 3)])],
+            &[(1, &[(12, 0), (11, 1)]), (2, &[(22, 1), (21, 2)])],
+            &[(1, &[(12, 0), (11, 1)]), (2, &[(22, 1), (21, 2)])],
+            &[(1, &[(13, 0), (12, 1)]), (2, &[(20, 1), (21, 2)])],
+            &[(1, &[(13, 0), (12, 1)]), (2, &[(20, 1), (21, 2)])],
         ];
         // ONE re-stamp per container per batch — the whole point, and the
         // number the eager arm got wrong: 6, 2, 2, 2, 6 edits against
@@ -16557,6 +17275,257 @@ mod tests {
         assert_eq!(deferred_order.parent_of(r0), None);
         assert_eq!(deferred_order.parent_of(r1), None);
         println!("batches: 6, edits: 20, re-stamps: 10");
+    }
+
+    /// THE SPACER IDENTITY (docs/virtualization-plan.md §4): top spacer +
+    /// the realized band + bottom spacer IS the collection's extent, and
+    /// the band's first row sits exactly at the core's offset. Both
+    /// numbers come from the core; this holds the one arithmetic step
+    /// this tier performs on them.
+    #[test]
+    fn the_two_spacers_span_exactly_what_the_band_does_not() {
+        // 15,000 uniform 28dip rows, a 40-row band starting at row 7,500.
+        let (extent, offset, banded) = (15_000.0 * 28.0, 7_500.0 * 28.0, 40.0 * 28.0);
+        let (top, bottom) = band_spacers(offset, extent, banded);
+        assert_eq!(top, offset, "the band's first row sits where the core says");
+        assert_eq!(top + banded + bottom, extent, "and the scrollbar spans the collection");
+        // At the top and at the end the spacer that has nothing to span
+        // is zero, not a gap and not a negative track.
+        assert_eq!(band_spacers(0.0, 280.0, 280.0), (0.0, 0.0));
+        assert_eq!(band_spacers(252.0, 280.0, 28.0), (252.0, 0.0));
+        // A correction that lands between the geometry read and the
+        // layout can make the band measure more than the extent below it;
+        // a negative track is not a thing to reserve.
+        assert_eq!(band_spacers(100.0, 200.0, 150.0), (100.0, 0.0));
+    }
+
+    /// WHAT `expect_window` COMPARES is the FIRST VISIBLE row, read off
+    /// the band's own tracks — not the band's first, which carries a
+    /// viewport of overscan above it.
+    ///
+    /// The fallback is the half that had to be written down: a viewport
+    /// parked in a SPACER has no row to read, and the only thing this
+    /// tier can measure there is the collection's mean row out of the
+    /// core's extent. It is an estimate, it says so, and the next cycle
+    /// reads real tracks.
+    ///
+    /// And a cycle with NEITHER — no viewport and no extent — measured
+    /// nothing and answers `None`; `a_report_may_not_be_the_band_it_was_given`
+    /// below is why that is not merely tidy.
+    #[test]
+    fn the_first_visible_row_is_read_off_the_band_then_estimated() {
+        let geometry = |first: usize, count: usize| crate::scene::WindowGeometry {
+            first,
+            count,
+            total: 1_000,
+            offset: first as f64 * 20.0,
+            extent: 20_000.0,
+            anchor_shift: 0.0,
+            corrected: false,
+        };
+        // A band of 30 rows from 100, viewport 200dip (10 rows) parked on
+        // row 110 — one viewport of overscan above it.
+        let tracks = vec![20.0; 30];
+        let g = geometry(100, 30);
+        assert_eq!(table_visible_rows(&g, g.offset, &tracks, 2_200.0, 200.0), Some((110, 10)));
+        // The band's own first row, when the viewport is at its top.
+        assert_eq!(table_visible_rows(&g, g.offset, &tracks, 2_000.0, 200.0), Some((100, 10)));
+        // Half a row of overlap still counts as visible at both edges.
+        assert_eq!(table_visible_rows(&g, g.offset, &tracks, 2_010.0, 200.0), Some((100, 11)));
+        // VARIABLE HEIGHTS: the tracks are read, never a pitch.
+        let varied = vec![10.0, 60.0, 10.0, 10.0];
+        let g = geometry(0, 4);
+        assert_eq!(table_visible_rows(&g, 0.0, &varied, 0.0, 70.0), Some((0, 2)));
+        assert_eq!(table_visible_rows(&g, 0.0, &varied, 70.0, 20.0), Some((2, 2)));
+        // Parked in a spacer: no track intersects, so the mean answers.
+        let g = geometry(0, 0);
+        assert_eq!(table_visible_rows(&g, 0.0, &[], 10_000.0, 200.0), Some((500, 10)));
+        // NEITHER a viewport nor an extent: nothing was measured, and
+        // nothing is reported. A band with rows in it reaches here too —
+        // that is the case the doubling rode in on.
+        let bare = |count: usize| crate::scene::WindowGeometry {
+            first: 0,
+            count,
+            total: 1_000,
+            offset: 0.0,
+            extent: 0.0,
+            anchor_shift: 0.0,
+            corrected: false,
+        };
+        assert_eq!(table_visible_rows(&bare(0), 0.0, &[], 0.0, 0.0), None);
+        assert_eq!(table_visible_rows(&bare(128), 0.0, &[20.0; 128], 0.0, 0.0), None);
+        // A live viewport whose collection has still measured nothing is
+        // the same admission: the mean does not exist yet.
+        assert_eq!(table_visible_rows(&bare(128), 0.0, &[], 0.0, 400.0), None);
+        // AND THE OTHER HALF: a collection that HAS been measured, in a
+        // tier with no viewport (never laid out, or a minimized window).
+        // The mean exists, so an arm that guarded on the mean alone
+        // would divide a zero viewport by it and invent a ONE-ROW
+        // visible range — tearing the band down to two rows on a
+        // measurement nobody made.
+        let measured = crate::scene::WindowGeometry {
+            first: 0,
+            count: 128,
+            total: 1_000,
+            offset: 0.0,
+            extent: 20_000.0,
+            anchor_shift: 0.0,
+            corrected: false,
+        };
+        assert_eq!(table_visible_rows(&measured, 0.0, &[20.0; 128], 0.0, 0.0), None);
+        // An empty collection realizes nothing — and THAT is measured.
+        let empty = crate::scene::WindowGeometry {
+            first: 0,
+            count: 0,
+            total: 0,
+            offset: 0.0,
+            extent: 0.0,
+            anchor_shift: 0.0,
+            corrected: false,
+        };
+        assert_eq!(table_visible_rows(&empty, 0.0, &[], 0.0, 400.0), Some((0, 0)));
+    }
+
+    /// THE FIXPOINT THE REPORT LOOP RESTS ON, driven against the CORE's
+    /// own band arithmetic rather than asserted about one function.
+    ///
+    /// What this tier reports is what `RowWindow::band` bands, and that
+    /// adds an overscan to every report — so a cycle that answers with
+    /// the realized band's own count hands the core a band twice the
+    /// size, and the next cycle reads the bigger one and does it again.
+    /// Measured on the lane 2026-08-25 with the trace on: `band 0+128`,
+    /// `0+256`, `0+512`, `0+1024`, `0+2048`, `0+4096`, every line
+    /// carrying `vh 0.0` — the whole 15,000-row collection realized
+    /// before the ScrollViewer had ever been laid out, which took
+    /// ledger_python's `expect_column_edges` from 6ms to 5.8 SECONDS
+    /// standalone and past the retry window under the matrix
+    /// (docs/traps.md, "The band that fed itself").
+    ///
+    /// NO SCENE CAN FAIL THIS. The band's width is a viewport metric and
+    /// left `expect_window` deliberately (docs/virtualization-plan.md
+    /// §5), so a tier that realizes every row answers every windowing
+    /// observable correctly — it just does it slowly enough to lose the
+    /// leg on a loaded machine. That is check-native-undo's shape: the
+    /// wall is static or it is nothing.
+    #[test]
+    fn a_report_may_not_be_the_band_it_was_given() {
+        let total = 15_000;
+        let mut window = crate::rowwindow::RowWindow::default();
+        window.plant_seed(128);
+        assert_eq!(window.band(total), 0..128, "the seed bounds the first fill");
+        // Seven cycles of the pre-layout state the lane measured: no
+        // viewport, no extent, and whatever the band currently holds.
+        for cycle in 0..7 {
+            let band = window.band(total);
+            let geometry = crate::scene::WindowGeometry {
+                first: band.start,
+                count: band.len(),
+                total,
+                offset: 0.0,
+                extent: 0.0,
+                anchor_shift: 0.0,
+                corrected: false,
+            };
+            let tracks = vec![0.0; band.len()];
+            let visible = table_visible_rows(&geometry, 0.0, &tracks, 0.0, 0.0);
+            assert_eq!(
+                visible, None,
+                "cycle {cycle}: a cycle that measured nothing reported \
+                 {visible:?}, and the core bands a report with an overscan \
+                 on it — so THAT is the next cycle's band"
+            );
+            if let Some((first, count)) = visible {
+                window.report(first, count);
+            }
+        }
+        assert_eq!(
+            window.band(total),
+            0..128,
+            "seven unmeasured cycles left the seed's band untouched"
+        );
+        // And the amplification this holds shut, stated as arithmetic so
+        // the number in the sentence above is checked and not recalled:
+        // one report of the band's own count IS a doubling.
+        let mut fed = crate::rowwindow::RowWindow::default();
+        fed.report(0, 128);
+        assert_eq!(fed.band(total), 0..256);
+        fed.report(0, 256);
+        assert_eq!(fed.band(total), 0..512);
+    }
+
+    /// THE FOUR LINKS OF THE REPORT LOOP, HELD STATICALLY — because no
+    /// scene can fail one of them.
+    ///
+    /// MEASURED HERE 2026-08-25, with the perturbation watched: delete
+    /// the range report from `table_report_once` and windowed.steps,
+    /// ledger.steps and varied.steps ALL STAY GREEN. Every scroll in
+    /// every scene is `scroll_to_row`, which bands explicitly at its own
+    /// call site, and `expect_window` on a tier that realized every row
+    /// answers `0 <n> <n>` — truthfully (docs/virtualization-plan.md §5).
+    /// So the link whose absence costs the whole milestone — the band
+    /// never narrows at first layout, never follows a resize and never
+    /// follows the reader — is invisible to the harness. That is
+    /// check-native-undo's shape: a pair no scene can fail is held
+    /// statically or not at all.
+    ///
+    /// The other three are red on a scene today and held here anyway, so
+    /// that a scene rewritten tomorrow cannot quietly take the wall away.
+    #[test]
+    fn every_link_of_the_report_loop_is_still_wired() {
+        const SRC: &str = include_str!("mod.rs");
+
+        /// One top-level function's body, from `fn NAME(` to the closing
+        /// brace in column 0.
+        fn body(name: &str) -> &'static str {
+            let head = format!("\nfn {name}(");
+            let start = SRC.find(&head).unwrap_or_else(|| panic!("no top-level fn {name}"));
+            let end = SRC[start + 1..].find("\n}\n").expect("unterminated fn") + start + 1;
+            &SRC[start..end]
+        }
+
+        /// One method's body, from `fn NAME(` to the closing brace at the
+        /// impl's own indent.
+        fn method(name: &str) -> &'static str {
+            let head = format!("\n    fn {name}(");
+            let start = SRC.find(&head).unwrap_or_else(|| panic!("no method {name}"));
+            let end = SRC[start + 1..].find("\n    }\n").expect("unterminated method") + start + 1;
+            &SRC[start..end]
+        }
+
+        let clauses: [(&str, &str, &str); 7] = [
+            // The band panel's own two tracks, built by the ONE thing
+            // that places a Column's children.
+            ("reindex", body("reindex"), "def.SetHeight(spacer(*top))"),
+            ("reindex ", body("reindex"), "def.SetHeight(spacer(*bottom))"),
+            // The range report (§3.2): the band follows what is on screen.
+            ("table_report_once", body("table_report_once"), "table_band_to(core, id, visible)"),
+            // The verify half (§3.4): the realized rows' measured extents.
+            ("table_measure_rows", body("table_measure_rows"), "core.scene.rows_measured(id, first, &tracks)"),
+            // The spacers (§4): the core's own offset and what is left
+            // below it, written onto the band panel's two tracks.
+            ("table_write_spacers", body("table_write_spacers"), "defs.GetAt(0)?.SetHeight(pixel(top))"),
+            ("table_write_spacers ", body("table_write_spacers"), "defs.GetAt(n - 1)?.SetHeight(pixel(bottom))"),
+            // The anchor (§2.4): scroll_to_row parks a ROW, and the
+            // re-park inside the report cycle is what follows it through
+            // a correction.
+            ("table_report_once ", body("table_report_once"), "table_scroll_to(&host, id, want)"),
+        ];
+        for (what, text, call) in clauses {
+            assert!(
+                text.contains(call),
+                "{what} no longer calls `{call}` — the row window's report loop \
+                 has a link missing, and NO SCENE CAN SEE IT"
+            );
+        }
+        // scroll_to_row's own two halves: band by index, then park.
+        let scroll = method("scroll_to_row");
+        for call in ["table_band_to(core, id, (index, count))", "w.anchor = Some(index)"] {
+            assert!(
+                scroll.contains(call),
+                "the scroll_to_row verb no longer calls `{call}`"
+            );
+        }
+        println!("report-loop links held: {} clauses + 2", clauses.len());
     }
 
     #[test]

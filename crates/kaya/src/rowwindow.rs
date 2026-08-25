@@ -23,6 +23,12 @@ const OVERSCAN: usize = 1;
 pub(crate) struct RowWindow {
     /// The backend's last reported visible range, `(first, count)`.
     reported: Option<(usize, usize)>,
+    /// The SEED: the band a windowed-capable For starts life in when the
+    /// backend has declared that it windows rows, until the first report
+    /// replaces it (docs/deferred.md, the declares-windowing entry). A
+    /// seed is not a report — it is what the backend knows before any
+    /// layout: nothing, and a screenful is a safe nothing.
+    seed: Option<usize>,
     /// The realized rows in band order — what the For's container holds.
     /// scene.rs's `reconcile_window` is its only writer.
     realized: Vec<Key>,
@@ -49,8 +55,27 @@ pub(crate) struct RowWindow {
 }
 
 impl RowWindow {
+    /// Reported, as against merely seeded — the distinction the tests
+    /// hold and nothing else needs.
+    #[cfg(test)]
     pub(crate) fn is_reported(&self) -> bool {
         self.reported.is_some()
+    }
+
+    /// Reported OR seeded: the band is a range over the collection rather
+    /// than the whole of it, so the site's realized set is exactly the
+    /// band's rows and scene.rs's windowed fork applies.
+    pub(crate) fn is_bounded(&self) -> bool {
+        self.reported.is_some() || self.seed.is_some()
+    }
+
+    /// Start this site at `rows` instead of unbounded. A no-op once
+    /// anything real has arrived — a report is a measurement and a seed
+    /// is an admission of having none.
+    pub(crate) fn plant_seed(&mut self, rows: usize) {
+        if self.reported.is_none() {
+            self.seed = Some(rows);
+        }
     }
 
     pub(crate) fn corrected(&self) -> bool {
@@ -72,9 +97,15 @@ impl RowWindow {
     /// band holding no rows can never be measured and therefore can never
     /// grow, so a `(0, 0)` report at first layout would be a permanently
     /// blank list rather than a temporarily empty one.
+    /// THE SEED IS THE FLOOR, NOT A VIEWPORT: it takes no overscan,
+    /// because there is no measured range to overscan around. The first
+    /// report replaces it outright.
     pub(crate) fn band(&self, total: usize) -> Range<usize> {
         let Some((first, count)) = self.reported else {
-            return 0..total;
+            return match self.seed {
+                Some(rows) => 0..rows.min(total),
+                None => 0..total,
+            };
         };
         if total == 0 {
             return 0..0;
@@ -267,6 +298,31 @@ mod tests {
         let w = RowWindow::default();
         assert_eq!(w.band(15_000), 0..15_000);
         assert_eq!(w.band(0), 0..0);
+    }
+
+    /// THE SEED: a declared backend's site starts at the first k rows and
+    /// nothing else — no overscan, clamped to the collection.
+    #[test]
+    fn a_seeded_window_bands_the_first_rows_only() {
+        let mut w = RowWindow::default();
+        w.plant_seed(128);
+        assert!(w.is_bounded(), "a seed bounds the band");
+        assert!(!w.is_reported(), "but it is not a report");
+        assert_eq!(w.band(15_000), 0..128);
+        assert_eq!(w.band(40), 0..40, "clamped to a small collection");
+        assert_eq!(w.band(0), 0..0);
+    }
+
+    /// THE FIRST REPORT REPLACES THE SEED: a measurement outranks an
+    /// admission of having none, whichever direction it moves the band.
+    #[test]
+    fn a_report_replaces_the_seed() {
+        let mut w = RowWindow::default();
+        w.plant_seed(128);
+        w.report(400, 20);
+        assert_eq!(w.band(1_000), 380..440, "the report's band, not the seed's");
+        w.plant_seed(128);
+        assert_eq!(w.band(1_000), 380..440, "and a later seed cannot take it back");
     }
 
     /// Visible ± one viewport, clamped at both ends.

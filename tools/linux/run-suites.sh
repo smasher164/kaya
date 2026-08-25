@@ -33,8 +33,11 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: built and run for rust only until the language
-# sweep lands their guests.
-DEPTH_SCENES=""
+# sweep lands their guests. `windowed` is rust BY DESIGN, not by depth
+# (docs/virtualization-plan.md §6.3): it is the compiled windowing scene
+# every lane can run, where ledger and varied are python and stop at the
+# desktops.
+DEPTH_SCENES="windowed"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1013,6 +1016,12 @@ for proto in x11 wayland; do
     run "$proto" table-haskell env KAYA_SELFTEST=table "$(hs_bin table)"
     run "$proto" table-java env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # ROW WINDOWING'S CONFORMANCE SCENE (docs/virtualization-plan.md
+    # §6.3): 400 uniform rows behind a band this tier narrows, scrolled
+    # by row identity. RUST ALONE, and compiled, because it is the one
+    # windowing scene the mobile lanes can run too.
+    run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
+        "$CARGO_TARGET_DIR/debug/examples/windowed"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py
@@ -1225,6 +1234,18 @@ for proto in x11 wayland; do
     # through KAYA_SCENES_DIR like every pooled leg's.
     run "$proto" portfolio-python env KAYA_SELFTEST=portfolio KAYA_LIB="$LIB" \
         python3 guests/python/portfolio.py
+    drain
+    # ROW WINDOWING'S TWO PYTHON SCENES (docs/virtualization-plan.md §5),
+    # the portfolio's arrangement one feature over: the transactions view
+    # drives 15,000 uniform rows on the EXACT path, and the varied scene
+    # drives the CORRECTED one on purpose. Python alone, so they stay off
+    # the mobile lanes; ALONE BETWEEN DRAINS because ledger's own load is
+    # the point of it.
+    run "$proto" ledger-python env KAYA_SELFTEST=ledger KAYA_LIB="$LIB" \
+        python3 guests/python/ledger.py
+    drain
+    run "$proto" varied-python env KAYA_SELFTEST=varied KAYA_LIB="$LIB" \
+        python3 guests/python/varied.py
     drain
 done
 drain

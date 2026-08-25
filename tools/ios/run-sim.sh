@@ -2249,6 +2249,19 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     queue_pad_leg run_swiftui_on table-swiftui-pad "$APP" dev.kaya.tableswiftui \
         table-swiftui-pad table table
 
+    # The windowed conformance scene (docs/virtualization-plan.md §6.3):
+    # 400 rows in a grown table, on the SYNTHESIZED tier — the phone is
+    # compact, which is the tier this lane windows. NO PAD LEG, and that
+    # is the tier routing showing through again: a regular iPad width
+    # takes SwiftUI's own Table, which §4 does not window (it names
+    # macOS's native tier), so scroll_to_row there refuses in its own
+    # words instead of answering.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example windowed
+    APP=$(make_bundle windowedrs-swiftui dev.kaya.windowedswiftui "$TARGET_DIR/examples/windowed")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on windowed-swiftui "$APP" dev.kaya.windowedswiftui \
+        windowed-swiftui windowed windowed
+
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and
     # the `settings` role is inert here — iOS has no application menu to

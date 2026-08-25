@@ -1492,6 +1492,25 @@ pub extern "C" fn kaya_wait_occurrences() -> bool {
 static PRESENTATION_TX_RX: Mutex<Option<Receiver<Transaction>>> = Mutex::new(None);
 static PRESENTATION_SCENE: Mutex<Option<Scene>> = Mutex::new(None);
 
+/// The interpreter backends declare that they window rows at their host
+/// init — swiftui_host::run for mac and iOS, android.rs's
+/// register_present_natives for Compose — which is BEFORE the first
+/// nextCommands builds the presentation scene. The declaration waits
+/// here for it (docs/deferred.md, the declares-windowing entry).
+static WINDOWING_DECLARED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn declare_windowing() {
+    WINDOWING_DECLARED.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(scene) = PRESENTATION_SCENE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        scene.declare_windowing();
+    }
+}
+
 // Where presentation-side emissions land. Defaults to the byte ring
 // (foreign guests read it via kaya_next_occurrence); the Rust API's
 // runtime-selected modes route emissions into the AppCtx mpsc instead.
@@ -3103,7 +3122,11 @@ pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
             return 0;
         };
         *rx_slot = Some(tx_rx);
-        *PRESENTATION_SCENE.lock().unwrap() = Some(Scene::new());
+        let mut scene = Scene::new();
+        if WINDOWING_DECLARED.load(std::sync::atomic::Ordering::SeqCst) {
+            scene.declare_windowing();
+        }
+        *PRESENTATION_SCENE.lock().unwrap() = Some(scene);
     }
     // 0 MEANS SHUTDOWN TO EVERY PUMP, so a batch that resolved to nothing
     // must not be returned: keep waiting instead. The undo tier's wake is

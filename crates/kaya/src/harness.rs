@@ -865,14 +865,23 @@ pub trait Stage: Send + 'static {
     /// every cluster exactly right while drawing in a corner of its
     /// viewport.
     fn column_edges(&self, target: Target, want: usize) -> String;
-    /// The For's realized band and its collection's declared total, as
-    /// this tier lays them out: `"<first> <count> <total>"`
-    /// (docs/virtualization-plan.md §5). A tier that realizes every row
-    /// answers `0 <n> <n>` — true, and exactly what an unwindowed
-    /// backend draws.
+    /// The For's FIRST VISIBLE row and its collection's declared total,
+    /// as this tier lays them out: `"<first> <total>"` (ruled
+    /// 2026-08-25; docs/virtualization-plan.md §5). The realized band's
+    /// WIDTH is a viewport metric and is deliberately not here — no
+    /// byte-shared scene could freeze it. A tier that realizes every row
+    /// answers `0 <n>` — true, and exactly what an unwindowed backend
+    /// draws.
+    ///
+    /// SO THIS PAIR CANNOT SEE WHETHER THE BAND EVER NARROWED: the first
+    /// visible row is a fact about the viewport either way (measured
+    /// 2026-08-25 on the GTK lane — windowed.steps passed with the range
+    /// report removed). The report loop's links are held statically
+    /// instead, per backend: tools/check-table-tier.sh for the mac tier,
+    /// tools/check-gtk.sh's census for GTK.
     ///
     /// A BACKEND THAT DOES NOT WINDOW YET ANSWERS A SENTENCE naming what
-    /// it does not do. It cannot equal a triple, so the leg reddens
+    /// it does not do. It cannot equal the pair, so the leg reddens
     /// carrying it; a stub that ABORTED would take the whole verdict
     /// list with it (tools/lib/hand-rolled-stubs.py: a refusal is not a
     /// sentinel).

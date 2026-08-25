@@ -96,6 +96,113 @@ sys.exit(1 if bad else 0)
 ' "$@"
 }
 
+# --- THE WINDOWED TIER'S LOOP: three links no scene can see. ---------
+#
+# docs/virtualization-plan.md §3/§4. The Compose tier windows its tables
+# — spacer, realized band, spacer, inside its own scroll container — and
+# THREE OF THE FOUR LINKS IN THAT LOOP ARE INVISIBLE TO THE ONE SCENE
+# THAT DRIVES IT. Measured 2026-08-25 on a real emulator, each
+# perturbation watched:
+#
+#   * the visible-range report deleted from the report loop:
+#     windowed.steps stays GREEN, because scroll_to_row moves the band
+#     itself and nothing else in the scene ever scrolls;
+#   * the measured-extent report deleted: GREEN — a height moves the
+#     ARITHMETIC and never the band (the mac tier measured the same);
+#   * both spacers zeroed: GREEN — expect_window reads the row at the
+#     viewport's top, and a tier that lays its rows out at the wrong y is
+#     internally consistent about which row that is.
+#
+# So they are held HERE, the way check-native-undo holds a pair no scene
+# can fail. The SwiftUI half of the same loop lives in
+# tools/check-table-tier.sh, which reads the mac driver.
+WINDOW_KOTLIN="android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+window_tier() { # [kotlin]; "-" reads stdin (how the self-tests feed a copy)
+    python3 -c '
+import sys
+
+KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+src = sys.argv[1] if len(sys.argv) > 1 else KOTLIN
+text = sys.stdin.read() if src == "-" else open(src).read()
+bad = []
+
+
+def body(anchor):
+    """The braced body the declaration `anchor` opens, or None."""
+    at = text.find(anchor)
+    if at < 0:
+        return None
+    start = text.find("{", at)
+    if start < 0:
+        return None
+    depth = 0
+    for j in range(start, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:j + 1]
+    return None
+
+
+report = body("fun report()")
+if report is None:
+    bad.append("KayaCompose.kt has no `fun report()` — the windowed tiers "
+               "report loop moved, and this clause is blind; re-point it")
+else:
+    for call, why in (
+        ("KayaPresent.windowMoved(",
+         "the visible range never reaches the core, so the band never "
+         "follows the viewport (scroll_to_row moves it on its own, which "
+         "is why the scene stays green)"),
+        ("KayaPresent.rowsMeasured(",
+         "the core never learns a row height, so its pitch, its extent "
+         "and both spacers stay 0 with every scene still green"),
+        ("KayaPresent.rowExtent(",
+         "the height report loses its EXACT comparison and either "
+         "repeats every turn or never fires"),
+    ):
+        if call not in report:
+            bad.append("`fun report()` in KayaCompose.kt never calls "
+                       "`" + call + "` — " + why)
+
+surface = body("private fun KayaTableSurface(")
+if surface is None:
+    bad.append("KayaCompose.kt has no `private fun KayaTableSurface(` — the "
+               "windowed tier moved, and this clause is blind; re-point it")
+else:
+    for pin, why in (
+        ("val offsetPx = window.offsetPx",
+         "the bands top stops being the core s offset"),
+        ("val extentPx = window.extentPx",
+         "the collection s height stops being the core s extent"),
+        ("kayaWindowSpacers(offsetPx, extentPx, bandH, tail)",
+         "the two spacers stop being one function of those two numbers"),
+        ("Constraints.fixed(totalW, spacers.first)",
+         "the TOP spacer stops being that function s answer"),
+        ("Constraints.fixed(totalW, spacers.second)",
+         "the BOTTOM spacer stops being that function s answer"),
+    ):
+        if pin not in surface:
+            bad.append("KayaTableSurface does not spell `" + pin + "` — "
+                       + why + ", and no scene can see it (measured: both "
+                       "spacers zeroed left windowed.steps green)")
+
+for line in bad:
+    print(line)
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
+window_status=0
+window_out="$(window_tier)" || {
+    echo "check-verbs: the Compose windowed tier is missing a link of its own report loop, and no scene can see it (docs/virtualization-plan.md §3/§4):" >&2
+    echo "$window_out" >&2
+    window_status=1
+}
+
 clip_status=0
 clip_out="$(clip_mirrors)" || {
     echo "check-verbs: the CLIP_* mirrors do not match crates/kaya/src/wire.rs — both interpreters carry PRIVATE copies and nothing else pins them, so a drifted value ships a wrong clip kind silently:" >&2
@@ -186,7 +293,55 @@ case "$gone" in
         ;;
 esac
 
-KAYA_CLIP_MIRRORS="$clip_status" python3 - <<'EOF'
+# AND THE WINDOWED TIER'S OWN, the same shape: the three perturbations
+# that were WATCHED staying green on a real emulator must be red here,
+# and each prints its substitution count first, because a perturbation
+# that did not apply proves nothing.
+window_negative() { # <python-regex> <replacement> <label> <expected finding>
+    local hits drift
+    hits="$(perturb "$WINDOW_KOTLIN" "$1" "$2" "$T/window.kt")"
+    if [ "$hits" != 1 ]; then
+        echo "check-verbs: SELF-TEST FAIL ($3 applied $hits times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+        exit 1
+    fi
+    echo "check-verbs: windowed-tier self-test ($3) applied $hits substitution(s)"
+    drift="$(window_tier - <"$T/window.kt")" && {
+        echo "check-verbs: SELF-TEST FAIL ($3 passed the windowed-tier clause)" >&2
+        exit 1
+    }
+    case "$drift" in
+        *"$4"*) ;;
+        *)
+            echo "check-verbs: SELF-TEST FAIL ($3 reddened, but did not name \"$4\"): $drift" >&2
+            exit 1
+            ;;
+    esac
+}
+
+window_negative '(\n            )KayaPresent\.windowMoved\(node\.id, first\.toLong\(\), count\.toLong\(\)\)' \
+    '' "the range report removed from the report loop" \
+    "never calls \`KayaPresent.windowMoved("
+window_negative '(\n            if \(moved\) )KayaPresent\.rowsMeasured\(node\.id, laidOutFirst\.toLong\(\), heights\)' \
+    'Unit' "the height report removed from the report loop" \
+    "never calls \`KayaPresent.rowsMeasured("
+window_negative '(\n        val spacers = )kayaWindowSpacers\(offsetPx, extentPx, bandH, tail\)' \
+    'Pair(0, 0)' "both spacers cut tier-side instead of from the core" \
+    "does not spell \`kayaWindowSpacers(offsetPx, extentPx, bandH, tail)\`"
+
+# An ABSENT interpreter is a failure that names it, never a skip.
+gone="$(window_tier "$T/no-such-interpreter.kt" 2>&1)" && {
+    echo "check-verbs: SELF-TEST FAIL (an absent Kotlin interpreter passed the windowed-tier clause)" >&2
+    exit 1
+}
+case "$gone" in
+    *"no-such-interpreter.kt"*) ;;
+    *)
+        echo "check-verbs: SELF-TEST FAIL (an absent Kotlin interpreter failed without naming it): $gone" >&2
+        exit 1
+        ;;
+esac
+
+KAYA_CLIP_MIRRORS="$clip_status" KAYA_WINDOW_TIER="$window_status" python3 - <<'EOF'
 import os
 import pathlib
 import re
@@ -416,5 +571,7 @@ if failures:
 # read here so there is exactly ONE verdict line.
 if os.environ["KAYA_CLIP_MIRRORS"] != "0":
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants + the CLIP_* mirrors + spec hash against 2 interpreters)")
+if os.environ["KAYA_WINDOW_TIER"] != "0":
+    sys.exit(1)
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants + the CLIP_* mirrors + the windowed tier's loop + spec hash against 2 interpreters)")
 EOF

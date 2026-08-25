@@ -1665,6 +1665,15 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity table \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script table)'"
+    # THE WINDOWED SCENE (docs/virtualization-plan.md §6.3): 400 uniform
+    # rows through the spacer+band tier. It is the only scene on this
+    # lane whose band is NARROWER than its collection — every other
+    # table here fits — so it is the only one that can tell a windowed
+    # tier from one that draws everything and clips.
+    run_apk windowed-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity windowed \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script windowed)'"
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \

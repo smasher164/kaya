@@ -265,6 +265,90 @@ mod tests {
         );
     }
 
+    /// AND SO DOES EVERY ROW-WINDOW ENTRY. The window verbs panic
+    /// through `Scene::window_site` for a target that is not a For
+    /// container — four discriminating arms — and `scroll_to_row` panics
+    /// for a key the collection does not hold. A BACKEND reaches them
+    /// from a scroll signal, a layout callback or a harness step, which
+    /// are the pump's own frames one feature over: nothing there can
+    /// unwind (docs/virtualization-plan.md §3).
+    ///
+    /// THE RUST BACKENDS ONLY. capi.rs's five entries all funnel through
+    /// `with_window_scene`, which carries the guard for every one of
+    /// them, so THAT is what is checked for capi rather than a line
+    /// proximity that would pass or fail by accident of layout.
+    #[test]
+    fn every_window_report_caller_sits_under_a_guard() {
+        // Generous, exactly as the Scene::apply clause above.
+        const WINDOW: usize = 40;
+        const ENTRIES: [&str; 5] = [
+            "scene.window_moved(",
+            "scene.rows_measured(",
+            "scene.window_geometry(",
+            "scene.row_extent(",
+            "scene.scroll_to_row(",
+        ];
+        let mut sites = 0;
+        for (src, file) in [(WINUI, "winui/mod.rs"), (GTK, "gtk.rs")] {
+            let lines: Vec<&str> = src.split('\n').collect();
+            for (i, line) in lines.iter().enumerate() {
+                if !ENTRIES.iter().any(|entry| line.contains(entry)) {
+                    continue;
+                }
+                // A NEEDLE inside a string literal is a test's clause
+                // naming the call, not a caller (winui's own link census
+                // spells `core.scene.rows_measured(` in quotes; found on
+                // the breadth merge). A live call site never puts the
+                // entry inside a quoted string on its own line.
+                if line.trim_start().starts_with('"')
+                    || ENTRIES.iter().any(|entry| {
+                        line.find(entry).is_some_and(|at| {
+                            line[..at].bytes().filter(|b| *b == b'"').count() % 2 == 1
+                        })
+                    })
+                {
+                    continue;
+                }
+                sites += 1;
+                let from = i.saturating_sub(WINDOW);
+                assert!(
+                    lines[from..=i].iter().any(|l| l.contains("fault::guard(")),
+                    "kaya: {file}:{} drives a row-window entry with no \
+                     crate::fault::guard within {WINDOW} lines above it — a report \
+                     arrives from a scroll signal or a layout callback, frames that \
+                     cannot unwind, so Scene::window_site's refusal aborts the \
+                     process instead of reddening the leg \
+                     (docs/virtualization-plan.md §3, docs/deferred.md)",
+                    i + 1
+                );
+            }
+        }
+        assert!(
+            sites >= 5,
+            "kaya: the census found only {sites} row-window entries across \
+             winui/mod.rs and gtk.rs — a backend that windows drives all five, so \
+             this is now reading past them and agreeing with everything"
+        );
+        // Read by hand, not through `body`: this one is generic, so its
+        // definition reads `fn with_window_scene<R: Default>(`.
+        let start = CAPI.find("fn with_window_scene").unwrap_or_else(|| {
+            panic!(
+                "kaya: capi.rs no longer defines `with_window_scene` — the five \
+                 window entries' one guard has moved and this clause is reading \
+                 nothing"
+            )
+        });
+        let rest = &CAPI[start..];
+        let funnel = &rest[..rest.find("\n}\n").expect("a column-0 closing brace")];
+        assert!(
+            funnel.contains("fault::guard("),
+            "kaya: capi.rs's `with_window_scene` is the one guard the five window \
+             entries share, and it no longer names crate::fault::guard — every \
+             `extern \"C\"` window entry is a frame entered from a backend's layout \
+             pass (docs/virtualization-plan.md §3)"
+        );
+    }
+
     /// AND THE PUMP'S OWN FRAME MAY NOT DECIDE TO DIE. `fault::guard`
     /// wraps `Scene::apply` inside `kaya_next_commands`; everything else
     /// in that function is outside it, so a panic there is the abort with

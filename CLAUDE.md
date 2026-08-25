@@ -505,6 +505,15 @@ in docs/deferred.md.
    both directions: a missing entry, and an EXTRA one, which is the half
    the census actually catches. Watched negatives doctor a shadow of the
    real tree with the substitution count printed),
+   `tools/check-staging.sh` (a wired leg's artifact is in the staging
+   derivation its own runner declares: a mac `$RUST_GUESTS` reference
+   outside SCENES/DEPTH_SCENES, a windows suite with no launcher or a
+   launcher naming an exe no list builds, a leg whose scene script or
+   python guest file is gone — each named with the list to extend. The
+   measured instance: the windowed-rust mac leg was wired hand-queued
+   and absent from the derivation, and the miss cost a full matrix to
+   learn what this census says in seconds. Launchers are the artifact
+   truth on windows — listdetail runs split.exe, two scenes one guest),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,

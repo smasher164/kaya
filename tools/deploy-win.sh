@@ -109,6 +109,12 @@ for arg in "$@"; do
         # (docs/editor-plan.md). There is no editor_rust to add later.
         editor_go) SUITE="$arg" ;;
         portfolio_python) SUITE="$arg" ;;
+        # ROW WINDOWING (docs/virtualization-plan.md §6.3). The windowed
+        # scene is COMPILED and rust-only by design — it is the one
+        # windowing scene every lane can run — while the ledger and the
+        # varied scenes are python guests that stop at the desktops.
+        windowed_rust) SUITE="$arg" ;;
+        ledger_python|varied_python) SUITE="$arg" ;;
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
         stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
         a11yrows_rust|a11yrows_python|a11yrows_go|a11yrows_csharp|a11yrows_java) SUITE="$arg" ;;
@@ -322,10 +328,11 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # which is how the WinUI accessibility read ended up committed
 # unproven.
 #
-# EMPTY TODAY, and that is the list working. The variable stays because
-# the next depth slice needs it on its first day, and because
-# KAYA_WIN_DEPTH_SCENES is how one is driven before it graduates.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+# `windowed` is here rather than in SCENES because the row-windowing
+# conformance scene is COMPILED and rust-only by design
+# (docs/virtualization-plan.md §6.3): it is the one windowing scene the
+# mobile lanes can also run, where ledger/varied are python.
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-windowed}"
 # GO-ONLY SCENES: a guest that exists in Go and only Go BY DESIGN
 # rather than by sequencing — an editor written in Rust would be kaya
 # testing itself (docs/editor-plan.md). Such a scene can join neither
@@ -346,7 +353,10 @@ GO_ONLY_SCENES="editor"
 # sweep — python.exe is already in kill_guests' fixed tail. What it
 # must join is SCENE_PYS, so the .py ships and stamps like every other
 # python surface.
-PY_ONLY_SCENES="portfolio"
+# The transactions view and the variable-height scene join it: both are
+# python guests of the row-windowing milestone (docs/virtualization-plan.md
+# §5), with no rust example to build and no exe family to sweep.
+PY_ONLY_SCENES="portfolio ledger varied"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -1818,6 +1828,18 @@ case "$SUITE" in
         drain_suites
         run_suite dirty_rust
         drain_suites
+        # ROW WINDOWING (docs/virtualization-plan.md §6.3), this backend's
+        # spacer+band tier: 400 uniform rows in the compiled conformance
+        # scene, 15,000 in the transactions view — above the 12,000-row
+        # choke this platform's non-virtualized For used to sit at
+        # (docs/measurements/choke-windows-2026-08-24.txt) — and 300
+        # structurally varied rows driving the corrected path. Pooled: no
+        # typed input, no window close, no OS chrome; every scroll is
+        # `scroll_to_row`, which the tier drives through its own
+        # ScrollViewer.
+        run_suite windowed_rust
+        run_suite ledger_python
+        run_suite varied_python
         run_suite a11yrows_rust
         run_suite a11yrows_python
         run_suite a11yrows_go

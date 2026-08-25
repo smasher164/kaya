@@ -293,6 +293,10 @@ name = "table"
 path = "../../guests/rust/table.rs"
 
 [[example]]
+name = "windowed"
+path = "../../guests/rust/windowed.rs"
+
+[[example]]
 name = "feed"
 path = "../../guests/rust/feed.rs"
 

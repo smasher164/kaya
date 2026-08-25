@@ -63,7 +63,13 @@ One machine, two paths, chosen per For by measurement:
 
 ## §3 — The wire and the drive loop
 
-1. There is NO new declaration. The For's existing record is enough.
+1. There is NO WIRE declaration: the For's existing record is enough and
+   no guest spells anything. The BACKEND declares — core-internally, at
+   its own init, no wire record and no binding surface — that it windows
+   rows (docs/deferred.md's declares-windowing entry, ruled 2026-08-25).
+   That declaration is what SEEDS a windowed-capable For's band at a
+   screenful instead of the whole collection: a report needs a layout,
+   and a single-transaction fill does not wait for one.
 2. **The report**: a backend laying out a For whose content overflows
    its band calls `kaya_window_moved(for_target, first_index,
    visible_count)` on the C ABI whenever the visible range changes

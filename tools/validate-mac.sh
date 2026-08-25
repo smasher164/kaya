@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface"
+DEPTH_SCENES="typeface windowed"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1071,6 +1071,13 @@ drain
 KAYA_SELFTEST_SCRIPT="$(scene_script varied)"
 export KAYA_SELFTEST_SCRIPT
 run varied-python-swiftui env KAYA_SELFTEST=varied python3 guests/python/varied.py
+drain
+# The COMPILED windowed scene (docs/virtualization-plan.md §6.3): rust
+# alone by design — the one windowing scene every lane can run, so it
+# is hand-queued like the portfolio rather than fanned across SCENES.
+KAYA_SELFTEST_SCRIPT="$(scene_script windowed)"
+export KAYA_SELFTEST_SCRIPT
+run windowed-rust-swiftui env KAYA_SELFTEST=windowed "$RUST_GUESTS"/windowed
 drain
 
 # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two

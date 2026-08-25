@@ -96,6 +96,9 @@ mod typeface;
 #[path = "table.rs"]
 mod table;
 
+#[path = "windowed.rs"]
+mod windowed;
+
 #[path = "identity.rs"]
 mod identity;
 
@@ -145,6 +148,11 @@ fn app(ctx: kaya::AppCtx) {
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),
         Ok("table") => table::app(ctx),
+        // The windowed scene (docs/virtualization-plan.md §6.3): the
+        // COMPILED conformance guest, which is what carries
+        // expect_window and scroll_to_row to the phones at all —
+        // ledger and varied are Python and stop at the desktops.
+        Ok("windowed") => windowed::app(ctx),
         // The typeface scene asks for the vendored font BY ASSET NAME
         // and does not read a path or an environment variable at all
         // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE

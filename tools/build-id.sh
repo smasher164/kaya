@@ -110,6 +110,7 @@ GATES = {
     # docs/: a depth stub is sanctioned only while docs/deferred.md holds
     # an OPEN entry for it, so STRIKING an entry through must fail.
     "check-stubs": ["crates", "swift", "android", "docs"],
+    "check-staging": ["guests"],
     # gradle's :kaya sourceSet reaches ../../bindings/java and nothing
     # else outside android/.
     "check-compose": ["android", "bindings/java"],

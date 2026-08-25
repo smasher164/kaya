@@ -1108,6 +1108,22 @@ const TABLE_COL_GAP: i32 = 24;
 /// tree reads and none of them can agree with a model copy.
 const TABLE_HEADER_CLASS: &str = "kaya-table-header";
 const TABLE_CELL_CLASS: &str = "kaya-table-header-cell";
+/// The tier's own viewport and the two spacers inside it, found by class
+/// like the header above so the table verbs stay tree reads.
+const TABLE_BODY_CLASS: &str = "kaya-table-body";
+const TABLE_SPACER_CLASS: &str = "kaya-table-spacer";
+
+/// How much of an UNGROWN table this tier shows before the rest scrolls
+/// — GTK's spelling of tools/scenes/table.steps' "a table is a
+/// viewport". It is also the wall that puts X11's 16-bit window geometry
+/// out of reach: with no declared window size a For's natural height IS
+/// the toplevel's, and the un-windowed one crossed 32,767px at 1,361
+/// rows (docs/measurements/choke-linux-2026-08-24.txt). Capped here the
+/// toplevel is bounded whatever the collection holds — including under
+/// the unbounded band every For starts life with, which is the phase no
+/// report has narrowed yet. A GROWN table never reaches this number: its
+/// parent's track decides.
+const TABLE_MAX_CONTENT: i32 = 600;
 
 /// A header cell's title sits FLUSH with the cells under it, so the
 /// theme's button padding and border come off: Adwaita's 10px inset
@@ -1142,6 +1158,34 @@ struct GtkTable {
     /// Shared with the click handlers so a re-declaration replaces the
     /// tag without rebuilding the buttons.
     tag: Rc<RefCell<Vec<u8>>>,
+    /// THE SCROLL CONTAINER THIS TIER OWNS (docs/virtualization-plan.md
+    /// §4): the realized band scrolls inside it while the header stays
+    /// put, and its GtkAdjustment is where the report loop starts.
+    body: gtk4::ScrolledWindow,
+    /// The scroller's one child — top spacer, the band's rows in order,
+    /// bottom spacer. Every stamped row of this For is parented HERE and
+    /// not on the container, which is why `table_rows` reads it.
+    content: gtk4::Box,
+    /// The two spacers. Their heights are the CORE's arithmetic
+    /// (`kaya_window_geometry`), never this tier's: a tier that computed
+    /// its own would be the second estimator §2 exists to remove.
+    top: gtk4::Box,
+    bottom: gtk4::Box,
+    /// The last range handed to the core. A layout that moved nothing
+    /// reports nothing, so report -> stamp -> layout cannot run away.
+    reported: Option<(usize, usize)>,
+    /// One report per main-loop turn, however many adjustment signals
+    /// asked for it.
+    pending: Rc<std::cell::Cell<bool>>,
+    /// §2.4's anchor, this tier's half: the ROW the viewport is parked
+    /// on. Every correction cycle re-parks it at its corrected position,
+    /// so a taller row realized ABOVE moves the scrollbar and not the
+    /// content under the reader's eyes. A scroll this tier did not issue
+    /// clears it — free scrolling is the reader's.
+    anchor: Rc<std::cell::Cell<Option<usize>>>,
+    /// Set while this tier is moving the adjustment itself, so its own
+    /// scroll is not read back as the reader's.
+    programmatic: Rc<std::cell::Cell<bool>>,
 }
 
 /// A container's children, in the toolkit's own order.
@@ -1232,6 +1276,16 @@ fn table_horizontal_track(column: &gtk4::Box) -> f64 {
 /// The stamped rows of a table container: everything after the header
 /// and its divider (all the children when no table was declared).
 fn table_rows(column: &gtk4::Box) -> Vec<gtk4::Widget> {
+    // A declared table's rows live in its own viewport, and what that
+    // holds is the REALIZED BAND (docs/virtualization-plan.md §5:
+    // expect_rows reads realized widgets). The spacers are geometry, not
+    // rows.
+    if let Some(content) = table_body(column) {
+        return children_of(&content)
+            .into_iter()
+            .filter(|w| !w.has_css_class(TABLE_SPACER_CLASS))
+            .collect();
+    }
     match table_header(column) {
         None => children_of(column),
         Some(header) => {
@@ -1281,7 +1335,7 @@ fn header_cell_text(cell: &gtk4::Widget) -> String {
 /// Build the header row for a table of `cols` columns. Each cell is a
 /// REAL GtkButton, so `header_click` drives the same `clicked` a user's
 /// press does (the `emit_clicked` route `press` already uses).
-fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>) -> GtkTable {
+fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) -> GtkTable {
     let header = gtk4::Box::new(gtk4::Orientation::Horizontal, TABLE_COL_GAP);
     header.add_css_class(TABLE_HEADER_CLASS);
     header.set_halign(gtk4::Align::Fill);
@@ -1312,7 +1366,153 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>) -> GtkTab
     let groups = (0..cols)
         .map(|_| gtk4::SizeGroup::new(gtk4::SizeGroupMode::Horizontal))
         .collect();
-    GtkTable { header, divider, groups, tag }
+    // THE WINDOW'S GEOMETRY, one rule five spellings
+    // (docs/virtualization-plan.md §4): top spacer, the realized band's
+    // real widgets, bottom spacer, inside the scroll container this tier
+    // owns. The content box carries the CONTAINER's own row gap, so a
+    // row's top-to-top pitch here is its box plus that gap and the
+    // spacers can be measured in the same units the core answers in.
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, CONTAINER_SPACING);
+    content.set_halign(gtk4::Align::Fill);
+    content.set_valign(gtk4::Align::Start);
+    let top = build_spacer();
+    let bottom = build_spacer();
+    content.append(&top);
+    content.append(&bottom);
+    let body = gtk4::ScrolledWindow::new();
+    body.add_css_class(TABLE_BODY_CLASS);
+    // Vertical only, the `scroll` kind's rule: a table's columns are
+    // laid out to the track, never scrolled sideways.
+    body.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    // OVERLAY, and stated rather than inherited: a bar that took width
+    // would take it off the ROWS and not off the header, and
+    // column_edges — which compares the two lines' right edges — would
+    // read that as content underfill.
+    body.set_overlay_scrolling(true);
+    // Natural size propagates so a table that FITS is byte-identical to
+    // the un-windowed one; the cap is what a table that does not fit
+    // stops at (TABLE_MAX_CONTENT).
+    body.set_propagate_natural_width(true);
+    body.set_propagate_natural_height(true);
+    body.set_max_content_height(TABLE_MAX_CONTENT);
+    body.set_hexpand(true);
+    body.set_vexpand(true);
+    body.set_halign(gtk4::Align::Fill);
+    body.set_valign(gtk4::Align::Fill);
+    body.set_child(Some(&content));
+    let pending = Rc::new(std::cell::Cell::new(false));
+    let anchor = Rc::new(std::cell::Cell::new(None));
+    let programmatic = Rc::new(std::cell::Cell::new(false));
+    // THE REPORT'S TWO SOURCES, both on the adjustment: `value-changed`
+    // is the scroll, `changed` is every resize and the first layout (the
+    // viewport publishes page-size and upper there). Neither reports
+    // inline — see schedule_window_report.
+    let adjustment = body.vadjustment();
+    {
+        let pending = pending.clone();
+        let anchor = anchor.clone();
+        let programmatic = programmatic.clone();
+        adjustment.connect_value_changed(move |_| {
+            if !programmatic.get() {
+                anchor.set(None);
+            }
+            schedule_window_report(&pending, id);
+        });
+    }
+    {
+        let pending = pending.clone();
+        adjustment.connect_changed(move |_| schedule_window_report(&pending, id));
+    }
+    GtkTable {
+        header,
+        divider,
+        groups,
+        tag,
+        body,
+        content,
+        top,
+        bottom,
+        reported: None,
+        pending,
+        anchor,
+        programmatic,
+    }
+}
+
+fn build_spacer() -> gtk4::Box {
+    let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    spacer.add_css_class(TABLE_SPACER_CLASS);
+    // A visible zero-height child would still cost the content box one
+    // row gap, which is exactly the number the spacer arithmetic below
+    // subtracts; hidden, GtkBox lays out no gap beside it at all.
+    spacer.set_visible(false);
+    spacer
+}
+
+/// The content box of a table's own viewport, read out of the tree the
+/// way `table_header` reads the header: by class, so no table verb can
+/// agree with a model copy.
+fn table_body(column: &gtk4::Box) -> Option<gtk4::Box> {
+    let mut child = column.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        let Ok(scroller) = w.downcast::<gtk4::ScrolledWindow>() else {
+            continue;
+        };
+        if !scroller.has_css_class(TABLE_BODY_CLASS) {
+            continue;
+        }
+        let inner = scroller.child()?;
+        // GTK4 unwraps the viewport it inserts for a non-scrollable
+        // child; the second arm is there because believing that is a
+        // read nobody would have watched fail.
+        if let Ok(content) = inner.clone().downcast::<gtk4::Box>() {
+            return Some(content);
+        }
+        return inner
+            .downcast::<gtk4::Viewport>()
+            .ok()?
+            .child()?
+            .downcast::<gtk4::Box>()
+            .ok();
+    }
+    None
+}
+
+/// One report per main-loop turn, and never from inside the signal
+/// itself: a harness read pumps the main context WHILE IT HOLDS the CORE
+/// borrow, so a report that took a mutable one there would panic. Busy
+/// means later, on a TIMEOUT rather than another idle — `while
+/// iteration(false)` dispatches only sources that are already ready, so
+/// re-arming as an idle would spin that loop forever.
+fn schedule_window_report(pending: &Rc<std::cell::Cell<bool>>, id: u64) {
+    if pending.get() {
+        return;
+    }
+    pending.set(true);
+    let pending = pending.clone();
+    glib::idle_add_local_once(move || run_scheduled_report(pending, id));
+}
+
+fn run_scheduled_report(pending: Rc<std::cell::Cell<bool>>, id: u64) {
+    let ran = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => {
+            if let Some(core) = core.as_mut() {
+                window_report(core, id);
+                reflow_table(core, id);
+            }
+            true
+        }
+        Err(_) => false,
+    });
+    if ran {
+        pending.set(false);
+        return;
+    }
+    glib::timeout_add_local(std::time::Duration::from_millis(1), move || {
+        run_scheduled_report(pending.clone(), id);
+        glib::ControlFlow::Break
+    });
 }
 
 /// Re-hang a declared table's header and re-tie its size groups. Runs
@@ -1328,6 +1528,10 @@ fn reflow_table(core: &mut CoreState, id: u64) {
     let header = table.header.clone();
     let divider = table.divider.clone();
     let groups = table.groups.clone();
+    let body = table.body.clone();
+    let content = table.content.clone();
+    let top = table.top.clone();
+    let bottom = table.bottom.clone();
     // The composed header leads the container's children whatever order
     // the rows arrived in, and the divider follows it.
     if header.parent().is_none() {
@@ -1339,6 +1543,33 @@ fn reflow_table(core: &mut CoreState, id: u64) {
         column.insert_child_after(&divider, Some(&header));
     } else {
         column.reorder_child_after(&divider, Some(&header));
+    }
+    if body.parent().is_none() {
+        column.insert_child_after(&body, Some(&divider));
+    } else {
+        column.reorder_child_after(&body, Some(&divider));
+    }
+    // A ROW THAT LANDED ON THE CONTAINER MOVES INTO THE VIEWPORT. The
+    // children-first sugars (OCaml, Haskell) can stamp rows before the
+    // columns record declares the table, and those rows were parented
+    // before there was a body to parent them to.
+    for stray in children_of(&column) {
+        if stray == header.clone().upcast::<gtk4::Widget>()
+            || stray == divider.clone().upcast::<gtk4::Widget>()
+            || stray == body.clone().upcast::<gtk4::Widget>()
+        {
+            continue;
+        }
+        column.remove(&stray);
+        content.append(&stray);
+    }
+    // The spacers bracket the band whatever order the moves left behind:
+    // MoveChild's "before: None" appends at the very end, which is past
+    // the bottom spacer until this puts it back.
+    content.reorder_child_after(&top, None::<&gtk4::Widget>);
+    let last = content.last_child();
+    if last.as_ref() != Some(bottom.upcast_ref::<gtk4::Widget>()) {
+        content.reorder_child_after(&bottom, last.as_ref());
     }
     // Fresh membership every pass: a row that left takes its cells out
     // of the groups with it, and a stale member would hold a width the
@@ -1371,6 +1602,215 @@ fn reflow_table(core: &mut CoreState, id: u64) {
             group.add_widget(&cell);
         }
     }
+}
+
+/// A spacer's height, written only when it moved: an equal size request
+/// still costs a resize, and this runs on every scroll frame.
+fn set_spacer(spacer: &gtk4::Box, visible: bool, height: f64) {
+    use gtk4::prelude::WidgetExt;
+    let want = height.round().clamp(0.0, f64::from(i32::MAX)) as i32;
+    if spacer.height_request() != want {
+        spacer.set_size_request(-1, want);
+    }
+    if spacer.is_visible() != visible {
+        spacer.set_visible(visible);
+    }
+}
+
+/// One row's top in the collection's own coordinates, summed from the
+/// CORE's per-row extents off the band's own offset — never from this
+/// tier's allocations, which would be a second estimator (§2).
+///
+/// It carries its own guard rather than leaning on its callers': every
+/// one of them is a scroll signal or a harness step, and a helper whose
+/// safety lives at the callsite is the shape fault::tests'
+/// window-entry census cannot read.
+fn row_position(
+    scene: &mut Scene,
+    id: u64,
+    index: usize,
+    band: &crate::scene::WindowGeometry,
+) -> Option<f64> {
+    crate::fault::guard("reading a row's extent", || {
+        let mut at = band.offset;
+        if index >= band.first {
+            for i in band.first..index {
+                at += scene.row_extent(id, i);
+            }
+        } else {
+            for i in index..band.first {
+                at -= scene.row_extent(id, i);
+            }
+        }
+        at
+    })
+}
+
+/// THE DRIVE LOOP, this tier's half (docs/virtualization-plan.md §3):
+/// what the reader can SEE goes to the core, the extents this tier laid
+/// out follow it, and the two spacers come back from the core's own
+/// arithmetic. Answers the pair `expect_window` compares — the first
+/// VISIBLE row and the collection's declared total.
+///
+/// NEVER FROM INSIDE A LAYOUT PASS: the applies it makes create and
+/// destroy widgets. Every caller is an idle, a harness step, or the
+/// end of a drained batch.
+fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
+    use gtk4::prelude::{AdjustmentExt, WidgetExt};
+    let Some(table) = core.tables.get(&id) else {
+        return (0, 0);
+    };
+    let content = table.content.clone();
+    let body = table.body.clone();
+    let top = table.top.clone();
+    let bottom = table.bottom.clone();
+    let last = table.reported;
+    let anchor = table.anchor.clone();
+    let programmatic = table.programmatic.clone();
+    let adjustment = body.vadjustment();
+    let spacing = f64::from(CONTAINER_SPACING);
+
+    let scene = &mut core.scene;
+    let Some(band) = crate::fault::guard("reading a window's geometry", || {
+        scene.window_geometry(id)
+    }) else {
+        return (0, 0);
+    };
+    let total = band.total;
+
+    // §2.4, THE RE-PARK: the anchored row goes back to the top of the
+    // viewport at its CORRECTED position, so heights that landed above
+    // it move the scrollbar rather than the reader's place. A scroll
+    // clamped at the collection's end simply does not land, and the
+    // reading below is then the honest one.
+    if let Some(index) = anchor.get().filter(|i| *i < total) {
+        let want = row_position(scene, id, index, &band);
+        if let Some(want) = want {
+            if (adjustment.value() - want).abs() > 0.5 {
+                programmatic.set(true);
+                adjustment.set_value(want);
+                programmatic.set(false);
+            }
+        }
+    }
+    let value = adjustment.value();
+    let page = adjustment.page_size().max(f64::from(body.height()));
+
+    // The band's rows, in band order, with the boxes this tier gave them.
+    let rows: Vec<(f64, f64)> = children_of(&content)
+        .into_iter()
+        .filter(|w| !w.has_css_class(TABLE_SPACER_CLASS))
+        .map(|w| {
+            let allocation = w.allocation();
+            (f64::from(allocation.y()), f64::from(allocation.height()))
+        })
+        .collect();
+
+    // THE VERIFY HALF (§2.2), reported only where this tier's extent
+    // DISAGREES with what the core already holds — exactly, no tolerance,
+    // which is also what stops this loop repeating. A row's extent is its
+    // PITCH: its own box plus the gap the content box lays out after it.
+    let mut heights = Vec::new();
+    for (_, height) in &rows {
+        if *height <= 0.0 {
+            break;
+        }
+        heights.push(*height + spacing);
+    }
+    if !heights.is_empty() {
+        let moved = crate::fault::guard("reading a row's extent", || {
+            heights
+                .iter()
+                .enumerate()
+                .any(|(i, h)| scene.row_extent(id, band.first + i) != *h)
+        });
+        if moved == Some(true) {
+            crate::fault::guard("reporting measured row heights", || {
+                scene.rows_measured(id, band.first, &heights);
+            });
+        }
+    }
+
+    let laid_out = rows.iter().any(|(_, height)| *height > 0.0);
+    let average = if total > 0 && band.extent > 0.0 {
+        band.extent / total as f64
+    } else {
+        0.0
+    };
+    let count = if average > 0.0 && page > 0.0 {
+        ((page / average).ceil() as usize).max(1)
+    } else {
+        0
+    };
+    let first = if !laid_out {
+        // Nothing drawn yet: the honest answer is where we already said
+        // we were, and the band's own rule keeps one row realized so
+        // there is something to measure next pass. The FIRST report of a
+        // For's life is this one, and (0, 0) is what narrows the
+        // unbounded band before anything measures a box holding every
+        // row of the collection.
+        last.map_or(0, |(first, _)| first)
+    } else {
+        let top_edge = rows[0].0;
+        let bottom_edge = rows[rows.len() - 1].0 + rows[rows.len() - 1].1;
+        if value + 0.5 < top_edge || value + 0.5 >= bottom_edge {
+            // The scrollbar jumped clean past the band — the reader's own
+            // route on a long collection. Step from the band's own edge by
+            // the mean pitch; the next pass reads real rows, and on the
+            // exact path this is already the answer.
+            let step = |gap: f64| {
+                if average > 0.0 {
+                    (gap / average).floor().max(0.0) as usize
+                } else {
+                    0
+                }
+            };
+            if value < top_edge {
+                band.first.saturating_sub(step(top_edge - value).max(1))
+            } else {
+                let past = band.first + rows.len() + step(value - bottom_edge);
+                past.min(total.saturating_sub(1))
+            }
+        } else {
+            rows.iter()
+                .position(|(y, height)| y + height > value + 0.5)
+                .map_or(band.first, |i| band.first + i)
+        }
+    };
+
+    if last != Some((first, count)) {
+        let scene = &mut core.scene;
+        let ops = crate::fault::guard("reporting a window range", || {
+            scene.window_moved(id, first, count)
+        });
+        if let Some(table) = core.tables.get_mut(&id) {
+            table.reported = Some((first, count));
+        }
+        for op in ops.unwrap_or_default() {
+            apply(core, op);
+        }
+    }
+
+    // THE SPACERS, sized by the core and by nothing here. The content
+    // box lays a gap between the top spacer and the band's first row, so
+    // the spacer is the band's offset LESS that gap and the first row's
+    // own top lands exactly on the core's position for it.
+    let scene = &mut core.scene;
+    let settled = crate::fault::guard("reading a window's geometry", || {
+        let band = scene.window_geometry(id);
+        let mut realized = 0.0;
+        for index in band.first..(band.first + band.count) {
+            realized += scene.row_extent(id, index);
+        }
+        (band, realized)
+    });
+    if let Some((band, realized)) = settled {
+        let above = (band.offset - spacing).max(0.0);
+        let below = (band.extent - band.offset - realized).max(0.0);
+        set_spacer(&top, band.first > 0 && above > 0.5, above);
+        set_spacer(&bottom, below > 0.5, below);
+    }
+    (first, total)
 }
 
 /// One navigation entry: a pushed scene root, retained while covered
@@ -1676,10 +2116,21 @@ fn drain_transactions() {
             // A transaction can be an undo GROUP, and a group is a ledger
             // entry: Edit>Undo's enablement moved with it.
             refresh_roles(core);
+            // THE BAND IS NARROWED BEFORE ANYTHING MEASURES IT. Every For
+            // starts under the unbounded band (the plan's §1 bridge), so
+            // the batch that declares a 15,000-row table stamps all of it;
+            // reporting HERE — inside the same idle, before GTK has laid
+            // anything out and before the size groups below are re-tied —
+            // is what keeps the O(cells^2) reflow and the toplevel's size
+            // negotiation off the whole collection.
+            let tables: Vec<u64> = core.tables.keys().copied().collect();
+            for id in &tables {
+                window_report(core, *id);
+            }
             // The rows a declared table is made of arrive, move and leave
             // in ops of their own, so the table is reconciled once the
             // batch has landed rather than inside any one of them.
-            for id in core.tables.keys().copied().collect::<Vec<_>>() {
+            for id in tables {
                 reflow_table(core, id);
             }
         });
@@ -5574,7 +6025,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         } => {
             use gtk4::prelude::WidgetExt;
             let parent_box = match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(b) | NativeWidget::Row(b) => b.clone(),
+                // The table's rows are ordered inside its viewport, where
+                // the AddChild above parented them.
+                NativeWidget::Column(b) => core
+                    .tables
+                    .get(&parent.0)
+                    .map_or_else(|| b.clone(), |t| t.content.clone()),
+                NativeWidget::Row(b) => b.clone(),
                 _ => panic!("kaya: move_child parent is not a container"),
             };
             let child_widget = core
@@ -6282,11 +6739,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 if let Some(old) = core.tables.remove(&id.0) {
                     column.remove(&old.header);
                     column.remove(&old.divider);
+                    // The rows outlive the header they were declared
+                    // under; they go back on the container and the new
+                    // table's reflow migrates them into its own viewport.
+                    for row in table_rows(&column) {
+                        old.content.remove(&row);
+                        column.append(&row);
+                    }
+                    column.remove(&old.body);
                 }
                 let table = build_table(
                     &core.occurrences,
                     titles.len(),
                     Rc::new(RefCell::new(tag.clone())),
+                    id.0,
                 );
                 core.tables.insert(id.0, table);
             }
@@ -7115,7 +7581,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 _ => {}
             }
             match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(column) => column.append(&child_widget),
+                // A DECLARED TABLE'S ROWS GO IN ITS OWN VIEWPORT
+                // (docs/virtualization-plan.md §4): the container keeps
+                // the header, the divider and the scroller, and the band
+                // lives inside. reflow_table migrates the rows that a
+                // children-first sugar parented before the table existed.
+                NativeWidget::Column(column) => {
+                    match core.tables.get(&parent.0).map(|t| t.content.clone()) {
+                        Some(content) => content.append(&child_widget),
+                        None => column.append(&child_widget),
+                    }
+                }
                 NativeWidget::Row(row) => row.append(&child_widget),
                 // The viewport's one child (the scene rejects a
                 // second): the content fills the viewport's width and
@@ -7649,7 +8125,15 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         CORE.with_borrow_mut(|core| {
             *core = Some(CoreState {
                 transactions: tx_rx,
-                scene: Scene::new(),
+                // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
+                // declares-windowing entry): every declared table gets
+                // the spacer+band tier, so a table's band starts at a
+                // screenful instead of at the whole collection.
+                scene: {
+                    let mut scene = Scene::new();
+                    scene.declare_windowing();
+                    scene
+                },
                 occurrences: occ_tx.clone(),
                 aux_windows: HashMap::new(),
                 nav_entries: HashMap::new(),
@@ -8036,6 +8520,36 @@ impl GtkStage {
         });
         rx.recv().expect("the main context applied the step")
     }
+}
+
+/// The For CONTAINER a window verb names: `None` for a target that
+/// resolves to nothing, `Some(None)` for a container this tier draws no
+/// viewport for (no columns declared on it), `Some(Some(id))` otherwise.
+#[cfg(feature = "harness")]
+fn for_container_id(core: &CoreState, t: crate::harness::Target) -> Option<Option<u64>> {
+    use crate::harness::TargetKind as K;
+    match t.kind {
+        K::Column => {
+            let i = crate::harness::try_resolve(t.index, core.columns.len())?;
+            let id = core.column_ids[i].0;
+            Some(core.tables.contains_key(&id).then_some(id))
+        }
+        K::Row => {
+            crate::harness::try_resolve(t.index, core.rows.len())?;
+            Some(None)
+        }
+        _ => None,
+    }
+}
+
+/// How many children a container is holding — the whole collection for a
+/// For nothing has windowed.
+#[cfg(feature = "harness")]
+fn container_children(core: &CoreState, t: crate::harness::Target) -> usize {
+    use crate::harness::TargetKind as K;
+    let registry = if t.kind == K::Column { &core.columns } else { &core.rows };
+    crate::harness::try_resolve(t.index, registry.len())
+        .map_or(0, |i| children_of(&registry[i]).len())
 }
 
 #[cfg(feature = "harness")]
@@ -9437,19 +9951,78 @@ impl crate::harness::Stage for GtkStage {
     }
 
 
-    /// The row window is §6.3's breadth slice; this backend realizes
-    /// every row and has no band to read. THE STUB IS A CALL, not a
-    /// sentence (tools/check-stubs.sh) — check-steps reads these two
-    /// literals and stops demanding the ledger/varied legs here. The
-    /// scene named is the one a hand-run would wire first; neither leg
-    /// is wired on this lane, so the wall exists for a hand-run alone
-    /// (crate::depth_stub("varied") is the same wall one scene over).
-    fn window_band(&self, _t: crate::harness::Target) -> String {
-        crate::depth_stub("ledger")
+    /// The first VISIBLE row and the collection's declared total, driven
+    /// off a fresh report so a poll that finds the band mid-move drives
+    /// it one step further rather than freezing it.
+    fn window_band(&self, t: crate::harness::Target) -> String {
+        Self::on_main_mut(move |core| {
+            let Some(id) = for_container_id(core, t) else {
+                return "<no such target>".to_owned();
+            };
+            let Some(id) = id else {
+                // A For this tier draws no viewport for — no columns were
+                // declared on it — realizes every row it holds, and its
+                // first row is the visible one at rest. Truthful, and
+                // exactly what an unreported window answers.
+                let rows = container_children(core, t);
+                return format!("0 {rows}");
+            };
+            let (first, total) = window_report(core, id);
+            reflow_table(core, id);
+            format!("{first} {total}")
+        })
     }
 
-    fn scroll_to_row(&self, _t: crate::harness::Target, _key: &str) -> String {
-        crate::depth_stub("varied")
+    /// The core maps the KEY to a position in the collection's current
+    /// order and this tier parks that row at the viewport's TOP. An
+    /// ACTION: the expect_window after it is the observable, so the only
+    /// answer here is a sentence about what stopped it.
+    fn scroll_to_row(&self, t: crate::harness::Target, key: &str) -> String {
+        let key = key.to_owned();
+        Self::on_main_mut(move |core| {
+            let Some(id) = for_container_id(core, t) else {
+                return "<no such target>".to_owned();
+            };
+            let Some(id) = id else {
+                return "this container declares no columns, so this tier gives it \
+                        no viewport to park a row in (docs/virtualization-plan.md §6.3)"
+                    .to_owned();
+            };
+            let scene = &mut core.scene;
+            let Some(index) = crate::fault::guard("resolving scroll_to_row", || {
+                scene.scroll_to_row(id, &crate::protocol::Value::Str(key.clone()))
+            }) else {
+                return format!("no row of this collection carries the key {key:?}");
+            };
+            // THE BAND FOLLOWS THE ROW BEFORE THE PIXELS DO: the range is
+            // reported from the index the CORE resolved rather than from
+            // an estimate off the scrollbar, which is the one reading that
+            // is exact on the corrected path too. Parking is then
+            // window_report's re-park, on the anchor set here.
+            let count = core.tables.get(&id).and_then(|t| t.reported).map_or(1, |(_, c)| c.max(1));
+            if let Some(table) = core.tables.get(&id) {
+                table.anchor.set(Some(index));
+            }
+            let scene = &mut core.scene;
+            let ops = crate::fault::guard("reporting a window range", || {
+                scene.window_moved(id, index, count)
+            });
+            if let Some(table) = core.tables.get_mut(&id) {
+                table.reported = Some((index, count));
+            }
+            for op in ops.unwrap_or_default() {
+                apply(core, op);
+            }
+            // The entering rows have to exist before the scroll can land
+            // on one, and the spacers above them have to be the core's
+            // before the adjustment's upper covers the row at all.
+            window_report(core, id);
+            reflow_table(core, id);
+            while glib::MainContext::default().iteration(false) {}
+            window_report(core, id);
+            reflow_table(core, id);
+            String::new()
+        })
     }
     fn header_click(&self, t: crate::harness::Target, column: u32) {
         Self::on_main(move |core| {
