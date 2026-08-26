@@ -6127,7 +6127,7 @@ read, each watched failing. The 58px measurement is in docs/traps.md
 is where the next session will look.
 
 ## ~~GAP — only macOS delineates a table's end; GTK and WinUI run CASH straight into the account total (maintainer, 2026-08-24)~~
-KEY: table end boundary, closing rule, table card, boxed-list, apron, Account total, synthesized header, inset-grouped, KayaTableCard
+KEY: table end boundary, closing rule, table card, boxed-list, apron, Account total, synthesized header, inset-grouped, KayaTableCard, segmented grouped container, segmentedShapes, KayaTableSegment, header rule, HorizontalDivider, header hairline
 
 CLOSED 2026-08-25: the maintainer ruled CARDS (flat: fill, 1px
 stroke, rounded corners, no shadow, no elevation) after a survey of
@@ -6136,9 +6136,11 @@ round-two captures — interior inset 12px per platform metrics, small
 GTK tables hugging their rows after the 58px scrollbar-minimum fix
 (its own struck entry, one above). Implemented on GTK, WinUI and
 Compose, held by tools/check-table-card.sh; macOS keeps the native
-interior. THE LAST SPELLING WAS RULED THE SAME DAY: the iOS
-synthesized tier takes the INSET-GROUPED card, not the desktop
-family's flat one, and it is implemented — the section below.
+interior. THE LAST TWO SPELLINGS WERE RULED THE SAME DAY, both of them
+the platform's GROUPED idiom rather than the desktop card: the iOS
+synthesized tier takes the INSET-GROUPED card, and Compose the
+SEGMENTED GROUPED CONTAINER after the Android research below. Both
+implemented — the sections below.
 
 Seen on the first cross-platform portfolio capture set: on GTK and
 WinUI the last row's text and the "Account total" label below it read
@@ -6186,14 +6188,15 @@ keeps every cell edge where expect_column_edges already found it:
 - Compose: `Modifier.background(surfaceContainer, 12.dp)` +
   `Modifier.border(1.dp, outlineVariant, 12.dp)` on KayaTableSurface,
   outside the verticalScroll so the card frames the viewport. Both are
-  draw modifiers; neither measures.
+  draw modifiers; neither measures. SUPERSEDED the same day by the
+  segmented grouped container — the section at the end of this entry.
 
 NO SCENE CAN FAIL THIS, so tools/check-table-card.sh is the wall: the
-card present in all four, flat (strokeless on iOS), coloured from
-platform tokens rather than literals, on the CONTENT layer where iOS
-demands it, and held OFF the mac's native tier, with 44 watched
-negatives. No .steps file and no expected string
-moved.
+card present in all four, flat (strokeless and borderless on the two
+grouped tiers), coloured from platform tokens rather than literals, on
+the CONTENT layer where iOS and Compose demand it, and held OFF the
+mac's native tier, with 58 watched negatives. No .steps file and no
+expected string moved.
 
 THE INTERIOR CAME BACK FROM THE FIRST SIGN-OFF (maintainer, 2026-08-25):
 "the linux and windows tables don't look good. the cards have no
@@ -6209,7 +6212,9 @@ viewport. So the card has an interior now, each platform's own:
 - WinUI 12 all round (Fluent's card content inset; `pad` is one number
   for four sides and splitting it would mean touching every `2.0 * pad`
   in the table's arithmetic).
-- Compose 16 horizontal / 8 vertical (Material's own content inset).
+- Compose 16 horizontal / 8 vertical (Material's own content inset) —
+  the two numbers survive the segmented ruling below, one interior per
+  segment now instead of one around the whole card.
 
 AND IT GOES THROUGH THE PATH THE INSTRUMENTS SUBTRACT, which is the only
 reason a padded card does not convict itself:
@@ -6225,8 +6230,11 @@ reason a padded card does not convict itself:
   box the guest's own inset leaves it.
 - Compose: `Modifier.padding` ABOVE the `onGloballyPositioned` that
   reports the viewport, so the viewport IS the padded content box.
+  RE-ROUTED by the segmented ruling below — the interior is laid out
+  inside each segment now, so the track is corrected instead and the
+  reported viewport is inset to the cells' box.
 Pinned in all three truth tables — `gtk_table_padded_card_convicts_nothing`,
-`a_padded_card_convicts_nothing`, and two Compose self-test claims — each
+`a_padded_card_convicts_nothing`, and four Compose self-test claims — each
 watched failing against a basis that forgets to subtract.
 
 ROW HAIRLINES SPAN THE PADDED CONTENT WIDTH, not the full card, on all
@@ -6234,7 +6242,9 @@ three. Adwaita's boxed-list bleeds its separators to the card edge, but
 the divider is a CHILD of the padded container on every one of these
 backends: bleeding it would mean moving the padding somewhere that shifts
 every cell off zero, which is the one thing this may not do. Stated so
-the next reader knows it was chosen, not inherited.
+the next reader knows it was chosen, not inherited. COMPOSE LEFT THIS
+RULE ALTOGETHER on 2026-08-26: its table draws no hairline at all now,
+because the segment gap is the separator (the section at the end).
 
 THE iOS SYNTHESIZED TIER IS INSET-GROUPED (maintainer, 2026-08-25) — the
 Settings look rather than the desktop family's flat card, and the mac is
@@ -6288,11 +6298,118 @@ the same cells read at the clip report 16pt of interior. Each watched
 failing — the subtraction deleted, the inset deleted, the underfill
 silenced — with the substitution count printed.
 
+COMPOSE IS THE SEGMENTED GROUPED CONTAINER (maintainer, 2026-08-25,
+after an Android research pass): a card around a table is not what any
+current Google phone surface draws. The idiom is the filled, borderless,
+shadowless grouped container that HUGS its rows — Settings on Android 16
+QPR1, and since material3 1.5.0 a first-class API, `SegmentedListItem` +
+`ListItemDefaults.segmentedShapes(index, count)`, with the non-segmented
+list item deprecated. A single frame held open around a whole scrolling
+list is the treatment Google Drive shipped and then withdrew. So the
+Compose bullet above is superseded in three ways at once:
+
+  - THE BORDER DIES. Nothing in the grouped idiom draws one, and
+    outlineVariant + 1dp was Compose's OutlinedCard — spec-legal, and the
+    one variant no shipped Google phone surface uses as a list frame. Fill
+    stays `surfaceContainer` (what Google's own SegmentedListItems sample
+    passes) and elevation stays 0, which is two of the three M3 card
+    variants' own token anyway.
+  - TWO SEGMENTS, corners BY POSITION. The header row is one container,
+    then the gap, then ONE container for every body row. The numbers are
+    androidx's, read out of the tokens rather than guessed:
+    `ListTokens.ContainerShape` = CornerLarge = 16dp for the group's outer
+    pair, `ItemContainerExpressiveShape` = CornerExtraSmall = 4dp at the
+    boundary between segments (the base shape `segmentedShapes` leaves on
+    the middles), and `ListItemDefaults.SegmentedGap` = 2dp between them.
+    Spelled with two RoundedCornerShapes and plain background modifiers,
+    NOT by adopting the API: android/kaya/build.gradle.kts pins
+    compose-bom 2024.10.01 = material3 1.3.1, and a card is not worth a
+    dependency bump (tools/check-pins.sh).
+  - THE CONTAINER IS CONTENT, iOS's correction one platform over. The two
+    segments are laid-out CHILDREN of KayaTableSurface's own Layout — which
+    already sizes itself to the collection's whole extent (top spacer +
+    realized band + bottom spacer) — so a short table's container ends at
+    its last row with the page ground below it inside the table's region,
+    and a tall one's spans the virtual content and scrolls with the rows.
+    ONE rounded rectangle per segment, so a reader mid-list sees straight
+    edges and corners only at the true ends. Nothing on the modifier chain
+    paints or pads any more; a fill there is the scroll VIEWPORT's.
+
+CHILDREN AND NOT A MODIFIER because no Compose modifier can draw two
+separated shapes, and that costs two invariants a modifier would not have
+needed, both held by the gate: the segments are the LAST TWO children
+(every index in the measure block — the cells' sublist, the bottom
+spacer, the segments themselves — counts from the end) and the FIRST TWO
+PLACED (placement order is draw order, so a segment placed after the rows
+paints over them and the lane sees a blank table — WinUI's
+appended-instead-of-inserted card in this backend's spelling).
+
+AND IT TOO GOES THROUGH THE PATH THE INSTRUMENT SUBTRACTS. The interior
+is laid out inside each segment now rather than padded outside the
+scroll, so the clip is the segments' outer box and no longer the cells':
+`kayaTableCellsBox` insets the reported viewport by the interior, and
+`tableTrackW`/`tableDrawnW` take the same span off the track — GTK's
+`css_inset_span` and Swift's `kayaTableContentTrack` in this backend's
+spelling. A raw track convicts every carded table of a 32dp underfill it
+does not have. Pinned in `kayaTableHorizontalSelftest`, which
+expect_column_edges runs before it reads any geometry: the carded clip
+yields the cells' box, an uncarded one is its own box, that box read in
+itself is silent, and the same table read at the CLIP is a TrackUnderfill.
+`kayaTableHorizontalIssue`, the windowing machinery, every row density and
+every cell and header metric are untouched. ONE NUMBER DOES MOVE, and it
+is named here rather than left for someone to find: the interior no longer
+pads the scroll clip, so `tableViewportH` and `window.viewportPx` are the
+table's whole region now instead of that region minus 16dp — a taller
+viewport, which is the true one. The hug clause does not notice (a
+hugging table's clip IS its content height, before and after), and the
+band the core seeds may realize one more row.
+
 STILL OPEN, and the only thing left: the captures. The entry says the
 change lands with fresh captures INSPECTED, and the maintainer signs
-those off — the iOS card included, whose sign-off has not happened
-either. The four radii are deliberately per-platform (12 / 8 / 12 / 10),
-which is the "per platform, not per app" half of the rule.
+those off — the iOS card and the Compose segments included, neither of
+which has had its sign-off. The radii are deliberately per-platform (12
+GTK / 8 WinUI / 10 iOS, and 16-outer with 4-inner on Compose, where the
+corner is a function of position rather than one number), which is the
+"per platform, not per app" half of the rule.
+
+AND THE HEADER RULE DIES WITH IT (maintainer, 2026-08-26, off the
+round-six capture). The first pass left the `HorizontalDivider` where it
+had always been, inside the header segment, and flagged it as a question
+because removing it moves `rowsTop`. The capture answered: the phone drew
+TWO separators nine pixels apart and of DIFFERENT WIDTHS — the 1px
+hairline inset 16dp each side at y=48, then 8px of orphaned header fill,
+then the full-bleed 2dp gap. In the Settings idiom the GAP is the
+separator and a segment carries no internal hairline, so the divider is
+gone from the Compose table's content. GTK's, WinUI's and iOS's hairlines
+are native grammar and are untouched.
+
+WHAT MOVED, exactly, and why every instrument stays honest:
+  - The content lambda lost one child, so every index in the measure block
+    shifted by one: the top spacer is `measurables[cols]`, the cells start
+    at `cols + 1`, and the three tail indices (bottom spacer, header
+    segment, body segment) are unchanged because they count from the END.
+  - `headerSegH` = padY + headerH + padY, where it was padY + headerH +
+    rowGap + dividerH + padY. So `rowsTop` and `tableContentH` each shrink
+    by rowGap + dividerH — the header segment is now exactly its interior
+    and its text, which is the idiom.
+  - HORIZONTALLY NOTHING MOVED AT ALL, and that is the load-bearing half:
+    the divider carried no `Modifier.edge`, so it was never in
+    `cellEdgeX`/`cellEdgeRightX` and never in expect_column_edges' `left`
+    or `right`. `tableTrackW`, `tableDrawnW`, `tableContentW`, both
+    viewport writers and `kayaTableCellsBox` are byte-identical, so the
+    pad != 0 case is the same case (re-proven anyway, by running the truth
+    table lifted out of the real file).
+  - The window reports stay self-consistent: `rowsTopPx` is written from
+    the same `rowsTop` the placement uses, and `contentTopOf` and
+    `visibleRange` read only that field and the extents this layout
+    measured. Nothing estimates a header height anywhere.
+  - expect_fills' hug clause: `tableContentH` and `tableViewportH` both
+    shrink together on a hugging table (its clip IS its content height),
+    so the clause cannot flip.
+tools/check-table-card.sh pins the ABSENCE, read out of the table's own
+content lambda so the file's four other HorizontalDividers (menu
+separators, section rules) are none of its business, with the rule
+spliced back exactly where it stood as the watched negative.
 
 
 ## ~~GAP — Haskell cannot declare a nested RECORD collection (found 2026-08-24, by the breadth fan-out)~~ — CLOSED 2026-08-24

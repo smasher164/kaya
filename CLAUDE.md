@@ -592,18 +592,24 @@ in docs/deferred.md.
    on the windows guest's unit phase),
    `tools/check-table-card.sh` (A TABLE BOUNDS ITS OWN EXTENT — one
    semantics, four spellings (ruled 2026-08-25). The mac's NATIVE tier
-   has it from the widget and is out of the rule; GTK, WinUI and Compose
-   each draw a flat card, and the iOS SYNTHESIZED tier the INSET-GROUPED
-   one — the Settings look, where the grouped ground behind the card is
-   the whole boundary and there is no stroke at all. NO SCENE CAN FAIL
+   has it from the widget and is out of the rule; GTK and WinUI each draw
+   a flat card; the iOS SYNTHESIZED tier draws the INSET-GROUPED one —
+   the Settings look, where the grouped ground behind the card is the
+   whole boundary and there is no stroke at all — and COMPOSE draws
+   Android's own answer to that same sentence, the SEGMENTED GROUPED
+   CONTAINER: a header segment, androidx's 2dp gap, one container for
+   every body row, corners BY POSITION (ListTokens.ContainerShape = 16dp
+   at the group's true ends, ItemContainerExpressiveShape = 4dp at the
+   boundary), and no stroke either, since nothing in the grouped idiom
+   draws one. NO SCENE CAN FAIL
    THIS: the card is pixels, and every table
    observable — expect_columns, expect_rows, expect_column_edges,
    expect_window — answers identically with it gone, which is how all
    three shipped a table's OPENING grammar and never its close, running
    the last row into the label under it. So it holds three things a
    capture would otherwise be the only witness to: the card is THERE,
-   it is FLAT (no shadow, no blur, no elevation — and on iOS no stroke
-   either) and its colours are the
+   it is FLAT (no shadow, no blur, no elevation — and on the two grouped
+   tiers no stroke either) and its colours are the
    platform's own tokens rather than literals. The flatness clause reads
    the card's OWN BLOCK with comments stripped — all four files
    legitimately name shadows elsewhere, and a comment saying the card
@@ -615,13 +621,27 @@ in docs/deferred.md.
    white to the bottom of the phone, and no observable moved. So the
    face is read INSIDE the clip's block and the ground outside it, and
    both of a grown table's viewport writers are held to the cells' box,
-   since the interior scrolls inside that clip.
+   since the interior scrolls inside that clip. COMPOSE HAS THE SAME
+   CLAUSE, in the shape its toolkit forces: no modifier there can draw
+   two separated shapes, so the segments are laid-out CHILDREN of the
+   table's own Layout — which already sizes itself to the whole extent —
+   and the gate holds the two invariants that buys, that they are the
+   LAST TWO children (every index in the measure block counts from the
+   end) and the FIRST TWO PLACED (placement order is draw order, and a
+   segment placed after the rows paints over them). Nothing on that
+   modifier chain may paint or pad.
    AND WHERE IT MAY NOT REACH: the mac. The card is the synthesized
    tier's alone (a count in the file AND inside that tier's own block)
    and its numbers are zero on macOS, since the edge instrument subtracts
    what they say the card spends — a card wrapped around KayaNativeTable
    and a macOS arm that draws are each watched being refused.
-   44 watched negatives, counts printed, red demanded on every run),
+   AND ON COMPOSE, NO HEADER RULE INSIDE A SEGMENT (ruled
+   2026-08-26): the grouped idiom's separator IS the 2dp gap, and a
+   HorizontalDivider under the header drew a second one nine pixels
+   away and of a different width. Read out of the table's own content
+   lambda, so the file's menu separators and the other three backends'
+   native hairlines are untouched.
+   58 watched negatives, counts printed, red demanded on every run),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing but RECORDS its

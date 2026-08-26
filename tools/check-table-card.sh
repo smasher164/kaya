@@ -11,10 +11,14 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 # A TABLE BOUNDS ITS OWN EXTENT — one semantics, four spellings
 # (docs/deferred.md's table-card entry, ruled 2026-08-25). The mac's
-# NATIVE tier has it from the widget; GTK, WinUI and Compose each draw a
-# flat card; the iOS SYNTHESIZED tier draws the INSET-GROUPED one — the
-# Settings look, where a card is parted from its page by the grouped
-# background behind it and never by an outline.
+# NATIVE tier has it from the widget; GTK and WinUI each draw a flat card;
+# the iOS SYNTHESIZED tier draws the INSET-GROUPED one — the Settings
+# look, where a card is parted from its page by the grouped background
+# behind it and never by an outline — and COMPOSE draws Android's own
+# answer to the same sentence, the SEGMENTED GROUPED CONTAINER: a header
+# segment, androidx's 2dp gap, one container for every body row, corners
+# by position (16dp at the group's true ends, 4dp at the boundary), and
+# no stroke anywhere.
 #
 # NO SCENE CAN FAIL THIS. The card is pixels and nothing else: every
 # table observable — expect_columns, expect_rows, expect_column_edges,
@@ -42,6 +46,7 @@ cd "$ROOT" || exit 1
 
 python3 - <<'PY'
 from pathlib import Path
+import re
 import sys
 
 GTK = "crates/kaya/src/gtk.rs"
@@ -114,20 +119,57 @@ PRESENT = (
     ("winui card spans the three tracks", WINUI,
      "Grid::SetRowSpan(&card_element, 3)?;",
      "Grid::SetRowSpan(&card_element, 1)?;"),
-    ("compose card fill", COMPOSE,
-     ".background(MaterialTheme.colorScheme.surfaceContainer, KAYA_TABLE_CARD_SHAPE)",
-     ".background(MaterialTheme.colorScheme.surface, KAYA_TABLE_CARD_SHAPE)"),
-    ("compose card stroke", COMPOSE,
-     ".border(1.dp, MaterialTheme.colorScheme.outlineVariant, KAYA_TABLE_CARD_SHAPE)",
-     ".padding(1.dp)"),
-    ("compose card radius", COMPOSE,
-     "private val KAYA_TABLE_CARD_SHAPE = RoundedCornerShape(12.dp)",
-     "private val KAYA_TABLE_CARD_SHAPE = RoundedCornerShape(0.dp)"),
-    # ABOVE the viewport read, which is the whole of why it is safe: the
-    # padded box is the one this Layout reports as its viewport.
+    # COMPOSE IS THE SEGMENTED GROUPED CONTAINER (ruled 2026-08-25 after
+    # the Material research): filled, BORDERLESS, elevation 0, two
+    # segments parted by androidx's own 2dp gap, corners by position.
+    ("compose segment fill", COMPOSE,
+     "Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))",
+     "Box(Modifier.background(MaterialTheme.colorScheme.surface, shape))"),
+    # CORNERS BY POSITION is the whole idiom: outer pair at the true ends
+    # of the group, the small inner radius at the segment boundary. Rounded
+    # all four, the two segments read as two cards with a 2dp crack.
+    ("compose header segment corners", COMPOSE,
+     "    topStart = KAYA_TABLE_SEGMENT_OUTER,\n"
+     "    topEnd = KAYA_TABLE_SEGMENT_OUTER,\n"
+     "    bottomStart = KAYA_TABLE_SEGMENT_INNER,",
+     "    topStart = KAYA_TABLE_SEGMENT_OUTER,\n"
+     "    topEnd = KAYA_TABLE_SEGMENT_OUTER,\n"
+     "    bottomStart = KAYA_TABLE_SEGMENT_OUTER,"),
+    ("compose body segment corners", COMPOSE,
+     "    topStart = KAYA_TABLE_SEGMENT_INNER,\n"
+     "    topEnd = KAYA_TABLE_SEGMENT_INNER,\n"
+     "    bottomStart = KAYA_TABLE_SEGMENT_OUTER,",
+     "    topStart = KAYA_TABLE_SEGMENT_OUTER,\n"
+     "    topEnd = KAYA_TABLE_SEGMENT_INNER,\n"
+     "    bottomStart = KAYA_TABLE_SEGMENT_OUTER,"),
+    # And the gap between them: fused, it is one container again and the
+    # header stops being a segment at all.
+    ("compose segment gap", COMPOSE,
+     "val bodyTop = headerSegH + gap",
+     "val bodyTop = headerSegH"),
+    # THE INTERIOR, inside each segment. Both numbers are laid out rather
+    # than padded now, so the perturbation is the measure that reads them.
     ("compose card interior", COMPOSE,
-     ".padding(horizontal = KAYA_TABLE_CARD_PAD_X, vertical = KAYA_TABLE_CARD_PAD_Y)",
-     ".padding(0.dp)"),
+     "val padX = KAYA_TABLE_CARD_PAD_X.roundToPx()",
+     "val padX = 0"),
+    ("compose card interior, vertical", COMPOSE,
+     "val padY = KAYA_TABLE_CARD_PAD_Y.roundToPx()",
+     "val padY = 0"),
+    # And the one number that has to follow it, GTK's `css_inset_span`
+    # clause in this backend's spelling: the segments span the outer box
+    # while the cells lay out in the interior, so the card's own span comes
+    # off the track or every carded table convicts itself of a 32dp
+    # underfill at expect_column_edges.
+    ("compose card interior off the assigned track", COMPOSE,
+     "if (constraints.hasBoundedWidth) (constraints.maxWidth - 2 * padX) / density else -1f",
+     "if (constraints.hasBoundedWidth) constraints.maxWidth / density else -1f"),
+    # THE OTHER HALF OF THAT SAME TRUTH: the interior scrolls INSIDE the
+    # clip, so the clip is not the cells' box and the viewport writer must
+    # inset it — reported raw, the table starts 16dp inside its own
+    # viewport (swift's two-writer clause, one platform over).
+    ("compose carded viewport reports the cells' box", COMPOSE,
+     "                    KAYA_TABLE_CARD_PAD_X.value,\n                )",
+     "                    0f,\n                )"),
     # THE iOS SYNTHESIZED TIER, inset-grouped: the two SEMANTIC colours
     # carry the whole boundary here, so a literal is not a style slip —
     # it is the card going blank in dark mode, or (light mode, white on
@@ -197,10 +239,23 @@ PRESENT = (
 # stylesheet, Fluent's in a control's default style, Material's in its
 # spec — so the substitute is a constant whose comment carries the
 # provenance, and this holds the use sites to naming it.
+#
+# THE COMPOSE THREE ARE ANDROIDX'S OWN NUMBERS and the comment above them
+# carries the token each was read from — ListTokens.ContainerShape =
+# CornerLarge = 16, ItemContainerExpressiveShape = CornerExtraSmall = 4,
+# ListItemDefaults.SegmentedGap = 2. material3 1.3.1 (the pinned
+# compose-bom) has no SegmentedListItem to inherit them from, so they are
+# copied, which is check-file-modes' trap one surface over.
 NAMED = (
     ("winui card interior", WINUI, "const TABLE_CARD_PAD: f64 = 12.0;"),
     ("compose card interior x", COMPOSE, "private val KAYA_TABLE_CARD_PAD_X = 16.dp"),
     ("compose card interior y", COMPOSE, "private val KAYA_TABLE_CARD_PAD_Y = 8.dp"),
+    ("compose segment outer radius", COMPOSE,
+     "private val KAYA_TABLE_SEGMENT_OUTER = 16.dp"),
+    ("compose segment inner radius", COMPOSE,
+     "private val KAYA_TABLE_SEGMENT_INNER = 4.dp"),
+    ("compose segment gap width", COMPOSE,
+     "private val KAYA_TABLE_SEGMENT_GAP = 2.dp"),
     ("ios card interior x", SWIFTUI, "let kayaTableCardInsetX: CGFloat = 16"),
     ("ios card interior y", SWIFTUI, "let kayaTableCardInsetY: CGFloat = 8"),
     ("ios card band", SWIFTUI, "let kayaTableCardBand: CGFloat = 16"),
@@ -224,6 +279,19 @@ GROUPED = ("the iOS spelling of that ruling is INSET-GROUPED: fill, the "
            "elevation, and the two semantic colours rather than literals, "
            "because iOS parts a card from its page by background contrast "
            "and a literal has no dark mode")
+SEGMENTED = ("the Compose spelling of that ruling is the SEGMENTED GROUPED "
+             "CONTAINER (ruled 2026-08-25 after the Material research): "
+             "filled from surfaceContainer, elevation 0, and BORDERLESS — "
+             "nothing in the grouped idiom draws a stroke, and the 1dp "
+             "outlineVariant border this replaced was the least-supported "
+             "part of the card it replaced")
+CONTENT = ("the Compose card is CONTENT (ruled 2026-08-25): the segments "
+           "are laid-out children sized to the collection's whole extent, "
+           "so a short table's container ends at its last row and a tall "
+           "one's scrolls with the rows. Anything that paints or pads on "
+           "this chain belongs to the scroll VIEWPORT instead — it runs to "
+           "the bottom of the screen under a three-row table, cannot "
+           "scroll, and no observable moves either way")
 BLOCKS = (
     ("gtk card rule", GTK,
      "const TABLE_CSS: &str = ", '";',
@@ -231,9 +299,13 @@ BLOCKS = (
     ("winui card markup", WINUI,
      "const TABLE_CARD_XAML: &str = ", ");",
      ("Shadow", "Elevation", "Translation", "#"), FLAT),
-    ("compose card modifiers", COMPOSE,
-     "        modifier = modifier\n            // THE CARD", "\n            .verticalScroll(",
-     (".shadow(", "elevation", "tonalElevation", "shadowElevation"), FLAT),
+    ("compose segment fill", COMPOSE,
+     "private fun KayaTableSegment(shape: RoundedCornerShape) {", "\n}\n",
+     (".border(", ".shadow(", "elevation", "tonalElevation", "shadowElevation",
+      "Color(", "outlineVariant"), SEGMENTED),
+    ("compose table modifier chain", COMPOSE,
+     "        modifier = modifier\n", "            .verticalScroll(node.scrollState),",
+     (".background(", ".border(", ".padding(", ".shadow("), CONTENT),
     ("ios card modifiers", SWIFTUI,
      FACE_HEAD, "\n}\n",
      ("stroke", ".border(", ".shadow(", "Color(red:", "Color(white:",
@@ -273,6 +345,61 @@ ZONE = (
      "#if os(macOS)\n            content.background(Color.gray)\n        #else\n"
      "            content\n                .padding(.horizontal, kayaTableCardInsetX)",
      "the macOS arm of KayaTableCardFace"),
+    # THE SAME FOUR WAYS ON COMPOSE, and the first is the same regression:
+    # the card was the scroll VIEWPORT's background there too until
+    # 2026-08-25, so a three-row grown table's container ran to the bottom
+    # of the phone and a tall one's could not scroll with the rows.
+    ("the compose card back on the scroll viewport's background", COMPOSE,
+     "        modifier = modifier\n            // NOTHING ON THIS CHAIN",
+     "        modifier = modifier\n"
+     "            .background(MaterialTheme.colorScheme.surfaceContainer, "
+     "KAYA_TABLE_BODY_SEGMENT_SHAPE)\n            // NOTHING ON THIS CHAIN",
+     "the compose table modifier chain names `.background(`"),
+    ("the compose card's interior back on the scroll clip", COMPOSE,
+     "        modifier = modifier\n            // NOTHING ON THIS CHAIN",
+     "        modifier = modifier\n"
+     "            .padding(horizontal = KAYA_TABLE_CARD_PAD_X, "
+     "vertical = KAYA_TABLE_CARD_PAD_Y)\n            // NOTHING ON THIS CHAIN",
+     "the compose table modifier chain names `.padding(`"),
+    ("the compose segments painted over the rows", COMPOSE,
+     "            headerSeg.place(0, 0)\n"
+     "            bodySeg.place(0, bodyTop)\n"
+     "            headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }",
+     "            headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }\n"
+     "            headerSeg.place(0, 0)\n"
+     "            bodySeg.place(0, bodyTop)",
+     "paints OVER them"),
+    # A MOVE, not a deletion: both segments still emitted, still exactly
+    # two, and now one child too early — which re-points the cells' sublist
+    # and the bottom spacer without moving a single observable.
+    ("the compose segments moved off the content's tail", COMPOSE,
+     "            Spacer(Modifier)\n"
+     "            // LAST IN THE CONTENT AND FIRST IN THE PLACEMENT: placement\n"
+     "            // order is draw order, so these paint BEHIND every row, and\n"
+     "            // every index in the measure block below counts from the end.\n"
+     "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+     "            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)",
+     "            // LAST IN THE CONTENT AND FIRST IN THE PLACEMENT: placement\n"
+     "            // order is draw order, so these paint BEHIND every row, and\n"
+     "            // every index in the measure block below counts from the end.\n"
+     "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+     "            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)\n"
+     "            Spacer(Modifier)",
+     "are not the last two children"),
+    # THE HEADER RULE COMING BACK, spliced exactly where it stood until
+    # 2026-08-26. Its absence is pixels like everything else here: no
+    # observable moves, and the capture was the only witness.
+    ("the compose header hairline back inside the segment", COMPOSE,
+     "            Spacer(Modifier)\n            rows.forEach { row ->",
+     "            HorizontalDivider()\n"
+     "            Spacer(Modifier)\n            rows.forEach { row ->",
+     "names `HorizontalDivider`"),
+    ("a third compose segment, at the head of the content", COMPOSE,
+     "        content = {\n            node.tableColumns.forEachIndexed",
+     "        content = {\n"
+     "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+     "            node.tableColumns.forEachIndexed",
+     "wanted exactly 2"),
 )
 
 
@@ -394,6 +521,93 @@ def zones(text):
     return out
 
 
+CONTENT_HEAD = "        content = {"
+CONTENT_END = "\n        modifier = modifier"
+CONTENT_TAIL = (
+    "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
+    "            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)\n"
+    "        },\n        modifier = modifier\n"
+)
+PLACE_HEAD = "        layout(totalW, totalH) {"
+
+
+def layers(text):
+    """WHICH LAYER WEARS THE COMPOSE CARD, and in what ORDER it paints.
+
+    Compose has no modifier that can draw two separated shapes, so the two
+    segments are laid-out CHILDREN — which buys the ruling's whole extent
+    (the layout already sizes itself to top spacer + band + bottom spacer)
+    and costs two invariants a modifier would not have needed: they are the
+    LAST TWO children, because every index in the measure block counts from
+    the end, and they are the FIRST TWO PLACED, because placement order is
+    draw order."""
+    out = []
+    # AND NO HEADER RULE INSIDE A SEGMENT (ruled 2026-08-26, off the
+    # round-six capture): the phone drew TWO separators nine pixels apart
+    # and of different widths — the 1px hairline inset 16dp each side at
+    # y=48, 8px of orphaned header fill under it, then the full-bleed 2dp
+    # gap. In the grouped idiom the GAP is the separator and a segment
+    # carries no internal hairline. Read out of the table's own content
+    # lambda, because the file's four other HorizontalDividers are menu
+    # separators and section rules and are none of this rule's business —
+    # as are GTK's, WinUI's and iOS's, which are native grammar and stay.
+    content = None
+    at = text.find(CONTENT_HEAD)
+    stop = text.find(CONTENT_END, at + len(CONTENT_HEAD)) if at >= 0 else -1
+    if at < 0 or stop < 0:
+        out.append(
+            f"check-table-card: {COMPOSE}: the table's `{CONTENT_HEAD.strip()}` "
+            "lambda is not where this gate reads it — every clause about what "
+            "the table emits would pass by reading nothing"
+        )
+    else:
+        content = text[at:stop]
+        if "HorizontalDivider" in content:
+            out.append(
+                f"check-table-card: {COMPOSE}: the table's content lambda names "
+                "`HorizontalDivider` — a segment carries no internal hairline, "
+                "and one under the header draws a second separator beside the "
+                "2dp gap that already is one (the capture of 2026-08-26: two "
+                "rules nine pixels apart, of different widths, with orphaned "
+                "header fill between them)"
+            )
+    calls = text.count("KayaTableSegment(KAYA_TABLE_")
+    if calls != 2:
+        out.append(
+            f"check-table-card: {COMPOSE}: `KayaTableSegment(KAYA_TABLE_...)` "
+            f"appears {calls} time(s), wanted exactly 2 — the header segment and "
+            "the body segment, and no third: every index in the measure block "
+            "(the cells' sublist, the bottom spacer, both segments) counts from "
+            "the END of the content lambda, so one more child silently re-points "
+            "every one of them"
+        )
+    if CONTENT_TAIL not in text:
+        out.append(
+            f"check-table-card: {COMPOSE}: the two segment fills are not the last "
+            "two children of KayaTableSurface's content lambda — the measure block "
+            "reads them at size-2 and size-1 and the cells at size-3, so a segment "
+            "emitted anywhere else measures a row as a card and a card as a row"
+        )
+    at = text.find(PLACE_HEAD)
+    if at < 0:
+        out.append(
+            f"check-table-card: {COMPOSE}: no `{PLACE_HEAD.strip()}` — the gate "
+            "cannot read the placement ORDER, which is the whole of this clause"
+        )
+    else:
+        stop = text.find("\n        }\n    }\n}", at)
+        order = re.findall(r"(\w+)\.place\(", text[at:stop if stop > 0 else len(text)])
+        if order[:2] != ["headerSeg", "bodySeg"]:
+            out.append(
+                f"check-table-card: {COMPOSE}: the table places {order[:2]} first, "
+                "wanted ['headerSeg', 'bodySeg'] — placement order is draw order, "
+                "so a segment placed after the rows paints OVER them and the lane "
+                "sees a blank table (WinUI's appended-instead-of-inserted card, in "
+                "this backend's spelling)"
+            )
+    return out
+
+
 def census(files):
     """The real predicate. Returns one sentence per finding, naming the
     clause rather than printing a column of counts."""
@@ -429,6 +643,7 @@ def census(files):
                     f"check-table-card: {path}: the {label} names `{word}` — {why}"
                 )
     out.extend(zones(files[SWIFTUI]))
+    out.extend(layers(files[COMPOSE]))
     return out
 
 
@@ -455,8 +670,8 @@ if offenders:
     raise SystemExit(1)
 print(
     f"check-table-card: the card is present, padded and flat in all four "
-    f"backends, iOS's on the CONTENT layer, and the mac unwrapped — "
-    f"{len(PRESENT)} clauses + {len(NAMED)} named interiors + "
+    f"backends, iOS's and Compose's on the CONTENT layer, and the mac "
+    f"unwrapped — {len(PRESENT)} clauses + {len(NAMED)} named interiors + "
     f"{len(BLOCKS)} flatness blocks + {len(ZONE)} layer/zone negatives"
 )
 
@@ -517,12 +732,20 @@ ELEVATE = (
      'BorderThickness=\\"1\\" ',
      'BorderThickness=\\"1\\" Shadow=\\"{ThemeResource CardShadow}\\" ',
      "Shadow"),
-    ("compose card modifiers", COMPOSE,
-     ".background(MaterialTheme.colorScheme.surfaceContainer, KAYA_TABLE_CARD_SHAPE)",
-     ".shadow(4.dp, KAYA_TABLE_CARD_SHAPE)\n"
-     "            .background(MaterialTheme.colorScheme.surfaceContainer, "
-     "KAYA_TABLE_CARD_SHAPE)",
+    ("compose segment fill", COMPOSE,
+     "Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))",
+     "Box(Modifier.shadow(4.dp, shape)"
+     ".background(MaterialTheme.colorScheme.surfaceContainer, shape))",
      ".shadow("),
+    # THE BORDER COMING BACK is the regression this ruling exists to stop:
+    # the 1dp outlineVariant stroke of Compose's OutlinedCard, which is
+    # spec-legal and which no shipped Google phone surface draws around a
+    # list (material-research.md's fourth-ranked candidate, replaced).
+    ("compose segment fill", COMPOSE,
+     "Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))",
+     "Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape)"
+     ".border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape))",
+     ".border("),
     # iOS's is the same reach for a familiar card: the desktop family's
     # 1px stroke, on the one platform whose idiom refuses it.
     ("ios card modifiers", SWIFTUI,

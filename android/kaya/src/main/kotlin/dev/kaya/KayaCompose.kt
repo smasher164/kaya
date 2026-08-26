@@ -27,7 +27,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -7710,17 +7709,25 @@ private fun kayaTableHorizontalSelftest(): String? {
         "a table drawn INSIDE its viewport is not convicted of overflowing" to
             (issue(100f, 100f, 100f, 100f, 40f, 140f) ==
                 KayaTableHorizontalIssue.ContentLeftUnderfill),
+        // THE CARDED SCROLL CLIP YIELDS THE CELLS' OWN BOX: the segmented
+        // containers and their interior are CONTENT, so a 232dp clip with
+        // this card's 16dp interior is a 200dp box starting at x+16 — the
+        // frame every claim below is read in.
+        "the carded scroll clip yields the cells' own box" to
+            (kayaTableCellsBox(0f, 232f, 16f) == Pair(16f, 216f)),
+        "an uncarded clip is its own cells' box" to
+            (kayaTableCellsBox(0f, 232f, 0f) == Pair(0f, 232f)),
         // A PADDED CARD CONVICTS NOTHING (docs/deferred.md's table-card
         // entry). ONE physical table, read twice: a 232dp outer box, this
         // card's own 16dp interior per side, 200dp of content inside it.
-        // The chain reports the CONTENT box — Modifier.padding sits above
-        // the onGloballyPositioned that reads the viewport — so every
-        // number is that box's and the leading edge is 0.
+        // The reported viewport IS that content box — kayaTableCellsBox
+        // insets the clip — so every number is that box's and the leading
+        // edge is 0.
         "a padded card read in its own content box is silent" to
             (issue(200f, 200f, 200f, 200f, 0f, 200f) == null),
-        // The SAME table with the padding read one modifier LOWER: the
-        // track and the viewport are the outer box, the content is not,
-        // and 16dp of card interior convicts a correct table.
+        // The SAME table read at the CLIP instead of the cells' box: the
+        // track and the viewport are the segments' outer box, the content
+        // is not, and 16dp of card interior convicts a correct table.
         "a viewport read outside the card's padding convicts it" to
             (issue(200f, 200f, 232f, 232f, 16f, 216f) ==
                 KayaTableHorizontalIssue.TrackUnderfill),
@@ -7796,8 +7803,9 @@ internal class KayaTableWindow(private val node: KayaNode) {
 
     // What the LAYOUT wrote, for the report that follows it. Plain
     // fields: written during measure, read on the next main-looper hop.
-    /** Where the collection's row 0 sits inside the scrolled content:
-     *  header, gap, divider, gap. */
+    /** Where the collection's row 0 sits inside the scrolled content: the
+     *  header segment, the segment gap, and the body segment's own top
+     *  interior. */
     @Volatile var rowsTopPx = 0
     /** The band THIS LAYOUT drew, and the realized rows' tops (in rows
      *  space, the core's offset included) and extents — each row's
@@ -8011,18 +8019,61 @@ internal class KayaTableWindow(private val node: KayaNode) {
  * three viewports of them carry widgets. LazyColumn stays rejected (§7):
  * one observable mechanism, and the core owns the band.
  */
-/** The table card's corners, Material's 12 dp (TABLE CARD, ruled 2026-08-25). */
-private val KAYA_TABLE_CARD_SHAPE = RoundedCornerShape(12.dp)
+/**
+ * THE SEGMENTED GROUPED CONTAINER (docs/deferred.md's table-card entry;
+ * ruled 2026-08-25 after the Material research). Corners BY POSITION, and
+ * every number is androidx's own rather than a guess: a group's OUTER pair
+ * is `ListTokens.ContainerShape` = CornerLarge = 16 dp, the boundary
+ * between two segments keeps `ListItemShapes.shape` =
+ * ItemContainerExpressiveShape = CornerExtraSmall = 4 dp, and
+ * `ListItemDefaults.SegmentedGap` = 2 dp parts them.
+ *
+ * PLAIN MODIFIERS, NOT SegmentedListItem: compose-bom 2024.10.01 pins
+ * material3 1.3.1 and that API arrived in 1.5.0-alpha23
+ * (android/kaya/build.gradle.kts, tools/check-pins.sh).
+ */
+private val KAYA_TABLE_SEGMENT_OUTER = 16.dp
+private val KAYA_TABLE_SEGMENT_INNER = 4.dp
+private val KAYA_TABLE_SEGMENT_GAP = 2.dp
+private val KAYA_TABLE_HEADER_SEGMENT_SHAPE = RoundedCornerShape(
+    topStart = KAYA_TABLE_SEGMENT_OUTER,
+    topEnd = KAYA_TABLE_SEGMENT_OUTER,
+    bottomStart = KAYA_TABLE_SEGMENT_INNER,
+    bottomEnd = KAYA_TABLE_SEGMENT_INNER,
+)
+private val KAYA_TABLE_BODY_SEGMENT_SHAPE = RoundedCornerShape(
+    topStart = KAYA_TABLE_SEGMENT_INNER,
+    topEnd = KAYA_TABLE_SEGMENT_INNER,
+    bottomStart = KAYA_TABLE_SEGMENT_OUTER,
+    bottomEnd = KAYA_TABLE_SEGMENT_OUTER,
+)
 
 /**
- * The card's interior. 16 dp horizontal is Material's own content inset —
- * the number M3 gives a card's and a list item's contents — and 8 dp
- * vertical is the apron: enough that the last row does not sit on the
- * stroke, and NOT a row metric, since it is the card's padding and no
- * row's.
+ * ONE SEGMENT'S interior. 16 dp horizontal is Material's own content
+ * inset; 8 dp vertical is the apron, and NOT a row metric — it is the
+ * segment's padding and no row's.
  */
 private val KAYA_TABLE_CARD_PAD_X = 16.dp
 private val KAYA_TABLE_CARD_PAD_Y = 8.dp
+
+/**
+ * ONE SEGMENT'S FILL: filled, borderless, elevation 0. The grouped idiom
+ * draws no stroke anywhere — tools/check-table-card.sh refuses one here.
+ */
+@Composable
+private fun KayaTableSegment(shape: RoundedCornerShape) {
+    Box(Modifier.background(MaterialTheme.colorScheme.surfaceContainer, shape))
+}
+
+/**
+ * THE CELLS' BOX INSIDE THE SCROLL CLIP (swift/KayaSwiftUI.swift's
+ * `kayaTableCellsBox` in this backend's spelling): the segments and their
+ * interior are CONTENT, so the clip is [interior] wider on each side than
+ * the box the cells lay out in. Reported raw, every table starts
+ * [interior] inside its own viewport at expect_column_edges.
+ */
+internal fun kayaTableCellsBox(clipLeft: Float, clipWidth: Float, interior: Float):
+    Pair<Float, Float> = Pair(clipLeft + interior, clipLeft + clipWidth - interior)
 
 @Composable
 private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
@@ -8086,7 +8137,6 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                         .edge("${geometryGeneration}h/$index"),
                 )
             }
-            HorizontalDivider()
             Spacer(Modifier)
             rows.forEach { row ->
                 row.children.forEachIndexed { index, cell ->
@@ -8094,26 +8144,26 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 }
             }
             Spacer(Modifier)
+            // LAST IN THE CONTENT AND FIRST IN THE PLACEMENT: placement
+            // order is draw order, so these paint BEHIND every row, and
+            // every index in the measure block below counts from the end.
+            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)
+            KayaTableSegment(KAYA_TABLE_BODY_SEGMENT_SHAPE)
         },
         modifier = modifier
-            // THE CARD (docs/deferred.md's table-card entry; ruled
-            // 2026-08-25): M3's flat card — surface container, a 1 dp
-            // outline, the radius, and no elevation, because both of
-            // these are DRAW modifiers and neither measures.
-            .background(MaterialTheme.colorScheme.surfaceContainer, KAYA_TABLE_CARD_SHAPE)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, KAYA_TABLE_CARD_SHAPE)
-            // THE CARD'S INTERIOR, AND ITS PLACE IN THIS CHAIN IS THE
-            // WHOLE POINT: it sits under the two draw modifiers, so the
-            // card paints the OUTER box, and ABOVE onGloballyPositioned,
-            // so the viewport this Layout reports is the padded content
-            // box the cells actually start at. Move it below that read
-            // and every cell edge lands `pad` inside a viewport that did
-            // not move — the leading-edge underfill, on every table.
-            .padding(horizontal = KAYA_TABLE_CARD_PAD_X, vertical = KAYA_TABLE_CARD_PAD_Y)
+            // NOTHING ON THIS CHAIN PAINTS OR PADS. The container is
+            // CONTENT (docs/deferred.md's table-card entry; ruled
+            // 2026-08-25): a fill here is the scroll VIEWPORT's, which
+            // runs to the bottom of the screen under a three-row table
+            // and cannot scroll with a tall one.
             .onGloballyPositioned {
-                val left = it.positionInWindow().x / density
+                val (left, right) = kayaTableCellsBox(
+                    it.positionInWindow().x / density,
+                    it.size.width / density,
+                    KAYA_TABLE_CARD_PAD_X.value,
+                )
                 node.tableViewportLeftX = left
-                node.tableViewportRightX = left + it.size.width / density
+                node.tableViewportRightX = right
                 node.tableViewportH = it.size.height / density
                 kayaContainerExtents[node.id] = it.size.height.toDouble()
                 kayaContainerCross[node.id] = it.size.width.toDouble()
@@ -8122,12 +8172,17 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             }
             .verticalScroll(node.scrollState),
     ) { measurables, constraints ->
-        // Children arrive in content order: cols headers, the divider,
-        // the top spacer, the realized band's cells row-major (the core
-        // held every row to the declared arity, so the % below cannot
-        // skew), then the bottom spacer.
+        // Children arrive in content order: cols headers, the top spacer,
+        // the realized band's cells row-major (the core held every row to
+        // the declared arity, so the % below cannot skew), the bottom
+        // spacer, then the two segment fills. NO HEADER RULE — the 2dp gap
+        // between the segments IS the separator in the grouped idiom
+        // (ruled 2026-08-26; tools/check-table-card.sh pins its absence).
+        val padX = KAYA_TABLE_CARD_PAD_X.roundToPx()
+        val padY = KAYA_TABLE_CARD_PAD_Y.roundToPx()
+        val gap = KAYA_TABLE_SEGMENT_GAP.roundToPx()
         val headers = measurables.take(cols).map { it.measure(Constraints()) }
-        val cells = measurables.subList(cols + 2, measurables.size - 1)
+        val cells = measurables.subList(cols + 1, measurables.size - 3)
             .map { it.measure(Constraints()) }
         val colWidth = IntArray(cols)
         headers.forEachIndexed { c, p -> colWidth[c] = maxOf(colWidth[c], p.width) }
@@ -8138,10 +8193,11 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         // FLOOR, and leftover track width is distributed across the
         // columns — the native macOS Table's resting look, stated as a
         // rule (docs/tables-plan.md decision 6; the span half of
-        // expect_column_edges holds it).
+        // expect_column_edges holds it). The leftover is measured in the
+        // SEGMENT'S INTERIOR, which is the box the cells lay out in.
         if (constraints.hasBoundedWidth) {
             val leftover =
-                constraints.maxWidth - colWidth.sum() - colGapPx * (cols - 1)
+                constraints.maxWidth - 2 * padX - colWidth.sum() - colGapPx * (cols - 1)
             if (leftover > 0) {
                 val per = leftover / cols
                 val rem = leftover % cols
@@ -8154,12 +8210,17 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             colX[c] = acc
             acc += colWidth[c] + if (c < cols - 1) colGapPx else 0
         }
-        val totalW = acc.coerceIn(constraints.minWidth, constraints.maxWidth)
+        val totalW = (acc + 2 * padX).coerceIn(constraints.minWidth, constraints.maxWidth)
+        val innerW = (totalW - 2 * padX).coerceAtLeast(0)
+        // THE CARD'S OWN SPAN COMES OFF THE TRACK (gtk.rs's `css_inset_span`
+        // and swift's `kayaTableContentTrack` in this backend's spelling):
+        // the segments span the outer box and the cells the interior, so
+        // every number here is the interior's — a raw track convicts every
+        // carded table of a 32dp underfill it does not have.
         node.tableTrackW =
-            if (constraints.hasBoundedWidth) constraints.maxWidth / density else -1f
-        node.tableDrawnW = totalW / density
+            if (constraints.hasBoundedWidth) (constraints.maxWidth - 2 * padX) / density else -1f
+        node.tableDrawnW = innerW / density
         node.tableContentW = acc / density
-        val divider = measurables[cols].measure(Constraints(minWidth = totalW, maxWidth = totalW))
         val headerH = headers.maxOfOrNull { it.height } ?: 0
         // A ROW'S EXTENT IS ITS TOP-TO-TOP REPEAT DISTANCE, spacing
         // included (§2.1): a sum of these IS where the next row starts,
@@ -8175,13 +8236,26 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val tail = if (rowExtents.isEmpty()) 0 else rowGapPx
         val spacers = kayaWindowSpacers(offsetPx, extentPx, bandH, tail)
         val topH = spacers.first
-        val top = measurables[cols + 1].measure(Constraints.fixed(totalW, spacers.first))
-        val bottom = measurables[measurables.size - 1]
+        val top = measurables[cols].measure(Constraints.fixed(totalW, spacers.first))
+        val bottom = measurables[measurables.size - 3]
             .measure(Constraints.fixed(totalW, spacers.second))
-        val rowsTop = headerH + rowGapPx + divider.height + rowGapPx
-        val contentH = rowsTop + topH + bandH - tail + spacers.second
+        // TWO SEGMENTS: the header row is its own container, then the gap,
+        // then ONE container for every body row. The interior is inside
+        // each, which is the whole of why the reported viewport is the
+        // cells' box and not this clip.
+        val headerSegH = padY + headerH + padY
+        val bodyTop = headerSegH + gap
+        val rowsTop = bodyTop + padY
+        val contentH = rowsTop + topH + bandH - tail + spacers.second + padY
         val totalH = contentH.coerceIn(constraints.minHeight, constraints.maxHeight)
         node.tableContentH = contentH / density
+        // SIZED TO THE WHOLE EXTENT, spacers included: a short table's
+        // container ends at its last row and a tall one's scrolls with the
+        // rows, ONE rounded rectangle each rather than one per band.
+        val headerSeg = measurables[measurables.size - 2]
+            .measure(Constraints.fixed(totalW, headerSegH))
+        val bodySeg = measurables[measurables.size - 1]
+            .measure(Constraints.fixed(totalW, (contentH - bodyTop).coerceAtLeast(0)))
         val tops = IntArray(rowExtents.size)
         var y = topH
         for (r in rowExtents.indices) {
@@ -8194,11 +8268,12 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.rowTops = tops
         window.schedule()
         layout(totalW, totalH) {
-            headers.forEachIndexed { c, p -> p.place(colX[c], 0) }
-            divider.place(0, headerH + rowGapPx)
+            headerSeg.place(0, 0)
+            bodySeg.place(0, bodyTop)
+            headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }
             top.place(0, rowsTop)
             cells.chunked(cols).forEachIndexed { r, row ->
-                row.forEachIndexed { c, p -> p.place(colX[c], rowsTop + tops[r]) }
+                row.forEachIndexed { c, p -> p.place(padX + colX[c], rowsTop + tops[r]) }
             }
             bottom.place(0, rowsTop + topH + bandH - tail)
         }
