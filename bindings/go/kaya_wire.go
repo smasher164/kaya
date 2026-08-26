@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x1c6b68dc2656ea21
+	SpecHash uint64 = 0x2f62f356091de5b6
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -40,6 +40,28 @@ const (
 	KindRadio = 12
 	KindGrid = 13
 	KindTextarea = 14
+	KindCanvas = 15
+	DrawOpMoveTo = 1
+	DrawOpLineTo = 2
+	DrawOpClose = 3
+	DrawOpStroke = 4
+	DrawOpFill = 5
+	DrawOpFont = 6
+	DrawOpText = 7
+	PaintSeries = 1
+	PaintSeriesFill = 2
+	PaintGrid = 3
+	PaintAxis = 4
+	PaintGround = 5
+	FillRuleNonzero = 0
+	FillRuleEvenOdd = 1
+	TextAlignStart = 0
+	TextAlignMiddle = 1
+	TextAlignEnd = 2
+	TextBaselineAlphabetic = 0
+	TextBaselineMiddle = 1
+	TextBaselineTop = 2
+	TextBaselineBottom = 3
 	PropText = 1
 	PropChecked = 2
 	PropValue = 3
@@ -182,6 +204,7 @@ const (
 	txSetBrandTypeface = 43
 	txSetAppIdentity = 44
 	txSetColumnHeaders = 45
+	txSetDrawing = 46
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -217,6 +240,7 @@ const (
 	applySetTypeface = 33
 	applySetAppIdentity = 34
 	applySetColumnHeaders = 35
+	applySetDrawing = 36
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -716,6 +740,18 @@ func TxSetColumnHeaders(widgetId uint64, sorted uint32, direction uint32, count 
 	b = binary.LittleEndian.AppendUint32(b, count)
 	b = binary.LittleEndian.AppendUint32(b, pathLen)
 	b = encodeValues(b, titles)
+	return endRecord(b)
+}
+
+// TxSetDrawing: DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws.
+func TxSetDrawing(widgetId uint64, vbW any, vbH any, count uint32, pathLen uint32, ops []any) []byte {
+	b := beginRecord(txSetDrawing)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = encodeValue(b, vbW)
+	b = encodeValue(b, vbH)
+	b = binary.LittleEndian.AppendUint32(b, count)
+	b = binary.LittleEndian.AppendUint32(b, pathLen)
+	b = encodeValues(b, ops)
 	return endRecord(b)
 }
 

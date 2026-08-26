@@ -881,7 +881,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x1c6b68dc2656ea21uL
+    private const val SPEC_HASH: ULong = 0x2f62f356091de5b6uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -917,6 +917,16 @@ object KayaCompose {
      */
     private const val APPLY_SET_APP_IDENTITY = 34
     private const val APPLY_SET_COLUMN_HEADERS = 35
+
+    /**
+     * The raster a canvas's declaration produced (docs/canvas-plan.md
+     * §1.1). NO ARM DECODES IT: the blit is the breadth phase (§8, §11
+     * phase 3) and this backend still declares the canvas depth stub, so
+     * the record cannot reach the pump. The constant stands so a drifted
+     * number fails tools/check-verbs.sh rather than a lane; it is named
+     * in [CANVAS_VOCABULARY].
+     */
+    private const val APPLY_SET_DRAWING = 36
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -1054,6 +1064,7 @@ object KayaCompose {
     const val KIND_RADIO = 12
     const val KIND_GRID = 13
     const val KIND_TEXTAREA = 14
+    const val KIND_CANVAS = 15
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -1174,6 +1185,49 @@ object KayaCompose {
     const val ALIGN_END = 2L
     const val ALIGN_STRETCH = 3L
     const val ALIGN_BASELINE = 4L
+
+    // The five canvas enums (spec enums; wire.rs's DRAW_OPS, PAINTS,
+    // FILL_RULES, TEXT_ALIGNS, TEXT_BASELINES). Long, like the role and
+    // symbol values: they ride the op stream as i64.
+    private const val DRAW_MOVE_TO = 1L
+    private const val DRAW_LINE_TO = 2L
+    private const val DRAW_CLOSE = 3L
+    private const val DRAW_STROKE = 4L
+    private const val DRAW_FILL = 5L
+    private const val DRAW_FONT = 6L
+    private const val DRAW_TEXT = 7L
+    private const val PAINT_SERIES = 1L
+    private const val PAINT_SERIES_FILL = 2L
+    private const val PAINT_GRID = 3L
+    private const val PAINT_AXIS = 4L
+    private const val PAINT_GROUND = 5L
+    private const val FILL_NONZERO = 0L
+    private const val FILL_EVEN_ODD = 1L
+    private const val TEXT_ALIGN_START = 0L
+    private const val TEXT_ALIGN_MIDDLE = 1L
+    private const val TEXT_ALIGN_END = 2L
+    private const val TEXT_BASELINE_ALPHABETIC = 0L
+    private const val TEXT_BASELINE_MIDDLE = 1L
+    private const val TEXT_BASELINE_TOP = 2L
+    private const val TEXT_BASELINE_BOTTOM = 3L
+
+    /**
+     * THE CANVAS WIRE VOCABULARY THIS BACKEND DOES NOT READ: the core
+     * rasterizes and a backend blits (docs/canvas-plan.md §1.1), so no op,
+     * paint, rule, align or baseline is interpreted here. The copies exist
+     * so a drifted number fails a gate rather than a lane, and naming them
+     * once here is what keeps check-detekt's unused-private family off
+     * them. The KayaSwiftUI sibling is `kayaCanvasVocabulary`.
+     */
+    val CANVAS_VOCABULARY: List<Long> = listOf(
+        APPLY_SET_DRAWING.toLong(),
+        DRAW_MOVE_TO, DRAW_LINE_TO, DRAW_CLOSE, DRAW_STROKE, DRAW_FILL, DRAW_FONT, DRAW_TEXT,
+        PAINT_SERIES, PAINT_SERIES_FILL, PAINT_GRID, PAINT_AXIS, PAINT_GROUND,
+        FILL_NONZERO, FILL_EVEN_ODD,
+        TEXT_ALIGN_START, TEXT_ALIGN_MIDDLE, TEXT_ALIGN_END,
+        TEXT_BASELINE_ALPHABETIC, TEXT_BASELINE_MIDDLE, TEXT_BASELINE_TOP,
+        TEXT_BASELINE_BOTTOM,
+    )
     private const val VALUE_BOOL = 1
     private const val VALUE_I64 = 2
     private const val VALUE_F64 = 3
@@ -6285,6 +6339,12 @@ object KayaCompose {
                             failures.add("app icon $got, wanted $want")
                         }
                     }
+                    // The three canvas reads (docs/canvas-plan.md §7.1,
+                    // §7.2). The blit is the breadth phase, so all three
+                    // refuse where check-stubs and check-steps can see it.
+                    "expect_drawing_hash" -> depthStub("canvas")
+                    "expect_drawing" -> depthStub("canvas")
+                    "expect_ink" -> depthStub("canvas")
                     "expect_window_size" -> {
                         // The surface's REAL extent against the advisory
                         // request. Android never honors a size request,
@@ -7114,14 +7174,14 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// No `depthStub` helper lives here: this backend has no depth stub,
-// and check-detekt's UnusedPrivateMember would report an unused
-// one. The next depth slice writes it back in EXACTLY this spelling
-// — `depthStub("<scene>")`, which is what check-stubs and
-// check-steps read, never a sentence of its own
-// (tools/lib/hand-rolled-stubs.py fails a hand-rolled refusal) —
-// and buys its silence with an OPEN entry in docs/deferred.md
-// (tools/lib/stub-ledger.py).
+// A depth stub is a CALL, never a sentence — tools/check-stubs.sh
+// reads it, and its silence is bought by an OPEN entry in
+// docs/deferred.md (tools/lib/stub-ledger.py).
+private fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on android — " +
+            "it is a depth slice; see CLAUDE.md's sequencing",
+    )
 
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
@@ -9004,6 +9064,13 @@ private fun KayaRenderCore(
         // second place for the echo guard to be got wrong.
         KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
+        KayaCompose.KIND_CANVAS -> {
+            // The ImageBitmap this arm will fill from the core's buffer is
+            // the breadth phase (docs/canvas-plan.md §8, §11 phase 3); it
+            // threads `a11y` the way KIND_IMAGE's does, a drawing being an
+            // image to the accessibility tree (§9).
+            depthStub("canvas")
+        }
     }
 }
 

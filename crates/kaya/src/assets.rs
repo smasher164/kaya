@@ -10,6 +10,34 @@ pub(crate) const ENV_VAR: &str = "KAYA_ASSET_DIR";
 
 const REPO_DEFAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../guests/assets");
 
+/// THE RESERVED NAMESPACE. An app asset whose name starts with this is
+/// refused by the same wall that refuses `..` and absolute paths
+/// (docs/canvas-plan.md §4.2): without it an app could ship a
+/// `kaya/default-font` of its own under the asset root and silently
+/// shadow the built-in, and the failure would be a font that changed on
+/// one platform.
+///
+/// NOT THE SAME THING as the `kaya/` prefix Android packages assets
+/// under INSIDE the apk, which the Kotlin reader strips before a name is
+/// resolved (docs/assets-plan.md A4). The two spellings look identical
+/// in a grep; the refusal below means the confusing case cannot arise.
+pub(crate) const RESERVED_PREFIX: &str = "kaya/";
+
+/// The face a canvas text op draws with when it names none. Answered
+/// from bytes EMBEDDED in libkaya, so a canvas can always draw text: on
+/// a lane whose asset root is missing, on a platform whose staging
+/// failed, in an app that ships no assets at all.
+pub(crate) const DEFAULT_FONT: &str = "kaya/default-font";
+
+/// The vendored Sora, compiled in. It rides tools/build-id.sh's
+/// artifact id, so a font swap that did not rebuild is a build-id
+/// refusal rather than a drawing that changed on one lane. The OFL
+/// permits embedding, and embedding is not modification.
+const DEFAULT_FONT_BYTES: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../guests/assets/fonts/sora-wght.ttf"
+));
+
 /// Where this process's asset root is, and which route said so — the
 /// failure sentence names the route, so it is carried rather than
 /// recomputed.
@@ -147,6 +175,13 @@ fn name_fault(name: &str) -> Option<(&'static str, String)> {
     if name.len() >= 2 && name.as_bytes()[1] == b':' {
         return Some(("absolute", name.to_owned()));
     }
+    // The reserved namespace, checked BEFORE the component walk so the
+    // sentence names the real problem. `read` answers the reserved names
+    // it knows before it gets here; anything else under the prefix is an
+    // app trying to shadow the built-ins.
+    if name.starts_with(RESERVED_PREFIX) {
+        return Some(("reserved", name.to_owned()));
+    }
     for part in name.split('/') {
         if part == ".." {
             return Some(("escape", name.to_owned()));
@@ -167,6 +202,9 @@ fn name_fault(name: &str) -> Option<(&'static str, String)> {
 /// platforms, line 2 names the resolved place and route, which no
 /// cross-platform expectation could hold equal.
 pub(crate) fn asset_why_not(name: &str) -> String {
+    if reserved(name).is_some() {
+        return String::new();
+    }
     if let Some((fault, shown)) = name_fault(name) {
         let rule = "an asset name is a relative path under the asset root, \
                     spelled with `/`, like \"fonts/sora-wght.ttf\"";
@@ -190,6 +228,14 @@ pub(crate) fn asset_why_not(name: &str) -> String {
                 return format!(
                     "kaya: asset(\"{shown}\") climbs out of the asset root with `..` — \
                      {rule}, and a name that can escape its root is a read of anything"
+                );
+            }
+            "reserved" => {
+                return format!(
+                    "kaya: asset(\"{shown}\") is in the reserved `{RESERVED_PREFIX}` \
+                     namespace — kaya answers those names itself (\"{DEFAULT_FONT}\" \
+                     is the canvas's built-in face), so an app package that carried \
+                     one would shadow a built-in on some platforms and not others"
                 );
             }
             _ => {
@@ -266,6 +312,9 @@ fn read_raw(place: &Place, name: &str) -> Result<Vec<u8>, Miss> {
 /// not compose prose. Wall 4: each call reads, no cache, no watch, no
 /// reload (docs/assets-plan.md A3).
 pub(crate) fn read(name: &str) -> Result<Vec<u8>, String> {
+    if let Some(bytes) = reserved(name) {
+        return Ok(bytes.to_vec());
+    }
     if name_fault(name).is_some() {
         return Err(asset_why_not(name));
     }
@@ -275,6 +324,25 @@ pub(crate) fn read(name: &str) -> Result<Vec<u8>, String> {
         // Empty and missing both route through the diagnostic.
         _ => Err(asset_why_not(name)),
     }
+}
+
+/// The bytes kaya answers a reserved name with, or None if the name is
+/// not one kaya knows. The whole reserved table, so the wall above and
+/// this answer cannot disagree.
+fn reserved(name: &str) -> Option<&'static [u8]> {
+    match name {
+        DEFAULT_FONT => Some(DEFAULT_FONT_BYTES),
+        _ => None,
+    }
+}
+
+/// A font asset's bytes, Arc'd so the shaper and the outline scaler
+/// share one buffer. `""` means the reserved default face
+/// (docs/canvas-plan.md §4.2) — a drawing that names no font still
+/// draws.
+pub(crate) fn font_bytes(name: &str) -> Result<std::sync::Arc<[u8]>, String> {
+    let name = if name.is_empty() { DEFAULT_FONT } else { name };
+    read(name).map(std::sync::Arc::from)
 }
 
 #[cfg(test)]
@@ -362,6 +430,38 @@ mod tests {
         assert!(read("/etc/passwd").is_err());
         assert!(read("fonts/nope.ttf").is_err());
         assert_eq!(read("fonts/nope.ttf").unwrap_err(), asset_why_not("fonts/nope.ttf"));
+    }
+
+    /// THE RESERVED NAMESPACE, both halves watched: kaya answers its own
+    /// name from embedded bytes, and an app package that spells anything
+    /// else under the prefix is refused with a sentence naming the
+    /// namespace (docs/canvas-plan.md §4.2).
+    #[test]
+    fn the_reserved_namespace_answers_kaya_and_refuses_an_app() {
+        let _serial = serially();
+        let font = read(DEFAULT_FONT).expect("the embedded default face");
+        assert_eq!(font.len(), DEFAULT_FONT_BYTES.len());
+        assert_eq!(asset_why_not(DEFAULT_FONT), "");
+        // The bytes are the vendored file's, so ONE font is the default
+        // and the typeface scene's blob-channel copy.
+        assert_eq!(font, read("fonts/sora-wght.ttf").unwrap());
+
+        // And with no asset root at all, which is half of what the
+        // embedding buys: a canvas can always draw text.
+        let nowhere = std::env::temp_dir().join(format!("kaya-no-assets-{}", std::process::id()));
+        // SAFETY: single-threaded test section under `serially()`.
+        unsafe { std::env::set_var(ENV_VAR, &nowhere) };
+        assert_eq!(read(DEFAULT_FONT).unwrap().len(), DEFAULT_FONT_BYTES.len());
+        unsafe { std::env::remove_var(ENV_VAR) };
+
+        for name in ["kaya/default-font.ttf", "kaya/anything", "kaya/nested/thing"] {
+            let e = read(name).expect_err("the reserved prefix is a wall");
+            println!("reserved refusal: {e}");
+            assert!(e.contains("reserved `kaya/` namespace"), "{e}");
+        }
+        // `font_bytes("")` is the unspecified case and means the
+        // reserved default.
+        assert_eq!(font_bytes("").unwrap().len(), DEFAULT_FONT_BYTES.len());
     }
 
     #[test]

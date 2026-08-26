@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x1c6b68dc2656ea21;
+    public const ulong SpecHash = 0x2f62f356091de5b6;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -38,6 +38,28 @@ static class KayaWire
     public const uint KindRadio = 12;
     public const uint KindGrid = 13;
     public const uint KindTextarea = 14;
+    public const uint KindCanvas = 15;
+    public const uint DrawOpMoveTo = 1;
+    public const uint DrawOpLineTo = 2;
+    public const uint DrawOpClose = 3;
+    public const uint DrawOpStroke = 4;
+    public const uint DrawOpFill = 5;
+    public const uint DrawOpFont = 6;
+    public const uint DrawOpText = 7;
+    public const uint PaintSeries = 1;
+    public const uint PaintSeriesFill = 2;
+    public const uint PaintGrid = 3;
+    public const uint PaintAxis = 4;
+    public const uint PaintGround = 5;
+    public const uint FillRuleNonzero = 0;
+    public const uint FillRuleEvenOdd = 1;
+    public const uint TextAlignStart = 0;
+    public const uint TextAlignMiddle = 1;
+    public const uint TextAlignEnd = 2;
+    public const uint TextBaselineAlphabetic = 0;
+    public const uint TextBaselineMiddle = 1;
+    public const uint TextBaselineTop = 2;
+    public const uint TextBaselineBottom = 3;
     public const uint PropText = 1;
     public const uint PropChecked = 2;
     public const uint PropValue = 3;
@@ -180,6 +202,7 @@ static class KayaWire
     public const ushort TxKindSetBrandTypeface = 43;
     public const ushort TxKindSetAppIdentity = 44;
     public const ushort TxKindSetColumnHeaders = 45;
+    public const ushort TxKindSetDrawing = 46;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -215,6 +238,7 @@ static class KayaWire
     public const ushort ApplyKindSetTypeface = 33;
     public const ushort ApplyKindSetAppIdentity = 34;
     public const ushort ApplyKindSetColumnHeaders = 35;
+    public const ushort ApplyKindSetDrawing = 36;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -752,6 +776,19 @@ static class KayaWire
         w.Write(pathLen);
         EncodeValues(w, titles);
         return Finish(stream, w, TxKindSetColumnHeaders);
+    }
+
+    /// DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws.
+    public static byte[] TxSetDrawing(ulong widgetId, object vbW, object vbH, uint count, uint pathLen, object[] ops)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        EncodeValue(w, vbW);
+        EncodeValue(w, vbH);
+        w.Write(count);
+        w.Write(pathLen);
+        EncodeValues(w, ops);
+        return Finish(stream, w, TxKindSetDrawing);
     }
 
     /// set_property with a constant text value.

@@ -7,6 +7,10 @@ mod app;
 // compiles on all five targets and every one can be handed a name.
 mod assets;
 mod brand;
+// The canvas raster (docs/canvas-plan.md). Ungated for assets' reason:
+// the core draws once and every platform blits, so every target compiles
+// the rasterizer.
+mod canvas;
 // The nounwind boundaries' one report path (docs/deferred.md, "A GUARD
 // THAT ABORTS THE PROCESS IS THE WRONG SHAPE"). Ungated for the reason
 // assets is: every target has frames that cannot unwind.
@@ -73,6 +77,9 @@ pub use app::{
     CatalogHome, MenuRole, Platform, Role, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx, ValueKind,
     props,
 };
+
+/// The canvas surface (docs/canvas-plan.md §2.2).
+pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
 
 /// The type's own shape is the schema: an enum derives the element sum,
 /// a struct the one-variant case.

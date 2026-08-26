@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x1c6b68dc2656ea21ULL
+#define KAYA_SPEC_HASH 0x2f62f356091de5b6ULL
 
 
 /* Create a signal holding `initial`. */
@@ -540,6 +540,18 @@ static inline void kaya_tx_set_column_headers(KayaTx *tx, uint64_t widget_id, ui
     kaya_wire_u32(tx, count);
     kaya_wire_u32(tx, path_len);
     kaya_wire_values(tx, titles, titles_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws. */
+static inline void kaya_tx_set_drawing(KayaTx *tx, uint64_t widget_id, KayaVal vb_w, KayaVal vb_h, uint32_t count, uint32_t path_len, const KayaVal *ops, uint32_t ops_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_DRAWING);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_value(tx, vb_w);
+    kaya_wire_value(tx, vb_h);
+    kaya_wire_u32(tx, count);
+    kaya_wire_u32(tx, path_len);
+    kaya_wire_values(tx, ops, ops_len);
     kaya_wire_end(tx, kaya_at);
 }
 

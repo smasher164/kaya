@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x1c6b68dc2656ea21L
+let spec_hash = 0x2f62f356091de5b6L
 
 let value_bool = 1
 let value_i64 = 2
@@ -41,6 +41,28 @@ let kind_select = 11
 let kind_radio = 12
 let kind_grid = 13
 let kind_textarea = 14
+let kind_canvas = 15
+let draw_op_move_to = 1
+let draw_op_line_to = 2
+let draw_op_close = 3
+let draw_op_stroke = 4
+let draw_op_fill = 5
+let draw_op_font = 6
+let draw_op_text = 7
+let paint_series = 1
+let paint_series_fill = 2
+let paint_grid = 3
+let paint_axis = 4
+let paint_ground = 5
+let fill_rule_nonzero = 0
+let fill_rule_even_odd = 1
+let text_align_start = 0
+let text_align_middle = 1
+let text_align_end = 2
+let text_baseline_alphabetic = 0
+let text_baseline_middle = 1
+let text_baseline_top = 2
+let text_baseline_bottom = 3
 let prop_text = 1
 let prop_checked = 2
 let prop_value = 3
@@ -183,6 +205,7 @@ let tx_kind_set_brand_accent = 42
 let tx_kind_set_brand_typeface = 43
 let tx_kind_set_app_identity = 44
 let tx_kind_set_column_headers = 45
+let tx_kind_set_drawing = 46
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -218,6 +241,7 @@ let apply_kind_set_brand = 32
 let apply_kind_set_typeface = 33
 let apply_kind_set_app_identity = 34
 let apply_kind_set_column_headers = 35
+let apply_kind_set_drawing = 36
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -602,6 +626,16 @@ let tx_set_column_headers widget_id sorted direction count path_len titles =
       Buffer.add_int32_le b (Int32.of_int count);
       Buffer.add_int32_le b (Int32.of_int path_len);
       encode_values b titles)
+
+(* DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws. *)
+let tx_set_drawing widget_id vb_w vb_h count path_len ops =
+  finish tx_kind_set_drawing (fun b ->
+      Buffer.add_int64_le b widget_id;
+      encode_value b vb_w;
+      encode_value b vb_h;
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b (Int32.of_int path_len);
+      encode_values b ops)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =

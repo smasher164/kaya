@@ -249,6 +249,10 @@ const _: () = assert!(KAYA_TX_SET_APP_IDENTITY == wire::TX_SET_APP_IDENTITY);
 /// plus the sort indicator, one atomic declaration (docs/tables-plan.md).
 pub const KAYA_TX_SET_COLUMN_HEADERS: u16 = 45;
 const _: () = assert!(KAYA_TX_SET_COLUMN_HEADERS == wire::TX_SET_COLUMN_HEADERS);
+/// The whole drawing on a canvas, one atomic declaration
+/// (docs/canvas-plan.md §3.1).
+pub const KAYA_TX_SET_DRAWING: u16 = 46;
+const _: () = assert!(KAYA_TX_SET_DRAWING == wire::TX_SET_DRAWING);
 /// `sorted`'s no-column sentinel, and `direction`'s two values.
 pub const KAYA_SORT_NONE: u32 = u32::MAX;
 pub const KAYA_SORT_ASC: u32 = 0;
@@ -456,6 +460,10 @@ const _: () = assert!(KAYA_APPLY_SET_APP_IDENTITY == wire::APPLY_SET_APP_IDENTIT
 /// backend hands the tag to kaya_emit_sort_requested verbatim.
 pub const KAYA_APPLY_SET_COLUMN_HEADERS: u16 = 35;
 const _: () = assert!(KAYA_APPLY_SET_COLUMN_HEADERS == wire::APPLY_SET_COLUMN_HEADERS);
+/// The RASTER a canvas's declaration produced: premultiplied RGBA8
+/// device pixels the backend blits (docs/canvas-plan.md §1.1).
+pub const KAYA_APPLY_SET_DRAWING: u16 = 36;
+const _: () = assert!(KAYA_APPLY_SET_DRAWING == wire::APPLY_SET_DRAWING);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -525,6 +533,7 @@ pub const KAYA_KIND_SELECT: u32 = 11;
 pub const KAYA_KIND_RADIO: u32 = 12;
 pub const KAYA_KIND_GRID: u32 = 13;
 pub const KAYA_KIND_TEXTAREA: u32 = 14;
+pub const KAYA_KIND_CANVAS: u32 = 15;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -540,6 +549,7 @@ const _: () = assert!(
         && KAYA_KIND_RADIO == wire::KIND_RADIO
         && KAYA_KIND_GRID == wire::KIND_GRID
         && KAYA_KIND_TEXTAREA == wire::KIND_TEXTAREA
+        && KAYA_KIND_CANVAS == wire::KIND_CANVAS
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md). KIND_PROGRESS shipped to every generated wire
@@ -559,7 +569,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 14,
+        kinds == 15,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -810,6 +820,55 @@ const _: () = assert!(
         && KAYA_ALIGN_END == wire::ALIGN_END
         && KAYA_ALIGN_STRETCH == wire::ALIGN_STRETCH
         && KAYA_ALIGN_BASELINE == wire::ALIGN_BASELINE
+);
+
+/// THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4), for the C
+/// floor, which writes the op stream out as the array it is. All five
+/// ride the wire as I64 inside the op stream, so they are exported at
+/// that width rather than as u32.
+pub const KAYA_DRAW_MOVE_TO: i64 = 1;
+pub const KAYA_DRAW_LINE_TO: i64 = 2;
+pub const KAYA_DRAW_CLOSE: i64 = 3;
+pub const KAYA_DRAW_STROKE: i64 = 4;
+pub const KAYA_DRAW_FILL: i64 = 5;
+pub const KAYA_DRAW_FONT: i64 = 6;
+pub const KAYA_DRAW_TEXT: i64 = 7;
+pub const KAYA_PAINT_SERIES: i64 = 1;
+pub const KAYA_PAINT_SERIES_FILL: i64 = 2;
+pub const KAYA_PAINT_GRID: i64 = 3;
+pub const KAYA_PAINT_AXIS: i64 = 4;
+pub const KAYA_PAINT_GROUND: i64 = 5;
+pub const KAYA_FILL_NONZERO: i64 = 0;
+pub const KAYA_FILL_EVEN_ODD: i64 = 1;
+pub const KAYA_TEXT_ALIGN_START: i64 = 0;
+pub const KAYA_TEXT_ALIGN_MIDDLE: i64 = 1;
+pub const KAYA_TEXT_ALIGN_END: i64 = 2;
+pub const KAYA_TEXT_BASELINE_ALPHABETIC: i64 = 0;
+pub const KAYA_TEXT_BASELINE_MIDDLE: i64 = 1;
+pub const KAYA_TEXT_BASELINE_TOP: i64 = 2;
+pub const KAYA_TEXT_BASELINE_BOTTOM: i64 = 3;
+const _: () = assert!(
+    KAYA_DRAW_MOVE_TO == wire::DRAW_MOVE_TO
+        && KAYA_DRAW_LINE_TO == wire::DRAW_LINE_TO
+        && KAYA_DRAW_CLOSE == wire::DRAW_CLOSE
+        && KAYA_DRAW_STROKE == wire::DRAW_STROKE
+        && KAYA_DRAW_FILL == wire::DRAW_FILL
+        && KAYA_DRAW_FONT == wire::DRAW_FONT
+        && KAYA_DRAW_TEXT == wire::DRAW_TEXT
+        && KAYA_PAINT_SERIES == wire::PAINT_SERIES
+        && KAYA_PAINT_SERIES_FILL == wire::PAINT_SERIES_FILL
+        && KAYA_PAINT_GRID == wire::PAINT_GRID
+        && KAYA_PAINT_AXIS == wire::PAINT_AXIS
+        && KAYA_PAINT_GROUND == wire::PAINT_GROUND
+        && KAYA_FILL_NONZERO == wire::FILL_NONZERO
+        && KAYA_FILL_EVEN_ODD == wire::FILL_EVEN_ODD
+        && KAYA_TEXT_ALIGN_START == wire::TEXT_ALIGN_START
+        && KAYA_TEXT_ALIGN_MIDDLE == wire::TEXT_ALIGN_MIDDLE
+        && KAYA_TEXT_ALIGN_END == wire::TEXT_ALIGN_END
+        && KAYA_TEXT_BASELINE_ALPHABETIC == wire::TEXT_BASELINE_ALPHABETIC
+        && KAYA_TEXT_BASELINE_MIDDLE == wire::TEXT_BASELINE_MIDDLE
+        && KAYA_TEXT_BASELINE_TOP == wire::TEXT_BASELINE_TOP
+        && KAYA_TEXT_BASELINE_BOTTOM == wire::TEXT_BASELINE_BOTTOM
 );
 
 /// The role enum's values (spec enum "role"): semantic emphasis, a
@@ -3078,6 +3137,61 @@ pub extern "C" fn kaya_row_extent(for_target: u64, index: u64) -> f64 {
     })
 }
 
+/// THE WINDOW'S SCALE AND APPEARANCE, reported by the backend; the core
+/// re-rasters every canvas at them (docs/canvas-plan.md §5, §6). That is
+/// the platforms' own rescale-then-re-render mechanism, not an
+/// invention: `backingScaleFactor` plus `windowDidChangeBackingProperties:`
+/// on macOS, `WM_DPICHANGED` on Windows, fractional-scale's
+/// `preferred_scale` on Wayland.
+///
+/// `scale` is the TRUE scale, never the rounded one — GTK is the backend
+/// that can hand back a fraction, and `gdk_surface_get_scale` is the
+/// double to read rather than `gtk_widget_get_scale_factor`'s integer.
+/// `dark` is the ONLY thing a platform contributes to a drawing: no
+/// platform colour reaches one.
+///
+/// A report that changes nothing emits nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
+    let mode = if dark { crate::canvas::Mode::Dark } else { crate::canvas::Mode::Light };
+    with_window_scene("reporting the window's scale and appearance", |scene| {
+        (scene.set_presentation(crate::canvas::Presentation { scale, mode }), ())
+    })
+}
+
+/// WHAT THE HARNESS READS BACK ABOUT ONE CANVAS: the CANONICAL raster's
+/// hash and the two legible facts, as one ASCII line
+/// `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (docs/canvas-plan.md §7.1, §7.2).
+///
+/// Canonical means scale 1.0 and the light palette, pinned HERE rather
+/// than read from the lane's display, which is what lets one frozen
+/// string hold on five platforms. It is a read of an ARTIFACT — the
+/// output of validation, the fold, shaping, font resolution, the palette
+/// and the rasterizer — never of the declaration, so it is not the
+/// forbidden shape where the scene agrees with itself.
+///
+/// Writes at most `cap` bytes to `out` and returns how many it wrote; 0
+/// means `widget` names no canvas that has been drawn. Never NUL
+/// terminates: the caller has the length.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_canvas_probe(widget: u64, out: *mut u8, cap: usize) -> usize {
+    let answer = with_window_scene("probing a canvas", |scene| {
+        (Vec::new(), scene.canvas_probe(crate::protocol::WidgetId(widget)))
+    });
+    let Some(answer) = answer else { return 0 };
+    let bytes = answer.as_bytes();
+    if out.is_null() || cap < bytes.len() {
+        return 0;
+    }
+    // SAFETY: the caller promises `cap` writable bytes and the length
+    // was just checked against it.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    bytes.len()
+}
+
 thread_local! {
     /// Where the batch handed out by the last `kaya_next_commands`
     /// lives. THREAD-LOCAL for HELD_OCCURRENCE's reason: the borrow's
@@ -3383,6 +3497,7 @@ mod tests {
             ("set_brand_typeface", KAYA_TX_SET_BRAND_TYPEFACE),
             ("set_app_identity", KAYA_TX_SET_APP_IDENTITY),
             ("set_column_headers", KAYA_TX_SET_COLUMN_HEADERS),
+            ("set_drawing", KAYA_TX_SET_DRAWING),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -3420,6 +3535,7 @@ mod tests {
             ("set_typeface", KAYA_APPLY_SET_TYPEFACE),
             ("set_app_identity", KAYA_APPLY_SET_APP_IDENTITY),
             ("set_column_headers", KAYA_APPLY_SET_COLUMN_HEADERS),
+            ("set_drawing", KAYA_APPLY_SET_DRAWING),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

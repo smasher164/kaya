@@ -5040,6 +5040,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Select => core.selects[resolve(t.index, core.selects.len())].clone().upcast(),
         K::Radio => core.radios[resolve(t.index, core.radios.len())].clone().upcast(),
         K::Grid => core.grids[resolve(t.index, core.grids.len())].clone().upcast(),
+        K::Canvas => crate::depth_stub("canvas"),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
         K::Entry | K::Textarea => {
@@ -6171,6 +6172,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
+                // The raw-pixel sibling of the arm above — a GdkMemoryTexture
+                // in a GtkPicture — is the breadth phase
+                // (docs/canvas-plan.md §8, §11 phase 3).
+                WidgetKind::Canvas => crate::depth_stub("canvas"),
             };
             {
                 // THE CONTROL: focus resolution picks the DEEPEST registered
@@ -6891,6 +6896,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // `selection_bounds()` normalizes; the marks keep the direction.
             buffer.select_range(&stop, &start);
         }
+        ApplyOp::SetDrawing { .. } => crate::depth_stub("canvas"),
         ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {
             // kaya's own header row over the For's stamped children
             // (docs/tables-plan.md decision 6). The whole bar is ONE
@@ -10299,6 +10305,7 @@ impl crate::harness::Stage for GtkStage {
                 K::Radio => core.radios.iter().map(|w| w.clone().upcast()).collect(),
                 K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
                 K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
+                K::Canvas => crate::depth_stub("canvas"),
             };
             find(widgets, &id)
         })
@@ -11279,6 +11286,16 @@ impl crate::harness::Stage for GtkStage {
         read_app_icon(&probe)
     }
 
+    /// The GdkMemoryTexture blit is the breadth phase (docs/canvas-plan.md
+    /// §8, §11 phase 3).
+    fn canvas_probe(&self, _target: crate::harness::Target) -> String {
+        crate::depth_stub("canvas")
+    }
+
+    fn canvas_ink(&self, _target: crate::harness::Target, _points: &str) -> String {
+        crate::depth_stub("canvas")
+    }
+
     fn inset(&self) -> String {
         Self::on_main(move |core| {
             // The shell's content, the root_fills rule one read over.
@@ -11617,6 +11634,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Scroll => nth!(core.scrolls),
         K::Row => nth!(core.rows),
         K::Column => nth!(core.columns),
+        K::Canvas => crate::depth_stub("canvas"),
     }
 }
 

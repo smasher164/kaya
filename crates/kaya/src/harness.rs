@@ -123,6 +123,9 @@ pub enum TargetKind {
     /// The multi-line entry: same set_text/read_text/focus verbs as
     /// the entry, its own registry.
     Textarea,
+    /// The drawing surface: the canvas verbs' target, and nothing
+    /// else's — a canvas has no text, no value and no activation.
+    Canvas,
 }
 
 /// The state an `expect_menu` step asserts, exactly as the steps
@@ -301,6 +304,29 @@ pub enum Step {
     /// centres — top-left, top-right, bottom-left, bottom-right — as
     /// `RRGGBB` in uppercase hex, `/`-joined.
     ExpectAppIcon(String),
+    /// THE PRIMARY CANVAS OBSERVABLE: the byte-hash of the canonical
+    /// raster (docs/canvas-plan.md §7.1). One frozen string on five
+    /// platforms, because every input to it is one thing — the op stream
+    /// (invariant 6 plus the viewbox), the font bytes (embedded in
+    /// libkaya), the shaper and rasterizer (one pinned CPU crate set),
+    /// the palette (kaya's own) and the scale (pinned by the verb).
+    ///
+    /// A HASH IS A TERRIBLE DIAGNOSTIC, so the failure text prints what
+    /// was MEASURED beside it — the op count and the ink bounds — and
+    /// never a guess about which op moved.
+    ExpectDrawingHash(Target, String),
+    /// The legible half: how many ops the core replayed and where the
+    /// ink landed, as `<ops>/<l>,<t>,<r>,<b>` in hundredths of the
+    /// canvas's own box (§7.2). Catches, legibly, what a hash cannot
+    /// say: nothing arrived, the transform is wrong, the y axis is
+    /// inverted, the drawing sits in a corner of its track.
+    ExpectDrawing(Target, String),
+    /// The colour at declared probe points on THE BACKEND'S OWN RENDERED
+    /// SURFACE (§7.2). The one check that fails when the blit dropped —
+    /// the hash reads the raster, not the window. Spelled
+    /// `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."`: the points in
+    /// hundredths of the box, then the colours they must sample.
+    ExpectInk(Target, String, String),
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
     /// contract, and the second blind spot shares cannot see: growers
@@ -651,7 +677,10 @@ impl Step {
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHighlights(t, _)
             | Step::ExpectSelection(t, _)
+            | Step::ExpectDrawingHash(t, _)
+            | Step::ExpectDrawing(t, _)
             | Step::Compose(t, _) => vec![t],
+            Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectWindow(t, _, _) => vec![t],
             Step::ExpectInset { target, .. } => target.iter_mut().collect(),
@@ -732,6 +761,9 @@ impl Step {
             Step::ExpectInset { .. } => true,
             Step::ExpectTypeface(_) => true,
             Step::ExpectAppIcon(_) => true,
+            Step::ExpectDrawingHash { .. } => true,
+            Step::ExpectDrawing { .. } => true,
+            Step::ExpectInk { .. } => true,
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectTitle { .. } => true,
@@ -939,6 +971,27 @@ pub trait Stage: Send + 'static {
     /// document a fallback chain (a Windows window with no icon of its
     /// own falls through to the window CLASS's, then the process's).
     fn app_icon(&self) -> String;
+    /// One canvas's CANONICAL raster read back out of the core:
+    /// `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (docs/canvas-plan.md §7.1).
+    /// Every backend answers by asking kaya, because that is the whole
+    /// point — five platforms' libkaya produced the same drawing, down
+    /// to antialiasing, and one frozen string says so.
+    ///
+    /// This proves NOTHING about whether anything reached the screen;
+    /// [`Stage::canvas_ink`] is what fails when the blit dropped.
+    fn canvas_probe(&self, target: Target) -> String;
+    /// The colour at declared normalized probe points, sampled from THE
+    /// BACKEND'S OWN RENDERED SURFACE — `RRGGBB/RRGGBB/...`, uppercase,
+    /// in the order the points were given as hundredths of the canvas's
+    /// box (`x,y` pairs). expect_app_icon's move, and its measured
+    /// discipline: sample CENTRES of flat regions, never boundaries, and
+    /// read through a 16-bit context with interpolation off so the round
+    /// to 8 bits happens exactly once.
+    ///
+    /// Its job is to prove the BLIT — that the buffer reached the
+    /// platform's image object, in the right pixel format, the right way
+    /// up, at the right size, unswizzled.
+    fn canvas_ink(&self, target: Target, points: &str) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -1486,6 +1539,39 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_typeface" => Step::ExpectTypeface(parse_string(rest)?),
             "expect_app_icon" => Step::ExpectAppIcon(parse_string(rest)?),
+            // THE THREE CANVAS VERBS (docs/canvas-plan.md §7). The hash
+            // is the primary observable; the other two are the legible
+            // backstops, and expect_ink is the only one that fails when
+            // the blit dropped.
+            "expect_drawing_hash" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_drawing_hash wants a target and a string: {line:?}")
+                })?;
+                Step::ExpectDrawingHash(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_drawing" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_drawing wants a target and a string: {line:?}")
+                })?;
+                Step::ExpectDrawing(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_ink" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_ink wants a target and a string: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                let spec = parse_string(text)?;
+                // `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."` — the
+                // points and the colours in ONE quoted argument, so the
+                // pairing is visible in the scene rather than split
+                // across two lists a reader has to zip by eye.
+                let (points, want) = spec.split_once(" = ").ok_or_else(|| {
+                    format!(
+                        "expect_ink wants \"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/...\", got {spec:?}"
+                    )
+                })?;
+                Step::ExpectInk(target, points.trim().to_owned(), want.trim().to_owned())
+            }
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -2048,6 +2134,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "radio" => TargetKind::Radio,
         "grid" => TargetKind::Grid,
         "textarea" => TargetKind::Textarea,
+        "canvas" => TargetKind::Canvas,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -3230,6 +3317,43 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("app icon {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectDrawingHash(target, want) => Some(poll(|| {
+                let got = stage.canvas_probe(*target);
+                // The probe carries the hash AND the two legible facts;
+                // this verb compares the hash and PRINTS THE REST on
+                // failure, because a hash on its own is a diagnostic
+                // that tells the next reader nothing (invariant 3, and
+                // §7.1's own discipline).
+                let (hash, measured) = got.split_once(' ').unwrap_or((got.as_str(), ""));
+                if hash == want {
+                    Ok(format!("drawing hash {want}"))
+                } else {
+                    Err(format!("drawing hash {hash} ({measured}), wanted {want}"))
+                }
+            })),
+            Step::ExpectDrawing(target, want) => Some(poll(|| {
+                let got = stage.canvas_probe(*target);
+                let measured = got.split_once(' ').map(|(_, m)| m).unwrap_or("").to_owned();
+                if measured == *want {
+                    Ok(format!("drawing {want}"))
+                } else {
+                    Err(format!("drawing {measured}, wanted {want}"))
+                }
+            })),
+            Step::ExpectInk(target, points, want) => Some(poll(|| {
+                let got = stage.canvas_ink(*target, points);
+                if got == *want {
+                    Ok(format!("ink {want}"))
+                } else {
+                    // WHAT THE SURFACE IS HOLDING IS THE DIAGNOSIS, the
+                    // app icon's rule one surface over: the declared
+                    // colours with two channels swapped say the blit
+                    // reached a BGRA object, all-transparent says
+                    // nothing arrived, and the colours in the wrong
+                    // order say it landed flipped.
+                    Err(format!("ink {got} at {points}, wanted {want}"))
+                }
+            })),
             Step::ExpectRootFills => Some(poll(|| {
                 // Empty means fills; anything else is the platform's
                 // own description of the hug, for the failure text
@@ -3779,6 +3903,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Radio => "radio",
         TargetKind::Grid => "grid",
         TargetKind::Textarea => "textarea",
+        TargetKind::Canvas => "canvas",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -4582,6 +4707,14 @@ mod tests {
         fn app_icon(&self) -> String {
             "<mock stage draws no app icon>".into()
         }
+        /// Same rule as the icon: a sentence, never a shape that could
+        /// accidentally equal a scene's expectation.
+        fn canvas_probe(&self, _target: Target) -> String {
+            "<mock stage rasterizes nothing>".into()
+        }
+        fn canvas_ink(&self, _target: Target, _points: &str) -> String {
+            "<mock stage blits nothing>".into()
+        }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -5047,6 +5180,14 @@ mod tests {
         fn app_icon(&self) -> String {
             "<mock stage draws no app icon>".into()
         }
+        /// Same rule as the icon: a sentence, never a shape that could
+        /// accidentally equal a scene's expectation.
+        fn canvas_probe(&self, _target: Target) -> String {
+            "<mock stage rasterizes nothing>".into()
+        }
+        fn canvas_ink(&self, _target: Target, _points: &str) -> String {
+            "<mock stage blits nothing>".into()
+        }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -5271,6 +5412,14 @@ mod tests {
         /// where a sentence cannot.
         fn app_icon(&self) -> String {
             "<mock stage draws no app icon>".into()
+        }
+        /// Same rule as the icon: a sentence, never a shape that could
+        /// accidentally equal a scene's expectation.
+        fn canvas_probe(&self, _target: Target) -> String {
+            "<mock stage rasterizes nothing>".into()
+        }
+        fn canvas_ink(&self, _target: Target, _points: &str) -> String {
+            "<mock stage blits nothing>".into()
         }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()

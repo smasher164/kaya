@@ -798,6 +798,15 @@ pub enum WidgetKind {
     /// Spacing/Align are container-of-many concerns. Virtualization is
     /// out (docs/deferred.md).
     Scroll,
+    /// A drawing surface whose content is a PIXEL BUFFER THE CORE
+    /// PRODUCED (docs/canvas-plan.md). The guest declares an op list
+    /// through `set_drawing`; the core validates, shapes, rasterizes and
+    /// emits ApplyOp::SetDrawing; every backend's arm is a raw-pixel
+    /// blit. Display-only, like Image: no occurrence, no tag, and
+    /// pointer events stay deferred. Its VIEWBOX is its natural size —
+    /// the one widget whose content size is app-decided, which is why
+    /// kaya has no width/height prop (§3.2).
+    Canvas,
 }
 
 impl WidgetKind {
@@ -818,7 +827,7 @@ impl WidgetKind {
     /// unconditional copy is a dead_code warning that trains the next
     /// reader to ignore dead_code warnings.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 14] = [
+    pub(crate) const ALL: [WidgetKind; 15] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -833,6 +842,7 @@ impl WidgetKind {
         WidgetKind::Radio,
         WidgetKind::Grid,
         WidgetKind::Textarea,
+        WidgetKind::Canvas,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -861,6 +871,7 @@ impl WidgetKind {
             | WidgetKind::Image
             | WidgetKind::Scroll
             | WidgetKind::Progress
+            | WidgetKind::Canvas
             | WidgetKind::Grid => false,
         }
     }
@@ -1456,6 +1467,20 @@ pub enum TxOp {
         path: Vec<Value>,
         titles: Vec<String>,
     },
+    /// DECLARE the whole drawing on a canvas, replacing the previous
+    /// declaration (docs/canvas-plan.md §3.1). `viewbox` is the
+    /// coordinate system the ops are written in AND the canvas's natural
+    /// size in points; `ops` is the flat opcode-then-operands run.
+    /// `widget` is a live canvas (path empty), or a canvas TEMPLATE NODE
+    /// — path empty declares every stamped copy's drawing, keys
+    /// outermost-first re-declare ONE copy's (set_column_headers'
+    /// addressing verbatim).
+    SetDrawing {
+        widget: WidgetId,
+        viewbox: (f64, f64),
+        path: Vec<Value>,
+        ops: Vec<Value>,
+    },
 }
 
 /// A transaction: applied atomically, in submission order, last write
@@ -1569,6 +1594,14 @@ pub enum ApplyOp {
     /// node id plus key path no backend can compute. Nothing here
     /// reorders (docs/tables-plan.md).
     SetColumnHeaders { id: WidgetId, sorted: u32, direction: u32, titles: Vec<String>, tag: Vec<u8> },
+    /// THE RASTER a canvas's declaration produced (docs/canvas-plan.md
+    /// §1.1): `width` x `height` PREMULTIPLIED RGBA8 device pixels at
+    /// `scale`, so the logical size is width/scale by height/scale. The
+    /// backend blits; it interprets no op and owns no drawing API.
+    /// Re-emitted on a new declaration, a scale report or an appearance
+    /// flip. A zero-sized buffer means declared-and-empty: the node
+    /// stays present with no picture (tools/check-empty-child.sh).
+    SetDrawing { id: WidgetId, width: u32, height: u32, scale: f64, pixels: Blob },
     /// The brand accent, DERIVED (docs/styling-plan.md D1): the seed —
     /// for Material, the one platform whose own derivation kaya defers
     /// to — plus per-appearance values no backend re-computes. Emitted

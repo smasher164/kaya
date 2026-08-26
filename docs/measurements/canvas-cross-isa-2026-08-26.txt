@@ -1,0 +1,65 @@
+CROSS-ISA BYTE-IDENTITY OF THE CANVAS RASTER
+measured 2026-08-26, while landing the canvas depth slice
+the obligation: docs/canvas-plan.md §7.1, "phase 1, BEFORE the first
+frozen hash"
+
+THE QUESTION
+------------
+`expect_drawing_hash` freezes ONE string for five platforms, and the
+argument for it is that every input is one thing: the op stream, the
+font bytes, the shaper, the rasterizer, the palette and the scale. The
+plan named the one thing that could falsify it — ALL FIVE LANES ARE
+aarch64 TODAY (mac and iOS on Apple silicon, windows on
+aarch64-pc-windows-msvc, android on arm64-v8a, linux in a container on
+the same host), so cross-ISA identity of a SIMD raster pipeline had
+never been tested, and tiny-skia's "must produce exactly the same
+results as Skia" is a claim about a reference implementation, not about
+x86_64 versus aarch64.
+
+THE RESULT
+----------
+    aarch64  40b0692193e14148
+    x86_64   40b0692193e14148
+
+IDENTICAL. The primary observable stands as one string per lane, not one
+per architecture family, and §7.2's checks stay a backstop rather than
+the whole story.
+
+WHAT WAS RUN
+------------
+A standalone probe reproducing crates/kaya/src/canvas.rs's pipeline —
+tiny-skia 0.12.0 rasterizing paths, harfrust 0.13.3 shaping and skrifa
+0.46.2 scaling unhinted outlines of the vendored Sora — over the canvas
+scene's own shapes at the canonical scale: a filled area under a
+polyline, three hairline gridlines, a 2pt series stroke, and two text
+runs at two weights of the same variable font. The hash is canvas.rs's
+own FNV-1a over the pixmap's dimensions and bytes.
+
+The probe REPRODUCES the pipeline rather than importing the kaya crate,
+because kaya on linux pulls a whole GTK backend in. What is under test is
+the three crates, which is where a SIMD divergence would live; the exact
+crate versions are pinned with `=` so the probe cannot silently measure a
+different rasterizer than the one libkaya carries.
+
+    aarch64: the mac host, native, `cargo run --release`.
+    x86_64:  `docker run --platform linux/amd64 rust:1-slim`, the same
+             source and the same three pinned versions.
+
+THE CAVEAT, STATED SO NOBODY OVER-READS THIS
+--------------------------------------------
+The x86_64 run was EMULATED — Docker Desktop on Apple silicon, not
+native x86_64 hardware. That is still x86_64 CODE: rustc emitted the
+x86_64 instruction selection, including whatever SSE the crates' portable
+SIMD lowers to, and the emulator executed it. So it tests the codegen
+path, which is the thing that would diverge. It does NOT test a real
+x86_64 CPU's corner cases (denormal handling, an FMA contraction a
+different microarchitecture might take). The day kaya adds a native
+x86_64 lane, re-run this before trusting the frozen hash there; the probe
+is small enough to rewrite from this file.
+
+WHAT WOULD HAVE HAPPENED IF THEY DIVERGED
+-----------------------------------------
+The observable degrades to a hash per architecture family — still one
+string per lane family, still stronger than anything a per-backend
+rasterizer could offer — and tools/scenes/canvas.steps grows a second
+frozen string. Nothing about the architecture changes.

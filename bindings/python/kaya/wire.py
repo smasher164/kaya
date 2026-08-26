@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x1c6b68dc2656ea21
+SPEC_HASH = 0x2f62f356091de5b6
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -36,6 +36,28 @@ KIND_SELECT = 11
 KIND_RADIO = 12
 KIND_GRID = 13
 KIND_TEXTAREA = 14
+KIND_CANVAS = 15
+DRAW_OP_MOVE_TO = 1
+DRAW_OP_LINE_TO = 2
+DRAW_OP_CLOSE = 3
+DRAW_OP_STROKE = 4
+DRAW_OP_FILL = 5
+DRAW_OP_FONT = 6
+DRAW_OP_TEXT = 7
+PAINT_SERIES = 1
+PAINT_SERIES_FILL = 2
+PAINT_GRID = 3
+PAINT_AXIS = 4
+PAINT_GROUND = 5
+FILL_RULE_NONZERO = 0
+FILL_RULE_EVEN_ODD = 1
+TEXT_ALIGN_START = 0
+TEXT_ALIGN_MIDDLE = 1
+TEXT_ALIGN_END = 2
+TEXT_BASELINE_ALPHABETIC = 0
+TEXT_BASELINE_MIDDLE = 1
+TEXT_BASELINE_TOP = 2
+TEXT_BASELINE_BOTTOM = 3
 PROP_TEXT = 1
 PROP_CHECKED = 2
 PROP_VALUE = 3
@@ -179,6 +201,7 @@ TX_SET_BRAND_ACCENT = 42
 TX_SET_BRAND_TYPEFACE = 43
 TX_SET_APP_IDENTITY = 44
 TX_SET_COLUMN_HEADERS = 45
+TX_SET_DRAWING = 46
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -214,6 +237,7 @@ APPLY_SET_BRAND = 32
 APPLY_SET_TYPEFACE = 33
 APPLY_SET_APP_IDENTITY = 34
 APPLY_SET_COLUMN_HEADERS = 35
+APPLY_SET_DRAWING = 36
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -461,6 +485,10 @@ def tx_set_app_identity(mask, name, icon):
 def tx_set_column_headers(widget_id, sorted, direction, count, path_len, titles):
     """DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  PATH ADDRESSING (dynamic tables, docs/tables-plan.md): the Values carry `path_len` KEY values FIRST, then the `count` titles — sort_requested's identity convention pointed the other way. path_len 0 with a live For's container id is the flat case above; path_len 0 with a nested For's TEMPLATE NODE id declares the bar for EVERY copy (stored on the site, applied at each stamp); path_len > 0 with the template node id and keys outermost-first re-declares ONE stamped copy's bar — the per-copy sort indicator. A keyed target that names no stamped copy is refused loudly.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run."""
     return record(TX_SET_COLUMN_HEADERS, struct.pack("<Q", widget_id) + struct.pack("<I", sorted) + struct.pack("<I", direction) + struct.pack("<I", count) + struct.pack("<I", path_len) + _enc.values(titles))
+
+def tx_set_drawing(widget_id, vb_w, vb_h, count, path_len, ops):
+    """DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws."""
+    return record(TX_SET_DRAWING, struct.pack("<Q", widget_id) + _enc.value(vb_w) + _enc.value(vb_h) + struct.pack("<I", count) + struct.pack("<I", path_len) + _enc.values(ops))
 
 
 def tx_set_text(widget_id, text):

@@ -8,6 +8,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/**
+ * The scale and the appearance the §7.1 hash is taken at, pinned by the
+ * verb rather than read from the lane's display: one frozen string on
+ * five platforms needs every input to be one thing.
+ */
+#define CANONICAL_SCALE 1.0
+
 #define REC_PAD 0
 
 #define REC_BUTTON_CLICKED 1
@@ -185,6 +192,12 @@
 #define TX_SET_COLUMN_HEADERS 45
 
 /**
+ * The whole drawing on a canvas, one atomic declaration
+ * (docs/canvas-plan.md §3.1).
+ */
+#define TX_SET_DRAWING 46
+
+/**
  * `sorted`'s no-column sentinel (alert_choice's cancel precedent).
  */
 #define SORT_NONE UINT32_MAX
@@ -290,6 +303,13 @@
  */
 #define APPLY_SET_COLUMN_HEADERS 35
 
+/**
+ * The RASTER a canvas's declaration produced: premultiplied RGBA8
+ * device pixels the backend blits (docs/canvas-plan.md §1.1). No op
+ * crosses this channel.
+ */
+#define APPLY_SET_DRAWING 36
+
 #define VALUE_BOOL 1
 
 #define VALUE_I64 2
@@ -327,6 +347,50 @@
 #define KIND_GRID 13
 
 #define KIND_TEXTAREA 14
+
+#define KIND_CANVAS 15
+
+#define DRAW_MOVE_TO 1
+
+#define DRAW_LINE_TO 2
+
+#define DRAW_CLOSE 3
+
+#define DRAW_STROKE 4
+
+#define DRAW_FILL 5
+
+#define DRAW_FONT 6
+
+#define DRAW_TEXT 7
+
+#define PAINT_SERIES 1
+
+#define PAINT_SERIES_FILL 2
+
+#define PAINT_GRID 3
+
+#define PAINT_AXIS 4
+
+#define PAINT_GROUND 5
+
+#define FILL_NONZERO 0
+
+#define FILL_EVEN_ODD 1
+
+#define TEXT_ALIGN_START 0
+
+#define TEXT_ALIGN_MIDDLE 1
+
+#define TEXT_ALIGN_END 2
+
+#define TEXT_BASELINE_ALPHABETIC 0
+
+#define TEXT_BASELINE_MIDDLE 1
+
+#define TEXT_BASELINE_TOP 2
+
+#define TEXT_BASELINE_BOTTOM 3
 
 #define PROP_TEXT 1
 
@@ -882,6 +946,12 @@
 #define KAYA_TX_SET_COLUMN_HEADERS 45
 
 /**
+ * The whole drawing on a canvas, one atomic declaration
+ * (docs/canvas-plan.md §3.1).
+ */
+#define KAYA_TX_SET_DRAWING 46
+
+/**
  * `sorted`'s no-column sentinel, and `direction`'s two values.
  */
 #define KAYA_SORT_NONE UINT32_MAX
@@ -1051,6 +1121,12 @@
 #define KAYA_APPLY_SET_COLUMN_HEADERS 35
 
 /**
+ * The RASTER a canvas's declaration produced: premultiplied RGBA8
+ * device pixels the backend blits (docs/canvas-plan.md §1.1).
+ */
+#define KAYA_APPLY_SET_DRAWING 36
+
+/**
  * One-shot commands (the widget_command tx record / COMMAND apply
  * record): momentary verbs into widget-owned state. The closed
  * vocabulary; each verb is admitted by a real artifact.
@@ -1102,6 +1178,8 @@
 #define KAYA_KIND_GRID 13
 
 #define KAYA_KIND_TEXTAREA 14
+
+#define KAYA_KIND_CANVAS 15
 
 /**
  * Property keys.
@@ -1309,6 +1387,54 @@
 #define KAYA_ALIGN_BASELINE 4
 
 /**
+ * THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4), for the C
+ * floor, which writes the op stream out as the array it is. All five
+ * ride the wire as I64 inside the op stream, so they are exported at
+ * that width rather than as u32.
+ */
+#define KAYA_DRAW_MOVE_TO 1
+
+#define KAYA_DRAW_LINE_TO 2
+
+#define KAYA_DRAW_CLOSE 3
+
+#define KAYA_DRAW_STROKE 4
+
+#define KAYA_DRAW_FILL 5
+
+#define KAYA_DRAW_FONT 6
+
+#define KAYA_DRAW_TEXT 7
+
+#define KAYA_PAINT_SERIES 1
+
+#define KAYA_PAINT_SERIES_FILL 2
+
+#define KAYA_PAINT_GRID 3
+
+#define KAYA_PAINT_AXIS 4
+
+#define KAYA_PAINT_GROUND 5
+
+#define KAYA_FILL_NONZERO 0
+
+#define KAYA_FILL_EVEN_ODD 1
+
+#define KAYA_TEXT_ALIGN_START 0
+
+#define KAYA_TEXT_ALIGN_MIDDLE 1
+
+#define KAYA_TEXT_ALIGN_END 2
+
+#define KAYA_TEXT_BASELINE_ALPHABETIC 0
+
+#define KAYA_TEXT_BASELINE_MIDDLE 1
+
+#define KAYA_TEXT_BASELINE_TOP 2
+
+#define KAYA_TEXT_BASELINE_BOTTOM 3
+
+/**
  * The role enum's values (spec enum "role"): semantic emphasis, a
  * closed set. Which variant fits which KIND is the root's
  * value-dependent check (destructive/prominent are buttons-only,
@@ -1402,6 +1528,12 @@
 #define KAYA_ROW_NOT_FOUND UINT64_MAX
 
 typedef struct BoolKind BoolKind;
+
+/**
+ * Which palette a raster resolves its paint roles against. The ONLY
+ * thing a platform contributes to a drawing (§6).
+ */
+typedef struct Mode Mode;
 
 /**
  * Property keys; grows with widgets.
@@ -1652,7 +1784,19 @@ typedef struct KayaHostApi {
    * geometry read cannot answer.
    */
   double (*row_extent)(uint64_t, uint64_t);
+  /**
+   * THE CANVAS (docs/canvas-plan.md). `presentation` is the window's
+   * scale and appearance, reported so the core re-rasters; nothing
+   * about the drawing crosses the other way except the pixels on the
+   * apply channel. `canvas_probe` is the harness's read of the
+   * CANONICAL raster, composed in the core so five platforms compare
+   * a string kaya wrote.
+   */
+  void (*presentation)(double, bool);
+  uintptr_t (*canvas_probe)(uint64_t, uint8_t*, uintptr_t);
 } KayaHostApi;
+
+
 
 
 
@@ -2226,6 +2370,45 @@ void kaya_window_geometry(uint64_t for_target, struct KayaWindowGeometry *out);
  * which is the second estimator §2 exists to remove.
  */
 double kaya_row_extent(uint64_t for_target, uint64_t index);
+
+/**
+ * THE WINDOW'S SCALE AND APPEARANCE, reported by the backend; the core
+ * re-rasters every canvas at them (docs/canvas-plan.md §5, §6). That is
+ * the platforms' own rescale-then-re-render mechanism, not an
+ * invention: `backingScaleFactor` plus `windowDidChangeBackingProperties:`
+ * on macOS, `WM_DPICHANGED` on Windows, fractional-scale's
+ * `preferred_scale` on Wayland.
+ *
+ * `scale` is the TRUE scale, never the rounded one — GTK is the backend
+ * that can hand back a fraction, and `gdk_surface_get_scale` is the
+ * double to read rather than `gtk_widget_get_scale_factor`'s integer.
+ * `dark` is the ONLY thing a platform contributes to a drawing: no
+ * platform colour reaches one.
+ *
+ * A report that changes nothing emits nothing.
+ */
+void kaya_presentation(double scale, bool dark);
+
+/**
+ * WHAT THE HARNESS READS BACK ABOUT ONE CANVAS: the CANONICAL raster's
+ * hash and the two legible facts, as one ASCII line
+ * `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (docs/canvas-plan.md §7.1, §7.2).
+ *
+ * Canonical means scale 1.0 and the light palette, pinned HERE rather
+ * than read from the lane's display, which is what lets one frozen
+ * string hold on five platforms. It is a read of an ARTIFACT — the
+ * output of validation, the fold, shaping, font resolution, the palette
+ * and the rasterizer — never of the declaration, so it is not the
+ * forbidden shape where the scene agrees with itself.
+ *
+ * Writes at most `cap` bytes to `out` and returns how many it wrote; 0
+ * means `widget` names no canvas that has been drawn. Never NUL
+ * terminates: the caller has the length.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_canvas_probe(uint64_t widget, uint8_t *out, uintptr_t cap);
 
 /**
  * Presentation side: block until the next transaction, resolve it

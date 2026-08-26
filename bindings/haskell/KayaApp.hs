@@ -190,6 +190,26 @@ module KayaApp
     imageBytes,
     imageAsset,
     imageBound,
+    -- The canvas: 'canvas' stands in both zones through 'BothZones',
+    -- 'canvasOf' is the template flavour spelled at its own type, and
+    -- 'drawAt' re-declares ONE stamped copy's drawing (docs/canvas-plan.md).
+    Viewbox (..),
+    Paint (..),
+    FillRule (..),
+    TextAlign (..),
+    TextBaseline (..),
+    DrawOp,
+    moveTo,
+    lineTo,
+    close,
+    polyline,
+    stroke,
+    fill,
+    font,
+    text,
+    canvas,
+    canvasOf,
+    drawAt,
     -- The TEMPLATE zone's own surface: one constructor per widget kind, each
     -- returning 'Tpl Node' (the module header's naming rule).
     TplStrSource,
@@ -2297,6 +2317,144 @@ imageBound sig = leafish $ do
   bindSource w sig
   return w
 
+-- THE CANVAS (docs/canvas-plan.md §2.2). Haskell is the one binding where
+-- the drawing scope is literally a LIST, which is what the wire carries
+-- anyway: 'DrawOp' holds one opcode and its operands already encoded.
+
+-- | A canvas's coordinate system AND its natural size in
+-- device-independent points (docs/canvas-plan.md §3.2). The op stream is
+-- written in these units on every platform and in every language, so a
+-- scene can freeze it.
+data Viewbox = Viewbox Double Double
+
+-- | The paint ROLE an op names. Never RGB: the roles resolve in the core
+-- per appearance (§3.4).
+data Paint = Series | SeriesFill | Grid | Axis | Ground
+
+paintWire :: Paint -> Int64
+paintWire p = fromIntegral $ case p of
+  Series -> W.paintSeries
+  SeriesFill -> W.paintSeriesFill
+  Grid -> W.paintGrid
+  Axis -> W.paintAxis
+  Ground -> W.paintGround
+
+-- | Which way a fill resolves its own crossings.
+data FillRule = Nonzero | EvenOdd
+
+fillRuleWire :: FillRule -> Int64
+fillRuleWire r = fromIntegral $ case r of
+  Nonzero -> W.fillRuleNonzero
+  EvenOdd -> W.fillRuleEvenOdd
+
+-- | SVG's @text-anchor@: which end of the run sits at the anchor point.
+-- Spelled @Anchor*@ because @AlignStart@ and @AlignEnd@ are 'Align''s.
+data TextAlign = AnchorStart | AnchorMiddle | AnchorEnd
+
+textAlignWire :: TextAlign -> Int64
+textAlignWire a = fromIntegral $ case a of
+  AnchorStart -> W.textAlignStart
+  AnchorMiddle -> W.textAlignMiddle
+  AnchorEnd -> W.textAlignEnd
+
+-- | SVG's @dominant-baseline@: which horizontal line of the run sits at
+-- the anchor point.
+data TextBaseline
+  = BaselineAlphabetic
+  | BaselineMiddle
+  | BaselineTop
+  | BaselineBottom
+
+textBaselineWire :: TextBaseline -> Int64
+textBaselineWire b = fromIntegral $ case b of
+  BaselineAlphabetic -> W.textBaselineAlphabetic
+  BaselineMiddle -> W.textBaselineMiddle
+  BaselineTop -> W.textBaselineTop
+  BaselineBottom -> W.textBaselineBottom
+
+-- | One drawing op: an opcode and its operands, already the tagged values
+-- the wire carries. Opaque — the constructors below are the vocabulary.
+newtype DrawOp = DrawOp [W.Value]
+
+drawOp :: Word32 -> [W.Value] -> DrawOp
+drawOp code operands = DrawOp (W.VI64 (fromIntegral code) : operands)
+
+-- | Start a subpath at (x, y).
+moveTo :: Double -> Double -> DrawOp
+moveTo x y = drawOp W.drawOpMoveTo [W.VF64 x, W.VF64 y]
+
+-- | Extend the current subpath to (x, y).
+lineTo :: Double -> Double -> DrawOp
+lineTo x y = drawOp W.drawOpLineTo [W.VF64 x, W.VF64 y]
+
+-- | Close the current subpath.
+close :: DrawOp
+close = drawOp W.drawOpClose []
+
+-- | 'moveTo' the first point and 'lineTo' the rest — the chart's own
+-- shape, spelled once.
+polyline :: [(Double, Double)] -> [DrawOp]
+polyline points =
+  [if i == (0 :: Int) then moveTo x y else lineTo x y | (i, (x, y)) <- zip [0 ..] points]
+
+-- | Stroke the built path and clear it. The width is in
+-- device-independent points and does NOT carry the viewbox stretch, so a
+-- 1pt gridline is 1pt at every canvas size (§3.2).
+stroke :: Paint -> Double -> DrawOp
+stroke paint width = drawOp W.drawOpStroke [W.VI64 (paintWire paint), W.VF64 width]
+
+-- | Fill the built path and clear it.
+fill :: Paint -> FillRule -> DrawOp
+fill paint rule =
+  drawOp W.drawOpFill [W.VI64 (paintWire paint), W.VI64 (fillRuleWire rule)]
+
+-- | Select the face for subsequent text ops. The asset is an ordinary
+-- asset name; @""@ is kaya's own embedded default face, which is why a
+-- canvas can always draw text (§4.2). The size is in device-independent
+-- points.
+font :: String -> Double -> Int64 -> DrawOp
+font src size weight =
+  drawOp W.drawOpFont [W.VStr src, W.VF64 size, W.VI64 weight]
+
+-- | Draw ONE LINE with its anchor at (x, y). A line break in the string
+-- is refused by the core (§3.3).
+text :: Double -> Double -> String -> Paint -> TextAlign -> TextBaseline -> DrawOp
+text x y s paint align baseline =
+  drawOp
+    W.drawOpText
+    [ W.VF64 x,
+      W.VF64 y,
+      W.VI64 (paintWire paint),
+      W.VI64 (textAlignWire align),
+      W.VI64 (textBaselineWire baseline),
+      W.VStr s
+    ]
+
+-- One drawing, framed: KEYS FIRST, then the op stream — TX 46's Values
+-- order (docs/canvas-plan.md §3.1).
+drawingRecord :: Word64 -> [W.Value] -> Viewbox -> [DrawOp] -> Builder
+drawingRecord n keys (Viewbox w h) ops =
+  W.txSetDrawing
+    n
+    (W.VF64 w)
+    (W.VF64 h)
+    (fromIntegral (length flat))
+    (fromIntegral (length keys))
+    (keys ++ flat)
+  where
+    flat = concat [vs | DrawOp vs <- ops]
+
+-- | A drawing surface, and the whole drawing with it: the op list
+-- replaces whatever was declared before, never patches it. The viewbox is
+-- the coordinate system the ops are written in AND the canvas's natural
+-- size in points (§3.2). 'canvasOf' is the template flavour, as 'rowOf'
+-- is 'row''s.
+canvas :: (LeafArgs r) => Viewbox -> [DrawOp] -> r
+canvas vb ops = leafish $ do
+  w@(Widget n) <- widget W.kindCanvas
+  emitB (drawingRecord n [] vb ops)
+  return w
+
 -- Construction sugar, template flavor: one name per widget, and the
 -- argument's type picks the addressable source — a constant, a signal, or an
 -- element field.
@@ -2536,6 +2694,16 @@ scrollOf child = containerOf W.kindScroll [child]
 gridOf :: Int -> [Tpl Node] -> Tpl Node
 gridOf = gridWith
 
+-- | A canvas per stamped copy — a sparkline in a table cell, which is the
+-- case set_drawing grew its keys-first addressing for
+-- (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
+-- every copy is born with it; 'drawAt' re-declares one copy's afterwards.
+canvasOf :: Viewbox -> [DrawOp] -> Tpl Node
+canvasOf vb ops = do
+  n@(Node i) <- widget W.kindCanvas
+  emitT (drawingRecord i [] vb ops)
+  return n
+
 -- | A stamped progress bar whose fraction follows an addressable source — the
 -- per-row case this zone exists for, @progressBound (field \@"done" \@Task)@.
 progressBound :: TplNumberSource s => s -> Tpl Node
@@ -2604,6 +2772,13 @@ sortDesc column = Sort (fromIntegral column) 1
 -- plus that copy's keys, outermost first — the keys the node arm of
 -- 'onSort' hands the handler. An empty key list re-declares the bar for
 -- every copy. The core walls the template bar being declared first.
+-- | Re-declare ONE stamped copy's drawing: the canvas template Node plus
+-- that copy's keys, outermost first. An empty key list re-declares the
+-- drawing every copy is born with, which is what 'canvasOf' spells at
+-- declaration time (docs/canvas-plan.md §3.1).
+drawAt :: Node -> [W.Value] -> Viewbox -> [DrawOp] -> Build ()
+drawAt (Node n) keys vb ops = emitB (drawingRecord n keys vb ops)
+
 columnsAt :: Node -> [W.Value] -> [String] -> Sort -> Build ()
 columnsAt (Node n) keys titles sort =
   emitB

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x1c6b68dc2656ea21
+specHash = 0x2f62f356091de5b6
 
 valueBool :: Word32
 valueBool = 1
@@ -74,6 +74,50 @@ kindGrid :: Word32
 kindGrid = 13
 kindTextarea :: Word32
 kindTextarea = 14
+kindCanvas :: Word32
+kindCanvas = 15
+drawOpMoveTo :: Word32
+drawOpMoveTo = 1
+drawOpLineTo :: Word32
+drawOpLineTo = 2
+drawOpClose :: Word32
+drawOpClose = 3
+drawOpStroke :: Word32
+drawOpStroke = 4
+drawOpFill :: Word32
+drawOpFill = 5
+drawOpFont :: Word32
+drawOpFont = 6
+drawOpText :: Word32
+drawOpText = 7
+paintSeries :: Word32
+paintSeries = 1
+paintSeriesFill :: Word32
+paintSeriesFill = 2
+paintGrid :: Word32
+paintGrid = 3
+paintAxis :: Word32
+paintAxis = 4
+paintGround :: Word32
+paintGround = 5
+fillRuleNonzero :: Word32
+fillRuleNonzero = 0
+fillRuleEvenOdd :: Word32
+fillRuleEvenOdd = 1
+textAlignStart :: Word32
+textAlignStart = 0
+textAlignMiddle :: Word32
+textAlignMiddle = 1
+textAlignEnd :: Word32
+textAlignEnd = 2
+textBaselineAlphabetic :: Word32
+textBaselineAlphabetic = 0
+textBaselineMiddle :: Word32
+textBaselineMiddle = 1
+textBaselineTop :: Word32
+textBaselineTop = 2
+textBaselineBottom :: Word32
+textBaselineBottom = 3
 propText :: Word32
 propText = 1
 propChecked :: Word32
@@ -358,6 +402,8 @@ txKindSetAppIdentity :: Word16
 txKindSetAppIdentity = 44
 txKindSetColumnHeaders :: Word16
 txKindSetColumnHeaders = 45
+txKindSetDrawing :: Word16
+txKindSetDrawing = 46
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -428,6 +474,8 @@ applyKindSetAppIdentity :: Word16
 applyKindSetAppIdentity = 34
 applyKindSetColumnHeaders :: Word16
 applyKindSetColumnHeaders = 35
+applyKindSetDrawing :: Word16
+applyKindSetDrawing = 36
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -677,6 +725,10 @@ txSetAppIdentity mask name icon = wireRecord txKindSetAppIdentity (word32LE mask
 -- DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  PATH ADDRESSING (dynamic tables, docs/tables-plan.md): the Values carry `path_len` KEY values FIRST, then the `count` titles — sort_requested's identity convention pointed the other way. path_len 0 with a live For's container id is the flat case above; path_len 0 with a nested For's TEMPLATE NODE id declares the bar for EVERY copy (stored on the site, applied at each stamp); path_len > 0 with the template node id and keys outermost-first re-declares ONE stamped copy's bar — the per-copy sort indicator. A keyed target that names no stamped copy is refused loudly.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run.
 txSetColumnHeaders :: Word64 -> Word32 -> Word32 -> Word32 -> Word32 -> [Value] -> Builder
 txSetColumnHeaders widgetId sorted direction count pathLen titles = wireRecord txKindSetColumnHeaders (word64LE widgetId <> word32LE sorted <> word32LE direction <> word32LE count <> word32LE pathLen <> encodeValues titles)
+
+-- DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws.
+txSetDrawing :: Word64 -> Value -> Value -> Word32 -> Word32 -> [Value] -> Builder
+txSetDrawing widgetId vbW vbH count pathLen ops = wireRecord txKindSetDrawing (word64LE widgetId <> encodeValue vbW <> encodeValue vbH <> word32LE count <> word32LE pathLen <> encodeValues ops)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

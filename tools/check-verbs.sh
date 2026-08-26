@@ -459,6 +459,19 @@ for name, text in (("KayaSwiftUI.swift", swift), ("KayaCompose.kt", kotlin)):
 # types reachable through the spec's PROPS PropKinds (the scene's prop
 # typing keeps the rest off the pump).
 rows = re.findall(r"pub const ((?:APPLY|KIND|PROP|COMMAND|VALUE|MENU_KIND|MPROP)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
+# THE CANVAS VOCABULARIES, which no gate held until 2026-08-26. They ride
+# the op stream as i64 rather than u32, so the sweep above cannot see
+# them by type, and their prefixes are not in its alternation either —
+# which left five enums hand-copied into two interpreters with nothing
+# checking the numbers, the exact shape check-file-modes exists for
+# (docs/canvas-plan.md §3.6, which asked for this clause). Kotlin spells
+# a Long literal with an L suffix, so the value pattern allows one.
+canvas_rows = re.findall(
+    r"pub const ((?:DRAW|PAINT|FILL|TEXT_ALIGN|TEXT_BASELINE)_[A-Z_0-9]+): i64 = (\d+);", wire)
+if len(canvas_rows) < 21:
+    fail(f"only {len(canvas_rows)} canvas constants found in wire.rs — the sweep reads "
+         "nothing and would agree with everything")
+rows += canvas_rows
 props_block = spec[spec.index("pub const PROPS") : spec.index("];", spec.index("pub const PROPS"))]
 prop_kinds = set(re.findall(r"PropKind::(\w+)", props_block))
 required_values = {"VALUE_" + k.upper() for k in prop_kinds}
@@ -475,7 +488,7 @@ for const, value in rows:
     sname = swift_name(const)
     if not re.search(rf"let {re.escape(sname)}\b[^=\n]*= {value}\b", swift):
         fail(f"{const} = {value}: expected `{sname} ... = {value}` in KayaSwiftUI.swift")
-    if not re.search(rf"\b{const}\b\s*(?::\s*\w+\s*)?=\s*{value}\b", kotlin):
+    if not re.search(rf"\b{const}\b\s*(?::\s*\w+\s*)?=\s*{value}L?\b", kotlin):
         fail(f"{const} = {value}: expected `{const} = {value}` in KayaCompose.kt")
 
 # --- The spec hash. A runtime assert also holds it (a stale compiled
@@ -573,5 +586,5 @@ if os.environ["KAYA_CLIP_MIRRORS"] != "0":
     sys.exit(1)
 if os.environ["KAYA_WINDOW_TIER"] != "0":
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants + the CLIP_* mirrors + the windowed tier's loop + spec hash against 2 interpreters)")
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the windowed tier's loop + spec hash against 2 interpreters)")
 EOF

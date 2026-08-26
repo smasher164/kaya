@@ -1741,7 +1741,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # the packaging milestone (official upstream support exists,
     # PEP 730). The legs wire when it lands.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-    IOS_UNWIRED_SCENES="portfolio varied"
+    IOS_UNWIRED_SCENES="portfolio varied canvas"
     # NOT NARROWER any more, except by design: editor runs from the Go
     # suite alone (the plan chose Go so a binding's awkward corners
     # would show; there is no rust or swift editor guest). Everything

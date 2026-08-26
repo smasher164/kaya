@@ -80,6 +80,13 @@ VERB_FEATURE = {
     # scene asserting pane positions needs a backend that can show the
     # declared ceiling.
     "expect_panes": "panes",
+    # docs/canvas-plan.md §11.1. The verb, not the scene name: the
+    # portfolio chart will assert a drawing without being called after
+    # it, and a backend still declaring depth_stub("canvas") has to hold
+    # those legs off too.
+    "expect_drawing_hash": "canvas",
+    "expect_drawing": "canvas",
+    "expect_ink": "canvas",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

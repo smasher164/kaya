@@ -901,11 +901,15 @@ before the first hash is frozen.** ALL FIVE LANES ARE aarch64 TODAY:
 mac and iOS on Apple silicon, windows on `aarch64-pc-windows-msvc`
 (tools/deploy-win.sh), android on `arm64-v8a`
 (tools/android/run-emulator.sh), linux in a container on the same mac
-host. So cross-ISA byte-identity of a SIMD raster pipeline is currently
-UNTESTED, and tiny-skia's "same results as Skia" claim is about a
-reference implementation, not about x86_64 versus aarch64. Phase 1 owes
-one measurement — the same op stream rasterized on both ISAs, hashes
-compared — BEFORE any hash goes in a .steps file. If they diverge, the
+host. So cross-ISA byte-identity of a SIMD raster pipeline was UNTESTED,
+and tiny-skia's "same results as Skia" claim is about a reference
+implementation, not about x86_64 versus aarch64. Phase 1 owed one
+measurement — the same op stream rasterized on both ISAs, hashes
+compared — BEFORE any hash went in a .steps file. IT WAS MADE
+2026-08-26 and the two agree
+(docs/measurements/canvas-cross-isa-2026-08-26.txt); the x86_64 side was
+emulated, which tests the codegen path and not a real x86_64 CPU, so the
+day a native x86_64 lane arrives the probe is re-run. If they diverge, the
 primary observable degrades to a per-architecture hash (still one string
 per lane family, still stronger than anything lowering could offer) and
 §7.2 carries more weight. This is written down because the first x86_64
@@ -953,7 +957,11 @@ item is a rule about the scene's test figure, not about the app:
   and round to 8 bits exactly once.** A measured finding, not a
   precaution: an 8-bit context quantizes twice and reported `1D71D8` for
   a declared `1C71D8` (2026-08-18, recorded at
-  swift/KayaSwiftUI.swift:10221). A canvas ink read that skips this will
+  swift/KayaSwiftUI.swift, kayaIconQuadrants' own comment — the line
+  number this file used to carry was already 90 lines stale when the
+  depth slice looked it up, so it names the FUNCTION now, and
+  kayaSampleRGB is the canvas's sibling of it). A canvas ink read that
+  skips this will
   be off by one somewhere and look like a rasterizer bug.
 
 Every backend has a route to its own pixels: `NSView.cacheDisplay` or
@@ -1213,7 +1221,7 @@ an assumption:
 
 | # | what | when |
 | --- | --- | --- |
-| 1 | cross-ISA byte-identity of the raster (§7.1) — all five lanes are aarch64 today | phase 1, BEFORE the first frozen hash |
+| 1 | ~~cross-ISA byte-identity of the raster (§7.1) — all five lanes are aarch64 today~~ MEASURED 2026-08-26, identical: docs/measurements/canvas-cross-isa-2026-08-26.txt | phase 1, BEFORE the first frozen hash |
 | 2 | WinUI `WriteableBitmap` pixel format and whether the swizzle is needed (§8) | phase 3 |
 | 3 | does `\.displayScale` update on a cross-display move? (§5, inferred) | phase 2, on a two-display mac |
 | 4 | does GDK set the cairo device scale, and what does `gdk_surface_get_scale` return at fractional scales? (§5, inferred) | phase 3 |

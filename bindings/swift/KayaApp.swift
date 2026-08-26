@@ -157,6 +157,182 @@ enum KayaAlign: Int64 {
     case baseline = 4
 }
 
+/// A canvas's coordinate system AND its natural size in
+/// device-independent points (docs/canvas-plan.md §3.2). The op stream is
+/// written in these units on every platform and in every language, so a
+/// scene can freeze it.
+struct KayaViewbox {
+    let w: Double
+    let h: Double
+
+    init(_ w: Double, _ h: Double) {
+        self.w = w
+        self.h = h
+    }
+}
+
+/// The paint ROLE an op names. Never RGB: the roles resolve in the core
+/// per appearance (docs/canvas-plan.md §3.4). The numbers come from the
+/// core's own header rather than a fourth hand-written copy of them
+/// (tools/check-symbol-parity.sh's trap, one surface over).
+enum KayaPaint {
+    /// The line.
+    case series
+    /// The area under it.
+    case seriesFill
+    /// Gridlines.
+    case grid
+    /// Axis lines and tick labels.
+    case axis
+    /// The plot background.
+    case ground
+
+    var wire: Int64 {
+        switch self {
+        case .series: return Int64(KAYA_PAINT_SERIES)
+        case .seriesFill: return Int64(KAYA_PAINT_SERIES_FILL)
+        case .grid: return Int64(KAYA_PAINT_GRID)
+        case .axis: return Int64(KAYA_PAINT_AXIS)
+        case .ground: return Int64(KAYA_PAINT_GROUND)
+        }
+    }
+}
+
+/// Which way a fill resolves its own crossings.
+enum KayaFillRule {
+    case nonzero
+    case evenOdd
+
+    var wire: Int64 {
+        switch self {
+        case .nonzero: return Int64(KAYA_FILL_NONZERO)
+        case .evenOdd: return Int64(KAYA_FILL_EVEN_ODD)
+        }
+    }
+}
+
+/// SVG's `text-anchor`: which end of the run sits at the anchor point.
+enum KayaTextAlign {
+    case start
+    case middle
+    case end
+
+    var wire: Int64 {
+        switch self {
+        case .start: return Int64(KAYA_TEXT_ALIGN_START)
+        case .middle: return Int64(KAYA_TEXT_ALIGN_MIDDLE)
+        case .end: return Int64(KAYA_TEXT_ALIGN_END)
+        }
+    }
+}
+
+/// SVG's `dominant-baseline`: which horizontal line of the run sits at
+/// the anchor point.
+enum KayaTextBaseline {
+    case alphabetic
+    case middle
+    case top
+    case bottom
+
+    var wire: Int64 {
+        switch self {
+        case .alphabetic: return Int64(KAYA_TEXT_BASELINE_ALPHABETIC)
+        case .middle: return Int64(KAYA_TEXT_BASELINE_MIDDLE)
+        case .top: return Int64(KAYA_TEXT_BASELINE_TOP)
+        case .bottom: return Int64(KAYA_TEXT_BASELINE_BOTTOM)
+        }
+    }
+}
+
+/// The drawing scope's recorder. The calls read as immediate-mode
+/// drawing; they are recorded, and ONE record is submitted when the scope
+/// closes — the For template trace's fiction with a drawing scope instead
+/// of a loop (docs/canvas-plan.md §2.1).
+final class KayaDraw {
+    /// The box this drawing is written in, so a chart can compute its own
+    /// extents without the app carrying the numbers twice.
+    let viewbox: KayaViewbox
+    fileprivate var ops: [KayaValue] = []
+
+    fileprivate init(viewbox: KayaViewbox) {
+        self.viewbox = viewbox
+    }
+
+    @discardableResult
+    private func op(_ code: Int32, _ operands: KayaValue...) -> KayaDraw {
+        ops.append(.i64(Int64(code)))
+        ops.append(contentsOf: operands)
+        return self
+    }
+
+    /// Start a subpath at (x, y).
+    @discardableResult
+    func moveTo(_ x: Double, _ y: Double) -> KayaDraw {
+        op(KAYA_DRAW_MOVE_TO, .f64(x), .f64(y))
+    }
+
+    /// Extend the current subpath to (x, y).
+    @discardableResult
+    func lineTo(_ x: Double, _ y: Double) -> KayaDraw {
+        op(KAYA_DRAW_LINE_TO, .f64(x), .f64(y))
+    }
+
+    /// Close the current subpath.
+    @discardableResult
+    func close() -> KayaDraw {
+        op(KAYA_DRAW_CLOSE)
+    }
+
+    /// `moveTo` the first point and `lineTo` the rest — the chart's own
+    /// shape, spelled once.
+    @discardableResult
+    func polyline(_ points: [(Double, Double)]) -> KayaDraw {
+        for (i, p) in points.enumerated() {
+            if i == 0 {
+                moveTo(p.0, p.1)
+            } else {
+                lineTo(p.0, p.1)
+            }
+        }
+        return self
+    }
+
+    /// Stroke the built path and clear it. `width` is in
+    /// device-independent points and does NOT carry the viewbox stretch,
+    /// so a 1pt gridline is 1pt at every canvas size (§3.2).
+    @discardableResult
+    func stroke(_ paint: KayaPaint, width: Double) -> KayaDraw {
+        op(KAYA_DRAW_STROKE, .i64(paint.wire), .f64(width))
+    }
+
+    /// Fill the built path and clear it.
+    @discardableResult
+    func fill(_ paint: KayaPaint, rule: KayaFillRule = .nonzero) -> KayaDraw {
+        op(KAYA_DRAW_FILL, .i64(paint.wire), .i64(rule.wire))
+    }
+
+    /// Select the face for subsequent text ops. `asset` is an ordinary
+    /// asset name; `""` is kaya's own embedded default face, which is why
+    /// a canvas can always draw text (§4.2). `size` is in
+    /// device-independent points.
+    @discardableResult
+    func font(size: Double, asset: String = "", weight: Int64 = 400) -> KayaDraw {
+        op(KAYA_DRAW_FONT, .str(asset), .f64(size), .i64(weight))
+    }
+
+    /// Draw ONE LINE with its anchor at (x, y). A line break in `s` is
+    /// refused by the core (§3.3).
+    @discardableResult
+    func text(
+        _ x: Double, _ y: Double, _ s: String, _ paint: KayaPaint,
+        align: KayaTextAlign = .start, baseline: KayaTextBaseline = .alphabetic
+    ) -> KayaDraw {
+        op(
+            KAYA_DRAW_TEXT, .f64(x), .f64(y), .i64(paint.wire), .i64(align.wire),
+            .i64(baseline.wire), .str(s))
+    }
+}
+
 /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
 /// never how it looks — a closed vocabulary, so there is no raw value to
 /// reach for. Destructive and prominent are BUTTON emphasis, heading is
@@ -970,6 +1146,9 @@ final class KayaApp {
     /// its own table because the two id spaces collide numerically, and
     /// the empty key path is what tells the two apart at dispatch.
     private var nodeSorts: [UInt64: (KayaAppTx, [KayaValue], UInt32) throws -> Void] = [:]
+    /// Each canvas's declared viewbox, so a redraw in a LATER
+    /// transaction does not have to repeat it (docs/canvas-plan.md §2.2).
+    fileprivate var canvasViewboxes: [UInt64: KayaViewbox] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
@@ -2268,6 +2447,55 @@ final class KayaAppTx {
         if let indeterminate { tx.setIndeterminate(w.id, indeterminate) }
         if let grow { setGrow(w, grow) }
         return w
+    }
+
+    /// A drawing surface. `viewbox` is the coordinate system the ops are
+    /// written in AND the canvas's natural size in points, which is what
+    /// keeps one op stream identical on five platforms
+    /// (docs/canvas-plan.md §3.2). Declare what it draws with `draw`;
+    /// until then it is present and empty.
+    func canvas(_ viewbox: KayaViewbox, grow: Double? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_CANVAS))
+        // The viewbox rides the DRAWING on the wire, not a prop, so a
+        // canvas with no declaration yet has nothing to be inconsistent
+        // about; the guest side remembers it so a redraw in a later
+        // handler does not repeat it.
+        app.canvasViewboxes[w.id] = viewbox
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// DECLARE the whole drawing on a canvas, replacing whatever was
+    /// declared before. The closure reads as immediate-mode drawing and
+    /// records: one atomic record is submitted when it returns.
+    func draw(_ w: KayaWidget, _ body: (KayaDraw) -> Void) {
+        guard let viewbox = app.canvasViewboxes[w.id] else {
+            fatalError(
+                "kaya: draw on a widget that is not a canvas this app declared — a "
+                    + "drawing is a declaration against the canvas it draws on "
+                    + "(docs/canvas-plan.md §2.1)")
+        }
+        let d = KayaDraw(viewbox: viewbox)
+        body(d)
+        tx.setDrawing(
+            w.id, .f64(viewbox.w), .f64(viewbox.h), UInt32(d.ops.count), 0, d.ops)
+    }
+
+    /// Re-declare ONE stamped copy's drawing, addressed by the canvas
+    /// template node plus that copy's keys, outermost first. `at: []`
+    /// re-declares the drawing every copy is born with, which is what
+    /// `KayaTpl.canvas` spells at declaration time
+    /// (docs/canvas-plan.md §3.1).
+    func draw(
+        _ n: KayaNodeHandle, at path: [KayaValue], _ viewbox: KayaViewbox,
+        _ body: (KayaDraw) -> Void
+    ) {
+        let d = KayaDraw(viewbox: viewbox)
+        body(d)
+        // Keys first, then the op stream — TX 46's Values order.
+        tx.setDrawing(
+            n.id, .f64(viewbox.w), .f64(viewbox.h), UInt32(d.ops.count),
+            UInt32(path.count), path + d.ops)
     }
 
     /// A slider over min...max at value, with its change handler co-located.
@@ -3829,6 +4057,20 @@ final class KayaTpl {
     func image(_ f: KayaField<Data>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         bindSourceField(n, f)
+        return n
+    }
+
+    /// A canvas per stamped copy — a sparkline in a table cell, which is
+    /// the case set_drawing grew its keys-first addressing for
+    /// (docs/canvas-plan.md §3.1). The drawing is declared with the node,
+    /// so every copy is born with it; `KayaAppTx.draw(_:at:_:_:)`
+    /// re-declares one copy's afterwards.
+    func canvas(_ viewbox: KayaViewbox, _ body: (KayaDraw) -> Void) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_CANVAS))
+        let d = KayaDraw(viewbox: viewbox)
+        body(d)
+        tx.tx.setDrawing(
+            n.id, .f64(viewbox.w), .f64(viewbox.h), UInt32(d.ops.count), 0, d.ops)
         return n
     }
 

@@ -90,6 +90,8 @@ sealed class TodoRow
 
     public Node Image(Field<byte[]> f) => t.Image(f);
 
+    public Node Canvas(Viewbox vb, System.Action<Draw> body) => t.Canvas(vb, body);
+
     public Node Checkbox(Field<bool> f,
         System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
         t.Checkbox(f, onToggle);

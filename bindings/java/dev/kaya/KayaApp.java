@@ -203,6 +203,9 @@ public final class KayaApp {
     // one registration serves every stamped copy, and the occurrence's
     // key path says which copy was clicked.
     private final Map<Long, SortHandler> nodeSorts = new HashMap<>();
+    // Each canvas's declared viewbox, so a redraw in a LATER transaction
+    // does not have to repeat it (docs/canvas-plan.md §2.2).
+    private final Map<Long, Viewbox> canvasViewboxes = new HashMap<>();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     // separate from every widget/node table. The node flavors receive
     // the stamped copy's key path.
@@ -1830,6 +1833,183 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * A canvas's coordinate system AND its natural size in
+     * device-independent points (docs/canvas-plan.md §3.2). The op stream
+     * is written in these units on every platform and in every language,
+     * so a scene can freeze it.
+     */
+    public static final class Viewbox {
+        final double w;
+        final double h;
+
+        public Viewbox(double w, double h) {
+            this.w = w;
+            this.h = h;
+        }
+    }
+
+    /**
+     * The paint ROLE an op names. Never RGB: the roles resolve in the
+     * core per appearance (docs/canvas-plan.md §3.4).
+     */
+    public enum Paint {
+        /** The line. */
+        SERIES(KayaWire.PAINT_SERIES),
+        /** The area under it. */
+        SERIES_FILL(KayaWire.PAINT_SERIES_FILL),
+        /** Gridlines. */
+        GRID(KayaWire.PAINT_GRID),
+        /** Axis lines and tick labels. */
+        AXIS(KayaWire.PAINT_AXIS),
+        /** The plot background. */
+        GROUND(KayaWire.PAINT_GROUND);
+
+        final long wire;
+
+        Paint(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /** Which way a fill resolves its own crossings. */
+    public enum FillRule {
+        NONZERO(KayaWire.FILL_RULE_NONZERO),
+        EVEN_ODD(KayaWire.FILL_RULE_EVEN_ODD);
+
+        final long wire;
+
+        FillRule(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /** SVG's text-anchor: which end of the run sits at the anchor point. */
+    public enum TextAlign {
+        START(KayaWire.TEXT_ALIGN_START),
+        MIDDLE(KayaWire.TEXT_ALIGN_MIDDLE),
+        END(KayaWire.TEXT_ALIGN_END);
+
+        final long wire;
+
+        TextAlign(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /**
+     * SVG's dominant-baseline: which horizontal line of the run sits at
+     * the anchor point.
+     */
+    public enum TextBaseline {
+        ALPHABETIC(KayaWire.TEXT_BASELINE_ALPHABETIC),
+        MIDDLE(KayaWire.TEXT_BASELINE_MIDDLE),
+        TOP(KayaWire.TEXT_BASELINE_TOP),
+        BOTTOM(KayaWire.TEXT_BASELINE_BOTTOM);
+
+        final long wire;
+
+        TextBaseline(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /**
+     * The drawing scope's recorder. The calls read as immediate-mode
+     * drawing; they are recorded, and ONE record is submitted when the
+     * scope closes — the For template trace's fiction with a drawing
+     * scope instead of a loop (docs/canvas-plan.md §2.1).
+     */
+    public static final class Draw {
+        final List<Object> ops = new ArrayList<>();
+        private final Viewbox viewbox;
+
+        Draw(Viewbox viewbox) {
+            this.viewbox = viewbox;
+        }
+
+        /**
+         * The box this drawing is written in, so a chart can compute its
+         * own extents without the app carrying the numbers twice.
+         */
+        public Viewbox viewbox() {
+            return viewbox;
+        }
+
+        private Draw op(long code, Object... operands) {
+            ops.add(code);
+            for (Object operand : operands) {
+                ops.add(operand);
+            }
+            return this;
+        }
+
+        /** Start a subpath at (x, y). */
+        public Draw moveTo(double x, double y) {
+            return op(KayaWire.DRAW_OP_MOVE_TO, x, y);
+        }
+
+        /** Extend the current subpath to (x, y). */
+        public Draw lineTo(double x, double y) {
+            return op(KayaWire.DRAW_OP_LINE_TO, x, y);
+        }
+
+        /** Close the current subpath. */
+        public Draw close() {
+            return op(KayaWire.DRAW_OP_CLOSE);
+        }
+
+        /**
+         * moveTo the first point and lineTo the rest — the chart's own
+         * shape, spelled once.
+         */
+        public Draw polyline(double[][] points) {
+            for (int i = 0; i < points.length; i++) {
+                if (i == 0) {
+                    moveTo(points[i][0], points[i][1]);
+                } else {
+                    lineTo(points[i][0], points[i][1]);
+                }
+            }
+            return this;
+        }
+
+        /**
+         * Stroke the built path and clear it. {@code width} is in
+         * device-independent points and does NOT carry the viewbox
+         * stretch, so a 1pt gridline is 1pt at every canvas size
+         * (docs/canvas-plan.md §3.2).
+         */
+        public Draw stroke(Paint paint, double width) {
+            return op(KayaWire.DRAW_OP_STROKE, paint.wire, width);
+        }
+
+        /** Fill the built path and clear it. */
+        public Draw fill(Paint paint, FillRule rule) {
+            return op(KayaWire.DRAW_OP_FILL, paint.wire, rule.wire);
+        }
+
+        /**
+         * Select the face for subsequent text ops. {@code asset} is an
+         * ordinary asset name; {@code ""} is kaya's own embedded default
+         * face, which is why a canvas can always draw text (§4.2).
+         * {@code size} is in device-independent points.
+         */
+        public Draw font(String asset, double size, long weight) {
+            return op(KayaWire.DRAW_OP_FONT, asset, size, weight);
+        }
+
+        /**
+         * Draw ONE LINE with its anchor at (x, y). A line break in
+         * {@code s} is refused by the core (docs/canvas-plan.md §3.3).
+         */
+        public Draw text(double x, double y, String s, Paint paint,
+                TextAlign align, TextBaseline baseline) {
+            return op(KayaWire.DRAW_OP_TEXT, x, y, paint.wire, align.wire,
+                baseline.wire, s);
+        }
+    }
+
     public static final class Widget {
         final long id;
         final Tx tx;
@@ -2266,6 +2446,10 @@ public final class KayaApp {
 
         public Node image(KayaRecords.Field<byte[]> f) {
             return t.image(f);
+        }
+
+        public Node canvas(Viewbox viewbox, Consumer<Draw> body) {
+            return t.canvas(viewbox, body);
         }
 
         public Node entry() {
@@ -3223,6 +3407,65 @@ public final class KayaApp {
             Widget w = widget(KayaWire.KIND_PROGRESS);
             emit(KayaWire.txSetIndeterminate(w.id, true));
             return w;
+        }
+
+        /**
+         * A drawing surface. {@code viewbox} is the coordinate system the
+         * ops are written in AND the canvas's natural size in points,
+         * which is what keeps one op stream identical on five platforms
+         * (docs/canvas-plan.md §3.2). Declare what it draws with
+         * {@link #draw}; until then it is present and empty.
+         */
+        public Widget canvas(Viewbox viewbox) {
+            Widget w = widget(KayaWire.KIND_CANVAS);
+            // The viewbox rides the DRAWING on the wire, not a prop, so a
+            // canvas with no declaration yet has nothing to be
+            // inconsistent about; the guest side remembers it so a redraw
+            // in a later handler does not repeat it.
+            canvasViewboxes.put(w.id, viewbox);
+            return w;
+        }
+
+        /**
+         * DECLARE the whole drawing on a canvas, replacing whatever was
+         * declared before. The lambda reads as immediate-mode drawing and
+         * records: one atomic record is submitted when it returns.
+         */
+        public void draw(Widget w, Consumer<Draw> body) {
+            Viewbox viewbox = canvasViewboxes.get(w.id);
+            if (viewbox == null) {
+                throw new IllegalArgumentException(
+                        "kaya: draw on a widget that is not a canvas this app declared "
+                        + "— a drawing is a declaration against the canvas it draws on "
+                        + "(docs/canvas-plan.md §2.1)");
+            }
+            Draw d = new Draw(viewbox);
+            body.accept(d);
+            emit(KayaWire.txSetDrawing(w.id, viewbox.w, viewbox.h, d.ops.size(), 0,
+                d.ops.toArray()));
+        }
+
+        /**
+         * Re-declare ONE stamped copy's drawing: {@code node} is the
+         * canvas template node and {@code keys} that copy's path,
+         * outermost first. Empty keys re-declare the drawing every copy
+         * is born with, which is what {@code Tpl.canvas} spells at
+         * declaration time (docs/canvas-plan.md §3.1).
+         */
+        public void drawAt(Node node, List<Object> keys, Viewbox viewbox,
+                Consumer<Draw> body) {
+            Draw d = new Draw(viewbox);
+            body.accept(d);
+            // KEYS FIRST, then the op stream (KayaWire.txSetDrawing).
+            Object[] values = new Object[keys.size() + d.ops.size()];
+            for (int i = 0; i < keys.size(); i++) {
+                values[i] = keys.get(i);
+            }
+            for (int i = 0; i < d.ops.size(); i++) {
+                values[keys.size() + i] = d.ops.get(i);
+            }
+            emit(KayaWire.txSetDrawing(node.id, viewbox.w, viewbox.h, d.ops.size(),
+                keys.size(), values));
         }
 
         /** A slider whose position binds a float signal — the
@@ -4581,6 +4824,22 @@ public final class KayaApp {
         public Node image(KayaRecords.Field<byte[]> f) {
             Node n = widget(KayaWire.KIND_IMAGE);
             bindSourceField(n, 0, f);
+            return n;
+        }
+
+        /**
+         * A canvas per stamped copy — a sparkline in a table cell, which
+         * is the case set_drawing grew its keys-first addressing for
+         * (docs/canvas-plan.md §3.1). The drawing is declared with the
+         * node, so every copy is born with it; {@link Tx#drawAt}
+         * re-declares one copy's afterwards.
+         */
+        public Node canvas(Viewbox viewbox, Consumer<Draw> body) {
+            Node n = widget(KayaWire.KIND_CANVAS);
+            Draw d = new Draw(viewbox);
+            body.accept(d);
+            tx.emit(KayaWire.txSetDrawing(n.id, viewbox.w, viewbox.h, d.ops.size(), 0,
+                d.ops.toArray()));
             return n;
         }
 

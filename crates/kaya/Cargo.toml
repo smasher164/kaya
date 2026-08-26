@@ -26,6 +26,31 @@ harness = ["dep:atspi"]
 # is the schema.
 kaya-derive = { path = "../kaya-derive" }
 
+# THE CANVAS RASTER STACK (docs/canvas-plan.md §1.4, §4.1). CPU only and
+# pure Rust on every target, which is the property that makes the
+# byte-hash observable possible at all — a buffer whose pixels depend on
+# a GPU driver is a buffer no scene can freeze, and the linux lane has no
+# GPU anyway.
+#
+# THE CRATE LANDSCAPE WAS VERIFIED 2026-08-26 AGAINST THE ARCHIVED-CRATE
+# WAVE and re-checked at pin time: the plan's first draft named rustybuzz
+# and ttf-parser, which resvg uses and which are BOTH ABANDONED
+# (rustybuzz archived 2026-08-06, RUSTSEC-2026-0206). A dependency is
+# never cited from memory here.
+#
+# tiny-skia rasterizes PATHS — its own "text is out of scope" is the
+# correct division, not a gap, because the shaper turns text into paths
+# before it arrives. It lives under the Linebender org and is active;
+# vello_cpu is the named successor to revisit when it stabilizes, a
+# one-crate swap with zero binding churn (§1.4).
+tiny-skia = "0.12.0"
+# harfrust is the HarfBuzz project's own Rust port; skrifa/read-fonts is
+# googlefonts/fontations, Chrome-production. harfrust runs ON read-fonts
+# by its own design, so the shaper and the outline scaler share ONE font
+# parser and a canvas has exactly one thing reading a font file.
+harfrust = "0.13.3"
+skrifa = "0.46.2"
+
 [build-dependencies]
 # Emits msvc linker directives at build time; no-op for other targets.
 static_vcruntime = "2"
@@ -399,6 +424,10 @@ path = "../../guests/rust/identity.rs"
 [[example]]
 name = "assets"
 path = "../../guests/rust/assets.rs"
+
+[[example]]
+name = "canvas"
+path = "../../guests/rust/canvas.rs"
 
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a

@@ -10802,6 +10802,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image(image)
                 }
+                // The raw-pixel sibling of the arm above — a
+                // WriteableBitmap, and the premultiplied-BGRA8 swizzle
+                // §11's measure-at-implementation list holds open — is the
+                // breadth phase (docs/canvas-plan.md §8, §11 phase 3).
+                WidgetKind::Canvas => crate::depth_stub("canvas"),
             };
             core.widgets.insert(id, native);
         }
@@ -11403,6 +11408,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         } => {
             declare_table(core, id, sorted, direction, titles, tag)?;
         }
+        ApplyOp::SetDrawing { .. } => crate::depth_stub("canvas"),
         ApplyOp::SetAppIdentity(identity) => {
             // TWO SINKS FROM ONE DECLARATION, which is this platform's
             // whole shape (docs/app-identity-plan.md I3): the WINDOW's
@@ -14004,6 +14010,7 @@ fn target_element(
         K::Radio => nth!(core.radios),
         K::Grid => nth!(core.grids),
         K::Scroll => nth!(core.scrolls),
+        K::Canvas => crate::depth_stub("canvas"),
         // Buttons live in the registry as CLICK TAGS, not widgets, and
         // the tag is captured in the click closure rather than stored
         // on the Button — so there is no tag->widget link to follow.
@@ -15665,6 +15672,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Radio => find(&core.radios, &id),
                 K::Grid => find(&core.grids, &id),
                 K::Textarea => find(&core.textareas, &id),
+                K::Canvas => crate::depth_stub("canvas"),
             })
         })
         .ok()
@@ -16891,6 +16899,17 @@ impl crate::harness::Stage for WinUiStage {
             Ok(window_icon_samples(hwnd))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// The WriteableBitmap blit is the breadth phase (docs/canvas-plan.md
+    /// §8, §11 phase 3) — including the premultiplied-BGRA8 swizzle, which
+    /// §11's measure-at-implementation list holds open.
+    fn canvas_probe(&self, _target: crate::harness::Target) -> String {
+        crate::depth_stub("canvas")
+    }
+
+    fn canvas_ink(&self, _target: crate::harness::Target, _points: &str) -> String {
+        crate::depth_stub("canvas")
     }
 
     fn inset(&self) -> String {

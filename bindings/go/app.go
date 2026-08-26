@@ -176,6 +176,9 @@ type App struct {
 	// Signals recomputed from a collection after each of its
 	// mutations, written into the same transaction.
 	derived map[uint64][]func(*Tx)
+	// Each canvas's declared viewbox, so a redraw in a LATER transaction
+	// does not have to repeat it (docs/canvas-plan.md §2.2).
+	canvasViewboxes map[uint64]Viewbox
 	// Non-zero exactly while a template body is being declared: the
 	// record-time mirror-read guard's arm. openFors is For-only (it
 	// carries collection ids for nesting), so the guard has its own
@@ -228,6 +231,7 @@ func NewApp() *App {
 		fresh:          make(map[uint64][]*minter),
 		children:       make(map[uint64][]uint64),
 		derived:        make(map[uint64][]func(*Tx)),
+		canvasViewboxes: make(map[uint64]Viewbox),
 	}
 }
 
@@ -1056,6 +1060,138 @@ func (tx *Tx) Progress(value float64) Widget {
 func (w Widget) Indeterminate() Widget {
 	w.tx.emit(TxSetIndeterminate(w.id, true))
 	return w
+}
+
+// Viewbox is a canvas's coordinate system AND its natural size in
+// device-independent points (docs/canvas-plan.md §3.2). The op stream is
+// written in these units on every platform and in every language, so a
+// scene can freeze it.
+type Viewbox struct{ W, H float64 }
+
+// The paint ROLE an op names, never RGB: the roles resolve in the core
+// per appearance (§3.4). The values are the generated PaintX constants.
+type Paint int64
+
+// Which way a fill resolves its own crossings: FillRuleNonzero or
+// FillRuleEvenOdd.
+type FillRule int64
+
+// SVG's text-anchor: TextAlignStart, TextAlignMiddle, TextAlignEnd.
+type TextAlign int64
+
+// SVG's dominant-baseline: TextBaselineAlphabetic, TextBaselineMiddle,
+// TextBaselineTop, TextBaselineBottom.
+type TextBaseline int64
+
+// Draw is the drawing scope's recorder. The calls read as immediate-mode
+// drawing; they are recorded, and ONE record is submitted when the scope
+// closes — the For template trace's fiction with a drawing scope instead
+// of a loop (docs/canvas-plan.md §2.1).
+type Draw struct {
+	viewbox Viewbox
+	ops     []any
+}
+
+// Viewbox is the box this drawing is written in, so a chart can compute
+// its own extents without the app carrying the numbers twice.
+func (d *Draw) Viewbox() Viewbox { return d.viewbox }
+
+func (d *Draw) op(code int64, operands ...any) *Draw {
+	d.ops = append(d.ops, code)
+	d.ops = append(d.ops, operands...)
+	return d
+}
+
+// MoveTo starts a subpath at (x, y).
+func (d *Draw) MoveTo(x, y float64) *Draw { return d.op(DrawOpMoveTo, x, y) }
+
+// LineTo extends the current subpath to (x, y).
+func (d *Draw) LineTo(x, y float64) *Draw { return d.op(DrawOpLineTo, x, y) }
+
+// Close closes the current subpath.
+func (d *Draw) Close() *Draw { return d.op(DrawOpClose) }
+
+// Polyline moves to the first point and lines to the rest — the chart's
+// own shape, spelled once.
+func (d *Draw) Polyline(points [][2]float64) *Draw {
+	for i, p := range points {
+		if i == 0 {
+			d.MoveTo(p[0], p[1])
+		} else {
+			d.LineTo(p[0], p[1])
+		}
+	}
+	return d
+}
+
+// Stroke strokes the built path and clears it. width is in
+// device-independent points and does NOT carry the viewbox stretch, so a
+// 1pt gridline is 1pt at every canvas size (docs/canvas-plan.md §3.2).
+func (d *Draw) Stroke(paint Paint, width float64) *Draw {
+	return d.op(DrawOpStroke, int64(paint), width)
+}
+
+// Fill fills the built path and clears it.
+func (d *Draw) Fill(paint Paint, rule FillRule) *Draw {
+	return d.op(DrawOpFill, int64(paint), int64(rule))
+}
+
+// Font selects the face for subsequent text ops. asset is an ordinary
+// asset name; "" is kaya's own embedded default face, which is why a
+// canvas can always draw text (§4.2). size is in device-independent
+// points.
+func (d *Draw) Font(asset string, size float64, weight int64) *Draw {
+	return d.op(DrawOpFont, asset, size, weight)
+}
+
+// Text draws ONE LINE with its anchor at (x, y). A line break in s is
+// refused by the core (docs/canvas-plan.md §3.3).
+func (d *Draw) Text(x, y float64, s string, paint Paint, align TextAlign,
+	baseline TextBaseline) *Draw {
+	return d.op(DrawOpText, x, y, int64(paint), int64(align), int64(baseline), s)
+}
+
+// Canvas creates a drawing surface. vb is the coordinate system the ops
+// are written in AND the canvas's natural size in points, which is what
+// keeps one op stream identical on five platforms
+// (docs/canvas-plan.md §3.2). Declare what it draws with Tx.Draw; until
+// then it is present and empty.
+func (tx *Tx) Canvas(vb Viewbox) Widget {
+	w := tx.Widget(KindCanvas)
+	// The viewbox rides the DRAWING on the wire, not a prop, so a canvas
+	// with no declaration yet has nothing to be inconsistent about; the
+	// guest side remembers it so a redraw in a later handler does not
+	// repeat it.
+	tx.app.canvasViewboxes[w.id] = vb
+	return w
+}
+
+// Draw DECLARES the whole drawing on a canvas, replacing whatever was
+// declared before. The closure reads as immediate-mode drawing and
+// records: one atomic record is submitted when it returns.
+func (tx *Tx) Draw(w Widget, body func(d *Draw)) {
+	tx.alive()
+	vb, ok := tx.app.canvasViewboxes[w.id]
+	if !ok {
+		panic("kaya: Draw on a widget that is not a canvas this app declared — a drawing is a declaration against the canvas it draws on (docs/canvas-plan.md §2.1)")
+	}
+	d := &Draw{viewbox: vb}
+	body(d)
+	tx.emit(TxSetDrawing(w.id, vb.W, vb.H, uint32(len(d.ops)), 0, d.ops))
+}
+
+// DrawAt re-declares ONE stamped copy's drawing: the canvas template
+// Node, then that copy's keys outermost first. Empty keys re-declare the
+// drawing every copy is born with, which is what Tpl.Canvas spells at
+// declaration time (docs/canvas-plan.md §3.1).
+func (tx *Tx) DrawAt(n Node, keys []any, vb Viewbox, body func(d *Draw)) {
+	d := &Draw{viewbox: vb}
+	body(d)
+	values := make([]any, 0, len(keys)+len(d.ops))
+	values = append(values, keys...)
+	values = append(values, d.ops...)
+	tx.emit(TxSetDrawing(n.id, vb.W, vb.H, uint32(len(d.ops)),
+		uint32(len(keys)), values))
 }
 
 // Slider creates a slider over min..max at value, with its change
@@ -3261,6 +3397,19 @@ func (t *Tpl) RadioBound[S interface {
 func (t *Tpl) Image(source []byte) Node {
 	n := t.Widget(KindImage)
 	t.tx.emit(TxSetSource(n.id, uint64(blobWire(source))))
+	return n
+}
+
+// Canvas creates a canvas per stamped copy — a sparkline in a table
+// cell, which is the case set_drawing grew its keys-first addressing for
+// (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
+// every copy is born with it; Tx.DrawAt re-declares one copy's
+// afterwards.
+func (t *Tpl) Canvas(vb Viewbox, body func(d *Draw)) Node {
+	n := t.Widget(KindCanvas)
+	d := &Draw{viewbox: vb}
+	body(d)
+	t.tx.emit(TxSetDrawing(n.id, vb.W, vb.H, uint32(len(d.ops)), 0, d.ops))
 	return n
 }
 

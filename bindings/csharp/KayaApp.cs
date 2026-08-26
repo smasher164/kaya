@@ -445,6 +445,128 @@ readonly struct Sort
     public static Sort Desc(uint column) => new(column, 1);
 }
 
+/// <summary>A canvas's coordinate system AND its natural size in
+/// device-independent points (docs/canvas-plan.md §3.2). The op stream is
+/// written in these units on every platform and in every language, so a
+/// scene can freeze it.</summary>
+readonly struct Viewbox
+{
+    internal readonly double W;
+    internal readonly double H;
+
+    public Viewbox(double w, double h) { W = w; H = h; }
+}
+
+/// <summary>The paint ROLE an op names. Never RGB: the roles resolve in
+/// the core per appearance (docs/canvas-plan.md §3.4).</summary>
+enum Paint : long
+{
+    /// The line.
+    Series = KayaWire.PaintSeries,
+    /// The area under it.
+    SeriesFill = KayaWire.PaintSeriesFill,
+    /// Gridlines.
+    Grid = KayaWire.PaintGrid,
+    /// Axis lines and tick labels.
+    Axis = KayaWire.PaintAxis,
+    /// The plot background.
+    Ground = KayaWire.PaintGround,
+}
+
+/// <summary>Which way a fill resolves its own crossings.</summary>
+enum FillRule : long
+{
+    Nonzero = KayaWire.FillRuleNonzero,
+    EvenOdd = KayaWire.FillRuleEvenOdd,
+}
+
+/// <summary>SVG's text-anchor: which end of the run sits at the anchor
+/// point.</summary>
+enum TextAlign : long
+{
+    Start = KayaWire.TextAlignStart,
+    Middle = KayaWire.TextAlignMiddle,
+    End = KayaWire.TextAlignEnd,
+}
+
+/// <summary>SVG's dominant-baseline: which horizontal line of the run
+/// sits at the anchor point.</summary>
+enum TextBaseline : long
+{
+    Alphabetic = KayaWire.TextBaselineAlphabetic,
+    Middle = KayaWire.TextBaselineMiddle,
+    Top = KayaWire.TextBaselineTop,
+    Bottom = KayaWire.TextBaselineBottom,
+}
+
+/// <summary>The drawing scope's recorder. The calls read as
+/// immediate-mode drawing; they are recorded, and ONE record is submitted
+/// when the scope closes — the For template trace's fiction with a
+/// drawing scope instead of a loop (docs/canvas-plan.md §2.1).</summary>
+sealed class Draw
+{
+    internal readonly List<object> Ops = new();
+
+    internal Draw(Viewbox viewbox) => Viewbox = viewbox;
+
+    /// <summary>The box this drawing is written in, so a chart can
+    /// compute its own extents without the app carrying the numbers
+    /// twice.</summary>
+    public Viewbox Viewbox { get; }
+
+    Draw Op(long code, params object[] operands)
+    {
+        Ops.Add(code);
+        Ops.AddRange(operands);
+        return this;
+    }
+
+    /// <summary>Start a subpath at (x, y).</summary>
+    public Draw MoveTo(double x, double y) => Op(KayaWire.DrawOpMoveTo, x, y);
+
+    /// <summary>Extend the current subpath to (x, y).</summary>
+    public Draw LineTo(double x, double y) => Op(KayaWire.DrawOpLineTo, x, y);
+
+    /// <summary>Close the current subpath.</summary>
+    public Draw Close() => Op(KayaWire.DrawOpClose);
+
+    /// <summary>MoveTo the first point and LineTo the rest — the chart's
+    /// own shape, spelled once.</summary>
+    public Draw Polyline(IReadOnlyList<(double X, double Y)> points)
+    {
+        for (int i = 0; i < points.Count; i++)
+        {
+            if (i == 0) MoveTo(points[i].X, points[i].Y);
+            else LineTo(points[i].X, points[i].Y);
+        }
+        return this;
+    }
+
+    /// <summary>Stroke the built path and clear it. `width` is in
+    /// device-independent points and does NOT carry the viewbox stretch,
+    /// so a 1pt gridline is 1pt at every canvas size (§3.2).</summary>
+    public Draw Stroke(Paint paint, double width) =>
+        Op(KayaWire.DrawOpStroke, (long)paint, width);
+
+    /// <summary>Fill the built path and clear it.</summary>
+    public Draw Fill(Paint paint, FillRule rule = FillRule.Nonzero) =>
+        Op(KayaWire.DrawOpFill, (long)paint, (long)rule);
+
+    /// <summary>Select the face for subsequent text ops. `asset` is an
+    /// ordinary asset name; "" is kaya's own embedded default face, which
+    /// is why a canvas can always draw text (§4.2). `size` is in
+    /// device-independent points.</summary>
+    public Draw Font(double size, string asset = "", long weight = 400) =>
+        Op(KayaWire.DrawOpFont, asset, size, weight);
+
+    /// <summary>Draw ONE LINE with its anchor at (x, y). A line break in
+    /// `s` is refused by the core (§3.3).</summary>
+    public Draw Text(double x, double y, string s, Paint paint,
+        TextAlign align = TextAlign.Start,
+        TextBaseline baseline = TextBaseline.Alphabetic) =>
+        Op(KayaWire.DrawOpText, x, y, (long)paint, (long)align, (long)baseline, s);
+}
+
 sealed class KayaApp
 {
     /// This host's capabilities. Constant for the life of the process,
@@ -462,6 +584,10 @@ sealed class KayaApp
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
     internal readonly Dictionary<ulong, List<Action<Tx>>> Derived = new();
+
+    // Each canvas's declared viewbox, so a redraw in a LATER transaction
+    // does not have to repeat it (docs/canvas-plan.md §2.2).
+    internal readonly Dictionary<ulong, Viewbox> CanvasViewboxes = new();
 
     // No `nodes`: template nodes draw from `widgets`, one sequence per
     // app (DESIGN.md, Binding conventions).
@@ -1532,6 +1658,58 @@ sealed class Tx
         if (indeterminate is { } i) Records.Add(KayaWire.TxSetIndeterminate(w.Id, i));
         if (grow is double g) SetGrow(w, g);
         return w;
+    }
+
+    /// A drawing surface. `viewbox` is the coordinate system the ops are
+    /// written in AND the canvas's natural size in points, which is what
+    /// keeps one op stream identical on five platforms
+    /// (docs/canvas-plan.md §3.2). Declare what it draws with Draw;
+    /// until then it is present and empty.
+    public Widget Canvas(Viewbox viewbox, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindCanvas);
+        // The viewbox rides the DRAWING on the wire, not a prop, so a
+        // canvas with no declaration yet has nothing to be inconsistent
+        // about; the guest side remembers it so a redraw in a later
+        // handler does not repeat it.
+        App.CanvasViewboxes[w.Id] = viewbox;
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// DECLARE the whole drawing on a canvas, replacing whatever was
+    /// declared before. The lambda reads as immediate-mode drawing and
+    /// records: one atomic record is submitted when it returns.
+    public void Draw(Widget w, Action<Draw> body)
+    {
+        if (!App.CanvasViewboxes.TryGetValue(w.Id, out var viewbox))
+        {
+            throw new InvalidOperationException(
+                "kaya: Draw on a widget that is not a canvas this app declared — a "
+                + "drawing is a declaration against the canvas it draws on "
+                + "(docs/canvas-plan.md §2.1)");
+        }
+        var d = new Draw(viewbox);
+        body(d);
+        Records.Add(KayaWire.TxSetDrawing(w.Id, viewbox.W, viewbox.H,
+            (uint)d.Ops.Count, 0, d.Ops.ToArray()));
+    }
+
+    /// Re-declare ONE stamped copy's drawing: `n` is the canvas template
+    /// node and `keys` that copy's key path, outermost first. An empty
+    /// path re-declares the drawing every copy is born with, which is
+    /// what Tpl.Canvas spells at declaration time
+    /// (docs/canvas-plan.md §3.1).
+    public void Draw(Node n, IReadOnlyList<object> keys, Viewbox viewbox,
+        Action<Draw> body)
+    {
+        var d = new Draw(viewbox);
+        body(d);
+        var values = new object[keys.Count + d.Ops.Count];
+        for (int i = 0; i < keys.Count; i++) values[i] = keys[i];
+        for (int i = 0; i < d.Ops.Count; i++) values[keys.Count + i] = d.Ops[i];
+        Records.Add(KayaWire.TxSetDrawing(n.Id, viewbox.W, viewbox.H,
+            (uint)d.Ops.Count, (uint)keys.Count, values));
     }
 
     /// A slider over min..max at value, with its change handler
@@ -3043,6 +3221,21 @@ sealed class Tpl
     {
         var n = Widget(KayaWire.KindImage);
         BindSourceField(n, 0, f);
+        return n;
+    }
+
+    /// A canvas per stamped copy — a sparkline in a table cell, which is
+    /// the case set_drawing grew its keys-first addressing for
+    /// (docs/canvas-plan.md §3.1). The drawing is declared with the node,
+    /// so every copy is born with it; Tx.Draw(Node, keys, …) re-declares
+    /// one copy's afterwards.
+    public Node Canvas(Viewbox viewbox, Action<Draw> body)
+    {
+        var n = Widget(KayaWire.KindCanvas);
+        var d = new Draw(viewbox);
+        body(d);
+        tx.Records.Add(KayaWire.TxSetDrawing(n.Id, viewbox.W, viewbox.H,
+            (uint)d.Ops.Count, 0, d.Ops.ToArray()));
         return n;
     }
 

@@ -444,7 +444,15 @@ in docs/deferred.md.
    and wire constant present in BOTH interpreter backends — plus the
    spec hash pinned against bindings/c/kaya_wire.h, the
    byte-compared-verdict rule, the vtable rule, and the
-   stamped-observation rule),
+   stamped-observation rule.
+   THE CANVAS VOCABULARIES JOINED 2026-08-26, and they are the reason
+   the constant sweep now reads a TYPE as well as a prefix: draw_op,
+   paint, fill_rule, text_align and text_baseline ride the op stream as
+   i64, so twenty-one hand-copied numbers in two interpreters sat
+   outside every gate — check-symbol-parity is symbol-only and this
+   sweep's alternation named neither the prefixes nor the width. It
+   refuses a reader that finds fewer than twenty-one, because a census
+   that reads nothing agrees with everything),
    `tools/check-file-modes.sh` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

@@ -334,6 +334,7 @@ static class Program
         Fwd("Image", ["byte[] source"], "source");
         Fwd("Image", ["Signal s"], "s");
         Fwd("Image", ["Field<byte[]> f"], "f");
+        Fwd("Canvas", ["Viewbox vb", "System.Action<Draw> body"], "vb, body");
         Fwd("Checkbox", ["Field<bool> f", $"{onToggle} onToggle = null"], "f, onToggle");
         Fwd("Entry", [$"{onText} onChange = null"], "onChange");
         Fwd("Entry", ["string text", $"{onText} onChange = null"], "text, onChange");

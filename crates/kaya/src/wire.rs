@@ -85,6 +85,9 @@ pub const TX_SET_APP_IDENTITY: u16 = 44;
 /// The column header bar on a For's container: titles plus the sort
 /// indicator, one atomic declaration (docs/tables-plan.md).
 pub const TX_SET_COLUMN_HEADERS: u16 = 45;
+/// The whole drawing on a canvas, one atomic declaration
+/// (docs/canvas-plan.md §3.1).
+pub const TX_SET_DRAWING: u16 = 46;
 /// `sorted`'s no-column sentinel (alert_choice's cancel precedent).
 pub const SORT_NONE: u32 = u32::MAX;
 /// `direction`'s two values, read only when `sorted` names a column.
@@ -142,6 +145,11 @@ pub const APPLY_SET_APP_IDENTITY: u16 = 34;
 /// identity is a node id plus key path no backend can compute).
 pub const APPLY_SET_COLUMN_HEADERS: u16 = 35;
 
+/// The RASTER a canvas's declaration produced: premultiplied RGBA8
+/// device pixels the backend blits (docs/canvas-plan.md §1.1). No op
+/// crosses this channel.
+pub const APPLY_SET_DRAWING: u16 = 36;
+
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
 pub const VALUE_I64: u32 = 2;
@@ -164,6 +172,85 @@ pub const KIND_SELECT: u32 = 11;
 pub const KIND_RADIO: u32 = 12;
 pub const KIND_GRID: u32 = 13;
 pub const KIND_TEXTAREA: u32 = 14;
+pub const KIND_CANVAS: u32 = 15;
+
+// Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
+// of tagged values: one of these as an i64, then its operands.
+pub const DRAW_MOVE_TO: i64 = 1;
+pub const DRAW_LINE_TO: i64 = 2;
+pub const DRAW_CLOSE: i64 = 3;
+pub const DRAW_STROKE: i64 = 4;
+pub const DRAW_FILL: i64 = 5;
+pub const DRAW_FONT: i64 = 6;
+pub const DRAW_TEXT: i64 = 7;
+
+// Paint roles (§3.4). Resolved in the core, per appearance.
+pub const PAINT_SERIES: i64 = 1;
+pub const PAINT_SERIES_FILL: i64 = 2;
+pub const PAINT_GRID: i64 = 3;
+pub const PAINT_AXIS: i64 = 4;
+pub const PAINT_GROUND: i64 = 5;
+
+pub const FILL_NONZERO: i64 = 0;
+pub const FILL_EVEN_ODD: i64 = 1;
+
+// SVG's text-anchor and dominant-baseline.
+pub const TEXT_ALIGN_START: i64 = 0;
+pub const TEXT_ALIGN_MIDDLE: i64 = 1;
+pub const TEXT_ALIGN_END: i64 = 2;
+pub const TEXT_BASELINE_ALPHABETIC: i64 = 0;
+pub const TEXT_BASELINE_MIDDLE: i64 = 1;
+pub const TEXT_BASELINE_TOP: i64 = 2;
+pub const TEXT_BASELINE_BOTTOM: i64 = 3;
+
+/// The (value, name) table for every draw opcode, paint role, fill rule,
+/// text align and text baseline — the second spelling of the five
+/// canvas enums, read by the core's refusals and by every diagnostic
+/// that has to say WHICH op or role it could not accept. Not in the spec
+/// hash; held level with the spec by
+/// `spec::tests::canvas_names_match_the_spec_enums`, and against the
+/// three hand-copied surfaces by tools/check-symbol-parity.sh —
+/// check-file-modes' hand-copied-numbers trap, one surface over.
+pub const DRAW_OPS: &[(i64, &str)] = &[
+    (DRAW_MOVE_TO, "move_to"),
+    (DRAW_LINE_TO, "line_to"),
+    (DRAW_CLOSE, "close"),
+    (DRAW_STROKE, "stroke"),
+    (DRAW_FILL, "fill"),
+    (DRAW_FONT, "font"),
+    (DRAW_TEXT, "text"),
+];
+
+pub const PAINTS: &[(i64, &str)] = &[
+    (PAINT_SERIES, "series"),
+    (PAINT_SERIES_FILL, "series_fill"),
+    (PAINT_GRID, "grid"),
+    (PAINT_AXIS, "axis"),
+    (PAINT_GROUND, "ground"),
+];
+
+pub const FILL_RULES: &[(i64, &str)] = &[(FILL_NONZERO, "nonzero"), (FILL_EVEN_ODD, "even_odd")];
+
+pub const TEXT_ALIGNS: &[(i64, &str)] = &[
+    (TEXT_ALIGN_START, "start"),
+    (TEXT_ALIGN_MIDDLE, "middle"),
+    (TEXT_ALIGN_END, "end"),
+];
+
+pub const TEXT_BASELINES: &[(i64, &str)] = &[
+    (TEXT_BASELINE_ALPHABETIC, "alphabetic"),
+    (TEXT_BASELINE_MIDDLE, "middle"),
+    (TEXT_BASELINE_TOP, "top"),
+    (TEXT_BASELINE_BOTTOM, "bottom"),
+];
+
+/// One canvas vocabulary's name for a value, or None for a value the
+/// vocabulary does not carry. ONE lookup over all five tables rather
+/// than five wrappers: the caller already names the table, and four of
+/// the wrappers had no caller outside their own pin test.
+pub fn vocab_name(table: &[(i64, &'static str)], value: i64) -> Option<&'static str> {
+    table.iter().find(|(v, _)| *v == value).map(|(_, n)| *n)
+}
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -574,6 +661,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_RADIO => WidgetKind::Radio,
         KIND_GRID => WidgetKind::Grid,
         KIND_TEXTAREA => WidgetKind::Textarea,
+        KIND_CANVAS => WidgetKind::Canvas,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -1094,6 +1182,32 @@ pub fn decode_transaction_with_blobs(
                     })
                     .collect();
                 TxOp::SetColumnHeaders { widget, sorted, direction, path: flat, titles }
+            }
+            TX_SET_DRAWING => {
+                let widget = WidgetId(r.u64());
+                let vb_w = match r.value() {
+                    Value::F64(n) => n,
+                    other => panic!("kaya: set_drawing's viewbox width is {other:?}, wanted f64"),
+                };
+                let vb_h = match r.value() {
+                    Value::F64(n) => n,
+                    other => panic!("kaya: set_drawing's viewbox height is {other:?}, wanted f64"),
+                };
+                let count = r.u32() as usize;
+                let path_len = r.u32() as usize;
+                // KEYS FIRST, then the op stream — set_column_headers'
+                // convention verbatim — and both declared lengths must
+                // agree with the list's own, or the fold walks operands
+                // belonging to a key.
+                let mut flat = r.record();
+                assert!(
+                    flat.len() == path_len + count,
+                    "kaya: set_drawing declares {path_len} keys and {count} op values \
+                     but carries {} values",
+                    flat.len()
+                );
+                let ops = flat.split_off(path_len);
+                TxOp::SetDrawing { widget, viewbox: (vb_w, vb_h), path: flat, ops }
             }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
@@ -2078,6 +2192,15 @@ impl Writer {
                     }
                 })
             }
+            ApplyOp::SetDrawing { id, width, height, scale, pixels } => {
+                self.record(APPLY_SET_DRAWING, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&width.to_le_bytes());
+                    b.extend_from_slice(&height.to_le_bytes());
+                    write_value(b, &Value::F64(*scale), blobs);
+                    write_value(b, &Value::Blob(pixels.clone()), blobs);
+                })
+            }
             ApplyOp::SelectRange { id, range } => self.record(APPLY_SELECT_RANGE, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&range.start.to_le_bytes());
@@ -2478,6 +2601,25 @@ impl Writer {
                     }
                 })
             }
+            TxOp::SetDrawing { widget, viewbox, path, ops } => {
+                self.record(TX_SET_DRAWING, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    write_value(b, &Value::F64(viewbox.0), blobs);
+                    write_value(b, &Value::F64(viewbox.1), blobs);
+                    b.extend_from_slice(&(ops.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&((path.len() + ops.len()) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    // Keys first, then the op stream — the decode's
+                    // contract, and set_column_headers' verbatim.
+                    for key in path {
+                        write_value(b, key, blobs);
+                    }
+                    for op in ops {
+                        write_value(b, op, blobs);
+                    }
+                })
+            }
             TxOp::SelectRange { widget, range } => self.record(TX_SELECT_RANGE, |b, _| {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 b.extend_from_slice(&range.start.to_le_bytes());
@@ -2672,6 +2814,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Radio => KIND_RADIO,
         WidgetKind::Grid => KIND_GRID,
         WidgetKind::Textarea => KIND_TEXTAREA,
+        WidgetKind::Canvas => KIND_CANVAS,
     }
 }
 

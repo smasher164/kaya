@@ -427,6 +427,9 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         // The header bar is not state; the order underneath it already
         // rides collection_move's undo run (docs/tables-plan.md).
         TxOp::SetColumnHeaders { .. } => UndoVerdict::Refused("set_column_headers"),
+        // A drawing renders app state, it is not state
+        // (docs/canvas-plan.md ruling 10, set_column_headers' reasoning).
+        TxOp::SetDrawing { .. } => UndoVerdict::Refused("set_drawing"),
         TxOp::CreateFor { .. } => UndoVerdict::Refused("create_for"),
         TxOp::CreateWhen { .. } => UndoVerdict::Refused("create_when"),
         TxOp::VariantCase { .. } => UndoVerdict::Refused("variant_case"),
@@ -538,6 +541,28 @@ pub(crate) struct Scene {
     /// LATE template declaration can re-stamp bars onto copies that
     /// already exist.
     bar_instances: HashMap<(u64, PathKey), WidgetId>,
+    /// EVERY LIVE CANVAS'S VALIDATED DRAWING, live ids and stamped
+    /// instance ids alike (docs/canvas-plan.md). This is the raster's
+    /// root: a scale report or an appearance flip re-rasters exactly
+    /// these, and the harness's canonical read answers out of it.
+    drawings: HashMap<WidgetId, crate::canvas::Drawing>,
+    /// A canvas TEMPLATE NODE's drawing: every stamped copy receives it,
+    /// and stamping records the copy in [`Self::drawing_instances`].
+    /// set_column_headers' tpl_headers, one kind over.
+    tpl_drawings: HashMap<u64, crate::canvas::Drawing>,
+    /// Per-copy re-declarations, keyed (template node, copy keys
+    /// outermost-first). Cleared with the copy, and by a template
+    /// re-declaration — "replacing whatever was declared before" covers
+    /// the copies.
+    drawing_overrides: HashMap<(u64, PathKey), crate::canvas::Drawing>,
+    /// Every stamped copy of every canvas template node. Recorded
+    /// unconditionally so a LATE template declaration reaches copies
+    /// that already exist.
+    drawing_instances: HashMap<(u64, PathKey), WidgetId>,
+    /// The scale and appearance the backend last reported. Every raster
+    /// is taken at it, and a report that changes it re-rasters every
+    /// canvas (docs/canvas-plan.md §5, §6).
+    presentation: crate::canvas::Presentation,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget that
@@ -2368,6 +2393,70 @@ impl Scene {
                                 tag: crate::wire::click_tag(node, &path),
                             });
                             self.bar_overrides.insert((node, keypath), bar);
+                        }
+                    }
+                }
+                TxOp::SetDrawing { widget, viewbox, path, ops } => {
+                    // The drawing's three addressings, spec doc order
+                    // (docs/canvas-plan.md §3.1): a live canvas, a canvas
+                    // TEMPLATE NODE for every stamped copy, or that node
+                    // plus keys for ONE copy. THE VALIDATION IS FIRST AND
+                    // IS THE SAME CALL for all three — there is one place
+                    // that draws, so there is one place that refuses
+                    // (§3.5).
+                    let drawing = match crate::canvas::validate(viewbox, &ops) {
+                        Ok(d) => d,
+                        Err(why) => panic!("{why}"),
+                    };
+                    let live = path.is_empty()
+                        && self.widgets.get(&widget) == Some(&WidgetKind::Canvas);
+                    if live {
+                        self.emit_drawing(widget, &drawing, &mut out);
+                        self.drawings.insert(widget, drawing);
+                    } else {
+                        let node = widget.0;
+                        assert!(
+                            self.template_nodes.get(&node) == Some(&WidgetKind::Canvas),
+                            "kaya: set_drawing targets {widget:?}, which is neither a live \
+                             canvas nor a canvas template node — a drawing is a \
+                             declaration against the canvas it draws on \
+                             (docs/canvas-plan.md §3.1)"
+                        );
+                        if path.is_empty() {
+                            // The template re-declaration: every copy's
+                            // drawing, per-copy overrides replaced with it.
+                            self.drawing_overrides.retain(|(n, _), _| *n != node);
+                            self.tpl_drawings.insert(node, drawing.clone());
+                            let copies: Vec<(PathKey, WidgetId)> = self
+                                .drawing_instances
+                                .iter()
+                                .filter(|((n, _), _)| *n == node)
+                                .map(|((_, keys), wid)| (keys.clone(), *wid))
+                                .collect();
+                            for (_, wid) in copies {
+                                self.emit_drawing(wid, &drawing, &mut out);
+                                self.drawings.insert(wid, drawing.clone());
+                            }
+                        } else {
+                            assert!(
+                                self.tpl_drawings.contains_key(&node),
+                                "kaya: a per-copy set_drawing needs the template drawing \
+                                 declared first — the copy's call replaces it \
+                                 (docs/canvas-plan.md §3.1)"
+                            );
+                            let keypath: PathKey = path.iter().map(Key::from_value).collect();
+                            let wid = *self
+                                .drawing_instances
+                                .get(&(node, keypath.clone()))
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "kaya: set_drawing keys {path:?} name no stamped copy \
+                                         of canvas node {node}"
+                                    )
+                                });
+                            self.emit_drawing(wid, &drawing, &mut out);
+                            self.drawings.insert(wid, drawing.clone());
+                            self.drawing_overrides.insert((node, keypath), drawing);
                         }
                     }
                 }
@@ -4204,6 +4293,27 @@ impl Scene {
                 Self::validate_row_arity(bodies, titles.len() as u32);
                 self.tpl_headers.insert(widget.0, HeaderBar { sorted, direction, titles });
             }
+            TxOp::SetDrawing { widget, viewbox, path, ops } => {
+                // A canvas per row — a sparkline in a table cell — is the
+                // case §3.1 gave this record its keys-first shape for.
+                assert!(
+                    path.is_empty(),
+                    "kaya: a template-zone set_drawing takes no key path — the per-copy \
+                     re-declaration is a live call against the stamped copy \
+                     (docs/canvas-plan.md §3.1)"
+                );
+                assert!(
+                    self.template_nodes.get(&widget.0) == Some(&WidgetKind::Canvas),
+                    "kaya: set_drawing targets node {}, which is not a canvas declared in \
+                     this template scope",
+                    widget.0
+                );
+                let drawing = match crate::canvas::validate(viewbox, &ops) {
+                    Ok(d) => d,
+                    Err(why) => panic!("{why}"),
+                };
+                self.tpl_drawings.insert(widget.0, drawing);
+            }
             other => panic!("kaya: {other:?} is not valid inside a template"),
         }
     }
@@ -4439,6 +4549,7 @@ impl Scene {
             }
         }
         self.bar_overrides.retain(|(_, p), _| *p != copy_path);
+        self.drawing_overrides.retain(|(_, p), _| *p != copy_path);
     }
 
     /// The blueprint over `collection` is known: record what one of its
@@ -4832,6 +4943,21 @@ impl Scene {
                         kind: *kind,
                         tag,
                     });
+                    if *kind == WidgetKind::Canvas {
+                        // Recorded unconditionally, so a LATE template
+                        // declaration reaches copies that already exist
+                        // (bar_instances' rule, one kind over).
+                        self.drawing_instances.insert((*node, copy_path.clone()), id);
+                        if let Some(drawing) = self
+                            .drawing_overrides
+                            .get(&(*node, copy_path.clone()))
+                            .or_else(|| self.tpl_drawings.get(node))
+                            .cloned()
+                        {
+                            self.emit_drawing(id, &drawing, out);
+                            self.drawings.insert(id, drawing);
+                        }
+                    }
                 }
                 TplOp::SetProp { node, prop, value } => {
                     let id = node_map[node];
@@ -5105,6 +5231,8 @@ impl Scene {
         // for (no resurrection on a same-key re-insert).
         let dead: std::collections::HashSet<WidgetId> = stamp.widgets.iter().copied().collect();
         self.bar_instances.retain(|_, wid| !dead.contains(wid));
+        self.drawing_instances.retain(|_, wid| !dead.contains(wid));
+        self.drawings.retain(|wid, _| !dead.contains(wid));
         for site_id in &stamp.when_sites {
             if let Some(mut site) = self.when_sites.remove(site_id) {
                 if let Some(bysig) = self.when_by_signal.get_mut(&site.signal) {
@@ -5229,6 +5357,68 @@ impl Scene {
             return;
         };
         self.seed_window(id, &path, out);
+    }
+
+    /// Rasterize one canvas at the reported presentation and put the
+    /// pixels on the apply channel. THE ONE PLACE A DRAWING BECOMES
+    /// BYTES — a scale report, an appearance flip and a re-declaration
+    /// all arrive here, so a backend can never see two spellings of the
+    /// same picture.
+    ///
+    /// The canvas is rastered at its VIEWBOX, which is its natural size;
+    /// a track bigger than that stretches the blit. The assigned-size
+    /// report that would let the core carry §3.2's stretch itself is
+    /// phase-3 work (docs/canvas-plan.md §11, docs/deferred.md).
+    fn emit_drawing(
+        &mut self,
+        id: WidgetId,
+        drawing: &crate::canvas::Drawing,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let raster =
+            crate::canvas::rasterize(drawing, drawing.viewbox, self.presentation);
+        out.push(ApplyOp::SetDrawing {
+            id,
+            width: raster.width,
+            height: raster.height,
+            scale: raster.scale,
+            pixels: crate::protocol::Blob::from(raster.pixels),
+        });
+    }
+
+    /// The backend reports the window's scale and appearance; the core
+    /// re-rasters (docs/canvas-plan.md §5, §6). Only the numbers cross —
+    /// no platform colour reaches a drawing — and an unchanged report
+    /// emits nothing, because a stale-size blit is the transition bug
+    /// every core-buffer framework has and a redundant one is just cost.
+    pub(crate) fn set_presentation(
+        &mut self,
+        p: crate::canvas::Presentation,
+    ) -> Vec<ApplyOp> {
+        if !p.scale.is_finite() || p.scale <= 0.0 || p == self.presentation {
+            return Vec::new();
+        }
+        self.presentation = p;
+        let mut out = Vec::new();
+        let mut all: Vec<(WidgetId, crate::canvas::Drawing)> =
+            self.drawings.iter().map(|(id, d)| (*id, d.clone())).collect();
+        // Stable order: the apply channel is compared byte-for-byte by
+        // the harness, and a HashMap's order is not a fact about kaya.
+        all.sort_by_key(|(id, _)| id.0);
+        for (id, drawing) in all {
+            self.emit_drawing(id, &drawing, &mut out);
+        }
+        out
+    }
+
+    /// What the harness reads back about one canvas: the canonical
+    /// raster's hash and the two legible facts, composed HERE so five
+    /// platforms compare a string the core wrote (docs/canvas-plan.md
+    /// §7.1). `None` when the id names no canvas that has been drawn.
+    pub(crate) fn canvas_probe(&self, id: WidgetId) -> Option<String> {
+        let drawing = self.drawings.get(&id)?;
+        let p = crate::canvas::probe(drawing);
+        Some(format!("{:016x} {}", p.hash, crate::canvas::drawing_observation(&p)))
     }
 
     /// The realized set of a site whose band was UNBOUNDED: every row

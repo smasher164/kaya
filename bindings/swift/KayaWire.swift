@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x1c6b68dc2656ea21
+let kayaSpecHash: UInt64 = 0x2f62f356091de5b6
 
 struct KayaTx {
     var bytes = Data()
@@ -490,6 +490,18 @@ struct KayaTx {
         self.u32(count)
         self.u32(pathLen)
         self.values(titles)
+        self.end(kayaAt)
+    }
+
+    /// DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws.
+    mutating func setDrawing(_ widgetId: UInt64, _ vbW: KayaValue, _ vbH: KayaValue, _ count: UInt32, _ pathLen: UInt32, _ ops: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DRAWING))
+        self.u64(widgetId)
+        self.value(vbW)
+        self.value(vbH)
+        self.u32(count)
+        self.u32(pathLen)
+        self.values(ops)
         self.end(kayaAt)
     }
 

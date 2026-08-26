@@ -38,6 +38,7 @@ kinds_seen = {}
 target_kinds = (
     "button", "checkbox", "slider", "entry", "label", "column", "row",
     "image", "scroll", "progress", "select", "radio", "grid", "textarea",
+    "canvas",
 )
 target_re = re.compile(r"\b(" + "|".join(target_kinds) + r")@([^\s;]*)")
 index_re = re.compile(r"\b(" + "|".join(target_kinds) + r")#([^\s;]*)")

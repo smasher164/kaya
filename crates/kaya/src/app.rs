@@ -574,6 +574,10 @@ pub struct AppCtx {
     // minted key is spent even if the transaction that spent it is
     // abandoned, so an id can never be handed out twice.
     fresh: RefCell<HashMap<CollectionId, Vec<(Vec<Value>, i64)>>>,
+    // Each canvas's declared viewbox, so a redraw in a LATER transaction
+    // does not have to repeat it (docs/canvas-plan.md §2.2's spelling).
+    // App-thread-only, like every registry beside `posted`.
+    viewboxes: RefCell<HashMap<u64, Viewbox>>,
 }
 
 impl AppCtx {
@@ -597,6 +601,7 @@ impl AppCtx {
             open_fors: RefCell::new(Vec::new()),
             derived: RefCell::new(HashMap::new()),
             fresh: RefCell::new(HashMap::new()),
+            viewboxes: RefCell::new(HashMap::new()),
         }
     }
 
@@ -2075,6 +2080,63 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A drawing surface. `viewbox` is the coordinate system the ops are
+    /// written in AND the canvas's natural size in points, which is what
+    /// keeps one op stream identical on five platforms
+    /// (docs/canvas-plan.md §3.2). Declare what it draws with
+    /// [`Tx::draw`]; until then it is present and empty.
+    pub fn canvas(&mut self, viewbox: Viewbox) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Canvas);
+        // The viewbox rides the DRAWING on the wire, not a prop, so a
+        // canvas with no declaration yet has nothing to be inconsistent
+        // about; the guest side remembers it so a redraw in a later
+        // handler does not repeat it.
+        self.ctx.viewboxes.borrow_mut().insert(w.0, viewbox);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// DECLARE the whole drawing on a canvas, replacing whatever was
+    /// declared before. The closure reads as immediate-mode drawing and
+    /// records: one atomic record is submitted when it returns, the For
+    /// template trace's fiction with a drawing scope instead of a loop.
+    pub fn draw(&mut self, w: WidgetId, body: impl FnOnce(&mut Draw)) {
+        let viewbox = *self.ctx.viewboxes.borrow().get(&w.0).unwrap_or_else(|| {
+            panic!(
+                "kaya: draw({w:?}) — that is not a canvas this app declared; a drawing \
+                 is a declaration against the canvas it draws on \
+                 (docs/canvas-plan.md §2.1)"
+            )
+        });
+        let mut d = Draw { viewbox, ops: Vec::new() };
+        body(&mut d);
+        self.ops.push(TxOp::SetDrawing {
+            widget: w,
+            viewbox: (viewbox.0, viewbox.1),
+            path: Vec::new(),
+            ops: d.ops,
+        });
+    }
+
+    /// The same, against a canvas TEMPLATE NODE: an empty path declares
+    /// every stamped copy's drawing, keys outermost-first re-declare ONE
+    /// copy's — a sparkline per row (`columns_at`'s addressing).
+    pub fn draw_at(
+        &mut self,
+        node: TemplateNodeId,
+        path: &Path,
+        viewbox: Viewbox,
+        body: impl FnOnce(&mut Draw),
+    ) {
+        let mut d = Draw { viewbox, ops: Vec::new() };
+        body(&mut d);
+        self.ops.push(TxOp::SetDrawing {
+            widget: WidgetId(node.0),
+            viewbox: (viewbox.0, viewbox.1),
+            path: path.clone(),
+            ops: d.ops,
+        });
+    }
+
     /// A progress bar in the platform's activity mode (no fraction).
     pub fn progress_indeterminate(&mut self) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Progress);
@@ -2852,6 +2914,187 @@ impl Sort {
     }
 }
 
+/// A canvas's coordinate system AND its natural size in
+/// device-independent points (docs/canvas-plan.md §3.2). The op stream
+/// is written in these units on every platform and in every language, so
+/// a scene can freeze it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Viewbox(pub f64, pub f64);
+
+/// The paint ROLE an op names. Never RGB: the roles resolve in the core
+/// per appearance, so a series line is legible in both modes and the
+/// buffer is byte-identical per mode (§3.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Paint {
+    /// The line.
+    Series,
+    /// The area under it.
+    SeriesFill,
+    /// Gridlines.
+    Grid,
+    /// Axis lines and tick labels.
+    Axis,
+    /// The plot background.
+    Ground,
+}
+
+impl Paint {
+    fn raw(self) -> i64 {
+        match self {
+            Paint::Series => crate::wire::PAINT_SERIES,
+            Paint::SeriesFill => crate::wire::PAINT_SERIES_FILL,
+            Paint::Grid => crate::wire::PAINT_GRID,
+            Paint::Axis => crate::wire::PAINT_AXIS,
+            Paint::Ground => crate::wire::PAINT_GROUND,
+        }
+    }
+}
+
+/// Which way a fill resolves its own crossings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillRule {
+    Nonzero,
+    EvenOdd,
+}
+
+/// SVG's `text-anchor`: which end of the run sits at the anchor point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAlign {
+    Start,
+    Middle,
+    End,
+}
+
+/// SVG's `dominant-baseline`: which horizontal line of the run sits at
+/// the anchor point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextBaseline {
+    Alphabetic,
+    Middle,
+    Top,
+    Bottom,
+}
+
+/// The drawing scope's recorder. The calls read as immediate-mode
+/// drawing; what happens is that they are recorded and ONE record is
+/// submitted when the scope closes — the For template trace's fiction,
+/// with a drawing scope instead of a loop (docs/canvas-plan.md §2.1).
+pub struct Draw {
+    viewbox: Viewbox,
+    ops: Vec<Value>,
+}
+
+impl Draw {
+    /// The viewbox this drawing is written in, so a chart can compute
+    /// its own extents without the app carrying the numbers twice.
+    pub fn viewbox(&self) -> Viewbox {
+        self.viewbox
+    }
+
+    fn op(&mut self, code: i64) -> &mut Self {
+        self.ops.push(Value::I64(code));
+        self
+    }
+
+    fn xy(&mut self, x: f64, y: f64) -> &mut Self {
+        self.ops.push(Value::F64(x));
+        self.ops.push(Value::F64(y));
+        self
+    }
+
+    /// Start a subpath at (x, y).
+    pub fn move_to(&mut self, x: f64, y: f64) -> &mut Self {
+        self.op(crate::wire::DRAW_MOVE_TO).xy(x, y)
+    }
+
+    /// Extend the current subpath to (x, y).
+    pub fn line_to(&mut self, x: f64, y: f64) -> &mut Self {
+        self.op(crate::wire::DRAW_LINE_TO).xy(x, y)
+    }
+
+    /// Close the current subpath.
+    pub fn close(&mut self) -> &mut Self {
+        self.op(crate::wire::DRAW_CLOSE)
+    }
+
+    /// `move_to` the first point and `line_to` the rest — the chart's
+    /// own shape, spelled once.
+    pub fn polyline(&mut self, points: &[(f64, f64)]) -> &mut Self {
+        for (i, (x, y)) in points.iter().enumerate() {
+            if i == 0 {
+                self.move_to(*x, *y);
+            } else {
+                self.line_to(*x, *y);
+            }
+        }
+        self
+    }
+
+    /// Stroke the built path and clear it. `width` is in
+    /// device-independent points and does NOT carry the viewbox stretch,
+    /// so a 1pt gridline is 1pt at every canvas size.
+    pub fn stroke(&mut self, paint: Paint, width: f64) -> &mut Self {
+        self.op(crate::wire::DRAW_STROKE);
+        self.ops.push(Value::I64(paint.raw()));
+        self.ops.push(Value::F64(width));
+        self
+    }
+
+    /// Fill the built path and clear it.
+    pub fn fill(&mut self, paint: Paint, rule: FillRule) -> &mut Self {
+        self.op(crate::wire::DRAW_FILL);
+        self.ops.push(Value::I64(paint.raw()));
+        self.ops.push(Value::I64(match rule {
+            FillRule::Nonzero => crate::wire::FILL_NONZERO,
+            FillRule::EvenOdd => crate::wire::FILL_EVEN_ODD,
+        }));
+        self
+    }
+
+    /// Select the face for subsequent text ops. `asset` is an ordinary
+    /// asset name; `""` is kaya's own embedded default face, which is
+    /// why a canvas can always draw text (§4.2). `size` is in
+    /// device-independent points.
+    pub fn font(&mut self, asset: &str, size: f64, weight: i64) -> &mut Self {
+        self.op(crate::wire::DRAW_FONT);
+        self.ops.push(Value::Str(asset.to_owned()));
+        self.ops.push(Value::F64(size));
+        self.ops.push(Value::I64(weight));
+        self
+    }
+
+    /// Draw ONE LINE with its anchor at (x, y). A line break in `s` is
+    /// refused by the core: line breaking is a layout engine kaya's
+    /// canvas deliberately does not have (§3.3).
+    pub fn text(
+        &mut self,
+        x: f64,
+        y: f64,
+        s: &str,
+        paint: Paint,
+        align: TextAlign,
+        baseline: TextBaseline,
+    ) -> &mut Self {
+        self.op(crate::wire::DRAW_TEXT);
+        self.ops.push(Value::F64(x));
+        self.ops.push(Value::F64(y));
+        self.ops.push(Value::I64(paint.raw()));
+        self.ops.push(Value::I64(match align {
+            TextAlign::Start => crate::wire::TEXT_ALIGN_START,
+            TextAlign::Middle => crate::wire::TEXT_ALIGN_MIDDLE,
+            TextAlign::End => crate::wire::TEXT_ALIGN_END,
+        }));
+        self.ops.push(Value::I64(match baseline {
+            TextBaseline::Alphabetic => crate::wire::TEXT_BASELINE_ALPHABETIC,
+            TextBaseline::Middle => crate::wire::TEXT_BASELINE_MIDDLE,
+            TextBaseline::Top => crate::wire::TEXT_BASELINE_TOP,
+            TextBaseline::Bottom => crate::wire::TEXT_BASELINE_BOTTOM,
+        }));
+        self.ops.push(Value::Str(s.to_owned()));
+        self
+    }
+}
+
 impl<'t, 'b, I: for_scope::Id> Iterator for Rows<'t, 'b, I> {
     type Item = Row<'t, 'b>;
 
@@ -3068,6 +3311,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
         self.tpl().image(src)
+    }
+
+    pub fn canvas(&mut self, viewbox: Viewbox, body: impl FnOnce(&mut Draw)) -> TemplateNodeId {
+        self.tpl().canvas(viewbox, body)
     }
 
     pub fn a11y_id(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
@@ -5396,6 +5643,24 @@ impl Tpl<'_, '_> {
     pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
         let n = self.widget(WidgetKind::Image);
         self.apply_source(n, Prop::Source, src.into().inner);
+        n
+    }
+
+    /// A canvas per stamped copy — a sparkline in a table cell, which is
+    /// the case set_drawing grew its keys-first addressing for
+    /// (docs/canvas-plan.md §3.1). The drawing is declared with the node,
+    /// so every copy is born with it; `Tx::draw_at` re-declares one
+    /// copy's afterwards.
+    pub fn canvas(&mut self, viewbox: Viewbox, body: impl FnOnce(&mut Draw)) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Canvas);
+        let mut d = Draw { viewbox, ops: Vec::new() };
+        body(&mut d);
+        self.tx.ops.push(TxOp::SetDrawing {
+            widget: WidgetId(n.0),
+            viewbox: (viewbox.0, viewbox.1),
+            path: Vec::new(),
+            ops: d.ops,
+        });
         n
     }
 

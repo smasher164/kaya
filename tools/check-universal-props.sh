@@ -52,6 +52,17 @@ kinds = re.findall(r"^KIND_([A-Z_]+)", read(wire), re.M)
 if not kinds:
     bad.append(f"{wire}: no KIND_* constants — the spec list is empty")
 
+def code_only(text):
+    """The arm with its comments stripped. A rule the arm's own comment
+    can satisfy is a text match, not a rule (check-table-card's
+    flatness clause reads its block the same way)."""
+    out = []
+    for line in text.splitlines():
+        stripped = re.sub(r"//.*", "", line)
+        out.append(stripped)
+    return "\n".join(out)
+
+
 # COMPOSE. Each `when (node.kind)` arm must mention the modifier.
 text = read(compose)
 start = text.find("private fun KayaRenderCore(")
@@ -71,11 +82,21 @@ for kind in kinds:
         bad.append(f"{compose}: no render arm for KIND_{kind}")
         continue
     arm = arms[kind]
+    # A DEPTH-STUB ARM IS EXEMPT, AND ONLY BECAUSE IT CANNOT RETURN.
+    # check-verbs' `records_or_refuses` carries the same carve-out for
+    # the same reason: `depthStub` is `Nothing`, so there is no view for
+    # a modifier to reach and no way for the arm to pass vacuously. The
+    # exemption is read from the CALL, never from prose — without this
+    # the gate was satisfied by the identifier appearing in the arm's
+    # own pointer comment, which is a text match and not a rule.
+    if re.search(r'\bdepthStub\("[a-z_]+"\)', code_only(arm)):
+        continue
     # `a11y` carries BOTH props. An arm may take the identity half
     # alone (`a11yTag`) only if it hands the NAME to the composable's
     # own parameter — Image is that case.
-    if not (re.search(r"\ba11y\b", arm)
-            or (re.search(r"\ba11yTag\b", arm) and re.search(r"\ba11yLabel\b", arm))):
+    if not (re.search(r"\ba11y\b", code_only(arm))
+            or (re.search(r"\ba11yTag\b", code_only(arm))
+                and re.search(r"\ba11yLabel\b", code_only(arm)))):
         bad.append(
             f"{compose}: the KIND_{kind} arm never applies `a11y` — "
             "the universal props reach every other kind and not this one")

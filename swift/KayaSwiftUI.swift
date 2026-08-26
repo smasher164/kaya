@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x1c6b68dc2656ea21
+let kayaSpecHash: UInt64 = 0x2f62f356091de5b6
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -44,6 +44,7 @@ private let applySetTypeface: UInt16 = 33
 /// is mac-only; see the `expect_app_icon` arm.
 private let applySetAppIdentity: UInt16 = 34
 private let applySetColumnHeaders: UInt16 = 35
+private let applySetDrawing: UInt16 = 36
 /// `tableSorted`'s no-column sentinel (the wire's SORT_NONE).
 let kayaSortNone: UInt32 = 0xFFFF_FFFF
 private let applyPushEntry: UInt16 = 12
@@ -112,6 +113,7 @@ private let kindSelect: UInt32 = 11
 private let kindRadio: UInt32 = 12
 private let kindGrid: UInt32 = 13
 private let kindTextarea: UInt32 = 14
+private let kindCanvas: UInt32 = 15
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -164,6 +166,45 @@ private let alignCenter: Int64 = 1
 private let alignEnd: Int64 = 2
 private let alignStretch: Int64 = 3
 private let alignBaseline: Int64 = 4
+// THE CANVAS VOCABULARIES (spec enums "draw_op", "paint", "fill_rule",
+// "text_align", "text_baseline"). APPEND-ONLY wire values, hand-copied
+// here and held against the core's by tools/check-verbs.sh — the
+// check-file-modes trap, one surface over. This backend BLITS and never
+// interprets an op (docs/canvas-plan.md §1.1), so nothing below is read
+// by the render; they exist so a drifted number fails a gate rather than
+// a lane.
+private let drawMoveTo: Int64 = 1
+private let drawLineTo: Int64 = 2
+private let drawClose: Int64 = 3
+private let drawStroke: Int64 = 4
+private let drawFill: Int64 = 5
+private let drawFont: Int64 = 6
+private let drawText: Int64 = 7
+private let paintSeries: Int64 = 1
+private let paintSeriesFill: Int64 = 2
+private let paintGrid: Int64 = 3
+private let paintAxis: Int64 = 4
+private let paintGround: Int64 = 5
+private let fillNonzero: Int64 = 0
+private let fillEvenOdd: Int64 = 1
+private let textAlignStart: Int64 = 0
+private let textAlignMiddle: Int64 = 1
+private let textAlignEnd: Int64 = 2
+private let textBaselineAlphabetic: Int64 = 0
+private let textBaselineMiddle: Int64 = 1
+private let textBaselineTop: Int64 = 2
+private let textBaselineBottom: Int64 = 3
+/// The private constant copies above are a VOCABULARY the render does
+/// not consult. Naming them once here keeps the compiler from reporting
+/// them unused without a per-constant annotation, and gives the reader
+/// one place that says why they exist.
+let kayaCanvasVocabulary: [Int64] = [
+    drawMoveTo, drawLineTo, drawClose, drawStroke, drawFill, drawFont, drawText,
+    paintSeries, paintSeriesFill, paintGrid, paintAxis, paintGround,
+    fillNonzero, fillEvenOdd,
+    textAlignStart, textAlignMiddle, textAlignEnd,
+    textBaselineAlphabetic, textBaselineMiddle, textBaselineTop, textBaselineBottom,
+]
 private let valueBool: UInt32 = 1
 private let valueI64: UInt32 = 2
 private let valueF64: UInt32 = 3
@@ -323,6 +364,13 @@ final class KayaNode: Identifiable {
     // after a failed decode).
     var image: KayaPlatformImage?
     var imageSize = "0x0"
+    // THE CANVAS BUFFER the core rasterized (docs/canvas-plan.md §1.1),
+    // as a CGImage over premultiplied RGBA8, with the scale it was drawn
+    // at so the blit is 1:1 at the window's density. nil is the
+    // declared-and-empty case, which stays PRESENT — never absent
+    // (tools/check-empty-child.sh).
+    var drawing: CGImage?
+    var drawingScale: CGFloat = 1
     // The scroll observations (scroll viewports only), recorded by the
     // render's readers, never a model copy.
     var scrollViewportH = 0.0
@@ -608,6 +656,7 @@ final class KayaSceneModel {
     var entryWidgets: [KayaNode] = []
     var sliders: [KayaNode] = []
     var images: [KayaNode] = []
+    var canvases: [KayaNode] = []
     var columns: [KayaNode] = []
     var rows: [KayaNode] = []
     var scrolls: [KayaNode] = []
@@ -2985,6 +3034,28 @@ enum KayaHost {
         return api.row_extent(container, UInt64(index))
     }
 
+    /// THE WINDOW'S SCALE AND APPEARANCE (docs/canvas-plan.md §5, §6).
+    /// The core re-rasters every canvas at what this reports; a report
+    /// that changes nothing emits nothing. Only the two numbers cross —
+    /// no platform colour reaches a drawing.
+    static func presentation(_ scale: CGFloat, _ dark: Bool) {
+        guard api != nil else { return }
+        api.presentation(Double(scale), dark)
+    }
+
+    /// One canvas's CANONICAL raster, read back out of the core:
+    /// `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (§7.1). Empty when the id
+    /// names no canvas that has been drawn.
+    static func canvasProbe(_ widget: UInt64) -> String {
+        guard api != nil else { return "" }
+        var buffer = [UInt8](repeating: 0, count: 128)
+        let wrote = buffer.withUnsafeMutableBufferPointer { buf in
+            api.canvas_probe(widget, buf.baseAddress, UInt(buf.count))
+        }
+        guard wrote > 0 else { return "" }
+        return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
+    }
+
     /// An entry edit, with the three facts the core's undo ledger cannot
     /// derive (docs/undo-plan.md §3).
     ///
@@ -3131,6 +3202,18 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
             // apply arm, for the reason at the top of this function: the
             // handle dies with the batch, and without this the icon arrives as
             // no bytes at all, with no error on any side.
+            // SET_DRAWING's pixels are a blob too, and they die with the
+            // batch exactly as a prop's do. Body: { u64 id; u32 width;
+            // u32 height; Value scale; Value pixels }, so the blob's
+            // value header sits one 16-byte f64 value past the fixed
+            // part.
+            if kind == applySetDrawing {
+                let vat = at + 8 + 16 + 16
+                if raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self) == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
+                    blobs[handle] = KayaHost.blobData(handle)
+                }
+            }
             if kind == applySetAppIdentity {
                 var vat = at + 8 + 8
                 let nameLen = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
@@ -3221,6 +3304,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindEntry: kayaScene.entryWidgets.append(node)
                 case kindCheckbox: kayaScene.checkboxes.append(node)
                 case kindImage: kayaScene.images.append(node)
+                case kindCanvas: kayaScene.canvases.append(node)
                 case kindColumn: kayaScene.columns.append(node)
                 case kindRow: kayaScene.rows.append(node)
                 case kindScroll: kayaScene.scrolls.append(node)
@@ -3562,6 +3646,25 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 cnode.tableSorted = csorted
                 cnode.tableDirection = cdirection
                 cnode.sortTag = Array(raw[cat..<(cat + ctagLen)])
+            case applySetDrawing:
+                // THE RASTER, not the ops: { u64 id; u32 width; u32
+                // height; Value scale; Value pixels } — premultiplied
+                // RGBA8 the core produced (docs/canvas-plan.md §1.1).
+                // This backend interprets no draw op and owns no drawing
+                // API; its arm is the raw-pixel sibling of the image
+                // arm's decode.
+                let did = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let dw = Int(raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self))
+                let dh = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
+                // Each Value is { u32 type; u32 len; payload } padded to
+                // 8, so the f64 scale's payload is at +24 and the blob
+                // handle's at +40.
+                let dscale = raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                let dhandle = raw.loadUnaligned(fromByteOffset: body + 40, as: UInt64.self)
+                if let dnode = kayaScene.nodes[did] {
+                    dnode.drawingScale = CGFloat(dscale)
+                    dnode.drawing = kayaDrawingImage(blobs[dhandle], dw, dh)
+                }
             case applyPresentSaveDialog:
                 // The platform's REAL save dialog (NSSavePanel), answered
                 // exactly once through kaya_emit_save_dialog_result — one
@@ -5228,6 +5331,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "label": return kayaTarget(spec, "label", kayaScene.labels)
     case "slider": return kayaTarget(spec, "slider", kayaScene.sliders)
     case "image": return kayaTarget(spec, "image", kayaScene.images)
+    case "canvas": return kayaTarget(spec, "canvas", kayaScene.canvases)
     case "column": return kayaTarget(spec, "column", kayaScene.columns)
     case "row": return kayaTarget(spec, "row", kayaScene.rows)
     case "scroll": return kayaTarget(spec, "scroll", kayaScene.scrolls)
@@ -6714,6 +6818,58 @@ private func kayaRunScript(_ script: String) {
                     observed.append("app icon \(wantIcon)")
                 } else {
                     failures.append("app icon \(gotIcon), wanted \(wantIcon)")
+                }
+            case "expect_drawing_hash", "expect_drawing":
+                // THE CANONICAL RASTER, asked of the CORE (docs/canvas-plan.md
+                // §7.1): every backend answers the same way, because the whole
+                // point is that five platforms' libkaya drew the same picture.
+                // The probe carries the hash AND the two legible facts; the
+                // hash verb compares the first and prints the rest, since a
+                // hash on its own tells the next reader nothing.
+                let drawSpec = Substring(parts[1])
+                let wantDraw = kayaQuoted(Array(parts[2...]))
+                let probe = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaTarget(drawSpec, "canvas", kayaScene.canvases) else {
+                        return ""
+                    }
+                    return KayaHost.canvasProbe(node.id)
+                }
+                let drawParts = probe.split(separator: " ", maxSplits: 1)
+                let drawHash = drawParts.count == 2 ? String(drawParts[0]) : "<no canvas \(drawSpec)>"
+                let drawMeasured =
+                    drawParts.count == 2 ? String(drawParts[1]) : "<no canvas \(drawSpec)>"
+                if parts[0] == "expect_drawing_hash" {
+                    if drawHash == wantDraw {
+                        observed.append("drawing hash \(wantDraw)")
+                    } else {
+                        failures.append(
+                            "drawing hash \(drawHash) (\(drawMeasured)), wanted \(wantDraw)")
+                    }
+                } else if drawMeasured == wantDraw {
+                    observed.append("drawing \(wantDraw)")
+                } else {
+                    failures.append("drawing \(drawMeasured), wanted \(wantDraw)")
+                }
+            case "expect_ink":
+                // THE BLIT, sampled off the window's own pixels (§7.2) — the
+                // one canvas read that fails when the buffer never reached the
+                // platform's image object, and the reason the hash is not the
+                // whole story. `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."`.
+                let inkSpec = Substring(parts[1])
+                let inkArg = kayaQuoted(Array(parts[2...]))
+                let inkHalves = inkArg.components(separatedBy: " = ")
+                let inkPoints = inkHalves.first ?? ""
+                let wantInk = inkHalves.count == 2 ? inkHalves[1] : ""
+                let gotInk = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaTarget(inkSpec, "canvas", kayaScene.canvases) else {
+                        return "<no canvas \(inkSpec)>"
+                    }
+                    return kayaCanvasInk(node, inkPoints)
+                }
+                if gotInk == wantInk {
+                    observed.append("ink \(wantInk)")
+                } else {
+                    failures.append("ink \(gotInk) at \(inkPoints), wanted \(wantInk)")
                 }
             case "expect_inset":
                 // The content inset, MEASURED as the halved gap between the
@@ -10311,6 +10467,130 @@ func kayaWindowCaption(_ windowId: UInt64) -> String {
     return name
 }
 
+/// Where each canvas landed, in SwiftUI's global (window) space —
+/// recorded by a reader on the canvas arm, the way every other geometry
+/// fact in this file is recorded, never written from a layout pass.
+@MainActor var kayaCanvasFrames: [UInt64: CGRect] = [:]
+
+/// The canvas arm's geometry reader (KayaTrackReader's shape). It exists
+/// so `expect_ink` can find the canvas ON THE REAL SURFACE rather than
+/// re-rendering the node, which would agree with the arm by
+/// construction.
+private struct KayaCanvasReader: View {
+    let id: UInt64
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .global)
+            Color.clear
+                .onAppear { kayaCanvasFrames[id] = frame }
+                .onChange(of: frame) { _, f in kayaCanvasFrames[id] = f }
+        }
+    }
+}
+
+/// Sample `points` — `x,y` pairs in hundredths of the canvas's own box —
+/// off THE WINDOW'S OWN RENDERED PIXELS, as `RRGGBB/RRGGBB/...`. What
+/// `expect_ink` verifies, and the only canvas read that fails when the
+/// blit dropped (docs/canvas-plan.md §7.2).
+///
+/// Every angle-bracketed answer below says what it MEASURED, never a
+/// guess about which layer lost the picture.
+@MainActor func kayaCanvasInk(_ node: KayaNode, _ points: String) -> String {
+    // THE APPEARANCE RIDES THE ANSWER, because the display raster uses
+    // the platform's mode and kaya's palette has two of them (§6): a
+    // bare colour string would be a frozen expectation that quietly
+    // depends on the machine's appearance setting, and would fail on a
+    // dark-mode host with a mismatch that names no cause. This way the
+    // failure text says which palette it sampled.
+    let mode = kayaCanvasAppearance()
+    let wanted = points.split(separator: " ").compactMap { pair -> (Double, Double)? in
+        let xy = pair.split(separator: ",")
+        guard xy.count == 2, let x = Double(xy[0]), let y = Double(xy[1]) else { return nil }
+        return (x, y)
+    }
+    guard !wanted.isEmpty else { return "<no probe points in \(points)>" }
+    guard let frame = kayaCanvasFrames[node.id], frame.width > 1, frame.height > 1 else {
+        return "<the canvas laid out at \(kayaCanvasFrames[node.id].map(String.init(describing:)) ?? "no recorded frame")>"
+    }
+    #if os(macOS)
+        guard let window = NSApp.windows.first(where: { $0.isVisible }),
+            let content = window.contentView
+        else { return "<no visible window: \(NSApp.windows.count) windows exist>" }
+        // SwiftUI's global space is the window's content with y DOWN;
+        // an AppKit view's own space is y-down only when it is flipped.
+        // Both are asked rather than assumed, because a wrong answer
+        // here reads a different part of the window and looks exactly
+        // like a lowering bug.
+        let y = content.isFlipped ? frame.minY : content.bounds.height - frame.maxY
+        let rect = CGRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: rect) else {
+            return "<AppKit made no bitmap for \(rect) of a \(content.bounds.size) view>"
+        }
+        content.cacheDisplay(in: rect, to: rep)
+        guard let cg = rep.cgImage else {
+            return "<the cached bitmap carried no image for \(rect)>"
+        }
+    #else
+        let renderer = ImageRenderer(content: KayaRender(node: node))
+        renderer.scale = node.drawingScale
+        guard let cg = renderer.cgImage else {
+            return "<the renderer produced no image for a \(frame.size) canvas>"
+        }
+    #endif
+    return "\(mode) " + kayaSampleRGB(cg, wanted)
+}
+
+/// Which palette the core last rastered with, read the same way the
+/// brand tint reads it — the ONE reading, so the report and the answer
+/// cannot disagree.
+@MainActor func kayaCanvasAppearance() -> String {
+    #if os(macOS)
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    #else
+        let dark = UITraitCollection.current.userInterfaceStyle == .dark
+    #endif
+    return dark ? "dark" : "light"
+}
+
+/// kayaIconQuadrants' sampler with the probe points named rather than
+/// fixed at the quadrant centres. THE 16-BIT CONTEXT AND THE SINGLE
+/// ROUND ARE THE MEASURED PART: an 8-bit context quantizes twice and
+/// reported `1D71D8` for a declared `1C71D8` (2026-08-18; the comment
+/// above kayaIconQuadrants carries the finding).
+func kayaSampleRGB(_ image: CGImage, _ points: [(Double, Double)]) -> String {
+    let width = image.width, height = image.height
+    guard width > 1, height > 1 else { return "<a \(width)x\(height) surface>" }
+    var pixels = [UInt16](repeating: 0, count: width * height * 4)
+    let drawn: Bool = pixels.withUnsafeMutableBufferPointer { buf -> Bool in
+        guard
+            let ctx = CGContext(
+                data: buf.baseAddress, width: width, height: height,
+                bitsPerComponent: 16, bytesPerRow: width * 8,
+                space: CGColorSpace(name: CGColorSpace.sRGB)
+                    ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                    | CGBitmapInfo.byteOrder16Little.rawValue)
+        else { return false }
+        ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.interpolationQuality = .none
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return true
+    }
+    guard drawn else { return "<no bitmap context for a \(width)x\(height) surface>" }
+    return points.map { (px, py) -> String in
+        let x = min(max(Int(Double(width) * px / 100.0), 0), width - 1)
+        let y = min(max(Int(Double(height) * py / 100.0), 0), height - 1)
+        let at = (y * width + x) * 4
+        func byte(_ v: UInt16) -> Int { Int((Double(v) / 65535.0 * 255.0).rounded()) }
+        return String(
+            format: "%02X%02X%02X",
+            byte(pixels[at]), byte(pixels[at + 1]), byte(pixels[at + 2]))
+    }
+    .joined(separator: "/")
+}
+
 func kayaIconQuadrants(_ image: CGImage) -> String? {
     let width = image.width, height = image.height
     guard width > 1, height > 1 else { return nil }
@@ -10584,6 +10864,36 @@ func kayaDecodeImage(_ data: Data?, into node: KayaNode) {
         node.image = nil
         node.imageSize = "0x0"
     }
+}
+
+/// The core's raster as a CGImage: premultiplied RGBA8, `width` x
+/// `height` device pixels, no decode and no colour conversion — the
+/// bytes ARE the picture (docs/canvas-plan.md §1.1, §8).
+///
+/// nil for a zero-sized or short buffer, which is the declared-and-empty
+/// case; the render keeps the node present either way
+/// (tools/check-empty-child.sh).
+func kayaDrawingImage(_ data: Data?, _ width: Int, _ height: Int) -> CGImage? {
+    guard let data, width > 0, height > 0, data.count >= width * height * 4 else { return nil }
+    guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+    // PREMULTIPLIED FIRST + byteOrder32Big is RGBA in memory order on a
+    // little-endian host: R at byte 0, A at byte 3, which is tiny-skia's
+    // Pixmap layout. The swizzle a wrong pair here would produce is what
+    // expect_ink exists to catch.
+    let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        .union(.byteOrder32Big)
+    return CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bitsPerPixel: 32,
+        bytesPerRow: width * 4,
+        space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: info,
+        provider: provider,
+        decode: nil,
+        shouldInterpolate: false,
+        intent: .defaultIntent)
 }
 
 struct KayaRender: View {
@@ -11041,6 +11351,34 @@ struct KayaRender: View {
             } else {
                 Color.clear.frame(width: 0, height: 0)
             }
+        case kindCanvas:
+            // THE BLIT (docs/canvas-plan.md §8): the core rasterized, and
+            // this arm puts the bytes on screen at the density they were
+            // drawn at. No draw op is interpreted here and no drawing API
+            // is owned here.
+            //
+            // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
+            // ABSENT — the image arm's rule verbatim, for its reason
+            // (tools/check-empty-child.sh).
+            Group {
+                if let buffer = node.drawing {
+                    #if os(macOS)
+                        Image(
+                            nsImage: NSImage(
+                                cgImage: buffer,
+                                size: NSSize(
+                                    width: CGFloat(buffer.width) / node.drawingScale,
+                                    height: CGFloat(buffer.height) / node.drawingScale)))
+                    #else
+                        Image(
+                            uiImage: UIImage(
+                                cgImage: buffer, scale: node.drawingScale, orientation: .up))
+                    #endif
+                } else {
+                    Color.clear.frame(width: 0, height: 0)
+                }
+            }
+            .background(KayaCanvasReader(id: node.id))
         default:
             EmptyView()
         }
@@ -15943,6 +16281,32 @@ struct KayaSectionPane: View {
     }
 }
 
+/// THE SCALE AND APPEARANCE REPORT (docs/canvas-plan.md §5, §6): the
+/// backend reports, the core re-rasters every canvas. Apple's own model
+/// for bitmap-backed content — hold a bitmap at a scale, get told,
+/// re-render — expressed as SwiftUI's two environment values.
+///
+/// MEASURE-AT-IMPLEMENTATION #3 (§11) IS STILL OPEN: Apple nowhere
+/// states that `\.displayScale` updates when a window crosses to a
+/// differently-scaled display. It follows from the environment contract
+/// and is not written down, and this machine has one display, so it is
+/// recorded as inferred rather than measured (docs/deferred.md).
+private struct KayaPresentationReporter: ViewModifier {
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { report() }
+            .onChange(of: displayScale) { _, _ in report() }
+            .onChange(of: colorScheme) { _, _ in report() }
+    }
+
+    private func report() {
+        KayaHost.presentation(displayScale, colorScheme == .dark)
+    }
+}
+
 struct KayaRoot: View {
     @State private var scene = kayaScene
     @Environment(\.openWindow) private var openWindow
@@ -16047,6 +16411,9 @@ struct KayaRoot: View {
         // so the reading does not depend on which arm rendered — the arm depends
         // on the reading, never the reverse.
         .modifier(KayaFormFactorRecorder(windowId: 0))
+        // The canvas's scale and appearance channel, outside the arm
+        // chain for the form factor's reason.
+        .modifier(KayaPresentationReporter())
         // The accessor rides OUTSIDE the stack so its view never
         // detaches under a push.
         #if os(macOS)

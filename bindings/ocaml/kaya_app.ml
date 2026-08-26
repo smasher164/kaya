@@ -16,6 +16,12 @@ type signal = Signal of int64
 type widget = Widget of int64
 type node = Node of int64
 
+(* A canvas's coordinate system AND its natural size in
+   device-independent points (docs/canvas-plan.md §3.2). The op stream is
+   written in these units on every platform and in every language, so a
+   scene can freeze it. *)
+type viewbox = float * float
+
 (* WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
    note, which every binding's copy of this surface shortens. *)
 type capabilities = { aux_windows : bool }
@@ -218,6 +224,9 @@ type app = {
   (* Signals recomputed from a collection after each of its mutations,
      written into the same transaction. *)
   derived : (int64, (unit -> unit) list) Hashtbl.t;
+  (* Each canvas's declared viewbox, so a redraw in a LATER transaction
+     does not have to repeat it (docs/canvas-plan.md §2.2). *)
+  canvas_viewboxes : (int64, viewbox) Hashtbl.t;
 }
 
 (* One transaction: everything queued inside build (or a handler) applies
@@ -316,6 +325,7 @@ let create () =
     open_fors = [];
     tpl_depth = 0;
     derived = Hashtbl.create 8;
+    canvas_viewboxes = Hashtbl.create 8;
   }
 
 let emit tx record = tx.records <- record :: tx.records
@@ -934,6 +944,149 @@ let image ?grow ?a11y_id ?a11y_label ?source ?source_asset ?bind () =
    | None, None -> ());
   Option.iter (fun s -> bind_source w s) bind;
   w
+
+(* --- THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4) --------
+   The paint ROLE an op names, never RGB: the roles resolve in the core
+   per appearance. The numbers stay in the generated wire module. *)
+type paint = Series | Series_fill | Grid | Axis | Ground
+
+let paint_wire = function
+  | Series -> Int64.of_int Kaya_wire.paint_series
+  | Series_fill -> Int64.of_int Kaya_wire.paint_series_fill
+  | Grid -> Int64.of_int Kaya_wire.paint_grid
+  | Axis -> Int64.of_int Kaya_wire.paint_axis
+  | Ground -> Int64.of_int Kaya_wire.paint_ground
+
+(* Which way a fill resolves its own crossings. *)
+type fill_rule = Nonzero | Even_odd
+
+let fill_rule_wire = function
+  | Nonzero -> Int64.of_int Kaya_wire.fill_rule_nonzero
+  | Even_odd -> Int64.of_int Kaya_wire.fill_rule_even_odd
+
+(* SVG's [text-anchor]: which end of the run sits at the anchor point.
+   Spelled [Anchor_*] because [Start] and [End] are already [align]'s. *)
+type text_align = Anchor_start | Anchor_middle | Anchor_end
+
+let text_align_wire = function
+  | Anchor_start -> Int64.of_int Kaya_wire.text_align_start
+  | Anchor_middle -> Int64.of_int Kaya_wire.text_align_middle
+  | Anchor_end -> Int64.of_int Kaya_wire.text_align_end
+
+(* SVG's [dominant-baseline]: which horizontal line of the run sits at
+   the anchor point. *)
+type text_baseline = Alphabetic | Middle | Top | Bottom
+
+let text_baseline_wire = function
+  | Alphabetic -> Int64.of_int Kaya_wire.text_baseline_alphabetic
+  | Middle -> Int64.of_int Kaya_wire.text_baseline_middle
+  | Top -> Int64.of_int Kaya_wire.text_baseline_top
+  | Bottom -> Int64.of_int Kaya_wire.text_baseline_bottom
+
+(* The drawing scope's recorder. The calls read as immediate-mode
+   drawing; they are recorded, and ONE record is submitted when the scope
+   closes — the For template trace's fiction with a drawing scope instead
+   of a loop (docs/canvas-plan.md §2.1). [d_ops] accumulates reversed. *)
+type draw = { d_viewbox : viewbox; mutable d_ops : Kaya_wire.value list }
+
+(* The box this drawing is written in, so a chart can compute its own
+   extents without the app carrying the numbers twice. *)
+let viewbox d = d.d_viewbox
+
+let draw_op d code operands =
+  d.d_ops <- List.rev_append (Kaya_wire.I64 (Int64.of_int code) :: operands) d.d_ops
+
+(* Start a subpath at (x, y). *)
+let move_to d x y =
+  draw_op d Kaya_wire.draw_op_move_to [ Kaya_wire.F64 x; Kaya_wire.F64 y ]
+
+(* Extend the current subpath to (x, y). *)
+let line_to d x y =
+  draw_op d Kaya_wire.draw_op_line_to [ Kaya_wire.F64 x; Kaya_wire.F64 y ]
+
+(* Close the current subpath. *)
+let close d = draw_op d Kaya_wire.draw_op_close []
+
+(* [move_to] the first point and [line_to] the rest — the chart's own
+   shape, spelled once. *)
+let polyline d points =
+  List.iteri (fun i (x, y) -> if i = 0 then move_to d x y else line_to d x y) points
+
+(* Stroke the built path and clear it. [~width] is in device-independent
+   points and does NOT carry the viewbox stretch, so a 1pt gridline is
+   1pt at every canvas size (docs/canvas-plan.md §3.2). *)
+let stroke d ~paint ~width =
+  draw_op d Kaya_wire.draw_op_stroke
+    [ Kaya_wire.I64 (paint_wire paint); Kaya_wire.F64 width ]
+
+(* Fill the built path and clear it. *)
+let fill d ~paint ?(rule = Nonzero) () =
+  draw_op d Kaya_wire.draw_op_fill
+    [ Kaya_wire.I64 (paint_wire paint); Kaya_wire.I64 (fill_rule_wire rule) ]
+
+(* Select the face for subsequent text ops. [~asset] is an ordinary asset
+   name; [""] is kaya's own embedded default face, which is why a canvas
+   can always draw text (§4.2). [~size] is in device-independent points. *)
+let font d ?(asset = "") ~size ?(weight = 400) () =
+  draw_op d Kaya_wire.draw_op_font
+    [ Kaya_wire.Str asset; Kaya_wire.F64 size;
+      Kaya_wire.I64 (Int64.of_int weight) ]
+
+(* Draw ONE LINE with its anchor at (x, y). A line break in [s] is
+   refused by the core (docs/canvas-plan.md §3.3). *)
+let text d x y s ~paint ?(align = Anchor_start) ?(baseline = Alphabetic) () =
+  draw_op d Kaya_wire.draw_op_text
+    [ Kaya_wire.F64 x; Kaya_wire.F64 y; Kaya_wire.I64 (paint_wire paint);
+      Kaya_wire.I64 (text_align_wire align);
+      Kaya_wire.I64 (text_baseline_wire baseline); Kaya_wire.Str s ]
+
+(* One drawing, recorded and framed: keys FIRST, then the op stream —
+   TX 46's Values order (docs/canvas-plan.md §3.1). *)
+let drawing_record id keys ((vb_w, vb_h) as vb) body =
+  let d = { d_viewbox = vb; d_ops = [] } in
+  body d;
+  let ops = List.rev d.d_ops in
+  Kaya_wire.tx_set_drawing id (Kaya_wire.F64 vb_w) (Kaya_wire.F64 vb_h)
+    (List.length ops) (List.length keys) (keys @ ops)
+
+(* A drawing surface. [~viewbox] is the coordinate system the ops are
+   written in AND the canvas's natural size in points, which is what
+   keeps one op stream identical on five platforms (§3.2). [~draw]
+   declares what it draws at construction; [draw] re-declares it later,
+   and until one of them runs the canvas is present and empty. *)
+let canvas ?grow ?a11y_id ?a11y_label ~viewbox ?draw () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_canvas in
+  Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
+  let (Widget id) = w in
+  (* The viewbox rides the DRAWING on the wire, not a prop, so a canvas
+     with no declaration yet has nothing to be inconsistent about; the
+     guest side remembers it so a redraw in a later handler does not
+     repeat it. *)
+  Hashtbl.replace tx.app.canvas_viewboxes id viewbox;
+  Option.iter (fun body -> emit tx (drawing_record id [] viewbox body)) draw;
+  w
+
+(* DECLARE the whole drawing on a canvas, replacing whatever was declared
+   before. The function reads as immediate-mode drawing and records: one
+   atomic record is queued when it returns. *)
+let draw (Widget id) ~f =
+  let tx = the_tx () in
+  match Hashtbl.find_opt tx.app.canvas_viewboxes id with
+  | None ->
+    invalid_arg
+      "kaya: draw on a widget that is not a canvas this app declared -- a \
+       drawing is a declaration against the canvas it draws on \
+       (docs/canvas-plan.md §2.1)"
+  | Some vb -> emit tx (drawing_record id [] vb f)
+
+(* Re-declare ONE stamped copy's drawing: [node] is the canvas template
+   node and [keys] the copy's key path outermost first. An empty [keys]
+   re-declares the drawing every copy is born with, which is what
+   [Tpl.canvas ~draw] spells at declaration time (§3.1). *)
+let draw_at (Node id) keys ~viewbox ~f =
+  emit (the_tx ()) (drawing_record id keys viewbox f)
 
 (* A container from its children. A child is a PARTIALLY APPLIED
    creator — every creator ends in [()], and omitting that unit
@@ -2679,6 +2832,21 @@ module Tpl = struct
     Option.iter (fun data -> Floor.set_source n data) source;
     Option.iter (fun s -> Floor.bind_source n s) bind;
     Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
+    n
+
+  (* A canvas per stamped copy — a sparkline in a table cell, which is
+     the case set_drawing grew its keys-first addressing for
+     (docs/canvas-plan.md §3.1). The drawing is declared with the node,
+     so every copy is born with it; [draw_at] re-declares one copy's
+     afterwards. *)
+  let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ~viewbox ~draw () =
+    let n = Floor.widget Kaya_wire.kind_canvas in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    let (Node id) = n in
+    emit (the_tx ()) (drawing_record id [] viewbox draw);
     n
 
   (* Containers, the outer-zone convention: children are partially

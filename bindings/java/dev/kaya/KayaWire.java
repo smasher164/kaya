@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x1c6b68dc2656ea21L;
+    public static final long SPEC_HASH = 0x2f62f356091de5b6L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -39,6 +39,28 @@ public final class KayaWire {
     public static final int KIND_RADIO = 12;
     public static final int KIND_GRID = 13;
     public static final int KIND_TEXTAREA = 14;
+    public static final int KIND_CANVAS = 15;
+    public static final int DRAW_OP_MOVE_TO = 1;
+    public static final int DRAW_OP_LINE_TO = 2;
+    public static final int DRAW_OP_CLOSE = 3;
+    public static final int DRAW_OP_STROKE = 4;
+    public static final int DRAW_OP_FILL = 5;
+    public static final int DRAW_OP_FONT = 6;
+    public static final int DRAW_OP_TEXT = 7;
+    public static final int PAINT_SERIES = 1;
+    public static final int PAINT_SERIES_FILL = 2;
+    public static final int PAINT_GRID = 3;
+    public static final int PAINT_AXIS = 4;
+    public static final int PAINT_GROUND = 5;
+    public static final int FILL_RULE_NONZERO = 0;
+    public static final int FILL_RULE_EVEN_ODD = 1;
+    public static final int TEXT_ALIGN_START = 0;
+    public static final int TEXT_ALIGN_MIDDLE = 1;
+    public static final int TEXT_ALIGN_END = 2;
+    public static final int TEXT_BASELINE_ALPHABETIC = 0;
+    public static final int TEXT_BASELINE_MIDDLE = 1;
+    public static final int TEXT_BASELINE_TOP = 2;
+    public static final int TEXT_BASELINE_BOTTOM = 3;
     public static final int PROP_TEXT = 1;
     public static final int PROP_CHECKED = 2;
     public static final int PROP_VALUE = 3;
@@ -181,6 +203,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_BRAND_TYPEFACE = 43;
     public static final short TX_KIND_SET_APP_IDENTITY = 44;
     public static final short TX_KIND_SET_COLUMN_HEADERS = 45;
+    public static final short TX_KIND_SET_DRAWING = 46;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -216,6 +239,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_TYPEFACE = 33;
     public static final short APPLY_KIND_SET_APP_IDENTITY = 34;
     public static final short APPLY_KIND_SET_COLUMN_HEADERS = 35;
+    public static final short APPLY_KIND_SET_DRAWING = 36;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -689,6 +713,18 @@ public final class KayaWire {
         b.putInt(count);
         b.putInt(pathLen);
         encodeValues(b, titles);
+        return finish(b);
+    }
+
+    /** DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws. */
+    public static byte[] txSetDrawing(long widgetId, Object vbW, Object vbH, int count, int pathLen, Object[] ops) {
+        ByteBuffer b = begin(TX_KIND_SET_DRAWING);
+        b.putLong(widgetId);
+        encodeValue(b, vbW);
+        encodeValue(b, vbH);
+        b.putInt(count);
+        b.putInt(pathLen);
+        encodeValues(b, ops);
         return finish(b);
     }
 

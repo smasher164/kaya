@@ -235,6 +235,14 @@ pub struct KayaHostApi {
     /// asks per row over the WHOLE collection, which the band-shaped
     /// geometry read cannot answer.
     pub row_extent: extern "C" fn(u64, u64) -> f64,
+    /// THE CANVAS (docs/canvas-plan.md). `presentation` is the window's
+    /// scale and appearance, reported so the core re-rasters; nothing
+    /// about the drawing crosses the other way except the pixels on the
+    /// apply channel. `canvas_probe` is the harness's read of the
+    /// CANONICAL raster, composed in the core so five platforms compare
+    /// a string kaya wrote.
+    pub presentation: extern "C" fn(f64, bool),
+    pub canvas_probe: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
 }
 
 unsafe extern "C" {
@@ -350,6 +358,8 @@ pub(crate) fn run() -> i32 {
         scroll_to_row_i64: crate::capi::kaya_scroll_to_row_i64,
         window_geometry: crate::capi::kaya_window_geometry,
         row_extent: crate::capi::kaya_row_extent,
+        presentation: crate::capi::kaya_presentation,
+        canvas_probe: crate::capi::kaya_canvas_probe,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry): both of its tiers do, and the declaration has to beat the

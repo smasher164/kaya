@@ -143,6 +143,9 @@ _for_stack = []  # depth indices of enclosing Fors, for element levels
 _open_traces = []
 _for_collections = []  # the enclosing Fors' collections, for mirror parentage
 _tpl_depth = 0  # 0 = live zone; >0 = declaring a blueprint
+# Each canvas's declared viewbox, so a redraw in a LATER transaction does
+# not have to repeat it (docs/canvas-plan.md §2.2).
+_canvas_viewboxes = {}
 _pending_root = None  # the top-level container window() will mount
 _recording = False  # inside window(): mirror reads would freeze branches
 _journal = None  # per-transaction mirror undo, run if the tx is abandoned
@@ -519,6 +522,15 @@ class _Handle:
         forever. Returns the handle."""
         _app._register(self, wire.OCC_PASTED, fn)
         return self
+
+    def draw(self, *keys):
+        """DECLARE the whole drawing on a canvas, replacing whatever was
+        declared before: `with chart.draw() as d: ...`.
+
+        On a template node the keys select ONE stamped copy; with none it
+        declares the drawing every copy is born with
+        (docs/canvas-plan.md §2.1, §3.1)."""
+        return _DrawScope(self, keys)
 
 
 class Widget(_Handle):
@@ -3173,6 +3185,158 @@ def image(source=None, grow=None):
                 f"or an element field, not {type(source).__name__} — text "
                 "belongs on kaya.label"
             )
+    _set_grow(handle, grow)
+    return handle
+
+
+# The five canvas vocabularies, spelled as the names Python already
+# spells a role or an alignment with. The NUMBERS come from the generated
+# wire file, never retyped here (tools/check-symbol-parity.sh holds the
+# surfaces that must copy them by hand; this is not one).
+_PAINTS = {
+    "series": wire.PAINT_SERIES,
+    "series_fill": wire.PAINT_SERIES_FILL,
+    "grid": wire.PAINT_GRID,
+    "axis": wire.PAINT_AXIS,
+    "ground": wire.PAINT_GROUND,
+}
+_FILL_RULES = {
+    "nonzero": wire.FILL_RULE_NONZERO,
+    "even_odd": wire.FILL_RULE_EVEN_ODD,
+}
+_TEXT_ALIGNS = {
+    "start": wire.TEXT_ALIGN_START,
+    "middle": wire.TEXT_ALIGN_MIDDLE,
+    "end": wire.TEXT_ALIGN_END,
+}
+_TEXT_BASELINES = {
+    "alphabetic": wire.TEXT_BASELINE_ALPHABETIC,
+    "middle": wire.TEXT_BASELINE_MIDDLE,
+    "top": wire.TEXT_BASELINE_TOP,
+    "bottom": wire.TEXT_BASELINE_BOTTOM,
+}
+
+
+def _draw_vocab(table, what, name):
+    try:
+        return table[name]
+    except (KeyError, TypeError):
+        raise ValueError(
+            f"kaya: {name!r} is not a canvas {what}; the vocabulary is "
+            + ", ".join(sorted(table))
+        ) from None
+
+
+class Draw:
+    """The drawing scope's recorder. The calls read as immediate-mode
+    drawing; they are recorded, and ONE record is submitted when the
+    scope closes — the For template trace's fiction with a drawing scope
+    instead of a loop (docs/canvas-plan.md §2.1)."""
+
+    def __init__(self, viewbox):
+        self.viewbox = viewbox
+        self._ops = []
+
+    def _op(self, code, *operands):
+        self._ops.append(code)
+        self._ops.extend(operands)
+        return self
+
+    def move_to(self, x, y):
+        """Start a subpath at (x, y)."""
+        return self._op(wire.DRAW_OP_MOVE_TO, float(x), float(y))
+
+    def line_to(self, x, y):
+        """Extend the current subpath to (x, y)."""
+        return self._op(wire.DRAW_OP_LINE_TO, float(x), float(y))
+
+    def close(self):
+        """Close the current subpath."""
+        return self._op(wire.DRAW_OP_CLOSE)
+
+    def polyline(self, points):
+        """`move_to` the first point and `line_to` the rest — the chart's
+        own shape, spelled once."""
+        for i, (x, y) in enumerate(points):
+            if i == 0:
+                self.move_to(x, y)
+            else:
+                self.line_to(x, y)
+        return self
+
+    def stroke(self, paint, width=1.0):
+        """Stroke the built path and clear it. `width` is in
+        device-independent points and does NOT carry the viewbox stretch
+        (docs/canvas-plan.md §3.2)."""
+        return self._op(wire.DRAW_OP_STROKE,
+                        _draw_vocab(_PAINTS, "paint role", paint),
+                        float(width))
+
+    def fill(self, paint, rule="nonzero"):
+        """Fill the built path and clear it."""
+        return self._op(wire.DRAW_OP_FILL,
+                        _draw_vocab(_PAINTS, "paint role", paint),
+                        _draw_vocab(_FILL_RULES, "fill rule", rule))
+
+    def font(self, size, asset="", weight=400):
+        """Select the face for subsequent text ops. `asset` is an
+        ordinary asset name; `""` is kaya's own embedded default face."""
+        return self._op(wire.DRAW_OP_FONT, str(asset), float(size),
+                        int(weight))
+
+    def text(self, x, y, s, paint="axis", align="start",
+             baseline="alphabetic"):
+        """Draw ONE LINE with its anchor at (x, y). A line break in `s`
+        is refused by the core (docs/canvas-plan.md §3.3)."""
+        return self._op(wire.DRAW_OP_TEXT, float(x), float(y),
+                        _draw_vocab(_PAINTS, "paint role", paint),
+                        _draw_vocab(_TEXT_ALIGNS, "text align", align),
+                        _draw_vocab(_TEXT_BASELINES, "text baseline",
+                                    baseline),
+                        str(s))
+
+
+class _DrawScope:
+    """`_Handle.draw`'s with-block: records through `Draw`, submits one
+    `set_drawing` on exit. Nothing is emitted when the body raises."""
+
+    def __init__(self, handle, keys):
+        self._handle = handle
+        self._keys = list(keys)
+        self._draw = None
+
+    def __enter__(self):
+        viewbox = _canvas_viewboxes.get(self._handle.id)
+        if viewbox is None:
+            raise RuntimeError(
+                f"kaya: draw() on widget {self._handle.id} — that is not a "
+                "canvas this app declared; a drawing is a declaration "
+                "against the canvas it draws on (docs/canvas-plan.md §2.1)"
+            )
+        self._draw = Draw(viewbox)
+        return self._draw
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            return False
+        w, h = self._draw.viewbox
+        ops = self._draw._ops
+        _records().append(wire.tx_set_drawing(
+            self._handle.id, w, h, len(ops), len(self._keys),
+            [*self._keys, *ops],
+        ))
+        return False
+
+
+def canvas(viewbox, grow=None):
+    """A drawing surface. `viewbox` is the (width, height) coordinate
+    system the ops are written in AND the canvas's natural size in
+    points, which is what keeps one op stream identical on five
+    platforms (docs/canvas-plan.md §3.2). Declare what it draws with
+    `with handle.draw() as d:`; until then it is present and empty."""
+    w, h = viewbox
+    handle = _widget(wire.KIND_CANVAS)
+    _canvas_viewboxes[handle.id] = (float(w), float(h))
     _set_grow(handle, grow)
     return handle
 

@@ -24,11 +24,11 @@ import sys
 
 ROOT = "."
 
-# The 14 widget kinds; the gate passes them in from the GENERATED wire
+# The 15 widget kinds; the gate passes them in from the GENERATED wire
 # file, so this fallback tracks the spec by construction, not by memory.
 DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
-    "scroll progress select radio grid textarea"
+    "scroll progress select radio grid textarea canvas"
 ).split()
 
 # Constructors that are plumbing rather than sugar. Named here so that

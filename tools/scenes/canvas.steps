@@ -1,0 +1,75 @@
+# The canvas conformance scene (docs/canvas-plan.md): the core
+# rasterizes, the backend blits, and three verbs say so.
+#
+# THE THREE ARE NOT REDUNDANT, and the pairing is the whole design (§7).
+# `expect_drawing_hash` proves that this platform's libkaya produced the
+# SAME PIXELS as every other platform's, down to antialiasing — the
+# assertion React Native Skia built a whole screenshot suite to get,
+# expressed as one frozen string, and the reason the buffer is core-owned
+# at all. It proves NOTHING about whether anything reached the screen.
+# `expect_drawing` is the legible one: how many ops the core replayed and
+# where the ink landed, so a human reading a failure learns whether
+# nothing arrived, whether the transform is wrong, whether the y axis is
+# inverted, or whether the drawing sits in a corner of its track — none
+# of which a hash can say. `expect_ink` is the only one that fails when
+# the BLIT dropped: it samples the window's own rendered pixels, so a
+# buffer that never reached the platform's image object, or reached it
+# swizzled, upside down or at the wrong size, dies here while the hash
+# stays green.
+#
+# THE HASH IS ONE STRING ON FIVE PLATFORMS because every input to it is
+# one thing: the op stream (this file is shared verbatim and the guest
+# draws in VIEWBOX units, so no platform's track can move a coordinate),
+# the font bytes (kaya's own, embedded in libkaya), the shaper and the
+# rasterizer (one pinned CPU-only crate set compiled into every lane's
+# libkaya), the palette (kaya's own two-mode chart palette) and the scale
+# (the verb pins it at 1.0, so the lane's display cannot reach it).
+#
+# ALL FIVE LANES ARE aarch64 TODAY (§7.1) — mac and iOS on Apple silicon,
+# windows on aarch64-pc-windows-msvc, android on arm64-v8a, linux in a
+# container on the same host — so the one thing that could falsify this
+# string was cross-ISA identity of a SIMD raster pipeline, and it was
+# MEASURED before the string was frozen: both architectures rasterize
+# the same shapes to the same bytes
+# (docs/measurements/canvas-cross-isa-2026-08-26.txt, which also carries
+# the caveat that the x86_64 side was emulated). If a native x86_64 lane
+# ever disagrees, this degrades to a hash per architecture family — still
+# one string per lane family, and still stronger than anything a
+# per-backend rasterizer could offer.
+#
+# No opening settle: the first expect's bounded retry IS the scene-ready
+# wait.
+expect label#0 "portfolio value"
+# The legible pair first, so a failing run reads top to bottom as a
+# diagnosis rather than as a hash mismatch with no context. 41 ops: the
+# ground rect's six, three gridline pairs plus their stroke, the area's
+# eleven, the series' eight, the axis' three, and two font selections
+# with four text runs between them.
+#
+# THE FIGURE IS INSET INSIDE ITS VIEWBOX, so these four numbers can
+# discriminate at all: a drawing that filled its box would read
+# 0,0,100,100 whatever the transform did, and an inverted y axis or a
+# drawing pushed into a corner would move nothing.
+expect_drawing canvas@chart "41/2,8,97,83"
+expect_drawing_hash canvas@chart "e5ac8a2c0b240633"
+# THE BLIT, sampled at flat-region CENTRES and never at a boundary —
+# expect_app_icon's measured discipline, because whatever rescale a
+# platform applies blurs a boundary and would make this verb report a
+# colour no palette entry has. 15,20 is plot ground above the series;
+# 70,63 is deep inside the filled area under it.
+#
+# THE APPEARANCE IS PART OF THE OBSERVATION. The DISPLAY raster uses the
+# platform's mode and kaya's palette has two of them (§6), so a bare
+# colour string would be a frozen expectation quietly depending on the
+# host's appearance setting. Naming the mode makes a dark-mode host fail
+# with a sentence that says why. Making the ink assertion
+# appearance-independent is phase 4's business, where the palette gets
+# looked at hardest in both modes (docs/deferred.md).
+expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E2F7"
+# AND THE CANVAS IS A WIDGET, with a widget's universal props: a drawing
+# is an IMAGE to every platform's accessibility tree and the app authors
+# the spoken name (§9). Nothing here builds a semantics tree out of the
+# ops, deliberately — that is the one place an app opts out of kaya's
+# accessibility dividend, and the honest contract is an image with a
+# name.
+expect_ax canvas@chart "image/Portfolio value"

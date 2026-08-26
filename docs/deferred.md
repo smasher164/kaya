@@ -2285,9 +2285,81 @@ count, so the saving is measured rather than assumed.
   `kaya/default-font` answered from bytes embedded in libkaya (the
   vendored Sora) and the `kaya/` prefix refused in app packages. The
   ops travel as ordinary tagged values on set_column_headers' shape,
-  and Win2D is not needed at all under the buffer. NOTHING IS BUILT:
-  no protocol byte has moved and the headline stays open until the
-  five-lane matrix says otherwise.
+  and Win2D is not needed at all under the buffer.
+  DEPTH LANDED 2026-08-26 (phases 1-2, mac only): the `canvas` kind,
+  the `set_drawing` record and the five vocabularies are in the spec;
+  crates/kaya/src/canvas.rs validates, shapes and rasterizes; the
+  SwiftUI backend blits and reports its scale and appearance; the
+  three verbs and tools/scenes/canvas.steps are green on the mac lane
+  (`canvas-rust-swiftui`). The headline stays open: the other three
+  backends declare `depth_stub("canvas")`, only the Rust guest draws,
+  and the five-lane matrix has not run.
+- **DEPTH STUB: canvas on gtk** — the blit is the breadth phase
+  (docs/canvas-plan.md §8, §11 phase 3): a GdkMemoryTexture over the
+  core's premultiplied RGBA8 buffer in a GtkPicture, the raw-pixel
+  sibling of the encoded `gdk::Texture::from_bytes` arm already there,
+  plus the GdkTexture download that answers expect_ink. Closed when
+  tools/linux/run-suites.sh wires the canvas legs and they pass.
+  KEY: canvas, set_drawing, canvas_probe, canvas_ink, GdkMemoryTexture
+- **DEPTH STUB: canvas on winui** — the blit is the breadth phase
+  (docs/canvas-plan.md §8, §11 phase 3): a WriteableBitmap whose pixel
+  buffer receives the core's premultiplied RGBA8, plus the
+  premultiplied-BGRA8 swizzle §11's measure-at-implementation list
+  holds open, and RenderTargetBitmap for expect_ink. Closed when
+  tools/deploy-win.sh wires the canvas legs and they pass.
+  KEY: canvas, set_drawing, canvas_probe, canvas_ink, WriteableBitmap
+- **DEPTH STUB: canvas on compose** — the blit is the breadth phase
+  (docs/canvas-plan.md §8, §11 phase 3): an ImageBitmap filled from the
+  core's buffer in the KIND_CANVAS render arm, plus PixelCopy or a
+  bitmap draw for expect_ink. The wire constants and the three verb
+  arms are in already, so only the render and the read-back are
+  outstanding. Closed when tools/android/run-emulator.sh wires the
+  canvas legs and they pass.
+  KEY: canvas, set_drawing, KIND_CANVAS, CANVAS_VOCABULARY,
+  expect_drawing_hash
+- The canvas's ink assertion NAMES THE APPEARANCE, and that is a
+  limitation rather than a design (found 2026-08-26, while freezing
+  tools/scenes/canvas.steps). `expect_drawing_hash` pins the scale and
+  the palette itself, so it is one string on five platforms whatever
+  the host is set to; `expect_ink` samples the DISPLAY raster, which
+  uses the platform's own light/dark bit, and kaya's chart palette has
+  two modes — so the frozen colours would quietly depend on the
+  machine's appearance setting. The verb therefore reports the mode it
+  sampled (`light FFFFFF/D2E2F7`) and a dark-mode host fails with a
+  sentence that says why instead of a bare colour mismatch. What would
+  close it: either the harness pins the appearance for a leg the way it
+  pins the scale, or the scene carries both modes' strings. Phase 4 is
+  where the palette gets looked at hardest in both modes anyway.
+  KEY: expect_ink, canvas_ink, kayaCanvasAppearance, appearance, palette
+- A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
+  assigned track (docs/canvas-plan.md §3.2 rule 3, found while landing
+  the depth slice 2026-08-26). The core rasters at the VIEWBOX times
+  the reported scale, and the backend blits that image into whatever
+  track layout gives it — so a canvas at its natural size is
+  pixel-exact, and one given more space stretches the pen and the
+  glyphs with it, which rule 3 says must not happen. `rasterize` already
+  takes the target size and applies the viewbox stretch to POSITIONS
+  alone (its unit test `a_stretch_does_not_thicken_the_pen` proves the
+  arithmetic); what is missing is the backend report that would tell the
+  core what the track is, beside the scale report `kaya_presentation`
+  already carries. Not reachable by the depth scene, whose canvas sits
+  at its natural size. KEY: viewbox, stretch, emit_drawing, presentation,
+  rasterize
+- ~~CROSS-ISA byte-identity of the canvas raster is UNMEASURED~~ —
+  CLOSED 2026-08-26: measured before the first hash went into a .steps file,
+  and the two agree: aarch64 and x86_64 both rasterize the canvas
+  scene's shapes to `40b0692193e14148`
+  (docs/measurements/canvas-cross-isa-2026-08-26.txt, the report the
+  probe and its caveat live in). So `expect_drawing_hash` stays ONE
+  string per lane rather than one per architecture family, which is what
+  docs/canvas-plan.md §7.1 named as the thing that could falsify the
+  primary observable. WHAT IS STILL OPEN, and it is the caveat rather
+  than the claim: the x86_64 run was EMULATED (Docker Desktop on Apple
+  silicon), so it exercised the x86_64 codegen path — where a SIMD
+  divergence would live — and not a real x86_64 CPU's corner cases. The
+  day kaya adds a NATIVE x86_64 lane, re-run the probe before trusting
+  the frozen hash there. KEY: cross-ISA, aarch64, x86_64, drawing hash,
+  tiny-skia
 - Webview widget (Akhil, 2026-07-22; deferred furthest — the
   framework inside it is the entire web platform): minimal uniform
   surface is load-URL/load-HTML plus a navigation-requested veto
@@ -5197,6 +5269,11 @@ and the one-per-process wall followed the known script, and the lane
 passed standalone on the immediate rerun. One sighting, logged not
 chased; the family now has faces on android, iOS and windows, all
 under peak contention.
+
+AND AGAIN ON ANDROID (2026-08-26, save-compose, the canvas-depth
+matrix at 627s contended): the known sentences, the at-fail dumps
+kept as designed (android-save-compose-* in validate-failures), the
+lane green standalone minutes later. Logged, not chased.
 
 THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
 (2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in

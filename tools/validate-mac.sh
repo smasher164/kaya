@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface windowed"
+DEPTH_SCENES="typeface windowed canvas"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1127,6 +1127,16 @@ drain
 KAYA_SELFTEST_SCRIPT="$(scene_script typeface)"
 export KAYA_SELFTEST_SCRIPT
 run typeface-rust-swiftui env KAYA_SELFTEST=typeface "$RUST_GUESTS"/typeface
+drain
+
+# The canvas scene: the core rasterizes and this backend blits
+# (docs/canvas-plan.md). A DEPTH slice — rust only, mac only — with the
+# other three backends declaring depth_stub("canvas"), which is what
+# holds their legs off (check-stubs and check-steps state that one rule
+# from both sides).
+KAYA_SELFTEST_SCRIPT="$(scene_script canvas)"
+export KAYA_SELFTEST_SCRIPT
+run canvas-rust-swiftui env KAYA_SELFTEST=canvas "$RUST_GUESTS"/canvas
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome

@@ -1244,6 +1244,40 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   is not state, and the order underneath it already rides \
                   collection_move's undo run.",
         },
+        Record {
+            kind: 46,
+            name: "set_drawing",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("vb_w", FieldTy::Value),
+                f("vb_h", FieldTy::Value),
+                f("count", FieldTy::U32),
+                f("path_len", FieldTy::U32),
+                f("ops", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "DECLARE the whole drawing on a canvas widget, replacing \
+                  whatever was declared before (docs/canvas-plan.md §3.1). \
+                  `ops` holds `path_len` KEY values FIRST, then `count` op \
+                  values — set_column_headers' convention verbatim, and what \
+                  lets a canvas live inside a For row template: path_len 0 \
+                  with a live widget id is the flat case, path_len 0 with a \
+                  template node id declares the drawing for every stamped \
+                  copy, path_len > 0 re-declares one copy's.\n\n\
+                  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 \
+                  `draw_op` opcode followed by its operands (§3.3). \
+                  `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the \
+                  guest draws in AND the canvas's natural size in \
+                  device-independent points — which is what keeps one op \
+                  stream identical on five platforms (§3.2, invariant 6).\n\n\
+                  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on \
+                  set_column_headers' reasoning: a half-updated chart is the \
+                  same defect as new titles under a stale indicator. NOT \
+                  UNDOABLE: a drawing renders app state, it is not state.\n\n\
+                  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No \
+                  backend interprets an op, so every refusal in §3.5 happens \
+                  in the only place that draws.",
+        },
     ],
     apply: &[
         Record {
@@ -1800,6 +1834,30 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   presentation degrades, the declaration does not \
                   (docs/tables-plan.md). Nothing here reorders anything.",
         },
+        Record {
+            kind: 36,
+            name: "set_drawing",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("width", FieldTy::U32),
+                f("height", FieldTy::U32),
+                f("scale", FieldTy::Value),
+                f("pixels", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "THE RASTER, not the ops (docs/canvas-plan.md §1.1): \
+                  `pixels` is a blob of `width` x `height` PREMULTIPLIED \
+                  RGBA8 device pixels — tiny-skia's Pixmap layout — and \
+                  `scale` is the display scale they were drawn at, so the \
+                  logical size is width/scale by height/scale. The backend's \
+                  arm is the raw-pixel sibling of its Image arm; it \
+                  interprets no op and owns no drawing API (§8).\n\n\
+                  RE-EMITTED WHENEVER THE RASTER CHANGES: a new declaration, \
+                  a scale report, or an appearance flip. A width or height of \
+                  0 means the drawing is declared and empty — the node stays \
+                  present with no picture, never absent \
+                  (tools/check-empty-child.sh's rule).",
+        },
     ],
     occurrence: &[
         Record {
@@ -2218,7 +2276,62 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("radio", 12),
                 ("grid", 13),
                 ("textarea", 14),
+                ("canvas", 15),
             ],
+        },
+        EnumSpec {
+            // THE DRAW OPCODES (docs/canvas-plan.md §3.3). Five geometry
+            // ops and two text ops; each is followed on the wire by its
+            // own operands as tagged values. Curves, dashes, joins,
+            // blends, gradients and antialiasing control are refusals,
+            // not omissions — each is a measured platform divergence the
+            // core would now have to CHOOSE a behaviour for, and the
+            // choice is bought with an artifact.
+            //
+            // THE IDS ARE APPEND-ONLY: wire values in eight bindings and
+            // three interpreter copies.
+            name: "draw_op",
+            variants: &[
+                ("move_to", 1),
+                ("line_to", 2),
+                ("close", 3),
+                ("stroke", 4),
+                ("fill", 5),
+                ("font", 6),
+                ("text", 7),
+            ],
+        },
+        EnumSpec {
+            // PAINT IS A ROLE, NEVER RGB (§3.4): the roles resolve in the
+            // core, per appearance, so a series line is legible in both
+            // modes and the buffer is byte-identical per mode. Literal
+            // RGB is the named escalation, gated on an artifact.
+            name: "paint",
+            variants: &[
+                ("series", 1),
+                ("series_fill", 2),
+                ("grid", 3),
+                ("axis", 4),
+                ("ground", 5),
+            ],
+        },
+        EnumSpec {
+            name: "fill_rule",
+            variants: &[("nonzero", 0), ("even_odd", 1)],
+        },
+        EnumSpec {
+            // SVG's `text-anchor`, deliberately: it is the established
+            // vocabulary, and under the buffer kaya DEFINES it rather
+            // than reconciling four engines that disagree. Separate from
+            // the `align` enum, which is a layout cross-axis rule and
+            // has no `middle`.
+            name: "text_align",
+            variants: &[("start", 0), ("middle", 1), ("end", 2)],
+        },
+        EnumSpec {
+            // SVG's `dominant-baseline`, same reasoning as text_align.
+            name: "text_baseline",
+            variants: &[("alphabetic", 0), ("middle", 1), ("top", 2), ("bottom", 3)],
         },
         EnumSpec {
             name: "prop",
@@ -2572,6 +2685,7 @@ mod tests {
             ("set_brand_typeface", wire::TX_SET_BRAND_TYPEFACE),
             ("set_app_identity", wire::TX_SET_APP_IDENTITY),
             ("set_column_headers", wire::TX_SET_COLUMN_HEADERS),
+            ("set_drawing", wire::TX_SET_DRAWING),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2620,6 +2734,7 @@ mod tests {
             ("set_typeface", wire::APPLY_SET_TYPEFACE),
             ("set_app_identity", wire::APPLY_SET_APP_IDENTITY),
                 ("set_column_headers", wire::APPLY_SET_COLUMN_HEADERS),
+                ("set_drawing", wire::APPLY_SET_DRAWING),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -2842,6 +2957,12 @@ mod tests {
                     ("kind", "radio") => wire::KIND_RADIO,
                     ("kind", "grid") => wire::KIND_GRID,
                     ("kind", "textarea") => wire::KIND_TEXTAREA,
+                    ("kind", "canvas") => wire::KIND_CANVAS,
+                    ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
+                    ("paint", _) => canvas_pin(wire::PAINTS, name),
+                    ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
+                    ("text_align", _) => canvas_pin(wire::TEXT_ALIGNS, name),
+                    ("text_baseline", _) => canvas_pin(wire::TEXT_BASELINES, name),
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,
@@ -2949,6 +3070,60 @@ mod tests {
                     other => panic!("unpinned enum variant {other:?}"),
                 };
                 assert_eq!(*value, expected, "{}::{}", e.name, name);
+            }
+        }
+    }
+
+    /// Look one canvas enum variant up in wire.rs's own (value, name)
+    /// table BY NAME, so a variant the table does not carry fails here
+    /// rather than resolving to some other variant's number.
+    fn canvas_pin(table: &[(i64, &str)], name: &str) -> u32 {
+        let (value, _) = table
+            .iter()
+            .find(|(_, n)| *n == name)
+            .unwrap_or_else(|| panic!("wire.rs's table carries no {name:?}"));
+        u32::try_from(*value).expect("a canvas enum value is a small non-negative number")
+    }
+
+    /// The five canvas vocabularies are each spelled TWICE — the spec's
+    /// enum and wire.rs's (value, name) table, which is what the core's
+    /// refusals and every canvas diagnostic print from. enums_match_wire
+    /// pins the VALUES through canvas_pin; this pins the NAMES and the
+    /// COVERAGE, because a drifted name leaves a refusal naming an
+    /// opcode the app never wrote, and a missing row leaves a legal op
+    /// refused as unknown.
+    #[test]
+    fn canvas_names_match_the_spec_enums() {
+        let pairs: &[(&str, &[(i64, &str)])] = &[
+            ("draw_op", wire::DRAW_OPS),
+            ("paint", wire::PAINTS),
+            ("fill_rule", wire::FILL_RULES),
+            ("text_align", wire::TEXT_ALIGNS),
+            ("text_baseline", wire::TEXT_BASELINES),
+        ];
+        for (enum_name, table) in pairs {
+            let e = SPEC
+                .enums
+                .iter()
+                .find(|e| e.name == *enum_name)
+                .unwrap_or_else(|| panic!("spec has a {enum_name} enum"));
+            assert_eq!(e.variants.len(), table.len(), "{enum_name} coverage");
+            for ((name, value), (id, table_name)) in e.variants.iter().zip(*table) {
+                assert_eq!(name, table_name, "{enum_name} name drift at id {id}");
+                assert_eq!(i64::from(*value), *id, "{enum_name} id drift at {name}");
+            }
+        }
+        // Nothing outside a table resolves, including the neighbours and
+        // the negative a signed wire slot can carry.
+        for (table, outside) in [
+            (wire::DRAW_OPS, [0i64, 8, -1].as_slice()),
+            (wire::PAINTS, &[0, 6, -1]),
+            (wire::FILL_RULES, &[-1, 2, 3]),
+            (wire::TEXT_ALIGNS, &[-1, 3, 4]),
+            (wire::TEXT_BASELINES, &[-1, 4, 5]),
+        ] {
+            for value in outside {
+                assert_eq!(wire::vocab_name(table, *value), None, "{value} resolved");
             }
         }
     }
