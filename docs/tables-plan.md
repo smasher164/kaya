@@ -135,7 +135,13 @@ is a separate admission if a real app ever needs one).
    of the viewport empty: alignment alone cannot see it. macOS native
    columns add user resize on top (the affordance the touch tiers
    lack); its header is NSTableView's own and aligns with its cells by
-   construction, so that path clusters cells alone. Every backend's
+   construction, so that path clusters cells alone. THE FLOOR HALF
+   REACHED THAT PATH 2026-08-26 (ruling A, docs/deferred.md's
+   native-ellipsize entry): the measured content widths are the native
+   columns' MINIMUMS and their total is handed upward, so a hugging
+   container widens the way it does on every synthesized tier instead
+   of letting AppKit compress the columns and ellipsize inside them.
+   Every backend's
    negatives were WATCHED FAILING 2026-08-21 (cluster + span on native
    mac, Compose, GTK, WinUI, and both iOS tiers — one tier perturbed
    at a time with the other device's leg watched staying green), and

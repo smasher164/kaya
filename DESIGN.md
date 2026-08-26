@@ -381,7 +381,10 @@ live widget ids and template node ids from ONE monotone counter per app
 so no number ever names both a widget and a node; the teeth are
 scene.rs's two "already exists" walls (`kaya: widget id … already
 exists`, `kaya: template node id … already exists`), which a binding's
-own allocator can then never trip.
+own allocator can then never trip. The C floor has no allocator and
+hand-authors both runs, where those walls do NOT bite — scene.rs keeps
+`widgets` and `template_nodes` as separate maps — so `tools/check-c-ids.sh`
+is its teeth instead.
 
 **Line separators.** Guest-visible text uses LF (`\n`) as its line
 separator on every platform — occurrence payloads, harness reads, and

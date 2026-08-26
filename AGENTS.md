@@ -433,8 +433,9 @@ in docs/deferred.md.
    OPEN, written from a thread the handler spawned, passed every
    clause, and a background Build opening one of its own reached no
    chokepoint at all — both race the app thread's model in silence. So
-   Go, Java, C# and Swift now check the thread at that same chokepoint
-   AND at the build entry, in the ambient bindings' own sentence, and
+   Go, Java, C# and Swift (the HANDLE bindings) now check the thread
+   at that same chokepoint AND at the build entry, printing the same
+   error sentence the ambient bindings (Python, OCaml, Haskell) do, and
    the gate's wrong-thread census reads the four bodies rather than
    grepping the name — `alive()` is also the ASSET handle's liveness
    check in Java and Swift and comes FIRST in both files. Four
@@ -534,6 +535,23 @@ in docs/deferred.md.
    and absent from the derivation, and the miss cost a full matrix to
    learn what this census says in seconds. Launchers are the artifact
    truth on windows — listdetail runs split.exe, two scenes one guest),
+   `tools/check-c-ids.sh` (ONE ID SPACE FOR WIDGETS AND TEMPLATE NODES,
+   on the one tier with no allocator to hold it. Every binding mints
+   both from one monotone counter; the eight template-declaring C
+   guests hand-author their numbers, and crates/kaya/src/scene.rs keeps
+   `widgets` and `template_nodes` as SEPARATE MAPS on purpose — so a
+   collision is legal at the core, renders correctly and ships. All
+   eight overlapped until 2026-08-25 with every lane green, which is
+   why the gate's first negative is that shipped state itself: the
+   eight guests one revision before the renumber, all refused. It reads
+   the CALLS, never the `W_`/`N_` names — comments and string literals
+   are blanked, then create_widget / create_for / create_when /
+   template_end are walked in source order against a template-nesting
+   depth, which is scene.rs's own division of the two maps. A
+   name-keyed census would refuse guests/c/feed.c and
+   guests/c/reorder.c today: their N_POSTS and N_ITEMS are row COUNTS
+   whose numbers collide with real widget ids. An id it cannot fold to
+   a number is a finding naming the site, never a skip),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,

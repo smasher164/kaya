@@ -5011,3 +5011,37 @@ part (dark-mode elevation, desktop tinting, or both).
 `-AppleReduceDesktopTinting YES` in NSArgumentDomain changed nothing,
 but that pref need not be read from an argument domain, so that is a
 null result and not evidence. The fix does not rest on naming it.
+
+## An NSTableColumn's assigned width is a REQUEST; the minimum is the promise (2026-08-26)
+
+The mac native tier measures every realized cell and assigns each column
+its content width. That is not what the column ends up at. With
+`columnAutoresizingStyle = .noColumnAutoresizing` and a 24pt
+`minWidth`, AppKit still COMPRESSES the columns into whatever track the
+scroll view was handed, and the cells ellipsize while `layoutColumns`
+has done everything right. Instrumented on the transactions view:
+
+    layoutColumns id=29 visible=0+12 track=178.0 inset=16.0
+      total=267.33 widths=[92.5, 52.3, 43.03, 79.5]
+      assigned=[92.5, 52.3, 43.03, 79.5]
+
+and the pixels showed Date at ~43.5pt — its HEADER floor. Two sessions
+had already guessed at this from the outside and got it wrong in
+opposite directions ("the minimums are the whole bug", "the columns
+already sit on their floors and the table merely overflows"); the
+one-line stderr print inside layoutColumns settled it in one run.
+THE RULE: a column holds a width only as far as its `minWidth` says so.
+
+AND A WIDENED COLUMN'S CELLS DO NOT REDRAW THEMSELVES. AppKit resizes
+the cell VIEW when a column moves — measured, `frameOfCell` and the
+`KayaTableCellView`'s own `frame.width` both 92.5 — but the SwiftUI
+content already hosted inside it keeps the truncation it chose at the
+old width. Measured: a 92.5pt cell whose content asked 76.5 still drew
+"2026-08…", the ellipsis it had picked while that column was 65.17pt.
+The control that proves it is staleness and not an undersized floor: a
+standalone probe that never narrows draws the same string in full at
+the same 92.5pt. THE RULE: after moving a column's width, set the cell's
+root view again (`KayaTableDriver.represent`) — nothing else makes
+SwiftUI decide over, and NO observable can see it, because the
+difference is ink. `tools/check-table-tier.sh` holds the call statically
+for that reason.

@@ -196,6 +196,11 @@ GATES = [
     ("check-jni", ["tools/check-jni.sh"], True, ""),
     ("check-stubs", ["tools/check-stubs.sh"], True, ""),
     ("check-staging", ["tools/check-staging.sh"], True, ""),
+    # The C floor has no allocator, and scene.rs's two maps make a
+    # widget/node id collision legal at the core — so it renders
+    # correctly and no lane can see it. All eight guests overlapped
+    # until 2026-08-25.
+    ("check-c-ids", ["tools/check-c-ids.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),
     ("check-detekt", ["tools/check-detekt.sh"], True, ""),
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),

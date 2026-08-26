@@ -674,6 +674,41 @@ if surface is not None:
                    "one reading, mapped by kayaTableWidth; a second one decides a "
                    "tier the gate's truth table never saw.")
 
+# A5 — CONTENT IS THE FLOOR, the pairing half (ruled 2026-08-26). The
+# runtime clauses below drive the two halves the ruling names — the
+# measured minimum and the width handed upward — but the THIRD edit they
+# forced has no observable at all: a column that widens must re-present
+# its cells, because AppKit resizes the cell view while the SwiftUI
+# content inside it keeps the truncation it chose at the old width, and
+# that difference is INK. Nothing the interpreter exposes tells a stale
+# cell from a fresh one (contentWidth reads the same either way), so this
+# is the native-undo shape: a static pairing is the only wall available.
+columns_block = braced(text, r"private func layoutColumns\s*\(")
+if columns_block is None:
+    bad.append(f"{path}: no `private func layoutColumns(` block — the mac tier's "
+               "column sizing moved, and the floor clauses below read nothing.")
+else:
+    body = text[columns_block[0]:columns_block[1]]
+    for needle, why in (
+        ("column.minWidth = floors[",
+         "the measured content floor must be the column's MINIMUM. With a "
+         "hard-coded minimum AppKit compresses the columns to whatever track "
+         "it was handed, and every cell ellipsizes while this function has "
+         "assigned exactly the right widths (measured 2026-08-26)."),
+        ("publishContentWidth(",
+         "the measured content total must be published UPWARD, the way the "
+         "synthesized tier's columnWidths total is — without it the columns "
+         "hold their floors and the table is cut off at its container."),
+        ("represent(visible)",
+         "a widened column must RE-PRESENT its cells. AppKit resizes the cell "
+         "view; the SwiftUI content already hosted inside it keeps the "
+         "ellipsis it chose at the old width (measured 2026-08-26: a 92.5pt "
+         "cell asking 76.5 still drawing \"2026-08...\"). This clause is "
+         "static because that staleness is ink and no observable can see it."),
+    ):
+        if needle not in body:
+            bad.append(f"{path}: layoutColumns does not call `{needle}` — {why}")
+
 for line in bad:
     print(line)
 sys.exit(1 if bad else 0)
@@ -1310,5 +1345,32 @@ if ! grep -qF "iOS compact at/above the floor" "$T/doctored.out"; then
     exit 1
 fi
 echo "check-table-tier: self-test — the flipped compact arm reds the probe (exit $rc)"
+
+# CONTENT IS THE FLOOR (ruled 2026-08-26), both halves watched going red
+# on the real-window probe, and the third — the re-present — watched
+# reddening the static pairing clause, since ink is all that can see it.
+hits="$(perturb "$SWIFTUI" 'column\.minWidth = floors\[index\]' \
+    'column.minWidth = 24' "$T/unfloored-minimum.swift")"
+applied "$hits" "the measured column minimum replaced by a hard-coded 24" \
+    "struct KayaNativeTable > class KayaTableDriver > func layoutColumns"
+runtime_refuses "$T/unfloored-minimum.swift" "unfloored-minimum" \
+    "no native column declares a minimum below its measured content" \
+    "a native column whose minimum is below its content"
+
+hits="$(perturb "$SWIFTUI" \
+    'publishContentWidth\(floors\.reduce\(0, \+\) \+ 2 \* inset\)' \
+    'publishContentWidth(0)' "$T/unpublished-content-width.swift")"
+applied "$hits" "the measured content width published as zero" \
+    "struct KayaNativeTable > class KayaTableDriver > func layoutColumns"
+runtime_refuses "$T/unpublished-content-width.swift" "unpublished-content-width" \
+    "a hugging container widens to the native table's content" \
+    "a native tier that reports no content width upward"
+
+hits="$(perturb "$SWIFTUI" 'if widened \{ represent\(visible\) \}' \
+    'if widened { _ = visible }' "$T/unrepresented-widening.swift")"
+applied "$hits" "the re-present after a widened column removed" \
+    "struct KayaNativeTable > class KayaTableDriver > func layoutColumns"
+refuses "$T/unrepresented-widening.swift" "does not call \`represent(visible)\`" \
+    "a widened column that never re-presents its cells"
 
 echo "check-table-tier: OK"

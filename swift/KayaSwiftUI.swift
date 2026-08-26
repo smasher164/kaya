@@ -371,6 +371,12 @@ final class KayaNode: Identifiable {
     /// expect_columns proves the table rendered rather than that the
     /// wire arrived.
     var tablePresented = ""
+    /// THE MAC NATIVE TIER'S CONTENT WIDTH, published by the tier that laid
+    /// the columns out so the hugging container above can widen to it — the
+    /// native answer to the synthesized tier's `columnWidths` total (ruled
+    /// 2026-08-26, docs/deferred.md's native-ellipsize entry). 0 = nothing
+    /// measured yet.
+    var tableContentWidth: Double = 0
     /// docs/traps.md, "A table viewport contains rows".
     var tableGeometryEpoch = 0
     var tableCellFrames: [String: KayaTableCellObservation] = [:]
@@ -8399,6 +8405,13 @@ private struct KayaNativeTable: View {
         // model or the geometry generation moves.
         let generation = kayaTableGeometryGeneration(node)
         #if os(macOS)
+            // CONTENT IS THE FLOOR IN BOTH AXES (ruled 2026-08-26). The
+            // height has always been declared here from the core's own
+            // arithmetic; the width is the driver's measured content total,
+            // read in the body so a re-floor re-evaluates it, and declared
+            // the same way — which is what widens a hugging container
+            // instead of ellipsizing inside it.
+            let contentWidth = node.tableContentWidth
             KayaMacNativeTable(
                 node: node, generation: generation, columns: node.tableColumns,
                 sorted: node.tableSorted, direction: node.tableDirection
@@ -8411,6 +8424,7 @@ private struct KayaNativeTable: View {
             .frame(
                 height: node.grow > 0 ? nil : kayaNativeTableContentHeight(node),
                 alignment: .top)
+            .frame(minWidth: contentWidth > 0 ? contentWidth : nil, alignment: .leading)
         #else
             KayaTableColumns(node: node, generation: generation)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -8941,16 +8955,73 @@ private struct KayaNativeTable: View {
                 tableView.numberOfRows > 0
                 ? max(0, min(tableView.frameOfCell(atColumn: 0, row: 0).minX, 32)) : 0
             let track = scrollView.contentView.bounds.width - 2 * inset
+            let floors = widths
+            var widened = false
             let total = widths.reduce(0, +)
             if track > total {
                 let share = (track - total) / CGFloat(columns.count)
                 for column in widths.indices { widths[column] += share }
             }
-            for (column, width) in zip(columns, widths) where abs(column.width - width) > 0.5 {
-                column.minWidth = 24
+            for (index, column) in columns.enumerated() {
+                // THE MEASURED FLOOR IS THE MINIMUM, not 24. An assignment
+                // is only a request: with a 24pt minimum AppKit compresses
+                // the columns to whatever track it was given, so a panel
+                // narrower than the content ellipsized every cell while
+                // layoutColumns had assigned the right widths (measured
+                // 2026-08-26: track 178 against a 267.33 content total,
+                // assigned [92.5, 52.3, 43.03, 79.5], Date drawn at ~43.5).
+                if abs(column.minWidth - floors[index]) > 0.5 {
+                    column.minWidth = floors[index]
+                }
                 column.maxWidth = .greatestFiniteMagnitude
-                column.width = width
+                if abs(column.width - widths[index]) > 0.5 {
+                    column.width = widths[index]
+                    widened = true
+                }
             }
+            publishContentWidth(floors.reduce(0, +) + 2 * inset)
+            if widened { represent(visible) }
+        }
+
+        /// A WIDENED COLUMN MUST RE-PRESENT ITS CELLS. AppKit resizes the
+        /// cell VIEW when a column moves, but the SwiftUI content already
+        /// hosted inside it keeps the truncation it decided at the old
+        /// width: measured 2026-08-26 — a Date cell 92.5pt wide, asking
+        /// 76.5, still drawing "2026-08…", the ellipsis it had chosen while
+        /// the column was 65pt. Setting the root view again is what makes
+        /// SwiftUI decide over.
+        private func represent(_ visible: NSRange) {
+            guard visible.length > 0 else { return }
+            for offset in 0..<visible.length {
+                let index = visible.location + offset
+                guard let stamped = row(at: index) else { continue }
+                for column in tableView.tableColumns.indices
+                where column < stamped.children.count {
+                    guard
+                        let cell = tableView.view(
+                            atColumn: column, row: index, makeIfNecessary: false)
+                            as? KayaTableCellView
+                    else { continue }
+                    cell.present(stamped.children[column])
+                }
+            }
+        }
+
+        /// The native tier's half of content-is-the-floor: the measured
+        /// content total, handed UP so a hugging container widens to it the
+        /// way the synthesized tier's `columnWidths` total makes it (ruled
+        /// 2026-08-26). Without it the columns hold their floors and the
+        /// table is simply cut off at the container's width.
+        ///
+        /// ASYNC, like tablePresented beside it: this runs inside a layout
+        /// pass, and the `!=` guard is what stops publish -> re-layout ->
+        /// publish from running away.
+        private func publishContentWidth(_ content: CGFloat) {
+            let chrome = max(0, scrollView.bounds.width - scrollView.contentView.bounds.width)
+            let want = Double((content + chrome).rounded(.up))
+            guard node.tableContentWidth != want else { return }
+            let target = node
+            DispatchQueue.main.async { target.tableContentWidth = want }
         }
 
         /// The geometry the harness reads, from the TIER'S OWN frames:
@@ -9030,6 +9101,8 @@ private struct KayaNativeTable: View {
                     let column = NSTableColumn(
                         identifier: NSUserInterfaceItemIdentifier("kaya-column-\(index)"))
                     column.title = title
+                    // A BARE COLUMN, nothing measured yet: layoutColumns
+                    // re-floors it to its content on the first report.
                     column.minWidth = 24
                     column.sortDescriptorPrototype = NSSortDescriptor(
                         key: "\(kayaSortKeyPrefix)\(index)", ascending: true)

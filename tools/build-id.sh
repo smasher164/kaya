@@ -115,6 +115,10 @@ GATES = {
     # an OPEN entry for it, so STRIKING an entry through must fail.
     "check-stubs": ["crates", "swift", "android", "docs"],
     "check-staging": ["guests"],
+    # Its walk is guests/**/*.c, not guests/c alone: a C guest that
+    # appears in a new directory must not be invisible to it, and a key
+    # narrower than the walk hands back a stale PASS for exactly that.
+    "check-c-ids": ["guests"],
     # gradle's :kaya sourceSet reaches ../../bindings/java and nothing
     # else outside android/.
     "check-compose": ["android", "bindings/java"],

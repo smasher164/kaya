@@ -6102,8 +6102,8 @@ pre-fix join still running after 12s, the pre-fix subshell staging a
 lost install as OK.
 
 
-## GAP — the mac native tier ellipsizes where every synthesized tier widens (found 2026-08-26, by the transactions-view captures)
-KEY: native ellipsize, content is the floor, hugging column width, recent table truncation, NSTableView column sizing
+## ~~GAP — the mac native tier ellipsizes where every synthesized tier widens (found 2026-08-26, by the transactions-view captures)~~ — FIXED 2026-08-26 (maintainer's ruling A)
+KEY: native ellipsize, content is the floor, hugging column width, recent table truncation, NSTableView column sizing, tableContentWidth, publishContentWidth, represent
 
 The transactions view's recent table shows "2026…" and "$615…" on
 macOS while GTK (325px) and Windows (292px) show every date and amount
@@ -6115,8 +6115,71 @@ mac column sizing learns the floor (feed the measured content widths
 into the native column minimums) or the divergence is ruled acceptable
 native behavior. Maintainer's call; the captures are the exhibit.
 
-## QUESTION — a grown table's card ends three ways at the viewport (found 2026-08-26, by the transactions-view captures)
+RULED A, 2026-08-26: the mac native tier honors content-is-the-floor.
+Three edits in swift/KayaSwiftUI.swift, the first two the ruling's own
+halves and the third one measurement forced:
+
+1. THE MEASURED FLOOR IS THE MINIMUM. `layoutColumns` snapshots the
+   content widths before leftover distributes and writes them into
+   `column.minWidth` in place of the hard-coded 24. The instrumented
+   run is what named the mechanism, and it was not the one the entry
+   above guessed: layoutColumns had ALREADY measured and assigned the
+   right widths (track 178 against a 267.33 content total, assigned
+   [92.5, 52.3, 43.03, 79.5]) — AppKit then COMPRESSED the columns into
+   the track it was given, which a 24pt minimum permits and a measured
+   one does not.
+2. THE CONTENT TOTAL GOES UP. `publishContentWidth` writes the floors'
+   total onto `KayaNode.tableContentWidth` and KayaNativeTable's macOS
+   branch declares `.frame(minWidth:)` from it, beside the
+   `.frame(height:)` that was already there — the native answer to the
+   synthesized tier's `columnWidths` total, and what widens a hugging
+   container instead of cutting the table off at it.
+3. A WIDENED COLUMN RE-PRESENTS ITS CELLS. With 1 and 2 alone the panel
+   widened to 300pt and Total came good while Date still drew
+   "2026-08…": AppKit resizes the cell VIEW, but the SwiftUI content
+   already hosted inside it keeps the ellipsis it chose at the old
+   width — measured, a 92.5pt cell asking 76.5 still truncating, the
+   ellipsis it had picked while the column was 65.17pt. `represent(_:)`
+   sets the root view again over the realized band. The control that
+   proves the floor arithmetic itself was right: a standalone probe
+   that never narrows draws the same string in full at the same 92.5pt.
+
+PROOF, captured on the same held scene at 900x600 (the state is
+portfolio.steps:135's `choose select#0 2`, whose shorter net line is
+what still narrows the panel on this base — the unfiltered view stopped
+truncating when 56315ce added the net line): the panel goes 210pt ->
+300pt, and the first row's Date ink goes 62.5pt ("2026-08…") -> 74.5pt
+("2026-08-24" in full, the same ink the grown ledger table draws in the
+same capture).
+
+GUARDED: `tools/check-table-tier.sh`. Two RUNTIME clauses in the
+real-window probe — no column declares a minimum below its measured
+content, and a hugging container widens to the table's content — plus a
+static pairing clause for the re-present, because that staleness is INK
+and no observable the interpreter exposes can tell a stale cell from a
+fresh one (the native-undo shape). Three watched negatives, counts
+printed, red demanded on every run.
+
+WINDOWING BAND UNCHANGED, and deliberately: both tiers floor on the
+widest REALIZED row (native `visibleRows()`, synthesized's banded
+subviews), so a wider row outside the band re-floors when it scrolls
+in. A whole-model measure would re-create the 41%-of-main-thread walk
+the stored epoch exists to refuse.
+
+## ~~QUESTION — a grown table's card ends three ways at the viewport (found 2026-08-26, by the transactions-view captures)~~
 KEY: grown table card end, viewport cut row, fill-and-scroll, card clip bottom
+
+CLOSED 2026-08-26 BY RULING, and it is one rule, not three: a table's height is
+min(content, max height) — below the max it hugs its last row, at the
+max it clips and scrolls (the maintainer's own statement of intent).
+That structure holds on every platform today. What differs mid-scroll
+is PRESENTATION, and the maintainer ruled it platform spelling, not a
+carve-out: desktop draws the card's finished frame at the viewport
+edge with rows clipped inside, because that is what the platform's
+own card-framed grids do (PowerToys); iOS rides the card on the
+content so mid-scroll shows plain clipping and the rounded end
+appears only at the true last row, because that is what Settings
+does. No code changed under this ruling.
 
 On GTK (card y 67..578) and WinUI (card y 79..614) the grown
 transactions ledger's card ends at the viewport edge and cuts the last
@@ -6641,7 +6704,8 @@ red once by construction. Haskell's proof is the deleted field failing
 the build — its handles export abstractly, so no runtime probe can see
 an id. scene.rs's collision walls stay as the backstop that should
 never fire. DESIGN.md's Binding conventions now state the rule. The C
-floor's hand-authored guests were renumbered onto it 2026-08-25 (chore
+floor's hand-authored guests were renumbered onto it 2026-08-25, and
+tools/check-c-ids.sh refuses a re-collision from 2026-08-26 (chore
 entry below).
 
 The Haskell breadth probe manufactured a widget-id/template-node-id
@@ -6681,6 +6745,27 @@ no string, kind or record head moved. The comparator was watched red on a
 doctored byte first, and refuses a guest showing zero differences.
 check-steps.sh passes unchanged; no .steps file or expected string moved.
 All 17 C guests build (guests/c/Makefile, the whole SCENES list).
+
+GATED 2026-08-26, the half the renumber left open: nothing refused a C
+guest that re-collided the spaces, because scene.rs keeps `widgets` and
+`template_nodes` as separate maps and the collision is therefore legal
+at the core — it renders correctly and ships, which is exactly how all
+eight overlapped for months under green lanes. tools/check-c-ids.sh is
+in the fast sweep now. It reads the CALLS, not the `W_`/`N_` names:
+comments and string literals are blanked, then create_widget /
+create_for / create_when / template_end are walked in source order
+against a template-nesting depth, which is scene.rs's own division of
+the two maps. A name-keyed census could never have served — the numbers
+in guests/c/feed.c's N_POSTS and guests/c/reorder.c's N_ITEMS are row
+COUNTS that collide with real widget ids in their own files, so it
+would refuse both guests today. Findings name the guest, the number and
+both declaration sites; an id that will not fold to a number is a
+finding too, never a skip; and the roster and id counts are printed
+every run with a floor beneath them. THE FIRST NEGATIVE IS THIS ENTRY'S
+OWN BEFORE-STATE — the eight guests one revision before the renumber,
+read out of git, all eight refused — beside seven doctored-copy
+negatives, one of which plants the collision inside a comment and a
+string literal and demands the census stay GREEN.
 
 The one-id-space rule (DESIGN.md Binding conventions) is enforced in
 every binding's allocator; the eight template-declaring C guests

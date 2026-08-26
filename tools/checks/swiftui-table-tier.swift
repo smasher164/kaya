@@ -613,6 +613,119 @@ enum KayaTableTierProbe {
         }
         bandWindow.orderOut(nil)
 
+        // --- Half 5: content is the floor (ruled 2026-08-26). ----------
+        // A HUGGING container narrower than the table's content is the
+        // shape the transactions view shipped: the panel measured 210pt,
+        // the columns' content wanted 267, and every Date and Total cell
+        // ellipsized. Two things are read here, one per half of the
+        // ruling — the MINIMUM each column declares to AppKit, and the
+        // content width the tier hands UP — and the second is read off
+        // the real NSScrollView, so "it published a number" and "the
+        // container actually widened" are separate readings.
+        //
+        // The floors are recomputed here from the SAME cell measurement
+        // the tier uses, deliberately: what this holds is the ASSIGNMENT,
+        // which is where the defect was. The measurement itself is the
+        // capture's to prove.
+        func findTableView(_ view: NSView) -> NSTableView? {
+            if let table = view as? NSTableView { return table }
+            for sub in view.subviews {
+                if let table = findTableView(sub) { return table }
+            }
+            return nil
+        }
+
+        let floorTable = KayaNode(
+            id: 50, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("floor".utf8))
+        floorTable.tableColumns = ["Date", "Ticker"]
+        floorTable.sortTag = Array("floor-sort".utf8)
+        for r in 0..<6 {
+            let row = KayaNode(
+                id: UInt64(51_000 + r), kind: UInt32(KAYA_KIND_ROW),
+                tag: Array("floor-r\(r)".utf8))
+            for (c, value) in ["2026-08-24 09:15:00", "VANGUARD-TOTAL-WORLD"].enumerated() {
+                let cell = KayaNode(
+                    id: UInt64(52_000 + r * 2 + c), kind: UInt32(KAYA_KIND_LABEL),
+                    tag: Array("floor-c\(r)-\(c)".utf8))
+                cell.text = value
+                row.children.append(cell)
+            }
+            floorTable.children.append(row)
+        }
+        kayaScene.columns.append(floorTable)
+        let floorRoot = KayaNode(
+            id: 53, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("floor-root".utf8))
+        floorRoot.children.append(floorTable)
+        // 200pt of window against two columns of long text: the container
+        // CANNOT fit the content unless the tier makes it.
+        let floorWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 400),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        floorWindow.contentView = NSHostingView(
+            rootView: KayaRender(node: floorRoot, flexVertical: true, flexStretch: false))
+        floorWindow.orderFront(nil)
+
+        /// (worst deficit against the floor, worst minimum deficit, the
+        /// floors' total, the clip the cells were given, cells read).
+        func floorReading() -> (CGFloat, CGFloat, CGFloat, CGFloat, Int) {
+            guard let content = floorWindow.contentView,
+                let table = findTableView(content)
+            else { return (0, 0, 0, 0, 0) }
+            var floors = table.tableColumns.map {
+                max(24, $0.headerCell.cellSize.width + 16)
+            }
+            var seen = 0
+            let visible = table.rows(in: table.visibleRect)
+            for offset in 0..<max(0, visible.length) {
+                for c in table.tableColumns.indices {
+                    guard
+                        let cell = table.view(
+                            atColumn: c, row: visible.location + offset,
+                            makeIfNecessary: false) as? KayaTableCellView
+                    else { continue }
+                    floors[c] = max(floors[c], cell.contentWidth + 16)
+                    seen += 1
+                }
+            }
+            var widthDeficit: CGFloat = 0
+            var minDeficit: CGFloat = 0
+            for (c, column) in table.tableColumns.enumerated() {
+                widthDeficit = max(widthDeficit, floors[c] - column.width)
+                minDeficit = max(minDeficit, floors[c] - column.minWidth)
+            }
+            let clip = table.enclosingScrollView?.contentView.bounds.width ?? 0
+            return (widthDeficit, minDeficit, floors.reduce(0, +), clip, seen)
+        }
+
+        var floorState = floorReading()
+        let floorDeadline = Date().addingTimeInterval(6)
+        while Date() < floorDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            floorState = floorReading()
+            if floorState.4 > 0, floorState.1 <= 0.5, floorState.3 >= floorState.2 { break }
+        }
+        let (widthDeficit, minDeficit, floorTotal, clipWidth, cellsRead) = floorState
+        print("  content floor: \(cellsRead) cells read, floors total "
+            + "\(floorTotal), clip \(clipWidth), worst width deficit "
+            + "\(widthDeficit), worst minimum deficit \(minDeficit), published "
+            + "\(floorTable.tableContentWidth)")
+        // A census that read nothing agrees with everything.
+        expectBool(
+            "the content-floor clause read some realized cells", cellsRead >= 2, true)
+        expectBool(
+            "no native column declares a minimum below its measured content",
+            minDeficit <= 0.5, true)
+        expectBool(
+            "no native column is narrower than its measured content",
+            widthDeficit <= 0.5, true)
+        expectBool(
+            "the native tier publishes its measured content width upward",
+            floorTable.tableContentWidth >= Double(floorTotal), true)
+        expectBool(
+            "a hugging container widens to the native table's content",
+            clipWidth >= floorTotal, true)
+        floorWindow.orderOut(nil)
+
         if failures == 0 {
             print("swiftui-table-tier: OK — rule, geometry, this host's branch, "
                 + "and the rendered tier")
