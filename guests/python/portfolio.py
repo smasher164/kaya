@@ -1,12 +1,18 @@
-"""The portfolio dashboard (docs/portfolio-plan.md): one positions table
-per account, a deterministic "Day tick", and integer-cent money so the
-byte-frozen scene asserts exact strings.
+"""The portfolio app (docs/portfolio-plan.md): the dashboard — one
+positions table per account, a deterministic "Day tick", integer-cent
+money — and one push away the TRANSACTIONS VIEW, the whole book's
+15,000-row ledger in one For (docs/virtualization-plan.md §5, whose
+§6.2 amendment retired the standalone ledger guest when the breadth
+slice landed).
 
-The app's other screen is guests/python/ledger.py — the transactions
-view over guests/assets/market/transactions.csv, which is where row
-windowing is forced. It is a separate guest because a Python guest
-serves one scene and a 15,000-row For here would be stamped by THIS
-scene on every lane.
+THE VIEW WRITES NO WINDOWING CODE AND MAKES NO PROMISES: it inserts
+every row it has and reads every row it has; the band is the backend's
+and the core's business.
+
+THE TWO SCREENS TIE OUT (ruled 2026-08-26): an account's holdings ARE
+the sum of its transactions, so the view's net line reproduces the
+dashboard's account total to the byte. tools/gen-market.py reads BOOK
+below and generates a history that nets to it.
 
 Build the library first (cargo build), then:
     KAYA_SELFTEST=portfolio python3 guests/python/portfolio.py
@@ -32,9 +38,21 @@ class Account:
     total: str
 
 
+@dataclass
+class Txn:
+    date: str
+    ticker: str
+    side: str
+    total: str
+
+
 # The book: fixed holdings, prices in integer cents, and the tick's
 # fixed per-ticker delta. Every number the scene asserts derives from
 # these by arithmetic, never by observation.
+#
+# IT IS ALSO THE LEDGER'S BOOK: tools/gen-market.py reads BOOK out of
+# this file by ast and generates a history that nets to it, so the two
+# screens agree by construction (the tie-out, ruled 2026-08-26).
 BOOK = {
     "brokerage": ("Brokerage", [("AAPL", 10, 18000), ("NVDA", 4, 95050), ("VTI", 6, 26025)]),
     "retirement": ("Retirement", [("BND", 20, 7210), ("VXUS", 15, 6140)]),
@@ -43,12 +61,60 @@ BOOK = {
 TICK = {"AAPL": 250, "NVDA": -1000, "VTI": 75, "BND": -10, "VXUS": 60, "CASH": 0}
 ACCOUNT_ORDER = ["brokerage", "retirement", "savings"]
 
+# The one resolver (crates/kaya/src/assets.rs): the bytes come from the
+# asset root the lane staged, never from a path this guest spells.
+LEDGER = "market/transactions.csv"
+
+# The transactions view's surface id, and the filter's options with the
+# account each names. The first is "no filter", which is what "or all"
+# means.
+TRANSACTIONS = 7
+FILTERS = [
+    ("All accounts", None),
+    ("Brokerage", "brokerage"),
+    ("Retirement", "retirement"),
+    ("Savings", "savings"),
+]
+
+# The tail the side panel keeps, in FILE order whatever the ledger is
+# filtered or sorted to. Small on purpose: at 12 rows the band covers
+# the whole collection and windowing is observably invisible
+# (docs/virtualization-plan.md §1), which is the one place a shared
+# scene can freeze a realized count.
+RECENT = 12
+
+# What "Day tick" posts: the day's dividend for each account, on the day
+# after the ledger's last, in the same shape read_ledger yields. A
+# DIVIDEND MOVES MONEY AND NOT QUANTITY, which is what lets a tick post
+# into the book without breaking the tie-out — the net line below is
+# asserted after the tick, on data these rows are part of.
+POSTED = [
+    ("2026-08-25", "brokerage", "AAPL", "div", 0, 240),
+    ("2026-08-25", "retirement", "BND", "div", 0, 620),
+    ("2026-08-25", "savings", "CASH", "div", 0, 205),
+]
+
 prices = {t: cents for _, holdings in BOOK.values() for t, _, cents in holdings}
 sorted_accounts = {}
 
 
 def money(cents):
+    """Integer cents, no thousands separator — expect_rows joins cells
+    with commas (docs/portfolio-plan.md §1)."""
     return f"${cents // 100}.{cents % 100:02d}"
+
+
+def read_ledger():
+    with kaya.asset(LEDGER) as csv:
+        lines = csv.bytes().decode("ascii").splitlines()
+    out = []
+    for line in lines[1:]:
+        date, account, ticker, side, qty, _price, total = line.split(",")
+        out.append((date, account, ticker, side, int(qty), int(total)))
+    return out
+
+
+txns = read_ledger()
 
 
 def account_total(account):
@@ -80,21 +146,21 @@ def apply_order(account, column, descending):
     table = positions.at(account)
     _, holdings = BOOK[account]
     qty_of = {ticker: qty for ticker, qty, _ in holdings}
-    key_of = {
+    key_of_column = {
         0: lambda entry: entry[0],
         1: lambda entry: qty_of[entry[0]],
         2: lambda entry: prices[entry[0]],
         3: lambda entry: qty_of[entry[0]] * prices[entry[0]],
     }[column]
     entries = table.items()
-    entries.sort(key=key_of, reverse=descending)
+    entries.sort(key=key_of_column, reverse=descending)
     for key, _ in entries:
         table.move_to_end(key)
     indicator = kaya.Sort.desc(column) if descending else kaya.Sort.asc(column)
     table.set_columns("Ticker", "Qty", "Price", "Value", sort=indicator)
 
 
-def on_sort(account, column):
+def on_positions_sort(account, column):
     current = sorted_accounts.get(account)
     descending = current is not None and current[0] == column and not current[1]
     sorted_accounts[account] = (column, descending)
@@ -113,16 +179,197 @@ def tick():
         if account in sorted_accounts:
             apply_order(account, *sorted_accounts[account])
     portfolio_value.set(f"Portfolio: {money(portfolio_total())}")
+    txns.extend(POSTED)
+    book_size.set(f"Transactions: {len(txns)}")
+    # THE VIEW IS ONLY THERE WHILE IT IS PUSHED: its collections die with
+    # the popped entry, and a refresh into them would write to widgets
+    # nothing holds. The scene ticks with the view closed on purpose.
+    if screen:
+        refresh()
+
+
+# ---------------------------------------------------------------- the
+# transactions view. `screen` holds its handles while it is pushed and
+# is empty while it is not.
+screen = {}
+view = {"account": None, "sort": None}
+
+
+def key_of(index):
+    """A transaction has no identity of its own — no column of this CSV
+    is unique — so the key is its position in the file, minted here.
+    A STRING key, not the i64 insert_fresh would mint: the scene names
+    keys in `scroll_to_row` and in `kind@id[key]` targets, and the
+    untyped segment of that grammar matches string keys only
+    (docs/portfolio-plan.md §5)."""
+    return f"t{index:05d}"
+
+
+def cells(row):
+    date, _account, ticker, side, _qty, total = row
+    return Txn(date=date, ticker=ticker, side=side, total=money(total))
+
+
+def edge(label, row):
+    if row is None:
+        return f"{label} —"
+    date, _account, ticker, side, _qty, total = row
+    return f"{label} {date} {ticker} {side} {money(total)}"
+
+
+def net_line(rows):
+    """THE TIE-OUT, said out loud: buys minus sells over the rows showing,
+    per ticker, priced at the book's live prices. Filtered to one account
+    it is that account's holdings and its dashboard total, to the byte;
+    unfiltered it is the whole book and the portfolio total. Dividends
+    carry no quantity, so a tick cannot move it (docs/portfolio-plan.md
+    §6)."""
+    net = {}
+    for _date, _account, ticker, side, qty, _total in rows:
+        if side == "buy":
+            net[ticker] = net.get(ticker, 0) + qty
+        elif side == "sell":
+            net[ticker] = net.get(ticker, 0) - qty
+    held = {t: q for t, q in net.items() if q}
+    if not held:
+        return "net — = $0.00"
+    value = sum(q * prices[t] for t, q in held.items())
+    return ("net " + ", ".join(f"{t} {held[t]}" for t in sorted(held))
+            + f" = {money(value)}")
+
+
+def selected():
+    """The rows to show, in the order to show them, keyed."""
+    account = view["account"]
+    keyed = [(key_of(i), row) for i, row in enumerate(txns)
+             if account is None or row[1] == account]
+    if view["sort"] is not None:
+        column, descending = view["sort"]
+        of = (lambda kr: kr[1][0], lambda kr: kr[1][2],
+              lambda kr: kr[1][3], lambda kr: kr[1][5])[column]
+        # The key breaks ties, so the sorted order is a function of the
+        # data alone — a stable sort would make it a function of the
+        # order the rows happened to be in, which no scene can freeze.
+        keyed.sort(key=lambda kr: (of(kr), kr[0]), reverse=descending)
+    return keyed
+
+
+def sync(collection, held, want):
+    """Make `collection` hold exactly `want`, in that order.
+
+    Removals and insertions first, and the reordering ONLY if what they
+    left is not already the wanted order: narrowing a filter preserves
+    relative order, and a table that re-sorted itself for nothing would
+    cost one move record per row for no observable change.
+    """
+    wanted = {k for k, _ in want}
+    surviving = [k for k in held if k in wanted]
+    for k in held:
+        if k not in wanted:
+            collection.remove(k)
+    have = set(held)
+    for k, row in want:
+        if k not in have:
+            collection.insert(k, cells(row))
+            surviving.append(k)
+    order = [k for k, _ in want]
+    if surviving != order:
+        for k in order:
+            collection.move_to_end(k)
+    held[:] = order
+
+
+def refresh():
+    want = selected()
+    # The keys each collection holds, in order. The guest's own
+    # bookkeeping, never a mirror read: items() is refused at record
+    # time, and the whole point of this view is that reading 15,000 rows
+    # costs nothing.
+    sync(screen["ledger"], screen["in_ledger"], want)
+    sync(screen["recent"], screen["in_recent"],
+         [(key_of(i), row) for i, row in enumerate(txns)][-RECENT:])
+    screen["count"].set(f"{len(want)} of {len(txns)} transactions")
+    screen["first"].set(edge("first", want[0][1] if want else None))
+    screen["last"].set(edge("last", want[-1][1] if want else None))
+    screen["net"].set(net_line(row for _key, row in want))
+
+
+def on_filter(index):
+    view["account"] = FILTERS[index][1]
+    refresh()
+
+
+def on_ledger_sort(column):
+    current = view["sort"]
+    descending = current is not None and current[0] == column and not current[1]
+    view["sort"] = (column, descending)
+    refresh()
+    indicator = kaya.Sort.desc(column) if descending else kaya.Sort.asc(column)
+    screen["ledger"].set_columns("Date", "Ticker", "Side", "Total", sort=indicator)
+
+
+def closed_transactions():
+    screen.clear()
+
+
+def open_transactions():
+    # A freshly opened view shows the whole book, unsorted: the state
+    # belongs to the screen, and the screen is new.
+    view["account"] = None
+    view["sort"] = None
+    with app.push_entry(TRANSACTIONS, title="Transactions",
+                        on_popped=closed_transactions):
+        count_line = kaya.signal("")
+        first_line = kaya.signal("")
+        last_line = kaya.signal("")
+        net_signal = kaya.signal("")
+        with kaya.row():
+            with kaya.column(align="stretch"):
+                kaya.label(bind=count_line).a11y_id("count")
+                kaya.label(bind=first_line).a11y_id("first")
+                kaya.label(bind=last_line).a11y_id("last")
+                kaya.label(bind=net_signal).a11y_id("net")
+                kaya.select([name for name, _ in FILTERS], selected=0,
+                            on_select=on_filter)  # select#0
+                recent = kaya.collection(Txn)
+                # UNGROWN: a summary table hugs its rows (the empty-row
+                # ruling, docs/tables-plan.md).
+                for row in recent.columns("Date", "Ticker", "Side", "Total",
+                                          a11y_id="recent"):
+                    with kaya.row():
+                        kaya.label(bind=row.date)
+                        kaya.label(bind=row.ticker)
+                        kaya.label(bind=row.side)
+                        kaya.label(bind=row.total)
+            with kaya.column(grow=1, align="stretch"):
+                ledger = kaya.collection(Txn)
+                # GROWN: this one is the fill-and-scroll viewport the
+                # window reports its visible range from.
+                for row in ledger.columns("Date", "Ticker", "Side", "Total",
+                                          on_sort=on_ledger_sort, grow=1,
+                                          a11y_id="ledger"):
+                    with kaya.row():
+                        kaya.label(bind=row.date)
+                        kaya.label(bind=row.ticker)
+                        kaya.label(bind=row.side)
+                        kaya.label(bind=row.total)
+        screen.update(count=count_line, first=first_line, last=last_line,
+                      net=net_signal, recent=recent, ledger=ledger,
+                      in_recent=[], in_ledger=[])
+        refresh()
 
 
 app = kaya.App()
 
-with app.window(title="portfolio", width=800, height=600):
+with app.window(title="portfolio", width=900, height=600):
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
+    book_size = kaya.signal(f"Transactions: {len(txns)}")
     with kaya.row():
         with kaya.column():
             kaya.label(bind=portfolio_value)  # label#0
+            kaya.label(bind=book_size)  # label#1
             kaya.button("Day tick", on_click=tick)  # button#0
+            kaya.button("Transactions", on_click=open_transactions)  # button#1
         accounts = kaya.collection(Account)
         with kaya.column(grow=1, align="stretch") as detail:  # the detail column
             detail.a11y_id("detail")
@@ -138,7 +385,7 @@ with app.window(title="portfolio", width=800, height=600):
                     # wants.
                     for item in positions.columns(
                         "Ticker", "Qty", "Price", "Value",
-                        on_sort=on_sort, a11y_id="positions",
+                        on_sort=on_positions_sort, a11y_id="positions",
                     ):
                         with kaya.row():
                             kaya.label(bind=item.ticker)

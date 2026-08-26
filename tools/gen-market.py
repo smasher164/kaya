@@ -3,50 +3,65 @@
 
 Synthetic by doctrine (docs/portfolio-plan.md: deterministic data keeps
 the scenes honest) and by licence (real market data is not
-redistributable; this is ours). The walk runs BACKWARD from the
-portfolio book's live prices (guests/python/portfolio.py), so the last
-row of history meets the dashboard's present and the canvas charts can
-share this file. Integer cents everywhere; the LCG is spelled here so
-no language runtime's random module is load-bearing.
+redistributable; this is ours). Integer cents everywhere; the LCG is
+spelled here so no language runtime's random module is load-bearing.
+
+THE LEDGER NETS TO THE BOOK (ruled 2026-08-26): for every account and
+every ticker, buys minus sells equal the dashboard's position quantity —
+zero where the account holds none — and dividends move money without
+moving quantity. The book is READ OUT OF guests/python/portfolio.py by
+ast, never copied here: the price walk already claimed to run backward
+from that book's live prices while spelling its own prices, and one more
+copy is one more thing to drift.
+
+TWO THINGS THAT MAKE THE TIE POSSIBLE, both of them the obstacle
+docs/deferred.md's tie-out entry named:
+  - the file is the whole life of every position. The overshoot-and-tail
+    below decides DENSITY only (how many lots fall on which day); the
+    positions are walked over the RETAINED rows alone, starting at zero
+    on the first row, so a net over what the file contains is the book's.
+  - CASH is a book holding, so it is a tradeable ticker here — flat, at
+    its anchor, because a unit of account does not walk.
 """
 
+import ast
 import pathlib
 
 import os
 
 # KAYA_GEN_MARKET_OUT: check-assets regenerates into a scratch file to
 # byte-compare (the derivation clause); the default is the real root.
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path(
     os.environ.get("KAYA_GEN_MARKET_OUT")
-    or pathlib.Path(__file__).resolve().parents[1]
-    / "guests" / "assets" / "market" / "transactions.csv"
+    or ROOT / "guests" / "assets" / "market" / "transactions.csv"
 )
+GUEST = ROOT / "guests" / "python" / "portfolio.py"
 
-# The book's anchor prices in cents (portfolio.py's present day).
-TICKERS = [
-    ("AAPL", 18000),
-    ("NVDA", 95050),
-    ("VTI", 26025),
-    ("BND", 7210),
-    ("VXUS", 6140),
-]
-ACCOUNTS = ["brokerage", "retirement", "savings"]
 DAYS = 1096  # three years, fixed span ending 2026-08-24
 SEED = 0x6B617961  # "kaya"
 
-# The ledger's DECLARED size, kept from the most recent end. The per-day
-# lot count is a draw, so the walk overshoots and the tail is taken:
-# without a declared number every density tweak would move `total` in
-# three byte-frozen scenes at once. 15,000 is above WinUI's measured
-# 12,000-row choke (docs/measurements/choke-windows-2026-08-24.txt),
-# which is the size row windowing exists to make ordinary
-# (docs/virtualization-plan.md §5).
+# The ledger's DECLARED size. The per-day lot count is a draw, so the
+# walk overshoots and the tail is taken: without a declared number every
+# density tweak would move `total` in three byte-frozen scenes at once.
+# 15,000 is above WinUI's measured 12,000-row choke
+# (docs/measurements/choke-windows-2026-08-24.txt), which is the size row
+# windowing exists to make ordinary (docs/virtualization-plan.md §5).
 ROWS = 15_000
 # Lots per account-day, 1..LOTS. ODD ON PURPOSE: this LCG's low bits
 # have short periods (bit 0 alternates), so an even modulus draws a
 # visibly periodic pattern — `below(8)` and `below(6)` produce the same
 # skip sequence here, measured.
 LOTS = 11
+# Shares per lot, 1..LOT, and the room a position may run above what the
+# book holds. BAND bounds the settling lot: a position that wandered
+# thousands of shares clear of the book would square itself with one
+# absurd trade at the end.
+LOT = 40
+BAND = LOT
+# A unit of account does not walk: every CASH row is priced at its
+# anchor, which is also what the dashboard shows for that holding.
+FLAT = {"CASH"}
 
 
 class Lcg:
@@ -62,6 +77,20 @@ class Lcg:
 
     def below(self, n):
         return self.next() % n
+
+
+def book():
+    """The portfolio book, by ast. A reader that cannot find its subject
+    agrees with anything, so a missing BOOK is a refusal, not a default."""
+    for node in ast.parse(GUEST.read_text(), str(GUEST)).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "BOOK"):
+            return ast.literal_eval(node.value)
+    raise SystemExit(
+        "gen-market: guests/python/portfolio.py no longer spells BOOK at "
+        "module scope — this ledger is generated to net to that book and "
+        "cannot be written without it")
 
 
 def dates():
@@ -85,18 +114,21 @@ def dates():
 # The stamp is DERIVED BOOKKEEPING and lives outside the asset root on
 # purpose: the root ships to every platform as a unit and its listing
 # is byte-frozen in tools/scenes/assets.steps.
-STAMP = pathlib.Path(__file__).resolve().parents[1] / "target" / "gen-market.src"
+STAMP = ROOT / "target" / "gen-market.src"
 
 
 def stamp_id():
-    """Generator bytes AND artifact bytes: a stamp keyed on the
-    generator alone calls a corrupted artifact current, and the fix
-    check-assets names would then heal nothing."""
+    """Generator bytes, GUEST bytes and artifact bytes: a stamp keyed on
+    the generator alone calls a corrupted artifact current, and one blind
+    to the guest would call a ledger current after the book it nets to
+    moved."""
     import hashlib
     gid = hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
+    bid = (hashlib.sha256(GUEST.read_bytes()).hexdigest()[:16]
+           if GUEST.exists() else "absent")
     aid = (hashlib.sha256(OUT.read_bytes()).hexdigest()[:16]
            if OUT.exists() else "absent")
-    return f"{gid} {aid}"
+    return f"{gid} {bid} {aid}"
 
 
 def write_stamp():
@@ -105,8 +137,9 @@ def write_stamp():
 
 
 def ensure():
-    """Regenerate unless generator AND artifact both match the stamp —
-    the artifact is DERIVED, never committed (maintainer, 2026-08-24)."""
+    """Regenerate unless generator, guest AND artifact all match the
+    stamp — the artifact is DERIVED, never committed (maintainer,
+    2026-08-24)."""
     if OUT.exists() and STAMP.exists() and STAMP.read_text().strip() == stamp_id():
         return False
     generate()
@@ -118,10 +151,19 @@ def generate():
     rng = Lcg(SEED)
     span = dates()
 
+    the_book = book()
+    accounts = list(the_book)
+    holdings = {a: {t: q for t, q, _ in the_book[a][1]} for a in accounts}
+    anchors = {t: cents for a in accounts for t, _, cents in the_book[a][1]}
+    universe = list(anchors)
+
     # Backward walk per ticker: from the anchor, step at most 1.4% a
     # day, floored at 5% of the anchor so nothing goes absurd.
     prices = {}
-    for ticker, anchor in TICKERS:
+    for ticker, anchor in anchors.items():
+        if ticker in FLAT:
+            prices[ticker] = [anchor] * DAYS
+            continue
         walk = [anchor]
         for _ in range(DAYS - 1):
             step = rng.below(29) - 14  # -14..14 per mille
@@ -129,28 +171,78 @@ def generate():
             walk.append(max(prev, anchor // 20))
         prices[ticker] = list(reversed(walk))
 
-    rows = []
+    # THE DENSITY DRAW. Every lot draws a side, a share count AND a
+    # dividend amount, whichever it turns out to be: a stream that
+    # branched on the side would move under the walk below, which
+    # rewrites sides.
+    draws = []
     for i, day in enumerate(span):
-        for account in ACCOUNTS:
+        for account in accounts:
             # A quiet day for this account, so per-day row counts vary.
             if rng.below(5) == 0:
                 continue
             for _ in range(1 + rng.below(LOTS)):
-                ticker, _ = TICKERS[rng.below(len(TICKERS))]
-                price = prices[ticker][i]
+                ticker = universe[rng.below(len(universe))]
                 side = ("buy", "sell", "div")[rng.below(3)]
-                qty = 1 + rng.below(40)
-                if side == "div":
-                    qty = 0
-                    total = (1 + rng.below(90)) * 25  # cents
-                else:
-                    total = qty * price
-                rows.append((day, account, ticker, side, qty, price, total))
-    if len(rows) < ROWS:
+                qty = 1 + rng.below(LOT)
+                amount = (1 + rng.below(90)) * 25  # cents
+                draws.append((day, account, ticker, side, qty, amount,
+                              prices[ticker][i]))
+    if len(draws) < ROWS:
         raise SystemExit(
-            f"gen-market: the walk produced {len(rows)} rows, fewer than the "
+            f"gen-market: the walk produced {len(draws)} rows, fewer than the "
             f"declared {ROWS} — raise LOTS or DAYS")
-    rows = rows[-ROWS:]
+    draws = draws[-ROWS:]
+
+    # THE POSITION WALK, over the retained rows alone. Each pair's LAST
+    # lot is its settling lot: whatever squares that position with the
+    # book, or a dividend when the walk already arrived there.
+    settle = {}
+    for at, d in enumerate(draws):
+        settle[(d[1], d[2])] = at
+    orphans = [f"{a}/{t}" for a in accounts for t in universe
+               if (a, t) not in settle]
+    if orphans:
+        raise SystemExit(
+            "gen-market: no lot in the retained window for " +
+            ", ".join(orphans) + " — that pair could never be settled "
+            "against the book, so the ledger would not net to it: raise "
+            "ROWS or LOTS")
+
+    held = {(a, t): 0 for a in accounts for t in universe}
+    rows = []
+    for at, (day, account, ticker, side, qty, amount, price) in enumerate(draws):
+        target = holdings[account].get(ticker, 0)
+        have = held[(account, ticker)]
+        if at == settle[(account, ticker)]:
+            short = target - have
+            side = "buy" if short > 0 else "sell" if short < 0 else "div"
+            qty = abs(short)
+        elif side == "buy":
+            room = target + BAND - have
+            # No room left, so the lot goes the other way rather than
+            # being a buy of nothing.
+            side, qty = ("buy", min(qty, room)) if room > 0 else ("sell", min(qty, have))
+        elif side == "sell":
+            # Nothing held: the same flip, mirrored. Positions never go
+            # short, which is what keeps every settling lot small.
+            side, qty = ("sell", min(qty, have)) if have > 0 else ("buy", min(qty, target + BAND))
+        if side == "div":
+            qty, total = 0, amount
+        else:
+            total = qty * price
+            held[(account, ticker)] = have + (qty if side == "buy" else -qty)
+        rows.append((day, account, ticker, side, qty, price, total))
+
+    for account in accounts:
+        for ticker in universe:
+            want = holdings[account].get(ticker, 0)
+            if held[(account, ticker)] != want:
+                raise SystemExit(
+                    f"gen-market: {account}/{ticker} nets to "
+                    f"{held[(account, ticker)]} and the book holds {want} — "
+                    "the settling lot did not settle (this is the invariant "
+                    "the whole generator exists to hold)")
 
     lines = ["date,account,ticker,side,qty,price_cents,total_cents"]
     for day, account, ticker, side, qty, price, total in rows:

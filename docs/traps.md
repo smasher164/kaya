@@ -4948,3 +4948,66 @@ say "this does not scroll" (gtk.rs's `set_table_scrolling`). It is
 driven by numbers kaya already owns — the CORE's extent and the flex
 contract's grow weight — never by measuring the child, which would be a
 second estimator racing the one in docs/virtualization-plan.md §2.
+
+## `Color(nsColor:)` snapshots a dynamic NSColor OUTSIDE the window, so it is a different colour from the same NSColor drawn by AppKit (2026-08-26)
+
+The mac native table's apron — the 5pt strip `KayaNativeTable`'s
+safeAreaInset paints under the last row — was
+`Color(nsColor: .controlBackgroundColor)`, which is the very colour
+`NSTableView.backgroundColor` defaults to. In DARK mode it still drew a
+near-black bar across the bottom of every table.
+
+Measured on the portfolio dashboard, 2x capture, column x=900:
+
+    y 192..345   #24292C   table interior
+    y 346..355   #1E1E1E   the apron          <- 10 device px = 5.0pt
+    y 356+       #2D3235   window ground
+
+and from the interpreter instrumented inside its own `build()`:
+
+    table.backgroundColor    #1E1E1E    (= controlBackgroundColor)
+    controlBackgroundColor   #1E1E1E
+    underPageBackgroundColor #282828
+    windowBackgroundColor    #323232
+    cacheDisplay of the same scroll view, offscreen: #282828
+
+Three readings of ONE colour name in three contexts. A `Color(nsColor:)`
+fills the value resolved OUTSIDE the window (#1E1E1E); the table view
+resolves it INSIDE the window at draw time (#24292C on screen); an
+offscreen `cacheDisplay` gets a third (#282828). LIGHT HIDES ALL OF IT:
+every one of those is #FFFFFF in aqua, which is why no light capture and
+no lane could see the bar for as long as it shipped.
+
+Six candidate paints were compared in ONE capture, split across the
+apron's width, against the interior directly above (#24292C):
+
+    Color(nsColor: .controlBackgroundColor)   #1E1E1E   the bug
+    Rectangle().fill(.background)             #24292C   matches
+    Color(nsColor: .underPageBackgroundColor) #282828
+    Color(nsColor: .windowBackgroundColor)    #323232
+    Color.clear                               #2D3235   window ground
+    Color(nsColor: .textBackgroundColor)      #1E1E1E
+
+The two paints resolved IN THE HIERARCHY (the `.background` ShapeStyle,
+and clear letting the ground through) are the tinted pair; every
+snapshotted `Color(nsColor:)` is one of the untinted values the dump
+printed. THE RULE: where a SwiftUI fill has to agree with what AppKit
+draws beside it, name a SHAPESTYLE, not a `Color(nsColor:)`.
+tools/check-table-card.sh's "mac apron resolved in the hierarchy" holds
+the apron's own spelling.
+
+AND THE OBVIOUS FIX IS WORSE: an `NSViewRepresentable` filling
+`NSColor.controlBackgroundColor` — AppKit resolving it in the window,
+which is exactly right in principle — COLLAPSES kaya's scene. Built and
+captured three times (no `sizeThatFits`, `sizeThatFits` returning the
+proposal, and as the shipped fix): each rendered a window empty but for
+its last label. The same representable lays out correctly in a
+standalone SwiftUI scene, so it is kaya's own layout it cannot survive.
+An isolation build proved it was the representable and not the refactor:
+the identical wrapper with the original Color inside rendered normally.
+
+WHAT WAS NOT TOLD APART: which macOS mechanism supplies the in-window
+part (dark-mode elevation, desktop tinting, or both).
+`-AppleReduceDesktopTinting YES` in NSArgumentDomain changed nothing,
+but that pref need not be read from an argument domain, so that is a
+null result and not evidence. The fix does not rest on naming it.

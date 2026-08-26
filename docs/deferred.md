@@ -1417,6 +1417,19 @@ count, so the saving is measured rather than assumed.
 ## Testing / infrastructure
 
 
+- **The table bench drives two platforms of five.** tools/bench-tables.sh
+  runs `guest` (headless, the binding's accumulation path) and `macos`
+  (launch to verdict on the SwiftUI interpreter); `linux`, `windows`,
+  `android` and `ios` are refused with a sentence naming
+  docs/measurements/README.md's "The five rigs", where each 2026-08-24
+  procedure is written out step by step. They were deliberately NOT
+  transcribed into orchestration nobody could exercise the night it was
+  written: an ssh/schtasks, `am start` or simctl driver that no run
+  touches rots in silence, which invariant 3 calls a guess. Automating
+  one means having its environment up while it is written and watching
+  it produce a number. Until then the refusal is the honest answer, and
+  it is watched printing on all four.
+  KEY: bench-tables, five rigs, choke bench recipe, tools/bench, not automated
 - ~~**Go 1.27 STABLE is out; the three 1.27rc2 pins should move to it**~~
   — DONE 2026-08-22, the entry's own interim option: all three pins
   moved TOGETHER to the 1.27.0 release tarballs with go.dev's published
@@ -2203,7 +2216,10 @@ count, so the saving is measured rather than assumed.
   floor, so payload-path structural regressions trip at gate time.
   (Adding it means a second phase in each language's encode_bench
   program + floors in tools/bench-encode.sh — keep it separate from
-  the existing rec/s floors, which would otherwise deflate.)
+  the existing rec/s floors, which would otherwise deflate.) The
+  table/scroll bench is a separate family and carries no floors by
+  design: tools/bench-tables.sh, recorded under
+  docs/measurements/README.md.
 - Matrix speed, remaining (diminishing returns): a real swiftmodule
   for the Swift bindings; a Windows VM with more cores.
 - Windows entry follow-ups: IME contract notes for mobile; the WinUI
@@ -6086,6 +6102,34 @@ pre-fix join still running after 12s, the pre-fix subshell staging a
 lost install as OK.
 
 
+## GAP — the mac native tier ellipsizes where every synthesized tier widens (found 2026-08-26, by the transactions-view captures)
+KEY: native ellipsize, content is the floor, hugging column width, recent table truncation, NSTableView column sizing
+
+The transactions view's recent table shows "2026…" and "$615…" on
+macOS while GTK (325px) and Windows (292px) show every date and amount
+in full off the same bytes: the hugging left panel measures ~216pt on
+mac because NSTableView sizes columns by its own rules and ellipsizes
+overflow, while the synthesized tiers hold content-is-the-floor. One
+geometry rule, and the native tier answers it differently — either the
+mac column sizing learns the floor (feed the measured content widths
+into the native column minimums) or the divergence is ruled acceptable
+native behavior. Maintainer's call; the captures are the exhibit.
+
+## QUESTION — a grown table's card ends three ways at the viewport (found 2026-08-26, by the transactions-view captures)
+KEY: grown table card end, viewport cut row, fill-and-scroll, card clip bottom
+
+On GTK (card y 67..578) and WinUI (card y 79..614) the grown
+transactions ledger's card ends at the viewport edge and cuts the last
+visible row in half — correct fill-and-scroll, but exactly the
+arrangement the iOS card was moved to the content layer to avoid, so
+the three card platforms now answer "where does a grown table end"
+differently in one app: iOS's card scrolls with content and ends at
+the true last row, GTK/WinUI's cards frame the viewport and slice
+whatever row crosses the edge. Options when ruled: accept (desktop
+frames scrolling regions; the sliced row is normal desktop scrolling),
+or fade/inset the last partial row, or move desktop cards to the
+content layer too. Pixels-only either way.
+
 ## ~~GAP — a GTK table's viewport has a flat floor the content does not fill (found 2026-08-25, by the card capture round)~~ — FIXED 2026-08-25
 KEY: gtk table viewport floor, empty card space, minimum content height, table hugs content
 
@@ -6119,7 +6163,8 @@ numbers this backend already owns — AUTOMATIC when the container GROWS
 inside it) or when the CORE's extent exceeds TABLE_MAX_CONTENT, NEVER
 otherwise. A table that cannot need a scrollbar stops claiming one, and
 the scroller becomes transparent: minimum and natural both become the
-content's. The windowed tier is untouched — ledger.steps' 15,000 rows
+content's. The windowed tier is untouched — the transactions view's
+15,000 rows (then ledger.steps', the portfolio's since 2026-08-26)
 and varied's grown tables keep AUTOMATIC and their bounded viewports —
 and `check-gtk.sh`'s census holds both the policy write and the grow
 read, each watched failing. The 58px measurement is in docs/traps.md
@@ -6903,3 +6948,91 @@ inner For needed the copy's own automation key, so varied.py spells
 surface already blessed; the three interpreters' bare-id target arms now
 skip DESTROYED registry entries, which the keyed arm had always done and
 which a windowed copy's routine death made load-bearing.
+
+
+## ~~The transactions view lives in its own guest until row windowing reaches every backend~~ — DONE 2026-08-26
+KEY: transactions view, ledger.py, ledger.steps, ledger_python, PY_ONLY_SCENES, IOS_UNWIRED_SCENES, ANDROID_UNWIRED_SCENES, push_entry, portfolio.steps
+
+The condition docs/virtualization-plan.md §6.2 named came due when §6.3
+landed: `guests/python/ledger.py (gone)` and its scene are gone, and the view
+is the portfolio's second screen behind a `push_entry`
+(docs/portfolio-plan.md §6). One scene now carries both screens —
+dashboard, tick, push, the windowed contract at 15,003 rows, and `back`
+proving the covered root kept its numbers and its per-copy sorts. Three
+runners lost a leg each (mac, linux, windows), the two mobile UNWIRED
+lists lost a name, and check-assets' derivation clause moved to
+tools/scenes/portfolio.steps — where it now derives the POST-TICK
+ledger, reading RECENT and POSTED out of the guest by ast rather than
+keeping a third copy. Six watched negatives on that clause (19 in the
+gate, up from 16).
+
+Two questions the move surfaced are entries of their own, below: the
+holdings tie-out (ruled and closed 2026-08-26), and the keyed harness
+target's one-kind arm.
+
+## ~~An account's holdings are not the sum of its transactions~~ — DONE 2026-08-26
+KEY: gen-market tie-out, net position, opening balance, book quantities, CASH ticker, POSTED, label@net
+
+RESOLVED by the maintainer's delegated ruling, 2026-08-26: each account's
+holdings MUST equal the sum of its transactions, and the direction is to
+synthesize the TRANSACTIONS against the existing positions — the
+dashboard's numbers are byte-stable, the stream moved under them. What
+was open, for the record: the generator tied PRICE alone (its backward
+walk ends at the book's live prices), while quantities were random
+buy/sell/div lots, savings traded tickers it did not hold, and CASH — a
+book holding — was not among its TICKERS at all.
+
+The obstacle this entry named was the TAIL: the CSV is 15,000 rows kept
+from the recent end of a longer walk, so a net over the retained rows is
+not the book's. Neither option it foresaw was taken. The file is now the
+WHOLE LIFE of every position — the overshoot decides DENSITY only (which
+days carry how many lots) and the positions are walked over the retained
+rows alone, from zero on the first row — so no opening balance is needed
+and ROWS stays declared at 15,000. Three rules carry it: sells never
+exceed what is held and buys never run more than one lot above the book,
+so positions stay in a narrow band; each (account, ticker) pair's LAST
+lot is its settling lot, whatever squares that pair with the book, or a
+dividend when the walk already arrived; and the generator refuses itself
+if any pair still disagrees after the walk. CASH is a tradeable ticker
+now (flat, at its anchor — a unit of account does not walk), which is
+what lets savings' $500.00 be a transaction sum. tools/gen-market.py
+reads BOOK out of guests/python/portfolio.py by ast rather than keeping
+the second copy of it that this entry's "TICKERS" complaint was really
+about, and the --ensure stamp keys on the guest's bytes as well.
+
+"Day tick" now posts three DIVIDENDS instead of three buys: a dividend
+moves money and not quantity, so the tie survives a tick and the scene
+asserts it on a book those rows are part of.
+
+ASSERTED, not merely true: the transactions view carries a `label@net`
+line — buys minus sells over the rows showing, per ticker, priced at the
+live book. Unfiltered it reads `net AAPL 10, BND 20, CASH 1, NVDA 4,
+VTI 6, VXUS 15 = $10023.00`, which is label#0's "Portfolio: $10023.00"
+and the six Qty cells the positions tables freeze; filtered to
+Retirement it reads `net BND 20, VXUS 15 = $2370.00`, which is label#5's
+"Account total: $2370.00". check-assets grew C10, which nets the
+ARTIFACT against the guest's BOOK, derives both net lines, and refuses
+any net line whose money the dashboard does not also say — four new
+watched negatives (N20-N23, 23 in the gate, up from 19).
+
+## OPEN — the keyed harness target answers for `column` alone, so a stamped button cannot be driven (found 2026-08-26)
+KEY: resolve_id keyed arm, kind@id[key.path], button@id, stamped button target, winui buttons registry, click tags
+
+`kind@id[key.path]` resolves only when kind is `column`: gtk.rs and
+winui/mod.rs both early-return on `if kind != K::Column`, and
+KayaSwiftUI.swift guards `kind == "column"` before the keyed lookup.
+WinUI additionally answers None for the UNKEYED `button@id` — its
+buttons registry stores click tags rather than controls, which that file
+records as a documented divergence.
+
+What it cost: the portfolio's natural affordance is a "Transactions"
+button on each account card, and no scene can click one, so the view is
+reached by one live dashboard button and the account is chosen inside it
+by the filter (docs/portfolio-plan.md §5's finding). Any app whose rows
+carry actions has the same wall.
+
+The work is one harness slice: give each backend's keyed arm the same
+copy-path lookup for every kind that has an id vector, and give WinUI's
+buttons registry the controls it needs to answer at all. Three
+implementations, one rule, and check-verbs' target census is where it
+would be pinned.

@@ -1228,22 +1228,19 @@ for proto in x11 wayland; do
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain
-    # THE PORTFOLIO DASHBOARD (docs/portfolio-plan.md): python alone by
+    # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by
     # design, the editor's arrangement one language over; pooled — no
     # OS chrome, no injected keys. The script arrives by scene name
-    # through KAYA_SCENES_DIR like every pooled leg's.
+    # through KAYA_SCENES_DIR like every pooled leg's. ALONE BETWEEN
+    # DRAINS since the transactions view joined it: 15,000 windowed rows
+    # are its own load (docs/virtualization-plan.md §6.2).
     run "$proto" portfolio-python env KAYA_SELFTEST=portfolio KAYA_LIB="$LIB" \
         python3 guests/python/portfolio.py
     drain
-    # ROW WINDOWING'S TWO PYTHON SCENES (docs/virtualization-plan.md §5),
-    # the portfolio's arrangement one feature over: the transactions view
-    # drives 15,000 uniform rows on the EXACT path, and the varied scene
-    # drives the CORRECTED one on purpose. Python alone, so they stay off
-    # the mobile lanes; ALONE BETWEEN DRAINS because ledger's own load is
-    # the point of it.
-    run "$proto" ledger-python env KAYA_SELFTEST=ledger KAYA_LIB="$LIB" \
-        python3 guests/python/ledger.py
-    drain
+    # ROW WINDOWING'S VARIABLE-HEIGHT SCENE (docs/virtualization-plan.md
+    # §5): the portfolio's uniform 15k rows drive the EXACT path, this
+    # one drives the CORRECTED path on purpose. Python alone, so it stays
+    # off the mobile lanes.
     run "$proto" varied-python env KAYA_SELFTEST=varied KAYA_LIB="$LIB" \
         python3 guests/python/varied.py
     drain

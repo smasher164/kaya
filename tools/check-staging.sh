@@ -213,8 +213,8 @@ refuses "$s" 'ghostexe is in none of' \
 
 s="$(shadow n3)"
 hits="$(doctor "$s" tools/validate-mac.sh \
-    'KAYA_SELFTEST=ledger python3 guests/python/ledger\.py' \
-    'KAYA_SELFTEST=ledger python3 guests/python/ghostledger.py')"
+    'KAYA_SELFTEST=portfolio python3 guests/python/portfolio\.py' \
+    'KAYA_SELFTEST=portfolio python3 guests/python/ghostledger.py')"
 echo "check-staging: self-test N3 pointed a leg at a missing guest, $hits substitution(s)"
 [ "$hits" = 1 ] || { echo "check-staging: SELF-TEST BROKEN (N3 applied $hits)" >&2; exit 1; }
 refuses "$s" 'guests/python/ghostledger.py, which does not' \

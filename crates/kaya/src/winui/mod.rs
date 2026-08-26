@@ -2869,7 +2869,8 @@ fn band_spacers(offset: f64, extent: f64, banded: f64) -> (f64, f64) {
 /// seven cycles, every line carrying `vh 0.0`, undoing the
 /// declares-windowing seed before the first layout ever ran. The whole
 /// collection then cost 2.6s per `column_edges` read and 2.9s of XAML
-/// layout, and ledger_python's edges step burned 5.8s of its 15s retry
+/// layout, and the transactions view's edges step (ledger_python then,
+/// portfolio_python since) burned 5.8s of its 15s retry
 /// window unloaded — which is what went red under the matrix.
 fn table_visible_rows(
     geometry: &crate::scene::WindowGeometry,
@@ -17671,7 +17672,7 @@ mod tests {
     /// `0+256`, `0+512`, `0+1024`, `0+2048`, `0+4096`, every line
     /// carrying `vh 0.0` — the whole 15,000-row collection realized
     /// before the ScrollViewer had ever been laid out, which took
-    /// ledger_python's `expect_column_edges` from 6ms to 5.8 SECONDS
+    /// the transactions view's `expect_column_edges` from 6ms to 5.8 SECONDS
     /// standalone and past the retry window under the matrix
     /// (docs/traps.md, "The band that fed itself").
     ///
@@ -17732,7 +17733,7 @@ mod tests {
     ///
     /// MEASURED HERE 2026-08-25, with the perturbation watched: delete
     /// the range report from `table_report_once` and windowed.steps,
-    /// ledger.steps and varied.steps ALL STAY GREEN. Every scroll in
+    /// portfolio.steps and varied.steps ALL STAY GREEN. Every scroll in
     /// every scene is `scroll_to_row`, which bands explicitly at its own
     /// call site, and `expect_window` on a tier that realized every row
     /// answers `0 <n> <n>` — truthfully (docs/virtualization-plan.md §5).

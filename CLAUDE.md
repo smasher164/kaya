@@ -513,7 +513,17 @@ in docs/deferred.md.
    THE PACKAGED BYTES THEMSELVES ARE CHECKED WHERE THEY ARE PACKAGED,
    by `apk_assets_verify` right after the assemble that wrote them, in
    both directions: a missing entry, and an EXTRA one, which is the half
-   the census actually catches. Watched negatives doctor a shadow of the
+   the census actually catches.
+   AND THE LEDGER NETS TO THE BOOK since 2026-08-26: the portfolio's two
+   screens claim the same positions, so guests/assets/market/transactions.csv
+   is GENERATED to net to guests/python/portfolio.py's BOOK — per account
+   and per ticker, buys minus sells, dividends carrying no quantity — the
+   generator reads that book by ast and refuses to write a file that does
+   not tie. This clause holds the ARTIFACT ON DISK to the same book,
+   derives the scene's `label@net` lines from it, and refuses any net line
+   whose money the dashboard does not also say: a tie-out asserted on one
+   screen ties nothing (invariant 3, docs/portfolio-plan.md §6).
+   Watched negatives doctor a shadow of the
    real tree with the substitution count printed),
    `tools/check-staging.sh` (a wired leg's artifact is in the staging
    derivation its own runner declares: a mac `$RUST_GUESTS` reference
@@ -641,7 +651,7 @@ in docs/deferred.md.
    away and of a different width. Read out of the table's own content
    lambda, so the file's menu separators and the other three backends'
    native hairlines are untouched.
-   58 watched negatives, counts printed, red demanded on every run),
+   59 watched negatives, counts printed, red demanded on every run),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing but RECORDS its

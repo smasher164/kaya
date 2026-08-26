@@ -8361,9 +8361,16 @@ struct KayaTableSurface: View {
     }
 #endif
 
-private var kayaNativeTableApron: Color {
+/// The apron's ground, and on macOS a SHAPESTYLE rather than a Color:
+/// `Color(nsColor:)` snapshots the NSColor OUTSIDE the window, while the
+/// table view resolves the same colour inside it, so the two are
+/// different colours in dark aqua — measured 2026-08-26, a 5pt #1E1E1E
+/// bar under every table whose interior rendered #24292C
+/// (docs/traps.md). Light hid it: both are #FFFFFF there.
+/// tools/check-table-card.sh holds the spelling.
+private var kayaNativeTableApron: some View {
     #if os(macOS)
-        return Color(nsColor: .controlBackgroundColor)
+        return Rectangle().fill(.background)
     #else
         return Color(uiColor: .systemBackground)
     #endif

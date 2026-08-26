@@ -481,58 +481,186 @@ else:
 
 # ------------------------------------------------------------------ C9
 # THE SCENE IS DERIVED FROM THE ARTIFACT TOO. C8 holds the CSV to its
-# generator; nothing held tools/scenes/ledger.steps to the CSV, so
-# retuning the generator left a byte-frozen scene asserting last month's
+# generator; nothing held the transactions view's byte-frozen scene to
+# the CSV, so retuning the generator left it asserting last month's
 # ledger — a red that would arrive on every windowed lane at once, with
-# five failing strings and no file named. This re-derives the four
-# expectations that come from the artifact alone and prints the line the
-# CSV asks for.
+# five failing strings and no file named. This re-derives every
+# expectation that comes from the artifact and prints the line the CSV
+# asks for.
 #
-# The money rule and RECENT are written here as well as in
-# guests/python/ledger.py: the alternative is importing a guest that
-# builds a window at import time. They are one line and one integer, and
-# a guest that moves either reddens this clause naming the file.
-SCENE = "tools/scenes/ledger.steps"
-RECENT = 12
+#
+# THE SCENE SEES THE LEDGER AFTER THE TICK, so the derivation is the
+# CSV plus what "Day tick" posts. POSTED, RECENT, BOOK, TICK and FILTERS
+# are READ OUT OF THE GUEST by ast (importing it would build a window at
+# import time); a second copy here would be one more thing to drift. The
+# money rule is the one line still written twice, and a guest that moves
+# it reddens this clause naming the file. C10 rides in the same block
+# because it wants the same five tables.
+SCENE = "tools/scenes/portfolio.steps"
+GUEST = "guests/python/portfolio.py"
 scene_path = root / SCENE
+guest_path = root / GUEST
 if art.is_file() and not scene_path.is_file():
     bad.append(f"{SCENE} is gone while the market artifact whose rows it "
-               "freezes is still here — the uniform windowing scene is the "
+               "freezes is still here — the transactions view's scene is the "
                "only run-time observation that the ledger arrived whole")
+elif art.is_file() and not guest_path.is_file():
+    bad.append(f"{GUEST} is gone while the market artifact it reads is still "
+               "here — this clause reads POSTED and RECENT out of that guest "
+               "and cannot derive the scene without it")
 elif art.is_file():
-    csv_rows = [line.split(",")
-                for line in art.read_text().splitlines()[1:]]
+    import ast
+    guest_tree = ast.parse(guest_path.read_text(), GUEST)
 
-    def _money(cents):
-        return f"${cents // 100}.{cents % 100:02d}"
+    def _const(name):
+        """The guest's own table, by name. A reader that cannot find its
+        subject agrees with anything, so a missing name is a red."""
+        for node in guest_tree.body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and node.targets[0].id == name):
+                try:
+                    return ast.literal_eval(node.value)
+                except (ValueError, SyntaxError):
+                    return None
+        return None
 
-    def _edge(word, row):
-        date, _account, ticker, side, _qty, _price, total = row
-        return f"{word} {date} {ticker} {side} {_money(int(total))}"
+    RECENT = _const("RECENT")
+    POSTED = _const("POSTED")
+    BOOK = _const("BOOK")
+    TICK = _const("TICK")
+    FILTERS = _const("FILTERS")
+    if not isinstance(RECENT, int) or not isinstance(POSTED, list):
+        bad.append(f"{GUEST} no longer spells RECENT (an int) and POSTED (a "
+                   "list of literal rows) at module scope — this clause reads "
+                   "both to derive the scene, and a reader that finds neither "
+                   "would agree with any scene at all")
+    elif not isinstance(BOOK, dict) or not isinstance(TICK, dict) \
+            or not isinstance(FILTERS, list):
+        bad.append(f"{GUEST} no longer spells BOOK (the holdings), TICK (the "
+                   "per-ticker delta) and FILTERS (the view's account filter) "
+                   "at module scope — C10 nets the ledger against that book "
+                   "and a reader that cannot find it would call any data tied")
+    else:
+        # The guest's own row shape: date, account, ticker, side, qty,
+        # total_cents. POSTED is written in it, so the tick's rows need
+        # no arithmetic here.
+        rows = [(d, a, t, s, int(q), int(tot))
+                for d, a, t, s, q, _p, tot in
+                (line.split(",") for line in art.read_text().splitlines()[1:])]
+        csv_len = len(rows)
+        rows = rows + [tuple(r) for r in POSTED]
 
-    def _cells(row):
-        date, _account, ticker, side, _qty, _price, total = row
-        return f"{date},{ticker},{side},{_money(int(total))}"
+        def _money(cents):
+            return f"${cents // 100}.{cents % 100:02d}"
 
-    scene_text = scene_path.read_text()
-    derived = [
-        (f'expect label#0 "{len(csv_rows)} of {len(csv_rows)} transactions"',
-         "the ledger's declared size"),
-        (f'expect label#1 "{_edge("first", csv_rows[0])}"',
-         "the ledger's first row"),
-        (f'expect label#2 "{_edge("last", csv_rows[-1])}"',
-         "the ledger's last row"),
-        ('expect_rows column@recent "'
-         + "|".join(_cells(r) for r in csv_rows[-RECENT:]) + '"',
-         f"the {RECENT} most recent rows"),
-    ]
-    for line, what in derived:
-        if line not in scene_text:
-            bad.append(f"{SCENE} no longer freezes {what} the way the "
-                       "generated artifact has it. That scene is DERIVED from "
-                       "guests/assets/market/transactions.csv — move the "
-                       "expectation, never the artifact. The line the CSV "
-                       f"asks for is:\n    {line}")
+        def _edge(word, row):
+            date, _account, ticker, side, _qty, total = row
+            return f"{word} {date} {ticker} {side} {_money(total)}"
+
+        def _cells(row):
+            date, _account, ticker, side, _qty, total = row
+            return f"{date},{ticker},{side},{_money(total)}"
+
+        scene_text = scene_path.read_text()
+        derived = [
+            (f'expect label#1 "Transactions: {csv_len}"',
+             "the dashboard's count of the book as the artifact has it"),
+            (f'expect label#1 "Transactions: {len(rows)}"',
+             "the dashboard's count after the tick posted its rows"),
+            (f'expect label@count "{len(rows)} of {len(rows)} transactions"',
+             "the ledger's declared size"),
+            (f'expect label@first "{_edge("first", rows[0])}"',
+             "the ledger's first row"),
+            (f'expect label@last "{_edge("last", rows[-1])}"',
+             "the ledger's last row"),
+            ('expect_rows column@recent "'
+             + "|".join(_cells(r) for r in rows[-RECENT:]) + '"',
+             f"the {RECENT} most recent rows"),
+        ]
+
+        # ---------------------------------------------------------- C10
+        # THE TIE-OUT (ruled 2026-08-26): an account's holdings ARE the
+        # sum of its transactions. The generator holds that at write
+        # time and refuses itself if it slips; this holds the ARTIFACT
+        # ON DISK to it, which is the half a doctored or half-written
+        # CSV can break with the generator innocent. Then it derives the
+        # `label@net` lines the scene freezes, and requires the MONEY in
+        # each to be a string the dashboard also says — a tie-out
+        # asserted nowhere is not a guard (invariant 3).
+        holdings = {a: {t: q for t, q, _ in hs} for a, (_n, hs) in BOOK.items()}
+        anchors = {t: c for _n, hs in BOOK.values() for t, _q, c in hs}
+        live = {t: c + TICK.get(t, 0) for t, c in anchors.items()}
+        net = {}
+        for _d, account, ticker, side, qty, _tot in rows:
+            if side in ("buy", "sell"):
+                net[(account, ticker)] = (net.get((account, ticker), 0)
+                                          + (qty if side == "buy" else -qty))
+        pairs = sorted(set(net) | {(a, t) for a in holdings for t in anchors})
+        for account, ticker in pairs:
+            want = holdings.get(account, {}).get(ticker, 0)
+            got = net.get((account, ticker), 0)
+            if got != want:
+                bad.append(
+                    f"guests/assets/market/transactions.csv does not net to "
+                    f"{GUEST}'s BOOK: {account}/{ticker} nets to {got} and the "
+                    f"book holds {want}. THE LEDGER IS GENERATED TO TIE (ruled "
+                    "2026-08-26, docs/deferred.md) — the two screens claim the "
+                    "same positions, so a ledger that disagrees makes the "
+                    "dashboard a fiction. Regenerate: `python3 "
+                    "tools/gen-market.py --ensure`")
+
+        def _net_line(subset):
+            held = {}
+            for _d, _a, ticker, side, qty, _tot in subset:
+                if side in ("buy", "sell"):
+                    held[ticker] = (held.get(ticker, 0)
+                                    + (qty if side == "buy" else -qty))
+            held = {t: q for t, q in held.items() if q}
+            if not held:
+                return "net — = $0.00", 0
+            value = sum(q * live[t] for t, q in held.items())
+            return ("net " + ", ".join(f"{t} {held[t]}" for t in sorted(held))
+                    + f" = {_money(value)}"), value
+
+        # Index 0 of FILTERS is "no filter", which the freshly pushed
+        # view is in; every other index the scene actually chooses is
+        # read out of the scene rather than assumed.
+        chosen = {0} | {int(n) for n in
+                        re.findall(r"^choose select#0 (\d+)", scene_text,
+                                   re.M)}
+        for index in sorted(chosen):
+            if index >= len(FILTERS):
+                bad.append(f"{SCENE} chooses filter #{index} and {GUEST}'s "
+                           f"FILTERS has {len(FILTERS)} entries")
+                continue
+            account = FILTERS[index][1]
+            subset = [r for r in rows if account is None or r[1] == account]
+            line, value = _net_line(subset)
+            derived.append((f'expect label@net "{line}"',
+                            "the tie-out for "
+                            + (f"account {account}" if account else
+                               "the whole book")))
+            # The other half of the tie: that money is the DASHBOARD's,
+            # so the scene must say it on both screens.
+            twin = (f'"Account total: {_money(value)}"' if account
+                    else f'"Portfolio: {_money(value)}"')
+            if twin not in scene_text:
+                bad.append(
+                    f"{SCENE} freezes a net line worth {_money(value)} for "
+                    + (f"account {account}" if account else "the whole book")
+                    + f" and never asserts {twin} on the dashboard. The "
+                    "tie-out is only a guard while ONE scene says the same "
+                    "money on both screens (docs/portfolio-plan.md §6)")
+
+        for line, what in derived:
+            if line not in scene_text:
+                bad.append(f"{SCENE} no longer freezes {what} the way the "
+                           "generated artifact has it. That scene is DERIVED "
+                           "from guests/assets/market/transactions.csv and the "
+                           f"guest's own POSTED — move the expectation, never "
+                           f"the artifact. The line the data asks for is:\n"
+                           f"    {line}")
 
 for b in bad:
     print("check-assets: " + b, file=sys.stderr)
@@ -735,25 +863,88 @@ refuses "$s" "derived, never committed" "N13 (a missing derived artifact)"
 # SCENE is doctored rather than the CSV, so C8 stays green and this red
 # can only be C9's.
 s="$(fresh n14)"
-hits="$(doctor "$s" tools/scenes/ledger.steps 'expect label#2 "last [^"]*"' \
-    'expect label#2 "last 1999-01-01 AAPL buy $1.00"')"
+hits="$(doctor "$s" tools/scenes/portfolio.steps 'expect label@last "last [^"]*"' \
+    'expect label@last "last 1999-01-01 AAPL buy $1.00"')"
 applied "$hits" "N14's drifted last row"
 refuses "$s" "the ledger's last row" "N14 (a scene that outlived its artifact)"
 
 # N15 — C9: the same, one string over — the twelve most recent rows,
 # which is the expectation a regenerated ledger moves every time.
 s="$(fresh n15)"
-hits="$(doctor "$s" tools/scenes/ledger.steps '(expect_rows column@recent ")[^"]*"' \
+hits="$(doctor "$s" tools/scenes/portfolio.steps '(expect_rows column@recent ")[^"]*"' \
     '\1nothing,here,at,$0.00"')"
 applied "$hits" "N15's drifted recent rows"
 refuses "$s" "the 12 most recent rows" "N15 (a stale recent table)"
 
 # N16 — C9: the scene is deleted while the artifact stays.
 s="$(fresh n16)"
-rm "$s/tools/scenes/ledger.steps"
+rm "$s/tools/scenes/portfolio.steps"
 refuses "$s" "is gone while the market artifact" "N16 (a deleted scene)"
 
-echo "check-assets: self-test: 16 watched negatives, each with its" \
+# N17 — C9's tick half: the GUEST's posting rule moves and the scene
+# does not. Nothing else in the sweep reads POSTED, and the scene's
+# recent table is where the three posted rows show.
+s="$(fresh n17)"
+hits="$(doctor "$s" guests/python/portfolio.py \
+    '\("2026-08-25", "brokerage", "AAPL", "div", 0, 240\)' \
+    '("2026-08-25", "brokerage", "AAPL", "div", 0, 250)')"
+applied "$hits" "N17's re-valued posted dividend"
+refuses "$s" "the 12 most recent rows" "N17 (a posting rule the scene never heard about)"
+
+# N18 — C9: the DASHBOARD's own count of the book drifts. That label is
+# the one place the two screens are asserted to share a model, and it
+# is derived from the artifact's length alone.
+s="$(fresh n18)"
+hits="$(doctor "$s" tools/scenes/portfolio.steps 'expect label#1 "Transactions: 15003"' \
+    'expect label#1 "Transactions: 999"')"
+applied "$hits" "N18's drifted book count"
+refuses "$s" "after the tick posted its rows" "N18 (a dashboard count the ledger cannot produce)"
+
+# N19 — C9: the guest stops spelling the tables this clause reads, so
+# the derivation would silently have nothing to check against.
+s="$(fresh n19)"
+hits="$(doctor "$s" guests/python/portfolio.py '\nPOSTED = \[' '\nPOSTED_ROWS = [')"
+applied "$hits" "N19's renamed POSTED"
+refuses "$s" "no longer spells RECENT" "N19 (a census that lost its subject)"
+
+# N20 — C10: THE BOOK MOVES AND THE LEDGER DOES NOT, which is the way
+# the tie-out will actually break — someone edits a holding and never
+# reruns the generator. C8 reds beside it (the generator reads BOOK, so
+# a regeneration would no longer match the artifact on disk) and that is
+# the fix instruction; the fragment demanded here is C10's own, so this
+# proves the tie clause fired rather than its neighbour.
+s="$(fresh n20)"
+hits="$(doctor "$s" guests/python/portfolio.py '\("AAPL", 10, 18000\)' \
+    '("AAPL", 11, 18000)')"
+applied "$hits" "N20's moved holding"
+refuses "$s" "does not net to" "N20 (a book the ledger no longer sums to)"
+
+# N21 — C10's scene half, and the only perturbation in this file that
+# reaches C10 ALONE: the artifact and the book still agree, and the
+# scene's frozen net line does not.
+s="$(fresh n21)"
+hits="$(doctor "$s" tools/scenes/portfolio.steps '(expect label@net "net BND )\d+' \
+    '\g<1>21')"
+applied "$hits" "N21's drifted net line"
+refuses "$s" "the tie-out for account retirement" "N21 (a stale tie-out assertion)"
+
+# N22 — C10's other half: the net line survives and the DASHBOARD stops
+# saying the same money. A tie-out one screen asserts alone ties nothing.
+s="$(fresh n22)"
+hits="$(doctor "$s" tools/scenes/portfolio.steps 'Account total: \$2370\.00' \
+    'Account total: $2370.01')"
+applied "$hits" "N22's silenced dashboard twin"
+refuses "$s" "never asserts" "N22 (a tie-out asserted on one screen only)"
+
+# N23 — C10: the guest stops spelling the book this clause nets against.
+# The GENERATOR refuses in its own words too (C8 reports that refusal),
+# which is the wall on the path nobody can avoid; this is the gate half.
+s="$(fresh n23)"
+hits="$(doctor "$s" guests/python/portfolio.py '\nBOOK = \{' '\nHOLDINGS = {')"
+applied "$hits" "N23's renamed BOOK"
+refuses "$s" "no longer spells BOOK" "N23 (a tie-out census with no book)"
+
+echo "check-assets: self-test: 23 watched negatives, each with its" \
     "perturbation proven applied"
 
 # ---------------------------------------------------------------------

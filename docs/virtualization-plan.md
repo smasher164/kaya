@@ -152,12 +152,15 @@ One machine, two paths, chosen per For by measurement:
   band as the universal rule: every tier owes exactly the band's rows.
   At small N the band is all rows, so existing scenes keep their
   meaning unchanged.
-- **ledger.steps — the uniform scene**: the transactions view's shape
+- **portfolio.steps — the uniform scene**: the transactions view's shape
   at 15,000 generated rows (above WinUI's 12,000, the strongest
   measured non-virtualized choke). Exact path throughout: assert first
   rows, expect_window at the top, scroll_to_row to the middle and end,
-  expect_window each time, sort and re-assert, tick and re-assert.
+  expect_window each time, filter, sort and re-assert.
   Byte-deterministic everywhere because uniform data never corrects.
+  It was `ledger.steps` against a guest of its own until 2026-08-26,
+  when §6.2's amendment came due and the view joined the app it was
+  always for (docs/portfolio-plan.md §6).
 - **varied.steps — the variable-height scene** (maintainer,
   2026-08-24: a scene that can test variable height ships WITH the
   machine — invariant 4 forbids correction that nothing exercises).
@@ -189,23 +192,33 @@ One machine, two paths, chosen per For by measurement:
    transition, prefix-sum positions, anchor stability) — the exact
    path's tests watched red first, then the corrected path's.
 2. Mac depth: the NSTableView data-source tier, expect_window +
-   scroll_to_row on the mac stage, ledger.steps AND varied.steps, the
-   Python transactions view (with the Python insert fix, which is on
-   this path) — AS ITS OWN GUEST, guests/python/ledger.py, until
-   breadth: portfolio.steps runs on the linux and windows lanes today,
-   where an un-windowed 15k-row stamp still chokes; the view joins the
-   portfolio when §6.3 lands (amended 2026-08-25). varied.steps is a
+   scroll_to_row on the mac stage, the uniform scene AND varied.steps,
+   the Python transactions view (with the Python insert fix, which is on
+   this path) — AS ITS OWN GUEST, `guests/python/ledger.py` (gone),
+   until breadth: portfolio.steps ran on the linux and windows lanes
+   then, where an un-windowed 15k-row stamp still choked; the view joins
+   the portfolio when §6.3 lands (amended 2026-08-25). varied.steps is a
    ONE-COLUMN TABLE, not a plain For — §6.2 windows the mac table
    tier; the plain-For band is §6.3's. GTK and WinUI carry the
-   depth_stub calls meanwhile, and the python guests keep ledger and
-   varied on the mobile lanes' UNWIRED lists. validate-mac green.
+   depth_stub calls meanwhile, and the python guests keep the two scenes
+   on the mobile lanes' UNWIRED lists. validate-mac green.
 3. Breadth: the four synthesized spacer+band tiers in parallel
    worktrees; no binding surface moves (there is nothing to spell —
    the census's job is confirming NOTHING appeared). Matrix.
+   DONE 2026-08-25, and with it §6.2's amendment came due: the
+   transactions view moved into guests/python/portfolio.py behind a
+   `push_entry`, the standalone guest and its scene retired, and
+   check-assets' derivation moved to tools/scenes/portfolio.steps
+   (2026-08-26, docs/portfolio-plan.md §6).
 4. The before/after: the choke bench recipes re-run — acceptance is
    the old chokes passing with headroom (Android's 4-5k OOM must
    become 15k green; mac's per-row attribute-graph cost must be gone
-   from the sample), plus varied.steps green on every lane.
+   from the sample), plus varied.steps green on every lane. Those
+   recipes are checked in now: tools/bench-tables.sh drives the
+   headless and macOS rungs, and docs/measurements/README.md carries
+   what every number means, the 2026-08-24 baselines to beat, the four
+   rigs it does not yet drive, and the caveats that decide whether a
+   run counts.
 
 ## §7 — What was considered and rejected, so nobody re-litigates
 

@@ -2,7 +2,10 @@
 
 Status: the dynamic-tables shape replaced the v1 selection workaround
 2026-08-23, and the Rust/Python depth slice is ALL PASS through the
-five-lane matrix. The desktop scene is live; mobile stays declared off
+five-lane matrix. THE TRANSACTIONS VIEW JOINED THE APP 2026-08-26, the
+second of the three forcing features (docs/virtualization-plan.md §6.2's
+amendment: it lived in its own guest only until row windowing reached
+every backend). The desktop scene is live; mobile stays declared off
 until Python packaging. The second forcing app, the editor's role one
 milestone over (docs/editor-plan.md is the precedent this file follows).
 
@@ -27,11 +30,14 @@ milestone over (docs/editor-plan.md is the precedent this file follows).
 
 ## §1 — the surface
 
-One window, a two-column row: LEFT is the portfolio total and "Day
-tick" button; RIGHT is a For of account cards. Every account copy owns
-its name, total, and positions TABLE (Ticker | Qty | Price | Value).
-The table is a nested collection instance keyed by that account, and
-each copy owns its sort indicator and order.
+One window, a two-column row: LEFT is the portfolio total, the book's
+transaction count, the "Day tick" button and the "Transactions" button;
+RIGHT is a For of account cards. Every account copy owns its name,
+total, and positions TABLE (Ticker | Qty | Price | Value). The table is
+a nested collection instance keyed by that account, and each copy owns
+its sort indicator and order.
+
+THE SECOND SCREEN is the transactions view (§6), one `push_entry` away.
 
 Deliberate v1 choices, each a recorded stop short of a forced feature:
 
@@ -42,9 +48,9 @@ Deliberate v1 choices, each a recorded stop short of a forced feature:
   replace the space above it with a value-over-time chart. The "Day
   tick" button exists partly to accumulate the series a chart will
   want.
-- **A small book.** Three accounts, six tickers. The transactions
-  view (and the virtualization it forces) is a later slice; v1 stamps
-  every row it has.
+- **A small book.** Three accounts, six tickers; the dashboard stamps
+  every row it has. The book's HISTORY is the other scale entirely —
+  15,000 rows behind §6's push.
 - **A plain row, not panes.** The adaptive-panes vocabulary buys its
   keep when compact widths exist; the desktop skeleton is a fixed
   two-column row. Panes join when the mobile lanes do.
@@ -65,15 +71,31 @@ re-applies each account's independent sort. It is deterministic, so
 the scene can assert exact post-tick money, and it is the seed of the
 chart series the canvas slice will draw.
 
+IT ALSO POSTS THE DAY'S TRANSACTIONS (2026-08-26): one DIVIDEND per
+account, appended to §6's ledger, which is what makes the two screens
+one model rather than two. A dividend was the only shape available once
+the tie-out was ruled — money moves, quantity does not — so the holdings
+the view nets to are the same before and after a tick. The dashboard's
+count line moves with them, and it moves whether or not the view is
+pushed — a tick with the view closed writes to no dead collection,
+which the scene pins by ticking before it ever navigates.
+
 ## §3 — the scene (tools/scenes/portfolio.steps)
 
-Byte-frozen on the three desktop lanes. The assertions read all three
-tables, sort Retirement by Value in both directions, prove Brokerage
-and Savings keep an empty indicator, give Brokerage its own Qty sort,
-then tick every price and prove both independent sorts survive.
-Leaf targets are positional; each table is addressed as
-`column@positions[account]`. The authored id identifies the template
-node and the bracketed string-key path identifies its stamped copy.
+Byte-frozen on the three desktop lanes, ONE SCENE FOR BOTH SCREENS. The
+dashboard half reads all three tables, sorts Retirement by Value in both
+directions, proves Brokerage and Savings keep an empty indicator, gives
+Brokerage its own Qty sort, then ticks every price and proves both
+independent sorts survive. The transactions half then pushes the view
+and asserts the windowed contract there (§6), and `back` proves the
+covered dashboard kept its numbers and its per-copy sorts.
+
+Leaf targets are positional on the dashboard; each table is addressed as
+`column@positions[account]` — the authored id identifies the template
+node and the bracketed string-key path identifies its stamped copy. On
+the pushed screen the four status labels are addressed by AUTHORED ID
+(`label@count`), because their creation index sits behind every stamped
+cell the dashboard made and a band decides how many of those exist.
 
 ## §4 — sequencing
 
@@ -83,8 +105,9 @@ node and the bracketed string-key path identifies its stamped copy.
 2. The packaging milestone (ledgered): CPython + the binding into the
    APK and the iOS bundle; the mobile legs then wire and the panes
    pass joins.
-3. The remaining feature slices land in the ruled order:
-   virtualization (the transactions view), then canvas (the chart).
+3. The remaining feature slices land in the ruled order: virtualization
+   (the transactions view — DONE 2026-08-26, §6), then canvas (the
+   chart).
 
 ## §5 — findings ledger
 
@@ -117,6 +140,66 @@ awkward gets a line here, the editor's discipline.
   account total. macOS stretched the detail but not the new accounts For,
   leaving all four native columns inside a 145pt viewport. The fixes and
   measured guards are recorded beside the dynamic-table ledger entry and
-  in docs/traps.md; the scene now pins 800x600, both nested alignments,
+  in docs/traps.md; the scene now pins the declared window size (800x600
+  then, 900x600 since the transactions view joined — §6's screen carries
+  two tables side by side and was proven at that width), both nested
+  alignments,
   table containment, and horizontal cell edges for all three copies,
   repeated after each sort re-declaration and the live price tick.
+- **A STAMPED BUTTON CANNOT BE DRIVEN BY A SCENE (2026-08-26), which is
+  why the transactions view is filtered rather than opened per account.**
+  The natural app shape is a "Transactions" button on each account card;
+  its target would be `button@txns[brokerage]`, and the keyed arm of
+  `resolve_id` answers for `column` alone in all three harness
+  implementations (`if kind != K::Column { return None }` in gtk.rs and
+  winui/mod.rs, `guard kind == "column"` in KayaSwiftUI.swift). WinUI
+  cannot even answer the UNKEYED `button@id`: its buttons registry stores
+  click tags, not controls, and the file says so. So the affordance is one
+  LIVE button on the dashboard and the account is chosen inside the view
+  by its filter — the same "one account's history", one screen later.
+  Widening the keyed arm to every kind is a harness slice of its own
+  (ledgered), not something to smuggle in behind an app.
+
+## §6 — the transactions view
+
+The third forcing feature's artifact (docs/virtualization-plan.md §5):
+the whole book's history, 15,000 rows in one For, windowed by nature.
+It lived in its own guest while row windowing reached only some
+backends; §6.2's amendment ended that when the breadth slice landed,
+and 2026-08-26 it became this app's second screen.
+
+- **Reached by `push_entry`**, the serial navigation grammar
+  (guests/python/nav.py is the conformance spelling): a "Transactions"
+  button on the dashboard pushes an entry titled "Transactions", and the
+  platform's own back affordance pops it. The covered dashboard is
+  retained, which the scene asserts on the way back.
+- **The screen is a two-column row**: LEFT the count line, the first and
+  last row of what is showing, the net line, the account filter and the
+  twelve most recent transactions in FILE order; RIGHT the ledger itself,
+  grown, the fill-and-scroll viewport the window reports its visible
+  range from.
+- **The data is derived, never committed**: tools/gen-market.py writes
+  guests/assets/market/transactions.csv from a spelled-out LCG, and
+  check-assets re-derives every string the scene freezes about it — the
+  artifact plus the guest's own POSTED — so retuning the generator
+  reddens ONE gate naming this scene instead of three lanes.
+- **The guest writes no windowing code**: it inserts every row it has and
+  reads every row it has (docs/virtualization-plan.md §1). The screen's
+  state (filter, sort) belongs to the screen: a freshly pushed view shows
+  the whole book unsorted.
+- **THE TWO SCREENS TIE OUT** (ruled 2026-08-26): an account's holdings
+  ARE the sum of its transactions. tools/gen-market.py reads BOOK out of
+  the guest by ast and generates a history that nets to it — sells never
+  exceed what is held, buys never run more than one lot above the book,
+  each (account, ticker) pair's LAST lot settles that pair, and the
+  generator refuses itself if any pair still disagrees. CASH is a
+  tradeable ticker there, flat at its anchor, because it is a book
+  holding. "Day tick" posts DIVIDENDS, which move money and not quantity,
+  so a tick cannot break the tie.
+  The view says it out loud in `label@net`: buys minus sells over the
+  rows showing, per ticker, priced at the live book. Unfiltered that is
+  the six Qty cells the positions tables freeze and label#0's own money;
+  filtered to one account it is that account's card and its
+  "Account total:" to the byte. check-assets' C10 nets the artifact
+  against BOOK, derives both lines, and refuses a net line whose money
+  the dashboard never says — a tie-out asserted nowhere is not a guard.

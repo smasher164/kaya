@@ -231,6 +231,18 @@ PRESENT = (
     ("mac card interior is zero", SWIFTUI,
      "let kayaTableCardInsetX: CGFloat = 0",
      "let kayaTableCardInsetX: CGFloat = 4"),
+    # AND THE MAC'S OWN CLOSE, which is the apron rather than a card: a
+    # SHAPESTYLE, resolved in the hierarchy, never a Color(nsColor:).
+    # `Color(nsColor:)` snapshots the dynamic NSColor OUTSIDE the window
+    # while the table view resolves the same colour inside it, so the
+    # perturbation below — the spelling that shipped — filled #1E1E1E
+    # under an interior that rendered #24292C: a 5pt bar across the
+    # bottom of every dark-mode table, and #FFFFFF both ways in light,
+    # so no lane and no light capture could see it (measured 2026-08-26,
+    # docs/traps.md).
+    ("mac apron resolved in the hierarchy", SWIFTUI,
+     "return Rectangle().fill(.background)",
+     "return Color(nsColor: .controlBackgroundColor)"),
 )
 
 # THE INTERIOR IS A NAMED NUMBER, not a literal at the use site. No

@@ -1048,26 +1048,22 @@ drain
 run editor-go-swiftui env KAYA_SELFTEST=editor target/go-guests/kaya-go
 drain
 
-# THE PORTFOLIO DASHBOARD (docs/portfolio-plan.md), the second app on
-# this lane and PYTHON ALONE by design (the flagship slot spent on the
+# THE PORTFOLIO APP (docs/portfolio-plan.md), the second app on this
+# lane and PYTHON ALONE by design (the flagship slot spent on the
 # ambient-transaction binding), so like the editor it is in neither
 # SCENES nor DEPTH_SCENES — both derive a rust example this app does
-# not have. Pooled, not isolated: it opens no OS chrome and injects no
-# keys.
+# not have. Its scene carries the dashboard AND the transactions view's
+# 15,000 windowed rows (docs/virtualization-plan.md §6.2). Pooled, not
+# isolated: it opens no OS chrome and injects no keys.
 KAYA_SELFTEST_SCRIPT="$(scene_script portfolio)"
 export KAYA_SELFTEST_SCRIPT
 run portfolio-python-swiftui env KAYA_SELFTEST=portfolio python3 guests/python/portfolio.py
 drain
 
-# THE ROW-WINDOW SCENES (docs/virtualization-plan.md §5-§6.2): python
-# alone at depth like the portfolio — the uniform 15k ledger drives the
-# exact path, the structurally varied guest drives correction and the
-# anchoring sentence. Neither is in SCENES/DEPTH_SCENES for the same
-# reason the portfolio is not.
-KAYA_SELFTEST_SCRIPT="$(scene_script ledger)"
-export KAYA_SELFTEST_SCRIPT
-run ledger-python-swiftui env KAYA_SELFTEST=ledger python3 guests/python/ledger.py
-drain
+# THE VARIABLE-HEIGHT SCENE (docs/virtualization-plan.md §5): python
+# alone at depth like the portfolio, and not in SCENES/DEPTH_SCENES for
+# the same reason. The uniform 15k path rides the portfolio's own
+# transactions view now (§6.2's amendment).
 KAYA_SELFTEST_SCRIPT="$(scene_script varied)"
 export KAYA_SELFTEST_SCRIPT
 run varied-python-swiftui env KAYA_SELFTEST=varied python3 guests/python/varied.py
