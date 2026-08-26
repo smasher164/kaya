@@ -1683,6 +1683,24 @@ the self-test fixture, a string literal holding a fake invocation,
 matched the scanner's own file. A gate that scans a directory scans
 itself.
 
+## A substitution count of 1 does not say WHERE it applied
+
+check-pins' fifth clause ships eight watched negatives that doctor a
+copy of tools/fetch-winappsdk.sh. One of them swapped the hash check for
+a size check by replacing `shasum -a 256` — and the gate stayed green on
+the doctored copy while the count dutifully printed 1. The file spells
+`shasum -a 256` twice: the dev-shell fingerprint at the top runs first,
+so `str.replace(old, new, 1)` doctored the guard and left the verifier
+alone. The negative was testing nothing, and the count — the thing
+CLAUDE.md's invariant 3 tells you to print — agreed with it.
+
+So the rule is one notch stronger than "print the count": COUNT THE
+SITES FIRST and fail unless the pattern matches exactly one. A pattern
+matching twice is as broken as one matching zero times; both leave the
+clause under test untouched, and only the zero case is visible in the
+count. check-pins refuses any negative whose pattern matches a number
+of sites other than 1, and says how many it found.
+
 ## The aggregation outer MUST delegate QI (the NavigationView saga)
 
 NavigationView stow-crashed (c000027b, bare E_NOINTERFACE) in every

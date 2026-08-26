@@ -19,11 +19,11 @@ All **[MEASURED]**, read from the tree on 2026-08-16:
 
 | thing | version | where it is written |
 |---|---|---|
-| Windows App SDK (meta) | **2.2.0** | `tools/fetch-winappsdk.sh:53` (Runtime), header comment "component versions come from its nuspec (2.2.0)" |
-| WASDK **WinUI** component (the XAML framework + `Microsoft.UI.Xaml.winmd`) | **2.2.1** | `tools/fetch-winappsdk.sh:51`, `tools/winui-bindgen/src/main.rs` (`Microsoft.WindowsAppSDK.WinUI-2.2.1/.../Microsoft.UI.Xaml.winmd`) |
-| WASDK Foundation | 2.1.0 | `tools/fetch-winappsdk.sh:49` |
-| WASDK InteractiveExperiences (`Microsoft.UI.winmd`) | 2.0.15 | `tools/fetch-winappsdk.sh:50` |
-| WASDK Base | 2.0.4 | `tools/fetch-winappsdk.sh:48` |
+| Windows App SDK (meta) | **2.2.0** | `tools/fetch-winappsdk.sh:98` (Runtime), header comment "component versions come from its nuspec (2.2.0)" |
+| WASDK **WinUI** component (the XAML framework + `Microsoft.UI.Xaml.winmd`) | **2.2.1** | `tools/fetch-winappsdk.sh:95`, `tools/winui-bindgen/src/main.rs` (`Microsoft.WindowsAppSDK.WinUI-2.2.1/.../Microsoft.UI.Xaml.winmd`) |
+| WASDK Foundation | 2.1.0 | `tools/fetch-winappsdk.sh:91` |
+| WASDK InteractiveExperiences (`Microsoft.UI.winmd`) | 2.0.15 | `tools/fetch-winappsdk.sh:93` |
+| WASDK Base | 2.0.4 | `tools/fetch-winappsdk.sh:89` |
 | `windows` / `windows-core` crates | **0.62** | `crates/kaya/Cargo.toml:34,52` |
 | `windows-collections` / `-numerics` / `-future` | 0.3 | `crates/kaya/Cargo.toml:120-124` |
 | `windows-bindgen` | 0.62 (`.1` in the cargo cache) | `tools/winui-bindgen/Cargo.toml` |

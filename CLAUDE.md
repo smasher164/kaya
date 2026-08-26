@@ -588,7 +588,25 @@ in docs/deferred.md.
    names an exact version — gradle, nuget, SwiftPM, and the container's
    opam index, none of which has a lockfile the way cargo and nix do;
    the SwiftPM clause is the one whose false green cost a debugging
-   round, see docs/traps.md),
+   round, see docs/traps.md.
+   AND THE WINDOWS DOOR SINCE 2026-08-26, which is a curl and therefore
+   invisible to the other four: tools/fetch-winappsdk.sh pulls five
+   Windows App SDK packages out of nuget's flat container, and the
+   .csproj clause cannot reach it because the three .csproj files in the
+   tree are guest-side and tooling, not the backend. A curl names BYTES
+   as well as a version, so that script records each package's sha256
+   beside its version and checks it on every run INCLUDING the cached
+   path — the cache is the half a version pin cannot speak for, the
+   lesson deploy-win's version-keyed go check learned one machine over.
+   The gate holds the shape (a literal version, a 64-hex hash, the
+   verification unreachable-around) and then CUTS verify_sha256 out of
+   the script and runs it against wrong bytes, since static text saying
+   a hash is compared is not the comparison refusing. Eight watched
+   negatives on doctored copies, counts printed; one of them found its
+   own first draft doctoring the dev-shell fingerprint instead of the
+   verifier, so an ambiguous pattern is a failed test too. A second
+   tools/ script curling the same flat container is refused BY NAME,
+   because reading one file by name is how this hole existed),
    `tools/check-design-generation.sh` (BOTH macOS design generations stay
    on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
    flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the

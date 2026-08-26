@@ -6,7 +6,7 @@ arm64, console session active. Nothing shipped, nothing committed.
 
 SDK under measurement is the one kaya actually builds against:
 `Microsoft.WindowsAppSDK.WinUI 2.2.1` + `Foundation 2.1.0` +
-`InteractiveExperiences 2.0.15` (tools/fetch-winappsdk.sh:48-53). That is
+`InteractiveExperiences 2.0.15` (tools/fetch-winappsdk.sh:89-98). That is
 App SDK **2.x**, the current generation, so "modern App SDK additions"
 are inside every answer below rather than outside it.
 

@@ -5144,6 +5144,16 @@ list lags in BOTH directions, so every gone/present decision is now
 DEBOUNCED: waitForPickerGone and dismiss() both demand two
 consecutive absences before believing one.
 
+FIRST WINDOWS SIGHTING (2026-08-26, filedialog_rust, five-lane
+contended matrix): the choose press swallowed with the native dialog
+still up listing both files — the instrumented sentence ("the press
+was swallowed, which a backend cannot tell you because nothing
+returns an error for it") fired as designed, the downstream expects
+and the one-per-process wall followed the known script, and the lane
+passed standalone on the immediate rerun. One sighting, logged not
+chased; the family now has faces on android, iOS and windows, all
+under peak contention.
+
 THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
 (2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in
 hand): the OPEN picker was up with its list unreadable (DocumentsUI's

@@ -678,7 +678,7 @@ checked against the same pins:
 | libadwaita | `adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }` — the comment notes the validation image carries libadwaita **1.7.6**, so *"anything above 1.7 would compile here and fail"* | Cargo.toml:165-175 |
 | linux image | `debian@sha256:fac46bff…` (trixie, pinned by digest), `libgtk-4-dev`, `libadwaita-1-dev`, `adwaita-icon-theme`, `librsvg2-common` | tools/linux/Dockerfile:23,27,34,121 |
 | pango | `0.22.8`, features `["v1_56"]` | Cargo.toml:164 |
-| WinUI / WASDK | Base 2.0.4, Foundation 2.1.0, InteractiveExperiences 2.0.15, **WinUI 2.2.1**, Runtime 2.2.0 | tools/fetch-winappsdk.sh:48-53 |
+| WinUI / WASDK | Base 2.0.4, Foundation 2.1.0, InteractiveExperiences 2.0.15, **WinUI 2.2.1**, Runtime 2.2.0 | tools/fetch-winappsdk.sh:89-98 |
 | windows-rs | `windows` / `windows-core` **0.62**; `windows-numerics`/`collections`/`future` 0.3 | Cargo.toml:34-124 |
 | Compose | `compose-bom:2024.10.01`, `material3` from the BOM (**M3 1.7.5**, per the comment at :73), `material3.adaptive:1.0.0` + `adaptive-layout:1.0.0` | android/kaya/build.gradle.kts:53,54,65,66,73 |
 | Android | `compileSdk = 35`, AGP 8.7.3, Kotlin 2.0.21 (+ compose plugin 2.0.21) | android/kaya/build.gradle.kts:9, android/build.gradle.kts:2-5 |

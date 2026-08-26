@@ -11,7 +11,7 @@ see §6's "THE ONE LINK I COULD NOT VERIFY".
 
 ## 0. The pinned SDK
 
-[REPO] `tools/fetch-winappsdk.sh:48-53` pins the component packages by exact
+[REPO] `tools/fetch-winappsdk.sh:89-98` pins the component packages by exact
 version (comment on line 23-24: the component versions come from the
 `Microsoft.WindowsAppSDK` 2.2.0 meta-package's nuspec):
 

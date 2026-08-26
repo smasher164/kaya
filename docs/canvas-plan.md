@@ -432,19 +432,36 @@ next to the process exe on the windows lane. That last part is the
 pri-adjacency trap one file over (docs/traps.md), and it is
 tools/check-staging.sh's business.
 
-**And there is a gate hole in the way.** tools/check-pins.sh has four clauses:
+~~**And there is a gate hole in the way.** tools/check-pins.sh has four clauses:
 gradle coordinates, NuGet via `<PackageReference>` in `.csproj`, opam in
 tools/linux/Dockerfile, and SwiftPM's `Package.resolved`. It never reads
 tools/fetch-winappsdk.sh. The Windows App SDK component versions in that
 script are exact literals today, pinned by hand and guarded by nobody, and
 Win2D would arrive through that same unguarded door. The three `.csproj` files
 in the tree are guest-side and tooling, not the backend, so the existing NuGet
-clause cannot reach this.
+clause cannot reach this.~~
 
-This proposal therefore owes check-pins a fifth clause before Win2D lands:
-every NuGet flat-container fetch names a literal version. It is cheap, and it
-is invariant 3's rule about where a guard sits — the wall belongs on the path
-someone walks by adding a dependency, not in a runbook.
+~~This proposal therefore owes check-pins a fifth clause before Win2D lands:
+every NuGet flat-container fetch names a literal version.~~
+
+**CLOSED 2026-08-26, and it grew a second half.** check-pins has the fifth
+clause: every `fetch` in tools/fetch-winappsdk.sh names an exact version, and
+a NEW tools/ script resolving from the same flat container is refused by name,
+so the door cannot be re-opened next to the guard. The second half is what
+reading the fetch script found — it verified NOTHING it downloaded. Each
+package now records the sha256 of the `.nupkg` nuget.org serves beside its
+version (each of the five cross-checked against nuget.org's published
+packageHash), the script checks that hash on every run INCLUDING the cached
+path, and the gate cuts `verify_sha256` out of the script and runs it against
+wrong bytes on every sweep. Adding Win2D is now one `fetch` line with a
+version and a hash; leaving the hash off fails the gate naming the package.
+This was invariant 3's rule about where a guard sits — the wall belongs on the
+path someone walks by adding a dependency, not in a runbook.
+
+What is still unheld: `third_party/winappsdk/WindowsAppRuntimeInstall-arm64.exe`,
+the 108 MB installer tools/deploy-win.sh's `--provision` arm copies to the VM.
+No script fetches it and no package contains it — it was placed by hand, and
+its provenance is recorded nowhere. Pinning it means deciding what it is first.
 
 **And there is a version-skew risk specific to this tree, which should be
 tested before anything is pinned.** Win2D's current stable is
@@ -711,8 +728,9 @@ supposed to stay red while half the work is outstanding.
    on a runner if and only if that runner's backend has the feature.
    check-verbs is RED here until both interpreters carry both verbs; the
    Compose half lands in phase 3.
-3. **Breadth, in parallel worktrees.** GTK, WinUI (with §3.1's fetch line,
-   bindgen output, staging and the new check-pins clause), Compose, and the
+3. **Breadth, in parallel worktrees.** GTK, WinUI (with §3.1's fetch line —
+   version AND sha256, the clause is already there — bindgen output and
+   staging), Compose, and the
    remaining seven bindings plus the C floor. Each lane green on the
    byte-shared scene. check-sugar-surface goes green when the sixteenth
    constructor lands, not before.
@@ -881,13 +899,14 @@ assertion, and should be admitted one artifact at a time.
 ### D5. On Windows: Win2D, or the composition APIs already linked?
 
 **The question.** Ruling A names Win2D. It means a new NuGet fetch, more
-generated bindings, a native DLL staged beside every Windows app, and a new
-clause in check-pins to hold its version (§3.1). WinUI 3 can also reach 2D
-drawing through composition APIs the backend already links.
+generated bindings and a native DLL staged beside every Windows app. WinUI 3
+can also reach 2D drawing through composition APIs the backend already links.
 
-**Recommendation: prototype both in phase 3 and decide on the measurement,
-and add the check-pins clause regardless**, since the existing gate cannot see
-tools/fetch-winappsdk.sh whether or not Win2D ever lands.
+**Recommendation: prototype both in phase 3 and decide on the measurement.**
+The check-pins half of this is already done (§3.1, landed 2026-08-26 ahead of
+any ruling, since the gate could not see tools/fetch-winappsdk.sh whether or
+not Win2D ever lands): a Win2D fetch line now costs a version and a sha256,
+and the gate refuses it without both.
 
 **Why not just pick one now:** this is the only backend decision with a
 permanent consequence for every app kaya ships on Windows — a native
