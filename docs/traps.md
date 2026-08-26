@@ -3447,6 +3447,19 @@ environment. Only if it still fails is there something to debug — and
 then `KAYA_AX_TRACE=1` distinguishes "tree missing" from "read timed
 out" in one run, because it dumps what the platform actually publishes.
 
+THE USER IN THE SESSION IS THE SAME CLASS, twice measured. The mac
+lane runs in the logged-in GUI session, so the human at the machine is
+part of the test surface: watching a video during a matrix failed 46
+AX/dialog legs (2026-08-24), and one copy to the clipboard mid-lane
+failed clipboard-go-swiftui with the user's own copied text in the
+sentence — `label#0 reads "text  sealed interface Symbol permits …",
+wanted "text from another app"` (2026-08-25, cause confirmed by the
+user). The clipboard scenes read the REAL pasteboard, so any Cmd-C
+anywhere in the session between a leg's prime and its read lands in
+the leg. A failed clipboard or AX leg whose wrong value looks like
+something a person would copy or click is the environment; re-run the
+lane on a machine nobody is using before debugging anything.
+
 The underlying mechanism is not proven, and the honest statement is
 that it correlates with a burst of GUI processes starting and dying in
 quick succession — especially a batch that left legs wedged. The

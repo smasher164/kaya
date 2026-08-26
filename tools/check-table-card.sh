@@ -9,9 +9,12 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# A TABLE BOUNDS ITS OWN EXTENT — one semantics, three spellings
-# (docs/deferred.md's table-card entry, ruled 2026-08-25). macOS has it
-# from the native widget; GTK, WinUI and Compose each draw a card.
+# A TABLE BOUNDS ITS OWN EXTENT — one semantics, four spellings
+# (docs/deferred.md's table-card entry, ruled 2026-08-25). The mac's
+# NATIVE tier has it from the widget; GTK, WinUI and Compose each draw a
+# flat card; the iOS SYNTHESIZED tier draws the INSET-GROUPED one — the
+# Settings look, where a card is parted from its page by the grouped
+# background behind it and never by an outline.
 #
 # NO SCENE CAN FAIL THIS. The card is pixels and nothing else: every
 # table observable — expect_columns, expect_rows, expect_column_edges,
@@ -21,11 +24,16 @@ fi
 # total"). So, like the native-undo pair, a gate is the only wall
 # available, and it holds three things a capture would otherwise be the
 # only witness to: the card is THERE, it is FLAT (the ruling: no shadow,
-# no blur, no elevation), and its colours come from the platform's own
-# tokens rather than from literals.
+# no blur, no elevation — and on iOS no stroke either), and its colours
+# come from the platform's own tokens rather than from literals.
 #
-# WHAT IT DELIBERATELY DOES NOT HOLD: the mac tier, which delineates
-# natively and is not to be touched; and whether the card LOOKS right,
+# AND WHERE IT MAY NOT REACH: the mac. Its native tier delineates from
+# NSTableView's own interior and is not to be touched, so the iOS card
+# is the synthesized tier's alone, its numbers are zero on macOS, and
+# both halves are held here — a card wrapped around KayaNativeTable and
+# a macOS arm that draws are each watched being refused.
+#
+# WHAT IT DELIBERATELY DOES NOT HOLD: whether the card LOOKS right,
 # which is the capture sign-off the ledger entry still holds open.
 set -uo pipefail
 
@@ -39,6 +47,14 @@ import sys
 GTK = "crates/kaya/src/gtk.rs"
 WINUI = "crates/kaya/src/winui/mod.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+SWIFTUI = "swift/KayaSwiftUI.swift"
+
+FACE_CALL = ".modifier(KayaTableCardFace())"
+GROUND_CALL = ".modifier(KayaTableCardGround())"
+TIER_HEAD = "private struct KayaSynthesizedTable: View {"
+FACE_HEAD = "private struct KayaTableCardFace: ViewModifier {"
+GROUND_HEAD = "private struct KayaTableCardGround: ViewModifier {"
+CLIP_HEAD = "ScrollView(.vertical) {"
 
 # --- THE CARD IS THERE -------------------------------------------------
 #
@@ -112,6 +128,67 @@ PRESENT = (
     ("compose card interior", COMPOSE,
      ".padding(horizontal = KAYA_TABLE_CARD_PAD_X, vertical = KAYA_TABLE_CARD_PAD_Y)",
      ".padding(0.dp)"),
+    # THE iOS SYNTHESIZED TIER, inset-grouped: the two SEMANTIC colours
+    # carry the whole boundary here, so a literal is not a style slip —
+    # it is the card going blank in dark mode, or (light mode, white on
+    # white) the boundary disappearing altogether.
+    ("ios card fill", SWIFTUI,
+     ".fill(Color(uiColor: .secondarySystemGroupedBackground))",
+     ".fill(Color(white: 1.0))"),
+    ("ios page ground", SWIFTUI,
+     ".background(Color(uiColor: .systemGroupedBackground))",
+     ".background(Color(white: 0.95))"),
+    ("ios card radius", SWIFTUI,
+     "RoundedRectangle(cornerRadius: kayaTableCardRadius, style: .continuous)",
+     "Rectangle()"),
+    ("ios card interior", SWIFTUI,
+     ".padding(.horizontal, kayaTableCardInsetX)",
+     ".padding(.horizontal, 0)"),
+    ("ios card interior, vertical", SWIFTUI,
+     ".padding(.vertical, kayaTableCardInsetY)",
+     ".padding(.vertical, 0)"),
+    # The band is what MAKES the ground visible: without it the ground
+    # is painted entirely under the card and a strokeless card has no
+    # edge at all in light mode.
+    ("ios ground band", SWIFTUI,
+     ".padding(kayaTableCardBand)",
+     ".padding(0)"),
+    # And the one number that has to follow it, GTK's `css_inset_span`
+    # clause in this file's spelling: the reporters read the card's
+    # CONTENT box and KayaTrackReader the flex cell's OUTER one, so the
+    # card's own span comes off the track or every carded table convicts
+    # itself at expect_column_edges.
+    ("ios card interior off the assigned track", SWIFTUI,
+     "assigned, pad: kayaTableCardPad, synthesized: got.2)",
+     "assigned, pad: 0, synthesized: got.2)"),
+    # BOTH numbers are between the track and the cells, and the interior
+    # alone is the plausible half-answer.
+    ("ios card span is the band and the interior", SWIFTUI,
+     "let kayaTableCardPad: CGFloat = kayaTableCardBand + kayaTableCardInsetX",
+     "let kayaTableCardPad: CGFloat = kayaTableCardInsetX"),
+    ("ios ground worn by the synthesized tier", SWIFTUI,
+     GROUND_CALL,
+     ".modifier(EmptyModifier())"),
+    # THE TWO VIEWPORT WRITERS OF A GROWN TABLE, which the content-layer
+    # card is what forces apart: the card's interior scrolls INSIDE the
+    # clip, so the clip is wider than the cells' box and both writers
+    # must report the cells' box or expect_column_edges reads a table
+    # that starts 16pt inside its own viewport.
+    ("ios carded viewport, the reporter", SWIFTUI,
+     "scrollClip: true)",
+     "scrollClip: false)"),
+    ("ios carded viewport, the window's own writer", SWIFTUI,
+     "inScrollClip: viewportRect, interior: kayaTableCardInsetX)",
+     "inScrollClip: viewportRect, interior: 0)"),
+    # THE MAC SPENDS NOTHING. These two are the numbers the instrument
+    # subtracts; non-zero on a mac, they take 32pt off every mac table's
+    # track and convict a tier that draws no card at all.
+    ("mac card band is zero", SWIFTUI,
+     "let kayaTableCardBand: CGFloat = 0",
+     "let kayaTableCardBand: CGFloat = 4"),
+    ("mac card interior is zero", SWIFTUI,
+     "let kayaTableCardInsetX: CGFloat = 0",
+     "let kayaTableCardInsetX: CGFloat = 4"),
 )
 
 # THE INTERIOR IS A NAMED NUMBER, not a literal at the use site. No
@@ -124,6 +201,10 @@ NAMED = (
     ("winui card interior", WINUI, "const TABLE_CARD_PAD: f64 = 12.0;"),
     ("compose card interior x", COMPOSE, "private val KAYA_TABLE_CARD_PAD_X = 16.dp"),
     ("compose card interior y", COMPOSE, "private val KAYA_TABLE_CARD_PAD_Y = 8.dp"),
+    ("ios card interior x", SWIFTUI, "let kayaTableCardInsetX: CGFloat = 16"),
+    ("ios card interior y", SWIFTUI, "let kayaTableCardInsetY: CGFloat = 8"),
+    ("ios card band", SWIFTUI, "let kayaTableCardBand: CGFloat = 16"),
+    ("ios card radius constant", SWIFTUI, "let kayaTableCardRadius: CGFloat = 10"),
 )
 
 # --- AND IT IS FLAT ----------------------------------------------------
@@ -133,17 +214,65 @@ NAMED = (
 # popover has one, a dialog has one), so a file-wide grep would be a
 # sentence about the wrong widget. The ruling is flat HERE.
 #
-# (label, file, first line of the block, last line, forbidden spellings)
+# (label, file, first line of the block, last line, forbidden spellings,
+#  the rule the spellings would break)
+FLAT = ("the ruling of 2026-08-25 is a FLAT card: fill, a 1px stroke and "
+        "the radius, zero blur, zero elevation, and colours from the "
+        "platform's tokens rather than literals")
+GROUPED = ("the iOS spelling of that ruling is INSET-GROUPED: fill, the "
+           "radius and the grouped ground behind it — NO stroke, no "
+           "elevation, and the two semantic colours rather than literals, "
+           "because iOS parts a card from its page by background contrast "
+           "and a literal has no dark mode")
 BLOCKS = (
     ("gtk card rule", GTK,
      "const TABLE_CSS: &str = ", '";',
-     ("box-shadow", "text-shadow", "filter:", "blur")),
+     ("box-shadow", "text-shadow", "filter:", "blur"), FLAT),
     ("winui card markup", WINUI,
      "const TABLE_CARD_XAML: &str = ", ");",
-     ("Shadow", "Elevation", "Translation", "#")),
+     ("Shadow", "Elevation", "Translation", "#"), FLAT),
     ("compose card modifiers", COMPOSE,
      "        modifier = modifier\n            // THE CARD", "\n            .verticalScroll(",
-     (".shadow(", "elevation", "tonalElevation", "shadowElevation")),
+     (".shadow(", "elevation", "tonalElevation", "shadowElevation"), FLAT),
+    ("ios card modifiers", SWIFTUI,
+     FACE_HEAD, "\n}\n",
+     ("stroke", ".border(", ".shadow(", "Color(red:", "Color(white:",
+      "Color(hue:", "#colorLiteral"), GROUPED),
+)
+
+# --- THE LAYER, AND THE MAC -------------------------------------------
+#
+# Four ways this could go wrong, each perturbed the way it really would.
+# THE FIRST IS THE ONE THAT ALREADY HAPPENED: the card was painted as the
+# scroll VIEWPORT's background, so a three-row grown table ran white to
+# the bottom of the phone's screen (the maintainer's capture, 2026-08-25)
+# while its rows stopped near the top. An inset-grouped card belongs to
+# the CONTENT: it ends with the last row, and on a tall table it spans the
+# whole extent and scrolls with the rows. No observable moves either way,
+# so the layer is a gate clause or nothing.
+# (label, file, needle, replacement, the sentence the census must say)
+ZONE = (
+    ("the card back on the scroll viewport's background", SWIFTUI,
+     FACE_CALL + "\n                        }\n"
+     "                        .coordinateSpace(name: kayaTableScrollSpace(node))",
+     "}\n                        .coordinateSpace(name: kayaTableScrollSpace(node))\n"
+     "                        " + FACE_CALL,
+     "is not inside the scroll clip's content"),
+    ("the ground moved inside the scroll clip", SWIFTUI,
+     FACE_CALL + "\n                        }",
+     FACE_CALL + "\n                                " + GROUND_CALL
+     + "\n                        }",
+     "the grouped ground is INSIDE the scroll clip"),
+    ("the card wrapped around the mac's native tier", SWIFTUI,
+     "case .native: KayaNativeTable(node: node)",
+     "case .native: KayaNativeTable(node: node).modifier(KayaTableCardFace())",
+     "the card is the synthesized tier's alone"),
+    ("a macOS arm that draws", SWIFTUI,
+     "#if os(macOS)\n            content\n        #else\n            content\n"
+     "                .padding(.horizontal, kayaTableCardInsetX)",
+     "#if os(macOS)\n            content.background(Color.gray)\n        #else\n"
+     "            content\n                .padding(.horizontal, kayaTableCardInsetX)",
+     "the macOS arm of KayaTableCardFace"),
 )
 
 
@@ -162,6 +291,107 @@ def block(text, start, end, path, label):
     return "\n".join(
         line for line in body.splitlines() if not line.strip().startswith("//")
     )
+
+
+def swift_block(text, head):
+    """A Swift declaration's own body, brace-matched from its opening
+    line — the zone clauses below are about WHERE a modifier is applied,
+    which a file-wide count cannot answer."""
+    at = text.find(head)
+    if at < 0:
+        return None
+    depth = 0
+    for i in range(at + len(head) - 1, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[at:i + 1]
+    return None
+
+
+def zones(text):
+    """WHICH LAYER WEARS THE CARD, and that it stops at the mac.
+
+    The face is CONTENT — inside the scroll clip on the grown arm, so it
+    ends with the last row and scrolls with the rows — while the ground
+    is OUTSIDE the clip, framing the table's extent without scrolling.
+    And neither reaches macOS, whose native tier delineates from
+    NSTableView's own interior (the ruling)."""
+    out = []
+    tier = swift_block(text, TIER_HEAD)
+    if tier is None:
+        out.append(
+            f"check-table-card: {SWIFTUI}: no `{TIER_HEAD}` — the tier that wears "
+            "the card is gone or renamed, and every clause about where the card "
+            "is applied would pass by reading nothing"
+        )
+    else:
+        # BOTH ARMS wear the face (grown and ungrown), the ground once.
+        for call, want, what in (
+            (FACE_CALL, 2, "the card face, once per arm"),
+            (GROUND_CALL, 1, "the grouped ground, once around the tier"),
+        ):
+            worn, here = text.count(call), tier.count(call)
+            if worn != want or here != want:
+                out.append(
+                    f"check-table-card: {SWIFTUI}: `{call}` appears {worn} time(s) "
+                    f"in the file and {here} inside KayaSynthesizedTable, wanted "
+                    f"{want} of each ({what}) — the card is the synthesized tier's "
+                    "alone; the mac's native tier delineates from NSTableView's "
+                    "own interior and may not be wrapped in one"
+                )
+        clip = swift_block(tier, CLIP_HEAD)
+        if clip is None:
+            out.append(
+                f"check-table-card: {SWIFTUI}: KayaSynthesizedTable has no "
+                f"`{CLIP_HEAD}` block — the gate cannot tell the scroll clip's "
+                "CONTENT from the clip itself, which is the whole of this clause"
+            )
+        else:
+            if clip.count(FACE_CALL) != 1:
+                out.append(
+                    f"check-table-card: {SWIFTUI}: the grown arm's `{FACE_CALL}` "
+                    "is not inside the scroll clip's content "
+                    f"({clip.count(FACE_CALL)} inside `{CLIP_HEAD}`) — painted on "
+                    "the clip instead, the card is the VIEWPORT's background: it "
+                    "runs white to the bottom of the screen under a three-row "
+                    "table and cannot scroll with a tall one (the capture of "
+                    "2026-08-25)"
+                )
+            if clip.count(GROUND_CALL) != 0:
+                out.append(
+                    f"check-table-card: {SWIFTUI}: the grouped ground is INSIDE "
+                    "the scroll clip — the band frames the table's extent and may "
+                    "not scroll away with the rows"
+                )
+    for head, name in ((FACE_HEAD, "KayaTableCardFace"), (GROUND_HEAD, "KayaTableCardGround")):
+        card = swift_block(text, head)
+        if card is None:
+            out.append(
+                f"check-table-card: {SWIFTUI}: no `{head}` — the modifier this "
+                "gate reads the macOS arm out of is gone or renamed"
+            )
+            continue
+        i = card.find("#if os(macOS)")
+        j = card.find("#else", i + 1)
+        if min(i, j) < 0:
+            out.append(
+                f"check-table-card: {SWIFTUI}: {name} is not "
+                "`#if os(macOS)` / `#else` — the gate reads the two arms "
+                "separately because only one of them is the ruling"
+            )
+            continue
+        arm = " ".join(card[i + len("#if os(macOS)"):j].split())
+        if arm != "content":
+            out.append(
+                f"check-table-card: {SWIFTUI}: the macOS arm of {name} "
+                f"reads {arm!r}, wanted exactly 'content' — macOS is untouched "
+                "by this ruling, and an arm that draws puts a grouped card "
+                "under the below-floor mac tier where no lane would see it"
+            )
+    return out
 
 
 def census(files):
@@ -184,7 +414,7 @@ def census(files):
                 "interior is a number with a provenance in its comment, never a "
                 "literal at the use site"
             )
-    for label, path, start, end, forbidden in BLOCKS:
+    for label, path, start, end, forbidden, why in BLOCKS:
         body = block(files[path], start, end, path, label)
         if body is None:
             out.append(
@@ -196,16 +426,17 @@ def census(files):
         for word in forbidden:
             if word in body:
                 out.append(
-                    f"check-table-card: {path}: the {label} names `{word}` — the "
-                    "ruling of 2026-08-25 is a FLAT card: fill, a 1px stroke and "
-                    "the radius, zero blur, zero elevation, and colours from the "
-                    "platform's tokens rather than literals"
+                    f"check-table-card: {path}: the {label} names `{word}` — {why}"
                 )
+    out.extend(zones(files[SWIFTUI]))
     return out
 
 
 def load(over=None):
-    files = {p: Path(p).read_text(encoding="utf-8") for p in (GTK, WINUI, COMPOSE)}
+    files = {
+        p: Path(p).read_text(encoding="utf-8")
+        for p in (GTK, WINUI, COMPOSE, SWIFTUI)
+    }
     if over:
         files.update(over)
     return files
@@ -223,9 +454,10 @@ if offenders:
     )
     raise SystemExit(1)
 print(
-    f"check-table-card: the card is present, padded and flat in all three "
-    f"backends — {len(PRESENT)} clauses + {len(NAMED)} named interiors + "
-    f"{len(BLOCKS)} flatness blocks"
+    f"check-table-card: the card is present, padded and flat in all four "
+    f"backends, iOS's on the CONTENT layer, and the mac unwrapped — "
+    f"{len(PRESENT)} clauses + {len(NAMED)} named interiors + "
+    f"{len(BLOCKS)} flatness blocks + {len(ZONE)} layer/zone negatives"
 )
 
 # --- EVERY CLAUSE WATCHED FAILING -------------------------------------
@@ -291,6 +523,16 @@ ELEVATE = (
      "            .background(MaterialTheme.colorScheme.surfaceContainer, "
      "KAYA_TABLE_CARD_SHAPE)",
      ".shadow("),
+    # iOS's is the same reach for a familiar card: the desktop family's
+    # 1px stroke, on the one platform whose idiom refuses it.
+    ("ios card modifiers", SWIFTUI,
+     ".padding(.vertical, kayaTableCardInsetY)",
+     ".padding(.vertical, kayaTableCardInsetY)\n"
+     "                .overlay(\n"
+     "                    RoundedRectangle(cornerRadius: kayaTableCardRadius)\n"
+     "                        .stroke(Color.gray, lineWidth: 1)\n"
+     "                )",
+     "stroke"),
 )
 for label, path, needle, replacement, word in ELEVATE:
     applied = real[path].count(needle)
@@ -309,10 +551,29 @@ for label, path, needle, replacement, word in ELEVATE:
         print("got: " + ("\n".join(census(shadow)) or "(nothing)"), file=sys.stderr)
         failures += 1
 
+# And the two leaks onto the mac, each watched being refused BY NAME —
+# a count of findings would be satisfied by any other clause going red.
+for label, path, needle, replacement, sentence in ZONE:
+    applied = real[path].count(needle)
+    print(f"check-table-card: self-test — {label} applied {applied} substitution(s)")
+    if applied != 1:
+        raise SystemExit(
+            f"check-table-card: SELF-TEST BROKEN — {label} matched {applied} "
+            f"sites in {path}, wanted 1."
+        )
+    shadow = load({path: real[path].replace(needle, replacement, 1)})
+    got = [line for line in census(shadow) if sentence in line]
+    if not got:
+        print(f"check-table-card: SELF-TEST FAILED — {label} was not refused.",
+              file=sys.stderr)
+        print("wanted a sentence containing: " + sentence, file=sys.stderr)
+        print("got: " + ("\n".join(census(shadow)) or "(nothing)"), file=sys.stderr)
+        failures += 1
+
 if failures:
     raise SystemExit(1)
-print(f"check-table-card: {len(PRESENT) + len(NAMED) + len(ELEVATE)} watched "
-      "negatives, every one red as demanded")
+print(f"check-table-card: {len(PRESENT) + len(NAMED) + len(ELEVATE) + len(ZONE)} "
+      "watched negatives, every one red as demanded")
 PY
 rc=$?
 if [ "$rc" != 0 ]; then

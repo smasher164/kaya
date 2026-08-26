@@ -96,9 +96,10 @@ GATES = {
     # bindings are not inputs here. Same for check-native-undo.
     "check-roles": ["crates", "swift", "android"],
     "check-native-undo": ["crates", "swift", "android"],
-    # No binding either: the card is a lowering, and swift/ is out
-    # because the mac tier delineates natively and is not in the rule.
-    "check-table-card": ["crates", "android"],
+    # No binding either: the card is a lowering. swift/ IS an input since
+    # 2026-08-25 — the iOS synthesized tier draws the inset-grouped card,
+    # and the clause holding it off the mac reads that same file.
+    "check-table-card": ["crates", "swift", "android"],
     # Every source root the diagnostic census walks: the gate notices a
     # NEW why-not by its name alone, so a key blind to one root would
     # hand back a stale PASS for the file that just grew one.

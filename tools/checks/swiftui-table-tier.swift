@@ -81,6 +81,65 @@ enum KayaTableTierProbe {
         expectBool(
             "table track overflow is rejected",
             kayaTableViewportMatchesTrack(viewport, track: 297), false)
+        // THE PADDED CARD CONVICTS NOTHING — gtk.rs's
+        // `gtk_table_padded_card_convicts_nothing` in this file's spelling,
+        // for the iOS synthesized tier's inset-grouped card (ruled
+        // 2026-08-25). The numbers are PASSED, never read: this host's own
+        // constants are zero, so a probe that read them would drive the
+        // unpadded case and call it a measurement.
+        //
+        // THE CARD IS TWO LAYERS AND THE CHAIN HAS TO CLOSE. The ground band
+        // is OUTSIDE the scroll clip (it frames the table and never
+        // scrolls); the interior is INSIDE it, on the content that scrolls
+        // with the rows — so an 800pt assigned track gives a 768pt clip and
+        // a 736pt cells' box, and 736 is exactly what the instrument's
+        // content track must be.
+        let assignedTrack = 800.0
+        let clip = CGRect(x: 116, y: 200, width: 768, height: 400)
+        let carded = kayaTableCellsBox(inScrollClip: clip, interior: 16)
+        expectBool(
+            "the carded scroll clip yields the cells' own box",
+            carded.minX == 132 && carded.width == 736 && carded.height == clip.height,
+            true)
+        expectBool(
+            "a padded card's viewport matches its own content track",
+            kayaTableViewportMatchesTrack(
+                carded,
+                track: kayaTableContentTrack(assignedTrack, pad: 32, synthesized: true)),
+            true)
+        expectBool(
+            "a track basis that forgets the card convicts every padded table",
+            kayaTableViewportMatchesTrack(carded, track: assignedTrack), false)
+        // The CLIP is not the cells' box: a writer that reported it would
+        // agree with the assigned track and disagree with the cells.
+        expectBool(
+            "the scroll clip itself does not match the content track",
+            kayaTableViewportMatchesTrack(
+                clip,
+                track: kayaTableContentTrack(assignedTrack, pad: 32, synthesized: true)),
+            false)
+        // …and the pad is never paid twice: an UNCARDED tier — the mac's
+        // native one, and iOS's regular-width one — keeps its whole track.
+        expectBool(
+            "an uncarded table keeps its assigned track untouched",
+            kayaTableViewportMatchesTrack(
+                CGRect(x: 100, y: 200, width: 800, height: 120),
+                track: kayaTableContentTrack(800, pad: 32, synthesized: false)),
+            true)
+        // AND THE VIEWPORT IS THE CELLS' OWN BOX, which is what keeps the
+        // leading-edge clause flush under a card on the content layer. Read
+        // at the CLIP instead, the same cells report the card's interior as
+        // content underfill — the shape of a writer that forgot to inset.
+        expectBool(
+            "cells flush inside a carded viewport underfill nothing",
+            kayaTableLeadingUnderfill(
+                Double(carded.minX), viewport: carded, synthesized: true) == nil,
+            true)
+        expectBool(
+            "a viewport read at the scroll clip reports the card's interior",
+            kayaTableLeadingUnderfill(
+                Double(carded.minX), viewport: clip, synthesized: true) == 16,
+            true)
         expectBool(
             "global viewport origin rejects horizontally shifted cells",
             kayaTableFramesFitHorizontally(

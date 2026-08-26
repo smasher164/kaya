@@ -591,20 +591,37 @@ in docs/deferred.md.
    on every run; winui::tests' brand test is its rendered-output sibling
    on the windows guest's unit phase),
    `tools/check-table-card.sh` (A TABLE BOUNDS ITS OWN EXTENT — one
-   semantics, three spellings (ruled 2026-08-25). macOS has it from the
-   native widget and is out of the rule; GTK, WinUI and Compose each draw
-   a card. NO SCENE CAN FAIL THIS: the card is pixels, and every table
+   semantics, four spellings (ruled 2026-08-25). The mac's NATIVE tier
+   has it from the widget and is out of the rule; GTK, WinUI and Compose
+   each draw a flat card, and the iOS SYNTHESIZED tier the INSET-GROUPED
+   one — the Settings look, where the grouped ground behind the card is
+   the whole boundary and there is no stroke at all. NO SCENE CAN FAIL
+   THIS: the card is pixels, and every table
    observable — expect_columns, expect_rows, expect_column_edges,
    expect_window — answers identically with it gone, which is how all
    three shipped a table's OPENING grammar and never its close, running
    the last row into the label under it. So it holds three things a
    capture would otherwise be the only witness to: the card is THERE,
-   it is FLAT (no shadow, no blur, no elevation) and its colours are the
+   it is FLAT (no shadow, no blur, no elevation — and on iOS no stroke
+   either) and its colours are the
    platform's own tokens rather than literals. The flatness clause reads
-   the card's OWN BLOCK with comments stripped — all three files
+   the card's OWN BLOCK with comments stripped — all four files
    legitimately name shadows elsewhere, and a comment saying the card
    carries no elevation is the rule written down rather than a breach.
-   14 watched negatives, counts printed, red demanded on every run),
+   AND WHICH LAYER WEARS IT, which is the clause a capture bought: the
+   iOS card is CONTENT, inside the scroll clip, so it ends with the last
+   row and scrolls with a tall table. Painted as the viewport's
+   background — the first implementation — a three-row grown table ran
+   white to the bottom of the phone, and no observable moved. So the
+   face is read INSIDE the clip's block and the ground outside it, and
+   both of a grown table's viewport writers are held to the cells' box,
+   since the interior scrolls inside that clip.
+   AND WHERE IT MAY NOT REACH: the mac. The card is the synthesized
+   tier's alone (a count in the file AND inside that tier's own block)
+   and its numbers are zero on macOS, since the edge instrument subtracts
+   what they say the card spends — a card wrapped around KayaNativeTable
+   and a macOS arm that draws are each watched being refused.
+   44 watched negatives, counts printed, red demanded on every run),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing but RECORDS its

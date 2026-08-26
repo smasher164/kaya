@@ -5954,7 +5954,7 @@ three fronts at once (per docs/clipboard-plan.md the iOS prompt dance
 is semantic), or from a Windows VM with more cores.
 
 
-## GAP — ContentUnderfill wants a cell box that IS the column box, and two tiers have ink instead (leading-edge half done 2026-08-25; found 2026-08-24, by the review of 01dd633)
+## ~~GAP — ContentUnderfill wants a cell box that IS the column box, and two tiers have ink instead (leading-edge half done 2026-08-25; found 2026-08-24, by the review of 01dd633)~~
 KEY: ContentLeftUnderfill, ContentUnderfill, table_horizontal_issue, kayaTableHorizontalIssue, kayaTableLeadingUnderfill, kayaCurrentTableSynthesized, expect_column_edges, leading edge, cell box, natural size
 
 THE LEADING EDGE IS DONE, 2026-08-25, on every backend that can hold
@@ -6032,6 +6032,16 @@ the last column's trailing edge against the clip, and `frameOfCell` is
 already the column rect. Until then the two SwiftUI tiers answer
 different halves of one byte-shared step, which is the residue of this
 entry and is stated rather than hidden.
+
+CLOSED 2026-08-25, BY RULING: the maintainer keeps `.inset`. The
+native look is the reference aesthetic the card work copied onto the
+other platforms, and flattening it to win one clause on one platform
+would be backwards; the bug class stays covered by the three backends
+that measure a column box. So the residues are the accepted state, on
+the record: the mac native tier carries neither clause (the platform
+owns the leading edge), and the two synthesized ink tiers (Compose,
+iOS) carry the leading clause only. A future entry may reopen the ink
+half if a tier learns its column slots; this one is done.
 
 NOTE (the diagnostics half closed 2026-08-24): winui and Compose
 discriminate their horizontal-containment causes the way gtk.rs does —
@@ -6117,7 +6127,7 @@ read, each watched failing. The 58px measurement is in docs/traps.md
 is where the next session will look.
 
 ## ~~GAP — only macOS delineates a table's end; GTK and WinUI run CASH straight into the account total (maintainer, 2026-08-24)~~
-KEY: table end boundary, closing rule, table card, boxed-list, apron, Account total, synthesized header
+KEY: table end boundary, closing rule, table card, boxed-list, apron, Account total, synthesized header, inset-grouped, KayaTableCard
 
 CLOSED 2026-08-25: the maintainer ruled CARDS (flat: fill, 1px
 stroke, rounded corners, no shadow, no elevation) after a survey of
@@ -6126,8 +6136,9 @@ round-two captures — interior inset 12px per platform metrics, small
 GTK tables hugging their rows after the 58px scrollbar-minimum fix
 (its own struck entry, one above). Implemented on GTK, WinUI and
 Compose, held by tools/check-table-card.sh; macOS keeps the native
-interior. The iOS synthesized tier's spelling (inset-grouped vs the
-same flat card) is the one open ruling, recorded in the roadmap.
+interior. THE LAST SPELLING WAS RULED THE SAME DAY: the iOS
+synthesized tier takes the INSET-GROUPED card, not the desktop
+family's flat one, and it is implemented — the section below.
 
 Seen on the first cross-platform portfolio capture set: on GTK and
 WinUI the last row's text and the "Account total" label below it read
@@ -6178,9 +6189,11 @@ keeps every cell edge where expect_column_edges already found it:
   draw modifiers; neither measures.
 
 NO SCENE CAN FAIL THIS, so tools/check-table-card.sh is the wall: the
-card present in all three, flat, and coloured from platform tokens
-rather than literals, with 14 watched negatives. No .steps file and no
-expected string moved.
+card present in all four, flat (strokeless on iOS), coloured from
+platform tokens rather than literals, on the CONTENT layer where iOS
+demands it, and held OFF the mac's native tier, with 44 watched
+negatives. No .steps file and no expected string
+moved.
 
 THE INTERIOR CAME BACK FROM THE FIRST SIGN-OFF (maintainer, 2026-08-25):
 "the linux and windows tables don't look good. the cards have no
@@ -6223,9 +6236,62 @@ backends: bleeding it would mean moving the padding somewhere that shifts
 every cell off zero, which is the one thing this may not do. Stated so
 the next reader knows it was chosen, not inherited.
 
+THE iOS SYNTHESIZED TIER IS INSET-GROUPED (maintainer, 2026-08-25) — the
+Settings look rather than the desktop family's flat card, and the mac is
+untouched, its native tier delineating from NSTableView's own interior.
+Two modifiers in swift/KayaSwiftUI.swift, worn by KayaSynthesizedTable
+alone: `KayaTableCardFace` is the card — a rounded
+`secondarySystemGroupedBackground` fill at radius 10 over an interior of
+16 horizontal / 8 vertical, NO STROKE, because iOS parts a card from its
+page by background contrast and never by an outline — and
+`KayaTableCardGround` is the page under it, `systemGroupedBackground`
+behind a 16pt band. The colours are the SEMANTIC ones, so dark mode is
+free. Every number is zero on macOS, because the instrument subtracts what
+they say the card spends.
+
+THE FACE IS CONTENT, NOT VIEWPORT, and that came back from the capture
+(maintainer, same day): "is the ios table in this scene meant to have the
+white inset background stretch all the way to the bottom of the screen?
+like past the bottom of the last row of the table?" It was — the first
+implementation painted the card as the scroll viewport's background, so a
+three-row grown table ran white to the bottom of the phone while its rows
+stopped near the top. An inset-grouped card belongs to the CONTENT layer:
+the face goes INSIDE the scroll clip, on the stack the windowing machinery
+already sizes to the collection's whole extent (top spacer + band + bottom
+spacer), so a short table's card ends at its last row with the grouped
+ground below it, and a tall one's card spans the virtual content and
+scrolls with the rows — ONE rounded rectangle, so a reader mid-list sees
+straight edges and corners only at the true ends. The GROUND stays outside
+the clip: the band frames the table's extent and may not scroll away.
+
+THE GROUND IS THE TABLE'S OWN REGION, NOT THE WINDOW'S: painting the
+window grouped would move every non-table scene's pixels on the phone, so
+the scoped half is the band around the card. That band is not decoration —
+`secondarySystemGroupedBackground` IS white in light mode, so a strokeless
+card on the default page ground would have no edge at all, and the ground
+behind it is the whole boundary.
+
+AND IT TOO GOES THROUGH THE PATH THE INSTRUMENT SUBTRACTS, in two layers
+that add up to one pad: an 800pt assigned track gives a 768pt scroll clip
+(the band, outside) and a 736pt cells' box (the interior, inside, on the
+content), and `kayaTableContentTrack` takes both off the ASSIGNED track —
+which KayaTrackReader reads at the flex cell's OUTER box, GTK's trap one
+platform over. Because the interior now scrolls INSIDE the clip, the clip
+is no longer the cells' box: `kayaTableCellsBox` insets it, and BOTH of a
+grown table's viewport writers — KayaTableViewportReporter and
+KayaSynthesizedWindow's own report — go through it, or the leading clause
+reads a table starting 16pt inside its own viewport. Pinned in the tier's
+own truth table (tools/checks/swiftui-table-tier.swift): the clip yields
+the cells' box, that box matches the content track, the CLIP does not, an
+UNCARDED tier keeps its whole track, cells flush underfill nothing, and
+the same cells read at the clip report 16pt of interior. Each watched
+failing — the subtraction deleted, the inset deleted, the underfill
+silenced — with the substitution count printed.
+
 STILL OPEN, and the only thing left: the captures. The entry says the
 change lands with fresh captures INSPECTED, and the maintainer signs
-those off. The three radii are deliberately per-platform (12 / 8 / 12),
+those off — the iOS card included, whose sign-off has not happened
+either. The four radii are deliberately per-platform (12 / 8 / 12 / 10),
 which is the "per platform, not per app" half of the rule.
 
 

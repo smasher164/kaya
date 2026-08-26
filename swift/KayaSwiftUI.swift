@@ -5750,11 +5750,15 @@ private func kayaRunScript(_ script: String) {
                                     + "\(parts[2]) distinct increasing columns")
                             break
                         }
-                        guard let track = got.1, track > 0 else {
+                        guard let assigned = got.1, assigned > 0 else {
                             failures.append(
                                 "\(parts[1]) has no current assigned table track")
                             break
                         }
+                        // The card's own span comes off the track first, or
+                        // every carded table convicts itself.
+                        let track = kayaTableContentTrack(
+                            assigned, pad: kayaTableCardPad, synthesized: got.2)
                         let frames = columns.flatMap { $0 }
                         // TRACK, THEN THE LEADING EDGE, THEN THE TRAILING
                         // ONE — one precedence in all four backends
@@ -8007,6 +8011,32 @@ func kayaCurrentTableTrackWidth(_ table: KayaNode) -> Double? {
     return Double(observation.size.width)
 }
 
+/// The track the CELLS were given: the assigned track less what the card
+/// spends on both sides — gtk.rs's `css_inset_span` in this file's spelling.
+/// KayaTrackReader records the flex cell's OUTER box while the reporters read
+/// the card's CONTENT box, so a padded card underfills its own track by
+/// exactly that much unless it comes off first (KayaTableCard).
+///
+/// `pad` is a parameter rather than a read, so the mac probe can drive the
+/// padded case on a host whose own constant is zero (check-table-tier).
+func kayaTableContentTrack(_ track: Double, pad: CGFloat, synthesized: Bool) -> Double {
+    synthesized ? track - 2 * Double(pad) : track
+}
+
+/// THE CELLS' OWN BOX inside a carded SCROLL CLIP. The card's interior lives
+/// INSIDE the scrolling content (KayaTableCardFace) — it has to end with the
+/// last row rather than with the viewport — so the clip is wider than the
+/// cells' box by exactly that interior on each side, and both writers of a
+/// grown table's viewport report the cells' box, which is what
+/// expect_column_edges' leading clause reads. Vertical is untouched: the
+/// interior scrolls, so the cells may reach the clip's top and bottom.
+///
+/// `interior` is a parameter for kayaTableContentTrack's reason — the mac
+/// probe drives it on a host whose own constant is zero.
+func kayaTableCellsBox(inScrollClip clip: CGRect, interior: CGFloat) -> CGRect {
+    clip.insetBy(dx: interior, dy: 0)
+}
+
 private func kayaTableCellKey(_ row: KayaNode, _ column: Int, _ cell: KayaNode) -> String {
     "\(row.id)/\(column)/\(cell.id)"
 }
@@ -9072,10 +9102,16 @@ private struct KayaTableViewportReporter: View {
     let node: KayaNode
     let generation: Int
     let synthesized: Bool
+    /// True where this watches a SCROLL CLIP rather than the cells' own box:
+    /// the card's interior scrolls inside that clip (kayaTableCellsBox).
+    var scrollClip = false
 
     var body: some View {
         GeometryReader { geo in
-            let frame = geo.frame(in: .global)
+            let box = geo.frame(in: .global)
+            let frame =
+                scrollClip
+                ? kayaTableCellsBox(inScrollClip: box, interior: kayaTableCardInsetX) : box
             Color.clear.task(id: KayaGeometryStamp(generation: generation, frame: frame)) {
                 kayaRecordTableViewport(node, generation, frame, synthesized)
             }
@@ -9350,10 +9386,13 @@ typealias KayaTablePlaced = () -> Void
         // THE VIEWPORT FIRST, and past every early return below: it is a
         // geometric fact about the container, not about the band, and the
         // harness reads it for expect_column_edges whatever the window is
-        // doing.
-        if viewportRect.width > 0, viewportRect.height > 0 {
+        // doing. THE CELLS' BOX, not the raw clip — this tier's second
+        // viewport writer, and the two must report the same box.
+        let cells = kayaTableCellsBox(
+            inScrollClip: viewportRect, interior: kayaTableCardInsetX)
+        if cells.width > 0, cells.height > 0 {
             kayaRecordTableViewport(
-                node, kayaTableGeometryGeneration(node), viewportRect, true)
+                node, kayaTableGeometryGeneration(node), cells, true)
         }
         guard let geometry = KayaHost.windowGeometry(node.id), geometry.total > 0 else {
             // No core (the gate's probes host this render path with none)
@@ -9563,6 +9602,88 @@ private struct KayaTableContentReporter: View {
     }
 }
 
+/// THE INSET-GROUPED CARD'S NUMBERS, iOS only (ruled 2026-08-25;
+/// docs/deferred.md's table-card entry). ZERO ON macOS, whose native tier
+/// delineates from NSTableView's own interior and is untouched: the edge
+/// instrument subtracts what these say the card spends, so a mac that
+/// declared them would convict every mac table.
+#if os(macOS)
+    let kayaTableCardBand: CGFloat = 0
+    let kayaTableCardInsetX: CGFloat = 0
+    let kayaTableCardInsetY: CGFloat = 0
+#else
+    /// The grouped ground's band around the card. iOS insets a grouped
+    /// section from the SCREEN edge; a kaya table already sits inside the
+    /// guest's own container inset, so the band is the family's 16.
+    let kayaTableCardBand: CGFloat = 16
+    /// UIKit's cell layout margin — and the 16 the mac native tier's inset
+    /// NSTableView measured at (kayaTableLeadingUnderfill's note).
+    let kayaTableCardInsetX: CGFloat = 16
+    /// kaya's 8, as GTK's and Compose's cards: ROW DENSITY MAY NOT MOVE, so
+    /// the vertical interior is the container's, never the row's.
+    let kayaTableCardInsetY: CGFloat = 8
+#endif
+/// iOS's inset-grouped section radius.
+let kayaTableCardRadius: CGFloat = 10
+/// What the card spends per side, ACROSS BOTH LAYERS — the band outside the
+/// scroll clip and the interior inside it, on the content — and therefore
+/// the number the edge instrument takes off the assigned track
+/// (kayaTableContentTrack; kayaTableCellsBox is the interior half alone).
+let kayaTableCardPad: CGFloat = kayaTableCardBand + kayaTableCardInsetX
+
+/// THE CARD ITSELF, and it belongs to the CONTENT (ruled 2026-08-25, fixed
+/// the same day by the maintainer's capture: "is the ios table meant to have
+/// the white inset background stretch all the way to the bottom of the
+/// screen?"). Painted as the scroll VIEWPORT's background it ran white to
+/// the bottom under a three-row table; on the content layer it is what iOS
+/// draws — a short table's card ends at its last row with the grouped ground
+/// below it, and a tall one's card spans the whole extent (the window's two
+/// spacers included, since KayaTableLayout sizes itself to the collection)
+/// and scrolls with the rows, ONE rounded rectangle, so a reader mid-list
+/// sees straight edges and corners only at the true ends.
+///
+/// The GROUPED CELL background and NO STROKE — iOS parts a card from its
+/// page by background contrast, not by an outline. Semantic colours, so dark
+/// mode is free. tools/check-table-card.sh holds the layer as well as the
+/// look.
+private struct KayaTableCardFace: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+            content
+        #else
+            content
+                .padding(.horizontal, kayaTableCardInsetX)
+                .padding(.vertical, kayaTableCardInsetY)
+                .background(
+                    RoundedRectangle(cornerRadius: kayaTableCardRadius, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                )
+        #endif
+    }
+}
+
+/// THE PAGE GROUND the card sits on, scoped to the TABLE'S OWN REGION and
+/// never the window's: painting the window grouped would move every
+/// non-table scene's pixels. It is not decoration —
+/// secondarySystemGroupedBackground IS white in light mode, so without the
+/// ground behind it a strokeless card would have no edge at all.
+///
+/// OUTSIDE THE SCROLL CLIP, unlike the face: the band frames the table's
+/// extent and may not scroll away, and it is the half that keeps the card
+/// from ever touching the region's edge. Together with the face's interior
+/// it is what the edge instrument subtracts (kayaTableCardPad).
+private struct KayaTableCardGround: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+            content
+        #else
+            content
+                .padding(kayaTableCardBand)
+                .background(Color(uiColor: .systemGroupedBackground))
+        #endif
+    }
+}
+
 /// The synthesized tier (docs/tables-plan.md): kaya's own header over
 /// KayaTableLayout's floored-and-distributed columns, for hosts below
 /// the native Table's dynamic-column floor AND for every COMPACT iOS
@@ -9638,11 +9759,19 @@ private struct KayaSynthesizedTable: View {
                                 .background(
                                     KayaTableContentReporter(
                                         node: node, window: window, generation: generation))
+                                // THE CARD IS CONTENT, inside the clip: it
+                                // ends with the last row and scrolls with
+                                // them. Under the content reporter, whose
+                                // box must stay the LAYOUT's own — the band
+                                // arithmetic reads its top against
+                                // placement.bandTop.
+                                .modifier(KayaTableCardFace())
                         }
                         .coordinateSpace(name: kayaTableScrollSpace(node))
                         .background(
                             KayaTableViewportReporter(
-                                node: node, generation: generation, synthesized: true))
+                                node: node, generation: generation, synthesized: true,
+                                scrollClip: true))
                         .background(
                             GeometryReader { geo in
                                 let box = geo.frame(in: .global)
@@ -9658,12 +9787,17 @@ private struct KayaSynthesizedTable: View {
                 // several times inside one frame.
                 .onChange(of: generation) { window.placed(node) }
             } else {
+                // No clip here: the rows ARE the content, so the face hugs
+                // them exactly as it hugs a short scrolled table's.
                 rows(generation)
                     .background(
                         KayaTableViewportReporter(
                             node: node, generation: generation, synthesized: true))
+                    .modifier(KayaTableCardFace())
             }
         }
+        // A TABLE BOUNDS ITS OWN EXTENT — this tier's spelling of it.
+        .modifier(KayaTableCardGround())
         // task(id:), not onChange: this tier compiles at the macOS 13 /
         // iOS 16 floor, below the zero-parameter onChange.
         .task(id: presented) { node.tablePresented = presented }
