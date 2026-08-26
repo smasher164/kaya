@@ -987,7 +987,9 @@ own the state (see the undo note in this file).
     editable kinds (slider, entry, textarea), whose Android route is a
     different action's label.
   - **Video widget**: unexamined — DESIGN has the surface-handle
-    transport (the Canvas zero-copy arm) but no media-playback
+    transport (~~the Canvas zero-copy arm~~ the pixel-handoff arm; the
+    canvas widget stopped being that on 2026-08-26, docs/canvas-plan.md
+    §1.4) but no media-playback
     story. The wrap-native bet suggests a Video widget over each
     platform's native player (AVPlayerView / MediaPlayerElement /
     Media3 / GStreamer) before any frame-pushing pipeline.
@@ -1320,10 +1322,23 @@ own the state (see the undo note in this file).
 - Nesting depth >2 validation; typed keys in collection schemas.
 - Occurrence growth: subscription/filtering (every click emits today),
   suspension lifecycle (Android).
-- Vello scene-encoding subset (open question #3) — arrives with Canvas,
-  post-v1, on the surface-handle transport (pixel surfaces as
-  IOSurface/DXGI/dmabuf handles; the blob channel is the byte-copy arm,
-  Canvas is the zero-copy arm).
+- Vello scene-encoding subset (open question #3) — ~~arrives with
+  Canvas, post-v1,~~ RE-FILED 2026-08-26 against the PIXEL-HANDOFF
+  feature it was always about (docs/canvas-plan.md §1.4, §12): an app
+  that renders its own frames on its own schedule and hands kaya
+  finished pixels. It never governed the canvas WIDGET, and it does not
+  now — the canvas ratification put kaya's own op vocabulary on the
+  wire and kaya's own CPU rasterizer behind it, so nothing about a
+  rasterizer's format crosses a binding. The encoding also turned out
+  not to be available to adopt: Vello calls itself alpha, its only
+  statement about freezing the format is a 2023 roadmap saying it is
+  too early, `Encoding` is twelve parallel `Vec`s with no `repr(C)` and
+  no serde, it breaks at minor versions, and the one serious FFI
+  binding wrapped scene-BUILDING calls instead and was archived waiting
+  for a final API. Still open, and still on the surface-handle
+  transport (pixel surfaces as IOSurface/DXGI/dmabuf handles; the blob
+  channel is the byte-copy arm, the pixel-handoff feature is the
+  zero-copy arm).
 - Blob follow-ups: dedup on repeated registration (needs an artifact);
   kaya_blob_from_file/mmap escalation (needs an artifact showing the
   register copy matters — decode dominates by an order of magnitude).
@@ -2235,15 +2250,44 @@ count, so the saving is measured rather than assumed.
 - Canvas widget (Akhil, 2026-07-22; post-style-guide, before webview):
   a drawing surface. The viable shape is a DISPLAY LIST — the guest
   transmits drawing commands (paths, fills, strokes, transforms, text
-  runs) as data; core retains it as a prop; backends replay it into
+  runs) as data; core retains it as a prop; ~~backends replay it into
   the native surface (SwiftUI Canvas, Compose DrawScope, GTK4
   DrawingArea/cairo; WinUI needs Win2D CanvasControl — a new NuGet
-  dependency and packaging payload). Callback-per-frame immediate
+  dependency and packaging payload)~~. Callback-per-frame immediate
   mode is REJECTED (8-language FFI churn, divergent frame timing).
   The slippery slope is the op vocabulary (gradients, blend modes,
   images, text shaping) — start with a deliberately minimal op set.
   Pointer-event occurrences on the canvas are a further deferral
   inside this one.
+  KEY: canvas, drawing, display list, viewbox, paint role, raster,
+  tiny-skia, Win2D, set_drawing
+  ARCHITECTURE RATIFIED 2026-08-26 (Akhil, after two research rounds
+  — docs/canvas-plan.md, which is no longer a draft): THE CORE
+  RASTERIZES ITS OWN COMMAND LIST INTO A PIXEL BUFFER AND BACKENDS
+  ONLY BLIT IT, through the image machinery they already have. That
+  is what strikes the replay clause above: lowering one op list into
+  four native drawing APIs is dead (Qt migrated away from it and
+  states the payoff as platform-independent pixel exactness; .NET
+  MAUI shipped it and its issue record is the cost). The rasterizer
+  is a pinned implementation detail — tiny-skia today, vello_cpu
+  revisitable when it stabilizes, a one-crate swap with no binding
+  churn; GPU rendering for this buffer is refused on principle
+  (driver-dependent AA breaks byte-identity and the linux lane has no
+  GPU). TEXT IS IN v1, since a chart needs tick labels from the first
+  chart, with one shaping engine in the core (harfrust shapes,
+  skrifa/read-fonts outline, tiny-skia fills them as paths — the
+  crate landscape verified 2026-08-26 against the archived-crate wave,
+  since resvg's own rustybuzz/ttf-parser are abandoned,
+  RUSTSEC-2026-0206); text is the
+  feature that REQUIRES the buffer, because fonts diverge per
+  platform both by name resolution and by text engine. FONTS ARE
+  ASSETS through the one resolver, with the reserved name
+  `kaya/default-font` answered from bytes embedded in libkaya (the
+  vendored Sora) and the `kaya/` prefix refused in app packages. The
+  ops travel as ordinary tagged values on set_column_headers' shape,
+  and Win2D is not needed at all under the buffer. NOTHING IS BUILT:
+  no protocol byte has moved and the headline stays open until the
+  five-lane matrix says otherwise.
 - Webview widget (Akhil, 2026-07-22; deferred furthest — the
   framework inside it is the entire web platform): minimal uniform
   surface is load-URL/load-HTML plus a navigation-requested veto

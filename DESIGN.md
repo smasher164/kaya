@@ -2995,7 +2995,10 @@ content during a violent resize, the same as browsers. Decision: v1 ships
 pixel surfaces only, passed as platform surface handles (IOSurface, DXGI
 shared handles, dmabuf), so shipping pixels means passing a handle rather
 than copying. Display lists are v2 and adopt Vello's scene encoding rather
-than inventing a format.
+than inventing a format. THIS PASSAGE IS THE COMPOSITOR CASE ONLY — the
+Canvas WIDGET is a different feature and was ratified 2026-08-26 on a
+core-owned raster buffer with kaya's own op vocabulary
+(docs/canvas-plan.md §0, §1.4).
 
 **IME composition.** Input methods hold a mid-keystroke conversation with
 the focused field: they set and update preedit text, read surrounding text,
@@ -3269,8 +3272,9 @@ compact width, rather than a rule to generalize). Cost is a couple of
 props, not a milestone.
 
 The first-admissions queue, post-v1 and in rough order: Grid (forms will
-demand cross-row alignment), TextArea, Canvas (with the surface-handle
-transport), Tabs, RadioGroup, ProgressBar, ContextMenu, file dialogs,
+demand cross-row alignment), TextArea, Canvas (~~with the surface-handle
+transport~~ — ratified 2026-08-26 on a core-owned raster buffer instead,
+docs/canvas-plan.md), Tabs, RadioGroup, ProgressBar, ContextMenu, file dialogs,
 Separator, Splitter, Table, Tree, and date/time pickers. Tooltips return as
 a plain property. (Half this queue was pulled forward and landed in v1
 during the 2026-07-22 widget run: Grid, TextArea, Tabs — as sections,
@@ -3666,8 +3670,13 @@ remains is implementation-scale:
    table). The generation alternative lost: the Arc already tracks the
    only fact a generation scheme would approximate, and a stuck
    consumer pins one blob, never an epoch.
-3. The Vello scene-encoding subset for v2 display lists (arrives with
-   Canvas, after v1).
+3. The Vello scene-encoding subset for v2 display lists. Still open,
+   ~~arrives with Canvas, after v1~~ — RE-FILED 2026-08-26 against the
+   PIXEL-HANDOFF arm of "Custom drawing" below, which is the feature it
+   was written about. The Canvas WIDGET is ratified without it: the core
+   rasterizes kaya's own op vocabulary into a buffer and backends blit
+   (docs/canvas-plan.md, RATIFIED 2026-08-26), so no rasterizer's format
+   reaches a binding.
 4. The window vocabulary: resolved — see "Presentation contexts"
    (ratified 2026-07-21). Windows, modal presentations, and navigation
    are three context types with three unmixed lifecycle grammars;
