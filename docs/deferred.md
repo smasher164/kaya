@@ -5954,22 +5954,86 @@ three fronts at once (per docs/clipboard-plan.md the iOS prompt dance
 is semantic), or from a Windows VM with more cores.
 
 
-## GAP — the leading-edge UNDERFILL clause is GTK-only (found 2026-08-24, by the review of 01dd633)
-KEY: ContentLeftUnderfill, ContentUnderfill, table_horizontal_issue, kayaTableHorizontalIssue, expect_column_edges, leading edge
+## GAP — ContentUnderfill wants a cell box that IS the column box, and two tiers have ink instead (leading-edge half done 2026-08-25; found 2026-08-24, by the review of 01dd633)
+KEY: ContentLeftUnderfill, ContentUnderfill, table_horizontal_issue, kayaTableHorizontalIssue, kayaTableLeadingUnderfill, kayaCurrentTableSynthesized, expect_column_edges, leading edge, cell box, natural size
 
-gtk.rs convicts ContentLeftUnderfill (min_start > 2.0, cells indented
-inside their own viewport); winui and Compose convict only the OVERFLOW
-direction, and SwiftUI convicts neither edge. A table whose cells start
-40px inside their viewport is RED on Linux and GREEN on Windows,
-Android and macOS off the same byte-shared expect_column_edges line.
-GTK's ContentUnderfill (a line ending short of the viewport) is
-GTK-only for a different reason: winui's column_edges collects one
-global max right edge, not a per-line end, so the instrument is absent
-rather than the clause. Closing this changes verdicts on four backends,
-so it is a do/can't/defer sweep per language and backend, not a
-diagnostics fix.
+THE LEADING EDGE IS DONE, 2026-08-25, on every backend that can hold
+it. gtk.rs convicted ContentLeftUnderfill (min_start > 2.0, cells
+indented inside their own viewport) and nobody else did, so a table
+whose cells start 40px inside their viewport was RED on Linux and GREEN
+on Windows, Android and macOS off the same byte-shared
+expect_column_edges. Now: winui and Compose carry the clause, and
+SwiftUI carries it on the synthesized tier as
+`kayaTableLeadingUnderfill`. WinUI also got the PER-LINE END the old
+entry named — its `column_edges` collected one global max right edge —
+so `ContentUnderfill` is live there too, and `declare_table`'s own
+comment about a reserved scrollbar gutter leaving the rows narrower
+than the pinned header, which was FALSE when written, is true.
 
-NOTE (the diagnostics half closed 2026-08-24): winui and Compose now
+AND THE PER-LINE END WAS WRONG THE FIRST TIME, on the ink instead of
+the track, which the windows lane caught the same day: every
+table-bearing leg failed with "draws 289dip of a 508dip viewport" (also
+281/293, and 533-of-639 on the portfolio), the number tracking each
+row's own text. The premise was that `flush_tracks`' Stretch stamp
+reaches table cells; IT DOES NOT — that stamp is for FLEX children,
+while `table_stamp` writes explicit pixel tracks onto the header and
+every row and the cells sit inside them at their own content width.
+The same read PROVED the tables were correct while convicting them:
+TrackUnderfill and ColumnsOverflow were both silent on those legs, so
+the resolved tracks did span the viewport. `column_edges` now reads
+each line's OWN resolved ColumnDefinitions (`TableCellBox`,
+`table_line_end`) and the three edge numbers no longer share a basis —
+`min_start` and `max_end` stay on the INK, which is what can see
+content starting inside or spilling past its track, and `min_end` is
+the TRACK, which is the only thing a line's end can mean where cells do
+not fill. gtk.rs needs no such split because its cells DO fill.
+Two things moved with it. WinUI now classifies in the grid's CONTENT
+box (both pads off the frame AND off the ink): TransformToVisual's
+origin is the PADDING box where GTK4 gives a widget's own space the
+content box, so a table with a declared inset would have convicted
+itself of starting inside its own viewport. And all four backends share
+ONE precedence — track, then the LEADING edge, then the trailing one —
+which moved gtk.rs's two pairs: a table displaced at its start also
+ends in the wrong place, so conviction on the end named the symptom.
+
+WHAT REMAINS: `ContentUnderfill` — "a line ends short of the viewport" —
+is only measurable where a cell's recorded box IS its column's box. GTK
+has that (`build_table`/`reattach_table` give every cell hexpand +
+halign Fill) and WinUI has it (`flush_tracks` stamps
+HorizontalAlignment::Stretch, and the header cell XAML is Stretch).
+THE TWO SYNTHESIZED TIERS DO NOT, and it is the INSTRUMENT that is
+missing rather than the clause: Compose measures every cell with a bare
+`Constraints()` and records `left + size.width`, and KayaTableLayout
+places every cell with `proposal: .unspecified`. Both record INK.
+MEASURED 2026-08-25 on a real rendered synthesized table (the mac's
+width class perturbed in a copy, 1 substitution): a CORRECT table's
+lines end 161–177pt short of the viewport, and the amount varies per
+line, because it is the last cell's text. The clause would convict
+every android and every compact-iOS table leg.
+
+AND ONE QUESTION FOR THE MAINTAINER, on the mac NATIVE tier, where
+BOTH clauses stay out. Measured the same day, real NSTableView, 420pt
+window: every line starts at 16.0 and ends at 404.0. That 16pt is the
+`.inset` style's row inset (KayaSwiftUI.swift sets `.inset`
+deliberately), symmetric, and AppKit publishes `style`/`effectiveStyle`
+but NO accessor for the amount (web-checked). So the only reference
+kaya has for where the cells SHOULD start is the cells' own leading
+edge — which `sizeColumns` already reads and clamps at 32pt to size the
+columns — and a clause built on it is either VACUOUS (raw inset:
+min_start − inset == 0 by construction) or prints a CLAMP RESIDUE (a
+40pt indent prints "8pt"). Invariant 3 forbids both, so
+`kayaTableLeadingUnderfill` refuses the native tier in one line.
+THE FIX THAT WOULD MAKE IT REAL is `tableView.style = .fullWidth`,
+which removes the platform inset so kaya owns the leading edge the way
+it does on the other three backends — a VISUAL change to every macOS
+table, and therefore the maintainer's call, not an agent's. The same
+choice decides ContentUnderfill there: with no inset, a line's end is
+the last column's trailing edge against the clip, and `frameOfCell` is
+already the column rect. Until then the two SwiftUI tiers answer
+different halves of one byte-shared step, which is the residue of this
+entry and is stated rather than hidden.
+
+NOTE (the diagnostics half closed 2026-08-24): winui and Compose
 discriminate their horizontal-containment causes the way gtk.rs does —
 a pure classifier, one sentence per cause, each naming the number that
 convicts it, with a truth table pinned in winui::tests (the windows
@@ -5979,9 +6043,20 @@ android table leg runs it). KayaNode.tableContentW, written and never
 read, IS that separation on Compose: tableDrawnW is coerced into the
 incoming constraints and cannot exceed the track, so a resolved-column
 overflow was invisible in every field the verb read. No scene yet
-builds an overflowing table, so no lane has printed one of these
-sentences live; a scene that narrows a table below its content would
-turn the arithmetic-level watched reds into live ones on two lanes.
+builds an over- or under-filled table, so no lane has printed one of
+these sentences live; a scene that narrows a table below its content
+would turn the arithmetic-level watched reds into live ones. The
+2026-08-25 half was watched the same way — the classifiers lifted out
+of the real files and run (both sit behind `cfg(target_os)`, so
+`cargo test` on a mac compiles neither), every new branch made to fail
+with its substitution count printed, and the SwiftUI branch made to
+PRINT through a real NSWindow with KayaTableLayout's column origin
+displaced 40pt: "cells start at 40pt inside a 420pt viewport".
+That run also broke a pinned Compose claim, which was the point: the
+trailing-edge sentence's case carried a leading edge of 5dp, inert
+under the old four-cause classifier and a CONVICTABLE state under the
+new one, so it had stopped isolating the cause it pins. The input moved
+inside the slack; gtk.rs would have convicted it all along.
 
 ## ~~HANG — one wedged emulator at t0 of a staged install cost the matrix its verdict~~
 KEY: stage_suite_apk, stage_join, STAGE_DEADLINE, staged install, pm list packages postcondition, matrix wall, gate sweep
@@ -6001,8 +6076,58 @@ pre-fix join still running after 12s, the pre-fix subshell staging a
 lost install as OK.
 
 
-## GAP — only macOS delineates a table's end; GTK and WinUI run CASH straight into the account total (maintainer, 2026-08-24)
+## ~~GAP — a GTK table's viewport has a flat floor the content does not fill (found 2026-08-25, by the card capture round)~~ — FIXED 2026-08-25
+KEY: gtk table viewport floor, empty card space, minimum content height, table hugs content
+
+The card treatment made it visible: in the portfolio capture,
+Retirement (2 rows) and Savings (1 row) both draw a ~90px table
+viewport, leaving 17px and 41px of empty card under the last row,
+while Brokerage (3 rows) hugs its content. The card cannot have
+caused it — its four CSS properties are paint-only — and the
+2026-08-24 pre-card reference capture shows the same heights, so the
+floor predates the virtualization milestone. The geometry rule says
+content is the floor; a fixed minimum viewport is not that rule.
+
+THE SUSPECT WAS WRONG, and measuring cost less than believing it:
+gtk.rs sets no minimum content height anywhere — the floor is THE
+VERTICAL SCROLLBAR'S OWN MINIMUM. `Gtk.Scrollbar(VERTICAL)` measures
+(58, 58) on the lane's GTK, and GtkScrolledWindow folds that into its
+own MINIMUM wherever the policy may show a bar; a minimum outranks the
+natural height `propagate_natural_height` asks for, so the viewport
+never hugs below it. Measured in the lane's own container with
+build_table's exact configuration, and it reproduces the capture to the
+pixel: 1 row 58px against 16px of content (42 empty, the capture's 41),
+2 rows 58 against 40 (18 empty, the capture's 17), 3 rows 64 against 64
+(hugs, as Brokerage did). AUTOMATIC and ALWAYS both carry the floor;
+NEVER and EXTERNAL do not; overlay scrolling does not exempt it; and
+`max-content-height` does NOT pull the minimum down — measured, the
+candidate fix that failed first.
+
+FIXED: `set_table_scrolling` writes the vertical policy from two
+numbers this backend already owns — AUTOMATIC when the container GROWS
+(its parent's track decides its height, so it must be able to scroll
+inside it) or when the CORE's extent exceeds TABLE_MAX_CONTENT, NEVER
+otherwise. A table that cannot need a scrollbar stops claiming one, and
+the scroller becomes transparent: minimum and natural both become the
+content's. The windowed tier is untouched — ledger.steps' 15,000 rows
+and varied's grown tables keep AUTOMATIC and their bounded viewports —
+and `check-gtk.sh`'s census holds both the policy write and the grow
+read, each watched failing. The 58px measurement is in docs/traps.md
+("A GTK table's viewport floor is the scrollbar's own minimum"), which
+is where the next session will look.
+
+## ~~GAP — only macOS delineates a table's end; GTK and WinUI run CASH straight into the account total (maintainer, 2026-08-24)~~
 KEY: table end boundary, closing rule, table card, boxed-list, apron, Account total, synthesized header
+
+CLOSED 2026-08-25: the maintainer ruled CARDS (flat: fill, 1px
+stroke, rounded corners, no shadow, no elevation) after a survey of
+shipped GNOME and Windows apps, and inspected and approved the
+round-two captures — interior inset 12px per platform metrics, small
+GTK tables hugging their rows after the 58px scrollbar-minimum fix
+(its own struck entry, one above). Implemented on GTK, WinUI and
+Compose, held by tools/check-table-card.sh; macOS keeps the native
+interior. The iOS synthesized tier's spelling (inset-grouped vs the
+same flat card) is the one open ruling, recorded in the roadmap.
 
 Seen on the first cross-platform portfolio capture set: on GTK and
 WinUI the last row's text and the "Account total" label below it read
@@ -6023,6 +6148,85 @@ mobile yet; table.steps runs there. Pixels-only, so the camera and the
 portfolio captures hold it, and the change lands with fresh captures
 inspected. DEFERRED by the maintainer until after the six-binding
 breadth fan-out.
+
+RULED 2026-08-25: the CARD, on all three, and FLAT — fill, a crisp 1px
+stroke, rounded corners, zero blur and zero elevation. The mac tier is
+not touched. The card is the CONTAINER only: row heights, cell metrics
+and header metrics do not move, because the dense case is the one this
+has to survive.
+
+IMPLEMENTED, three spellings of one rule, and in all three the card is
+PAINT rather than BOX — nothing it draws is in the layout, which is what
+keeps every cell edge where expect_column_edges already found it:
+- GTK: `.kaya-table-card` on the For container — `@card_bg_color`, a
+  12px radius and a 1px `@borders` outline at `outline-offset: -1px`.
+  `outline` and not `border` for two MEASURED reasons, both in
+  docs/traps.md ("A GTK table card is paint, never box"): a border here
+  costs the content box 2px against a track measured from the parent,
+  and a container's `inset` prop is already a border on that same
+  widget, where the two do not add — one wins silently.
+- WinUI: TABLE_CARD_XAML, a Grid carrying
+  CardBackgroundFillColorDefaultBrush, a 1 DIP CardStrokeColorDefaultBrush
+  and OverlayCornerRadius (the 8 of Fluent's family, the one the design
+  language gives CARDS), inserted at child 0 and spanning the header, the
+  rule and the scroll host — behind them, not around them, since a
+  BorderThickness on the container itself would take 2 DIP out of the box
+  `table_stamp` and `column_edges` divide.
+- Compose: `Modifier.background(surfaceContainer, 12.dp)` +
+  `Modifier.border(1.dp, outlineVariant, 12.dp)` on KayaTableSurface,
+  outside the verticalScroll so the card frames the viewport. Both are
+  draw modifiers; neither measures.
+
+NO SCENE CAN FAIL THIS, so tools/check-table-card.sh is the wall: the
+card present in all three, flat, and coloured from platform tokens
+rather than literals, with 14 watched negatives. No .steps file and no
+expected string moved.
+
+THE INTERIOR CAME BACK FROM THE FIRST SIGN-OFF (maintainer, 2026-08-25):
+"the linux and windows tables don't look good. the cards have no
+inset/margin/padding, so the text is flush against the edges. Look at how
+macos has that in its natural table." macOS's number is 16pt — the
+`.inset` NSTableView's row indent, measured on this host by the
+leading-edge underfill work at cells starting 16.0 into a 420pt
+viewport. So the card has an interior now, each platform's own:
+- GTK 12 horizontal / 8 vertical. 12 is ADWAITA'S, read off a real
+  AdwActionRow in a `.boxed-list` (content starts at x=12); the vertical
+  is kaya's 8, because Adwaita gets a row's vertical room from
+  `min-height: 50px` and row density may not move.
+- WinUI 12 all round (Fluent's card content inset; `pad` is one number
+  for four sides and splitting it would mean touching every `2.0 * pad`
+  in the table's arithmetic).
+- Compose 16 horizontal / 8 vertical (Material's own content inset).
+
+AND IT GOES THROUGH THE PATH THE INSTRUMENTS SUBTRACT, which is the only
+reason a padded card does not convict itself:
+- GTK: `padding` on the container. GTK4 puts the widget's coordinate
+  origin at its CONTENT box, so the cells stay at 0 and `column.width()`
+  shrinks with them (measured). The one outer-box number left is the
+  assigned track, and `table_horizontal_track` takes the card's own span
+  off it — measured off the widget by `css_inset_span`, never re-derived.
+- WinUI: the CONTAINER's Padding, via `container_padding`, because that
+  is the number `table_stamp`'s `inner` and `column_edges`' content-box
+  frame already subtract. The card is a CHILD of that container, so it
+  carries a NEGATIVE margin of the same size and sits back out at the
+  box the guest's own inset leaves it.
+- Compose: `Modifier.padding` ABOVE the `onGloballyPositioned` that
+  reports the viewport, so the viewport IS the padded content box.
+Pinned in all three truth tables — `gtk_table_padded_card_convicts_nothing`,
+`a_padded_card_convicts_nothing`, and two Compose self-test claims — each
+watched failing against a basis that forgets to subtract.
+
+ROW HAIRLINES SPAN THE PADDED CONTENT WIDTH, not the full card, on all
+three. Adwaita's boxed-list bleeds its separators to the card edge, but
+the divider is a CHILD of the padded container on every one of these
+backends: bleeding it would mean moving the padding somewhere that shifts
+every cell off zero, which is the one thing this may not do. Stated so
+the next reader knows it was chosen, not inherited.
+
+STILL OPEN, and the only thing left: the captures. The entry says the
+change lands with fresh captures INSPECTED, and the maintainer signs
+those off. The three radii are deliberately per-platform (12 / 8 / 12),
+which is the "per platform, not per app" half of the rule.
 
 
 ## ~~GAP — Haskell cannot declare a nested RECORD collection (found 2026-08-24, by the breadth fan-out)~~ — CLOSED 2026-08-24
@@ -6055,11 +6259,67 @@ set — it compiles, ships, and dies at the use site. That is exactly how
 check-sugar-surface's haskell blocks grew five watched reds the compiler
 cannot give (a record collection born with the SCALAR schema and a key
 silently dropped on the way to the copy both typecheck) plus two more
-fixture typechecks; tpl-surfaces' haskell table reader gained the two
-points `nested record collection` and `record instance addressing`.
+fixture typechecks; tpl-surfaces gained the two points `nested record
+collection` and `record instance addressing` — read for Haskell alone at
+first, for ALL EIGHT since 2026-08-25 (`RECORD_ZONES`, the entry below),
+which is where `record_haskell` reads them now.
 
-## GAP — five more bindings cannot declare a nested RECORD collection either (found 2026-08-24, closing the Haskell one)
+## ~~GAP — five more bindings cannot declare a nested RECORD collection either (found 2026-08-24, closing the Haskell one)~~ — CLOSED 2026-08-25
 KEY: CollectionOf Tx-only, collection_of, collection(of:), RecordCollection At, typed instance addressing, nested record rows
+
+**Done, both halves, all eight, no carve-out.** A nested table's rows
+carry named fields in every binding now. Nothing moved in a generator —
+bindings/go/records.go, bindings/csharp/KayaRecords.cs,
+bindings/java/dev/kaya/KayaRecords.java and bindings/swift/KayaRecords.swift
+are HAND-WRITTEN: tools/gen-guests.sh's GENERATED list covers only the
+per-guest `<Rec>Kaya` files under guests/, never the binding libraries.
+- Go: free `TplCollectionOf[K, T](t *Tpl)` beside `CollectionOf`, over
+  one shared `newRecordCollection`; `RecordCollection.At` SHADOWS the
+  promoted untyped one and keeps K and T.
+- C#: `CollectionOf<T>(this Tpl)` beside the `Tx` extension (Tpl.Tx is
+  internal for it), plus `RecordCollection<T>.At`.
+- Java: `collectionOf(Tpl, Class)` AND `collectionOf(RowSurface, Class)`
+  — the row surface is the zone handle a Java scene actually holds —
+  plus `KayaRecords.Collection.at`. `KayaApp.Tpl.tx()` is package-private
+  for the first.
+- Swift: `KayaTpl.collection(of:)`, declared in KayaApp.swift because
+  `KayaTpl.tx` is `private` and Swift's private is file-scoped; plus
+  `KayaRecordCollection.at`.
+- OCaml: `record_at` (no overloading, so the typed narrowing is named),
+  and `module Tpl`'s `collection_of` re-export beside `collection`, so
+  the zone's own surface carries it rather than only the ambient
+  top-level.
+- Rust, Python, Haskell were already both-halves; verified in source, not
+  assumed.
+
+THE CENSUS READS ALL EIGHT NOW. The two points the Haskell close added
+were `TABLE_POINTS["haskell"]` alone; they are `RECORD_POINTS` in
+tools/tpl-surfaces.py with a reader per binding (`RECORD_ZONES`), and
+table_haskell's two blocks moved verbatim into `record_haskell`. The
+failure sentence is unchanged, so check-sugar-surface's (c2c) Haskell
+expectations still hold. Its new block (c2e) watches FOURTEEN census reds
+— both points in the other seven — each a shape that COMPILES and lies: a
+template-zone constructor opening its own transaction, a narrowing that
+keeps the type and addresses the PARENT, the promoted untyped `At`, a
+Python collection born without the open-For edge.
+
+AND EVERY BINDING HAS A RUNNING OR COMPILING EXERCISER, each watched
+failing: Rust's `a_nested_record_collection_carries_its_schema_and_
+addresses_the_copy` (cargo test), Python's five checks in
+kaya_app_checks.py, Go's `TestANestedRecordCollectionIsDeclaredInThe
+TemplateAndAddressedTyped` (check-abort's `go test`), C#'s
+`NestedRecordTable` in guests/csharp/AbortCheck.cs, OCaml's block in
+bindings/ocaml/checks/abort_check.ml, Java's `nestedRecordTable` in
+tools/java-typecheck.sh, Swift's tools/checks/swift-nested-table.swift
+(now record-typed end to end) and Haskell's NestedTable.hs.
+
+STILL ONE TIER UP, and not this entry: the KayaGen generators emit the
+record-collection FACTORY for the live zone only — `TableItemKaya.
+collection(KayaApp.Tx)`, `tableItemCollection(_ tx: KayaAppTx)`,
+`<Rec>Kaya.Collection(Tx)`. A guest reaches the template zone through
+the binding-level constructor above; the generated sugar has no zone
+twin. That is the same shape as the C# entry below's open half and
+belongs with it.
 
 The Haskell entry above was written as a Haskell gap. It is not: the
 sweep its fix required found the SAME two halves in five more bindings,
@@ -6153,8 +6413,8 @@ red once by construction. Haskell's proof is the deleted field failing
 the build — its handles export abstractly, so no runtime probe can see
 an id. scene.rs's collision walls stay as the backstop that should
 never fire. DESIGN.md's Binding conventions now state the rule. The C
-floor's hand-authored guests still overlap the spaces (chore entry
-below).
+floor's hand-authored guests were renumbered onto it 2026-08-25 (chore
+entry below).
 
 The Haskell breadth probe manufactured a widget-id/template-node-id
 collision and showed set_column_headers resolving the wrong space.
@@ -6170,8 +6430,29 @@ every binding's allocator and is the maintainer's call. Until then the
 walls hold.
 
 
-## CHORE — the C floor's hand-authored ids still overlap the two spaces (2026-08-24)
+## ~~CHORE — the C floor's hand-authored ids still overlap the two spaces (2026-08-24)~~
 KEY: C guests renumber, id space overlap, explicit floor, template-declaring guests
+
+SWEPT 2026-08-25. All eight template-declaring C guests — a11yrows,
+entry, feed, menus, milestone2, reorder, todos, undo, found by grepping
+guests/c for kaya_tx_template_end rather than from a list — restarted
+their N_ run at 1 inside the W_ run; every N_ id now continues the widget
+counter, so no number on the floor names both a widget and a node.
+Signal, collection and menu-item numbers are untouched, being spaces the
+rule exempts. The prose went with the numbers, since the floor is the
+documentation: undo.c's comment argued FOR the collision ("a node id and
+a widget id may collide as NUMBERS and nothing is wrong"), and all eight
+now name the shared space and point at DESIGN.md's Binding conventions.
+
+NO OUTPUT BYTE MOVED, proven rather than asserted. bindings/c/kaya_wire.h
+is header-only static inline packers, so each guest was linked against a
+stub libkaya and the transaction build_scene submits was captured before
+and after the renumber: identical length in all eight, and every differing
+byte an 8-byte id field carrying exactly one mapped (old -> new) pair —
+no string, kind or record head moved. The comparator was watched red on a
+doctored byte first, and refuses a guest showing zero differences.
+check-steps.sh passes unchanged; no .steps file or expected string moved.
+All 17 C guests build (guests/c/Makefile, the whole SCENES list).
 
 The one-id-space rule (DESIGN.md Binding conventions) is enforced in
 every binding's allocator; the eight template-declaring C guests
@@ -6305,8 +6586,21 @@ crosses the 32,767px protocol ceiling) — both shape the virtualization
 design.
 
 
-## BUG — the Python binding's insert is quadratic (found 2026-08-24, by the WinUI bench)
+## ~~BUG — the Python binding's insert is quadratic (found 2026-08-24, by the WinUI bench)~~
 KEY: python insert quadratic, ambient binding insert scan, large data guests
+
+FIXED 2026-08-25 in 7d13429 (the mac depth slice; this strike is
+late — the fix rode that commit and nobody struck the headline, so a
+2026-08-25 queue survey repeated the bug to the maintainer as open).
+The cost was not a keyed scan like Swift's: the rollback journal took
+a whole-model dict snapshot PER MUTATION, so N inserts cost N²/2
+copies. `_journal_instances` (bindings/python/kaya/__init__.py) takes
+it once per transaction, inside the membership test. The guard is a
+measurement, since Python has no compiler to refuse the eager copy:
+kaya_app_checks.py's Bulk clause compares per-row cost at 2,000 vs
+32,000 inserts and fails on growth (old body spliced back: 9.7-12.6x;
+fixed: 0.97-1.01x; bound 3.0 with headroom both sides, numbers printed
+every run).
 
 Measured while benching the reindex fix: 2,500 inserts cost 21ms,
 50,000 cost 5,162ms — the same class as the Swift entry fixed the same
@@ -6384,19 +6678,45 @@ single-transaction fill everywhere; until then, guests chunk (the
 wired scenes do) and no wired leg inserts at the dying scale.
 
 
-## GAP — an unrealized row has no nested-collection instance (found 2026-08-25, by the seed slice)
+## ~~GAP — an unrealized row has no nested-collection instance (found 2026-08-25, by the seed slice)~~ — CLOSED 2026-08-25
 KEY: nested collection instance, unrealized row write, template-owned collection state, bridge exemption
 
-A nested For's collection instance is born WITH its stamped copy, so a
-row outside the band has none: varied.py's write to row 128 died with
-"no instance of CollectionId(2) at path [r128]" the moment the seed
-made unrealized rows reachable — and the same hole was already open
-under any report (a row leaving the band returns with its inner rows
-gone; varied.steps asserts identity and totals, never inner content,
-which is why nobody had met it). The seed slice's ruling, on the
-record in docs/traps.md with a test: a table whose row template OWNS
-collection state stays on the bridge (realize-everything) until the
-design answers where windowed rows' nested data lives — either
-instances survive teardown as data (the §1 rule extended one level
-down) or the template constraint is walled at declaration. The
-maintainer picks; the trap's test keeps the current line honest.
+**Done, by the maintainer's ruling: DATA OUTLIVES WIDGETS, one level
+down.** A nested For's collection instance is MODEL DATA keyed by
+(collection, the outer row's copy path). It is born with the row's
+RECORD (`Scene::birth_nested`, off `insert_entry`), it survives the
+copy's widget teardown untouched, and a row entering the band rebuilds
+its inner widgets from it through the ordinary
+`register_for_site`/`reconcile_window` path — no parallel stamper, and
+the band machinery itself is unchanged. Death moved with birth: the row's
+own removal reaps it (`reap_nested`, recursive, off `remove_entry` and
+off `update_entry`'s variant change), which is also what keeps a same-key
+re-insert from inheriting a dead row's lines. THE BRIDGE EXEMPTION IS
+GONE — `body_owns_a_collection` and its early return in `seed_window` are
+deleted, so a template that owns collection state windows like everything
+else. The per-copy HEADER OVERRIDE went the same way in the same edit
+(`bar_overrides` is keyed by copy path and read back on every re-stamp;
+teardown used to drop it, which under windowing would have reset a nested
+table's sort indicator on every scroll).
+
+What it was: a nested For's instance used to be born WITH its stamped
+copy, so a row outside the band had none — varied.py's write to row 128
+died with "no instance of CollectionId(2) at path [r128]" the moment the
+seed made unrealized rows reachable, and the same hole was already open
+under any report (a row leaving the band returned with its inner rows
+gone; varied.steps asserted identity and totals, never inner content,
+which is why nobody had met it). The measurement is kept in
+docs/traps.md, under the entry whose ruling this edit rewrote.
+
+Held by three unit tests in crates/kaya/src/scene.rs
+(`an_unrealized_rows_inner_list_takes_writes_and_realizes_them`,
+`an_inner_list_survives_its_rows_teardown`,
+`a_removed_row_takes_its_inner_list_with_it`), each watched red against
+its own perturbation, and by tools/scenes/varied.steps, which now reads
+one row's inner lines after a scroll away and back and reads an
+out-of-band row's lines after scrolling to it. Addressing one copy's
+inner For needed the copy's own automation key, so varied.py spells
+`lines.rows(a11y_id=row.key)` — the row-sourced a11y_id the prop's own
+surface already blessed; the three interpreters' bare-id target arms now
+skip DESTROYED registry entries, which the keyed arm had always done and
+which a windowed copy's routine death made load-bearing.

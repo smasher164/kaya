@@ -14,6 +14,28 @@ import Foundation
 
 private let kayaPositionTitles = ["Symbol", "Shares"]
 
+/// The nested table's ROW TYPE: two named fields, which is what a table
+/// inside a row template is for (docs/deferred.md, the
+/// nested-record-collection gap).
+struct KayaPosition: KayaRecord {
+    var symbol: String
+    var shares: String
+
+    static let prototype = KayaPosition(symbol: "", shares: "")
+
+    init(symbol: String, shares: String) {
+        self.symbol = symbol
+        self.shares = shares
+    }
+
+    init(values: [KayaValue]) {
+        guard case .str(let symbol) = values[0], case .str(let shares) = values[1] else {
+            preconditionFailure("kaya: KayaPosition fields out of order")
+        }
+        self.init(symbol: symbol, shares: shares)
+    }
+}
+
 /// One table per account: the accounts For stamps a card, each card
 /// stamps its OWN positions For, and that nested For's bar is declared
 /// once for every copy (docs/tables-plan.md, dynamic tables).
@@ -26,12 +48,14 @@ func kayaNestedTableSurface(_ app: KayaApp) {
                     account.label(KayaField<String>(index: 0))
                     // Declared INSIDE the template scope — the core's
                     // own-scope wall (docs/tables-plan.md, MEASURED IN
-                    // SLICE 1).
-                    let positions = account.collection()
-                    let table = account.each(positions) { position in
+                    // SLICE 1) — AND record-typed, so the row's two cells
+                    // are the record's two fields rather than the one
+                    // string a scalar collection's element can be.
+                    let positions = account.collection(of: KayaPosition.self)
+                    let table = account.each(positions.collection) { position in
                         _ = position.row {
-                            position.label(KayaField<String>(index: 0))
-                            position.label(KayaField<String>(index: 0))
+                            positions.label(position, \.symbol)
+                            positions.label(position, \.shares)
                         }
                     }
                     // AFTER the nested For closed, in the parent's still
@@ -41,10 +65,15 @@ func kayaNestedTableSurface(_ app: KayaApp) {
                         // The copy's key path IS the message: reorder
                         // THAT copy's instance and move THAT copy's
                         // indicator — a sibling's bar does not stir.
+                        // `at` KEEPS THE RECORD TYPE, so the mutations
+                        // below are the record ones; a KayaCollection
+                        // here would take a bare KayaValue and the row's
+                        // fields would be unreachable.
                         let instance = positions.at(keys[0])
-                        for entry in tx.items(instance) {
-                            tx.moveToEnd(instance, entry.key)
+                        for entry in instance.items(tx) {
+                            instance.moveToEnd(tx, entry.key)
                         }
+                        instance.patch(tx, .str("aapl")).set(\.shares, "20")
                         tx.columns(
                             table, at: keys, kayaPositionTitles,
                             column == 0 ? .asc(column) : .desc(column))

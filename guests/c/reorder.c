@@ -13,13 +13,15 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
+ * N_ run continues the W_ one; collections count from 1 in their own
+ * (DESIGN.md, Binding conventions). */
 #define W_ROW 1
 #define W_ROTATE 2
 #define W_LIFT 3
 #define W_FOR_ITEMS 4
 #define C_ITEMS 1
-#define N_TITLE 1
+#define N_TITLE 5
 
 #define F_TITLE 0
 

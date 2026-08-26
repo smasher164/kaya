@@ -13,10 +13,13 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. CREATION ORDER IS
- * CONTRACT: the keys label must be created third and the notes label
- * fourth for tools/scenes/undo.steps to read them. Creating either
- * later resolves the index to a STAMPED row label instead of failing. */
+/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
+ * N_ run continues the W_ one; signals, collections and menu items each
+ * count from 1 in their own (DESIGN.md, Binding conventions).
+ * CREATION ORDER IS CONTRACT: the keys label must be created third and
+ * the notes label fourth for tools/scenes/undo.steps to read them.
+ * Creating either later resolves the index to a STAMPED row label
+ * instead of failing. */
 #define SIG_STATUS 1
 #define SIG_HISTORY 2
 #define SIG_KEYS 3
@@ -36,13 +39,9 @@
 
 #define C_TODOS 1
 
-/* Template nodes: their own id space, never widget ids. A node id and a
- * widget id may collide as NUMBERS and nothing is wrong: an
- * occurrence's identity is the PAIR (id, key path), empty path for a
- * live widget. */
-#define N_ROW 1
-#define N_TITLE 2
-#define N_NOTE 3
+#define N_ROW 12
+#define N_TITLE 13
+#define N_NOTE 14
 
 #define F_TITLE 0
 

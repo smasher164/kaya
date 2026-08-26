@@ -8,17 +8,20 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
+ * N_ run continues the W_ one — one run across both variant arms;
+ * signals and collections each count from 1 in their own (DESIGN.md,
+ * Binding conventions). */
 #define SIG_DONE 1
 #define W_ROW 1
 #define W_PROMOTE 2
 #define W_STATUS 3
 #define W_FOR_FEED 4
 #define C_FEED 1
-#define N_NOTE_TEXT 1
-#define N_TODO_ROW 2
-#define N_TODO_CHECK 3
-#define N_TODO_TITLE 4
+#define N_NOTE_TEXT 5
+#define N_TODO_ROW 6
+#define N_TODO_CHECK 7
+#define N_TODO_TITLE 8
 
 #define V_NOTE 0
 #define V_TODO 1

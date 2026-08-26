@@ -16,18 +16,19 @@
 #include <pthread.h>
 #include <stdio.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
+ * N_ run continues the W_ one; collections count from 1 in their own
+ * (DESIGN.md, Binding conventions). */
 #define W_ROOT 1
 #define W_FOR_NOTES 2
 #define W_FOR_HEADS 3
 #define C_NOTES 1
 #define C_HEADS 2
 
-/* Template nodes: their own id space, never widget ids. One run of the
- * space across both templates. */
-#define N_FIELD 1
-#define N_BAR 2
-#define N_TITLE 3
+/* One run of the space across both templates. */
+#define N_FIELD 4
+#define N_BAR 5
+#define N_TITLE 6
 
 /* A scalar collection has no record: its element IS the string, at
  * field 0. */

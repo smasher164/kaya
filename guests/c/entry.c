@@ -10,7 +10,9 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
+ * N_ run continues the W_ one; signals and collections each count from 1
+ * in their own (DESIGN.md, Binding conventions). */
 #define SIG_STATUS 1
 #define W_COLUMN 1
 #define W_FIELD 2
@@ -18,7 +20,7 @@
 #define W_STATUS 4
 #define W_FOR_TODOS 5
 #define C_TODOS 1
-#define N_TODO_LABEL 1
+#define N_TODO_LABEL 6
 
 static void build_scene(void) {
     uint8_t buf[1024];

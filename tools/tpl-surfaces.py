@@ -341,13 +341,10 @@ TABLE_POINTS = {
     "csharp": ("columns", "on_sort", "keyed re-declaration"),
     "swift": ("columns", "on_sort", "keyed re-declaration"),
     "ocaml": ("columns", "on_sort", "keyed re-declaration"),
-    "haskell": (
-        "columns",
-        "on_sort",
-        "keyed re-declaration",
-        "nested record collection",
-        "record instance addressing",
-    ),
+    # The two nested-RECORD points are RECORD_POINTS now, censused for
+    # all eight below rather than for Haskell alone (docs/deferred.md,
+    # closed 2026-08-25). The sentence they fail with is unchanged.
+    "haskell": ("columns", "on_sort", "keyed re-declaration"),
     "python": (
         "columns",
         "on_sort",
@@ -842,44 +839,8 @@ def table_haskell(_):
     ):
         got.add("keyed re-declaration")
 
-    # THE ROW'S OWN FIELDS, which is what a table nested in a template is
-    # FOR. Two halves, and either one missing leaves the rows scalar:
-    # the record-schema constructor must stand in the TEMPLATE zone (a
-    # nested collection may only be declared there), and narrowing the
-    # handle to one stamped copy must keep the element type, since every
-    # record mutation takes RecordCollection.
-    birth = haskell_decl(src, "newRecordCollection")
-    if (
-        birth
-        and re.search(
-            r"^\s+collectionOf\s*::\s*KayaRecord a\s*=>\s*Proxy a\s*->\s*"
-            r"m \(RecordCollection a\)",
-            declare,
-            re.M,
-        )
-        and re.search(r"^\s+collectionOf\b.*\bnewRecordCollection\b", tpl_zone, re.M)
-        and "kayaSchema p" in birth
-    ):
-        got.add("nested record collection")
-
-    handle = haskell_scope(src, r"^class CollectionHandle c where")
-    record_at = haskell_scope(
-        src, r"^instance CollectionHandle \(RecordCollection a\) where"
-    )
-    if (
-        handle
-        and record_at
-        and re.search(r"^\s+at\s*::\s*c\s*->\s*W\.Value\s*->\s*c", handle, re.M)
-        # The KEY THREADED THROUGH, not just a RecordCollection handed
-        # back: `at (RecordCollection c) _ = RecordCollection c` typechecks
-        # everywhere and addresses the parent instead of the copy.
-        and re.search(
-            r"^\s+at \(RecordCollection c\) key = RecordCollection \(at c key\)",
-            record_at,
-            re.M,
-        )
-    ):
-        got.add("record instance addressing")
+    # THE ROW'S OWN FIELDS moved to record_haskell (RECORD_ZONES), where
+    # the other seven bindings are read for the same two points.
     return got
 
 
@@ -934,8 +895,12 @@ def table_python(_):
                 r"_align_value\(self\._align\)\)",
             ),
             (
+                # THROUGH THE HANDLE SETTER, not the const emitter: the
+                # a11y id may come from the ROW (varied.py's
+                # `lines.rows(a11y_id=row.key)`), and only `_prop_source`
+                # reaches the element arm.
                 "ordinary For a11y id", "a11y_id", "_a11y_id",
-                r"wire\.tx_set_a11y_id\(self\._template\.handle\.id,\s*self\._a11y_id\)",
+                r"self\._template\.handle\.a11y_id\(self\._a11y_id\)",
             ),
         )
         for point, arg, field, emitter in row_points:
@@ -1018,6 +983,288 @@ def table_java(_):
     ):
         got.add("keyed re-declaration")
     return got
+
+
+# --- THE ROW'S OWN FIELDS: the nested RECORD collection, all eight -----
+#
+# A table nested in a row template is FOR rows that carry named fields,
+# and two halves make that spellable. Either one missing leaves the rows
+# scalar, which is what "three of eight bindings" meant
+# (docs/deferred.md, closed 2026-08-25):
+#
+#   nested record collection   — the record-schema constructor must stand
+#     in the TEMPLATE zone, the only scope a nested collection may be
+#     declared in (docs/tables-plan.md, MEASURED IN SLICE 1).
+#   record instance addressing — narrowing the handle to ONE stamped copy
+#     must keep the element type; every record mutation takes the typed
+#     collection, so a narrowing that hands back the plain handle puts
+#     the row's fields out of reach.
+#
+# READ OUT OF THE BLOCK THAT OWNS IT, never by name: six bindings spell
+# the typed narrowing exactly as the untyped one and are told apart only
+# by the receiver's type, which no line-oriented pattern sees.
+RECORD_POINTS = ("nested record collection", "record instance addressing")
+
+
+def record_rust(_):
+    src = read("crates/kaya/src/app.rs")
+    tpl = brace_block(src, r"^impl Tpl<'_, '_> \{")
+    coll = brace_block(src, r"^impl<T: KayaSum> Collection<T> \{")
+    if None in (tpl, coll):
+        return None
+
+    got = set()
+    # ONE collection type over an element type, so the zone's own
+    # constructor IS the record one — the type parameter is the schema.
+    if re.search(
+        r"^\s{4}pub fn collection<T: KayaSum>\(&mut self\) -> Collection<T>",
+        tpl,
+        re.M,
+    ):
+        got.add("nested record collection")
+
+    at = brace_block(
+        coll, r"^\s{4}pub fn at\(&self, key: impl Into<Value>\) -> Collection<T>")
+    # THE KEY THREADED THROUGH, not just a typed handle handed back: a
+    # body that returned self.clone() typechecks and addresses the parent.
+    if at and "path.push(key.into())" in at:
+        got.add("record instance addressing")
+    return got
+
+
+def record_go(_):
+    src = read("bindings/go/records.go")
+    live = go_func_body(
+        src,
+        r"^func CollectionOf\[K Key, T any\]\(tx \*Tx\) RecordCollection\[K, T\] \{",
+    )
+    if live is None:
+        return None
+
+    got = set()
+    # A FREE FUNCTION because Go methods take no type parameters; the
+    # zone handle is the parameter, and `t.tx` in the body is what proves
+    # the declaration lands in the template's open scope rather than in a
+    # transaction of its own.
+    tpl = go_func_body(
+        src,
+        r"^func TplCollectionOf\[K Key, T any\]\(t \*Tpl\) RecordCollection\[K, T\] \{",
+    )
+    if tpl and "t.tx" in tpl:
+        got.add("nested record collection")
+
+    at = go_func_body(
+        src,
+        r"^func \(c RecordCollection\[K, T\]\) At\(key any\) RecordCollection\[K, T\] \{",
+    )
+    if at and "c.Collection.At(key)" in at:
+        got.add("record instance addressing")
+    return got
+
+
+def record_csharp(_):
+    src = read("bindings/csharp/KayaRecords.cs")
+    rc = brace_block(src, r"^sealed class RecordCollection<T>")
+    statics = brace_block(src, r"^static class KayaRecords\b")
+    if None in (rc, statics):
+        return None
+
+    got = set()
+    if re.search(
+        r"^\s*public static RecordCollection<T> CollectionOf<T>\(this Tpl t\)\s*=>\s*"
+        r"Declare<T>\(t\.Tx\);",
+        statics,
+        re.M | re.S,
+    ):
+        got.add("nested record collection")
+
+    if re.search(
+        r"^\s*public RecordCollection<T> At\(object key\)\s*=>\s*"
+        r"new RecordCollection<T>\(Collection\.At\(key\), Info\);",
+        rc,
+        re.M | re.S,
+    ):
+        got.add("record instance addressing")
+    return got
+
+
+def record_java(_):
+    src = read("bindings/java/dev/kaya/KayaRecords.java")
+    coll = brace_block(src, r"^\s*public static final class Collection<K, T> \{")
+    if coll is None:
+        return None
+
+    got = set()
+    # BOTH ZONE HANDLES: a Java scene holds a `RowSurface` (what
+    # `tx.rows(c)` hands out) far more often than a bare `Tpl`, and an
+    # overload for the Tpl alone leaves the common spelling unreachable.
+    zones = set(re.findall(
+        r"^\s*public static <K, T> Collection<K, T> collectionOf\(\s*"
+        r"KayaApp\.(\w+) \w+, Class<T> \w+\)",
+        src,
+        re.M,
+    ))
+    if {"Tpl", "RowSurface"} <= zones:
+        got.add("nested record collection")
+
+    at = brace_block(coll, r"^\s*public Collection<K, T> at\(Object key\)")
+    if at and "new Collection<>(handle.at(key), info)" in at:
+        got.add("record instance addressing")
+    return got
+
+
+def record_swift(_):
+    tpl = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
+    rc = brace_block(
+        read("bindings/swift/KayaRecords.swift"),
+        r"^struct KayaRecordCollection<T: KayaRecord>",
+    )
+    if None in (tpl, rc):
+        return None
+
+    got = set()
+    # IN KayaTpl'S OWN BLOCK: `func collection()` one line up is the
+    # scalar twin, and `KayaAppTx.collection(of:)` is the live zone's —
+    # both spelled with the same word.
+    _, ctor = swift_member(
+        tpl,
+        r"^\s{4}func collection<T: KayaRecord>\(of type: T\.Type\)"
+        r" -> KayaRecordCollection<T>",
+    )
+    if ctor and "tx.collection(of: type)" in ctor:
+        got.add("nested record collection")
+
+    _, at = swift_member(
+        rc, r"^\s{4}func at\(_ key: KayaValue\) -> KayaRecordCollection<T>")
+    if at and "KayaRecordCollection(collection: collection.at(key))" in at:
+        got.add("record instance addressing")
+    return got
+
+
+def record_ocaml(_):
+    src = read("bindings/ocaml/kaya_app.ml")
+    tpl = keyword_block(src, r"^module Tpl = struct\b", r"^end")
+    if tpl is None:
+        return None
+    outside = src.replace(tpl, "")
+
+    got = set()
+    # The transaction is ambient here, so the zone is a MODULE: the
+    # re-export inside `module Tpl` is what makes the template zone's own
+    # surface carry the constructor, exactly as `collection` does.
+    if re.search(r"^  let collection_of rt = collection_of rt$", tpl, re.M):
+        got.add("nested record collection")
+
+    # OCaml has no overloading, so the typed narrowing carries its own
+    # name — and it is read from OUTSIDE module Tpl, where the untyped
+    # `at` it is built on also lives.
+    if re.search(
+        r"^let record_at rc key = \{ rc with rc_handle = at rc\.rc_handle key \}$",
+        outside,
+        re.M,
+    ):
+        got.add("record instance addressing")
+    return got
+
+
+def record_python(_):
+    src = read("bindings/python/kaya/__init__.py")
+    collection = python_class_block(src, "Collection")
+    bound = python_class_block(src, "_BoundCollection")
+    if None in (collection, bound):
+        return None
+
+    got = set()
+    # AMBIENT: one module-level constructor serves both zones, and the
+    # open-For edge is what makes the template one a NESTED collection
+    # rather than a second live table.
+    ctor = re.search(
+        r"^def collection\(record_type=None\):(.*?)(?=^def |\Z)", src, re.M | re.S)
+    if ctor and 'Collection(_app._next("collection"), record_type)' in ctor.group(1) \
+            and "_for_collections[-1]._children.append(handle)" in ctor.group(1):
+        got.add("nested record collection")
+
+    # The OWNER rides along, which is where the record type lives: a
+    # _BoundCollection built from anything else would encode the copy's
+    # entries against no schema.
+    at = re.search(
+        r"^\s{4}def at\(self, \*path\):(.*?)(?=^\s{4}def |\Z)",
+        collection,
+        re.M | re.S,
+    )
+    if at and "_BoundCollection(self, list(path))" in at.group(1):
+        got.add("record instance addressing")
+    return got
+
+
+def record_haskell(_):
+    src = read("bindings/haskell/KayaApp.hs")
+    declare = haskell_scope(src, r"^class Monad m => Declare m where")
+    tpl_zone = haskell_scope(src, r"^instance Declare Tpl where")
+    if declare is None or tpl_zone is None:
+        return None
+
+    got = set()
+    birth = haskell_decl(src, "newRecordCollection")
+    if (
+        birth
+        and re.search(
+            r"^\s+collectionOf\s*::\s*KayaRecord a\s*=>\s*Proxy a\s*->\s*"
+            r"m \(RecordCollection a\)",
+            declare,
+            re.M,
+        )
+        and re.search(r"^\s+collectionOf\b.*\bnewRecordCollection\b", tpl_zone, re.M)
+        and "kayaSchema p" in birth
+    ):
+        got.add("nested record collection")
+
+    handle = haskell_scope(src, r"^class CollectionHandle c where")
+    record_at = haskell_scope(
+        src, r"^instance CollectionHandle \(RecordCollection a\) where"
+    )
+    if (
+        handle
+        and record_at
+        and re.search(r"^\s+at\s*::\s*c\s*->\s*W\.Value\s*->\s*c", handle, re.M)
+        # The KEY THREADED THROUGH, not just a RecordCollection handed
+        # back: `at (RecordCollection c) _ = RecordCollection c` typechecks
+        # everywhere and addresses the parent instead of the copy.
+        and re.search(
+            r"^\s+at \(RecordCollection c\) key = RecordCollection \(at c key\)",
+            record_at,
+            re.M,
+        )
+    ):
+        got.add("record instance addressing")
+    return got
+
+
+RECORD_ZONES = [
+    ("rust", record_rust,
+     "impl Tpl's `collection<T>` + impl Collection<T>'s `at` "
+     "(crates/kaya/src/app.rs)"),
+    ("go", record_go,
+     "TplCollectionOf + RecordCollection.At (bindings/go/records.go)"),
+    ("csharp", record_csharp,
+     "KayaRecords.CollectionOf(this Tpl) + RecordCollection<T>.At "
+     "(bindings/csharp/KayaRecords.cs)"),
+    ("java", record_java,
+     "KayaRecords.collectionOf(Tpl|RowSurface, Class) + "
+     "KayaRecords.Collection.at (bindings/java/dev/kaya/KayaRecords.java)"),
+    ("swift", record_swift,
+     "KayaTpl.collection(of:) (bindings/swift/KayaApp.swift) + "
+     "KayaRecordCollection.at (bindings/swift/KayaRecords.swift)"),
+    ("ocaml", record_ocaml,
+     "module Tpl's `collection_of` + top-level `record_at` "
+     "(bindings/ocaml/kaya_app.ml)"),
+    ("python", record_python,
+     "the module-level `collection(record_type)` and Collection.at "
+     "(bindings/python/kaya/__init__.py)"),
+    ("haskell", record_haskell,
+     "Declare's `collectionOf` + instance CollectionHandle "
+     "(RecordCollection a) (bindings/haskell/KayaApp.hs)"),
+]
 
 
 TABLE_ZONES = [
@@ -1654,6 +1901,38 @@ def main():
                 f"check-sugar-surface: {lang}'s TEMPLATE-zone table cannot spell "
                 + ", ".join(missing)
                 + f" — in {where}. A live table method of the same name does not count."
+            )
+            status = 1
+
+    # THE ROW'S OWN FIELDS. Read for all eight out of the blocks that own
+    # them; the sentence is the table census's on purpose, since a nested
+    # record collection is what a table inside a row template is for.
+    for lang, reader, where in RECORD_ZONES:
+        try:
+            got = reader(None)
+        except OSError as e:
+            print(f"tpl-surfaces: cannot read {lang}'s nested-record surface ({e})")
+            status = 1
+            continue
+
+        if got is None:
+            print(
+                f"tpl-surfaces: cannot find {lang}'s nested-record surfaces — "
+                f"{where}. Fix the scoped reader rather than treating an unread "
+                "surface as empty."
+            )
+            status = 1
+            continue
+
+        missing = [point for point in RECORD_POINTS if point not in got]
+        if missing:
+            print(
+                f"check-sugar-surface: {lang}'s TEMPLATE-zone table cannot spell "
+                + ", ".join(missing)
+                + f" — in {where}. A live constructor of the same name does not "
+                "count: a nested collection may only be declared in the template "
+                "scope, and a narrowing that drops the element type puts every "
+                "record mutation out of reach, so the rows stay scalar."
             )
             status = 1
 

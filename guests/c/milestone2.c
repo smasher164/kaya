@@ -11,7 +11,10 @@
 #include <pthread.h>
 #include <stdio.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
+ * N_ run continues the W_ one — one run across the When's body and both
+ * For templates; signals and collections each count from 1 in their own
+ * (DESIGN.md, Binding conventions). */
 #define SIG_STATUS 1
 #define SIG_EXTRAS 2
 #define W_COLUMN 1
@@ -21,13 +24,13 @@
 #define W_FOR_GROUPS 5
 #define C_GROUPS 1
 #define C_ITEMS 2
-#define N_BANNER 1
-#define N_GROUP_COL 2
-#define N_GROUP_NAME 3
-#define N_ITEMS_FOR 4
-#define N_ITEM_ROW 5
-#define N_ITEM_TEXT 6
-#define N_REMOVE 7
+#define N_BANNER 6
+#define N_GROUP_COL 7
+#define N_GROUP_NAME 8
+#define N_ITEMS_FOR 9
+#define N_ITEM_ROW 10
+#define N_ITEM_TEXT 11
+#define N_REMOVE 12
 
 static void build_scene(void) {
     uint8_t buf[2048];

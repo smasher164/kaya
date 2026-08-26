@@ -235,6 +235,17 @@ public final class KayaRecords {
             this.info = info;
         }
 
+        /**
+         * The instance of this collection inside the copy keyed by
+         * {@code key} of the next enclosing For; chain for deeper
+         * nesting. TYPED: {@code handle.at} hands back a bare
+         * {@link KayaApp.Collection}, and every record mutation below
+         * takes this one.
+         */
+        public Collection<K, T> at(Object key) {
+            return new Collection<>(handle.at(key), info);
+        }
+
         public void insert(KayaApp.Tx tx, K key, T value) {
             tx.insertRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
@@ -462,6 +473,25 @@ public final class KayaRecords {
         // Registered here because this is the one place T is known.
         tx.registerRebuild(handle.id, (variant, fields) -> info.fromWire(fields));
         return new Collection<>(handle, info);
+    }
+
+    /**
+     * collectionOf inside a template body: a nested collection may only
+     * be declared in the template scope, so a table whose rows carry
+     * named fields needs the constructor there too (docs/deferred.md,
+     * the nested-record-collection gap).
+     */
+    public static <K, T> Collection<K, T> collectionOf(KayaApp.Tpl t, Class<T> type) {
+        return collectionOf(t.tx(), type);
+    }
+
+    /**
+     * collectionOf inside a ROW body — the handle {@code tx.rows(c)}
+     * hands out, and the only zone handle most Java scenes ever hold.
+     * The twin of {@link KayaApp.RowSurface#collection()}.
+     */
+    public static <K, T> Collection<K, T> collectionOf(KayaApp.RowSurface row, Class<T> type) {
+        return collectionOf(row.tpl(), type);
     }
 
     /**

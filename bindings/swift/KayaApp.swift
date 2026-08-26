@@ -3894,6 +3894,16 @@ final class KayaTpl {
         tx.collection()
     }
 
+    /// Declare a collection of T records inside this template; the
+    /// struct is the schema. A nested collection may only be declared in
+    /// the template scope, so a table whose rows carry named fields
+    /// needs the constructor here too (docs/deferred.md, the
+    /// nested-record-collection gap). IN THIS FILE because `tx` is
+    /// fileprivate storage — the body is KayaRecords' extension.
+    func collection<T: KayaRecord>(of type: T.Type) -> KayaRecordCollection<T> {
+        tx.collection(of: type)
+    }
+
     /// A nested For as a child: forEach whose body keeps no handles —
     /// the template twin of `KayaAppTx.each(_:_:)`, and the common case
     /// once the handles a template owes the outside are assigned to the

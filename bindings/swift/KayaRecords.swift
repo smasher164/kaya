@@ -117,6 +117,14 @@ private var kayaFieldIndexes: [AnyKeyPath: UInt32] = [:]
 struct KayaRecordCollection<T: KayaRecord> {
     let collection: KayaCollection
 
+    /// The instance of this collection inside the copy keyed by `key` of
+    /// the next enclosing For; chain for deeper nesting. TYPED: the
+    /// plain handle's `at` hands back a bare KayaCollection, and every
+    /// record mutation below takes this one.
+    func at(_ key: KayaValue) -> KayaRecordCollection<T> {
+        KayaRecordCollection(collection: collection.at(key))
+    }
+
     func insert(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.insertRecordRaw(collection, key, value, 0, value.kayaValues)
     }

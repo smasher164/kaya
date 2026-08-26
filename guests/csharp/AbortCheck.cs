@@ -258,6 +258,80 @@ static class AbortCheck
         });
     }
 
+    // THE ROW'S OWN FIELDS. A nested table is FOR rows that carry named
+    // fields, and until 2026-08-25 CollectionOf was a Tx extension and
+    // RecordCollection<T> had no At, so a C# scene could reach the
+    // template zone only through the untyped Collection (docs/deferred.md,
+    // the nested-record-collection gap). Both halves lie in ways that
+    // COMPILE — a constructor called on the wrong zone, a narrowing that
+    // drops the key — so both are decoded off the records here.
+    static void NestedRecordTable(KayaApp app)
+    {
+        app.Build(tx =>
+        {
+            var accounts = tx.Collection();
+            int before = tx.Records.Count;
+            Node table = default;
+            RecordCollection<TableItem> positions = null;
+            tx.Each(accounts, account =>
+            {
+                // THE TEMPLATE ZONE'S OWN CONSTRUCTOR. `tx.CollectionOf`
+                // is the live one, spelled the same; only the receiver
+                // tells them apart.
+                positions = account.CollectionOf<TableItem>();
+                table = TableItemKaya.Each(account, positions, row => row.Row(() =>
+                {
+                    row.Label(row.Name);
+                    row.Label(row.Size);
+                }));
+            });
+
+            byte[] birth = null;
+            for (int i = before; i < tx.Records.Count; i++)
+                if (RecKind(tx.Records[i]) == KayaWire.TxKindCreateCollection)
+                    birth = tx.Records[i];
+            Check(birth != null, "the template-zone CollectionOf queued no create_collection");
+            Check(BitConverter.ToUInt32(birth, 16) == 1
+                    && BitConverter.ToUInt32(birth, 24) == 2,
+                "the nested collection must be born with the RECORD schema (one "
+                    + "variant of two fields); the scalar schema compiles and "
+                    + "leaves every row one string wide");
+            var (open, close) = TemplateWindow(tx.Records, before, table.Id);
+            Check(open > 0 && close > open,
+                "the nested For has no template window — the probe is no longer "
+                    + "building a nested table");
+            var bound = BoundFields(tx.Records, open, close);
+            Check(bound.Count == 2 && bound[0] == 0 && bound[1] == 1,
+                "the nested rows must bind the RECORD's own tokens, in wire-index "
+                    + "order, inside the nested template");
+
+            // `At` KEEPS T, so this is the record insert. The untyped
+            // narrowing hands back a Collection, whose Insert takes a
+            // bare value and puts the row's fields out of reach.
+            int atInsert = tx.Records.Count;
+            positions.At("brokerage").Insert(tx, "aapl", new TableItem("AAPL", "10"));
+            byte[] insert = null;
+            for (int i = atInsert; i < tx.Records.Count; i++)
+                if (RecKind(tx.Records[i]) == KayaWire.TxKindCollectionInsert)
+                    insert = tx.Records[i];
+            Check(insert != null, "the typed At queued no collection_insert");
+            Check(BitConverter.ToUInt32(insert, 16) == 1,
+                "the record insert must carry path_len 1: a narrowing that drops "
+                    + "the key writes the PARENT's table with no error anywhere");
+            Check(ContainsAscii(insert, "AAPL") && ContainsAscii(insert, "10"),
+                "the insert must carry both of the record's fields");
+
+            var copy = positions.At("brokerage").Items(tx);
+            Check(copy.Count == 1 && Equals(copy[0].Key, "aapl")
+                    && copy[0].Value.Name == "AAPL",
+                "the copy's model must hold a TableItem — the typed At is what "
+                    + "keeps the mirror's entries records rather than bare values");
+            Check(positions.Items(tx).Count == 0,
+                "the collection's OWN table must stay empty; the write was "
+                    + "addressed to a copy");
+        });
+    }
+
     // OPEN IS NOT ENOUGH: a transaction is the app thread's. `closed`
     // cannot see a Task continuation writing through a transaction that
     // is still open, nor a background Build opening one of its own —
@@ -564,6 +638,8 @@ static class AbortCheck
         NestedTable(app);
 
         FacadeNestedTable(app);
+
+        NestedRecordTable(app);
 
         WrongThread(app);
 

@@ -1195,6 +1195,14 @@ type 'a record_collection = {
 (* The plain handle, for for_each. *)
 let record_handle rc = rc.rc_handle
 
+(* The instance of this record collection inside the copy keyed by [key]
+   of the next enclosing For; chain for deeper nesting. THE TYPED TWIN OF
+   [at]: OCaml has no overloading, so the name says which handle it
+   narrows — [at (record_handle rc) key] loses ['a] and every record
+   mutation below takes ['a record_collection] (docs/deferred.md, the
+   nested-record-collection gap). *)
+let record_at rc key = { rc with rc_handle = at rc.rc_handle key }
+
 (* Declare a collection of records; the descriptor is the schema. *)
 let collection_of rt =
   let tx = the_tx () in
@@ -2384,6 +2392,13 @@ module Tpl = struct
   end
 
   let collection () = collection ()
+
+  (* The record-schema constructor, in the zone a NESTED collection must
+     be declared in. The ambient transaction serves both zones, so this
+     is the outer one — re-exported here so the template zone's own
+     surface carries it, exactly as [collection] is (docs/deferred.md,
+     the nested-record-collection gap). *)
+  let collection_of rt = collection_of rt
 
   let for_each c body () =
     let tx = the_tx () in

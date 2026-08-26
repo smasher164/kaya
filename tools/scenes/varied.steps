@@ -11,30 +11,52 @@
 # changes pixel arithmetic, and pixel extents on this path are
 # legitimately platform- and history-dependent. So every expectation
 # below is a CORRECTION-STABLE fact — band membership by row identity,
-# the first index after each move, the declared total — and none is an
-# extent.
+# the first index after each move, the declared total, one row's own
+# inner content — and none is an extent.
 #
 # expect_window says the FIRST VISIBLE row and the DECLARED TOTAL,
-# both data (ruled 2026-08-25); the band's width and its members'
-# CONTENT are the viewport's business and the compiled table-tier
-# gate's to hold, so this file asserts identity and totals only.
+# both data (ruled 2026-08-25); the band's WIDTH is the viewport's
+# business and the compiled table-tier gate's to hold, so no line here
+# names it.
+#
+# ONE ROW'S CONTENT IS FAIR GAME, though the band's listing is not: each
+# row's inner For carries that row's key as its automation id, so
+# `expect_order column@r200` reads exactly one copy's lines and says
+# nothing about how many copies exist. That is what proves nested
+# collection instances outlive their stamps (ruled 2026-08-25 — the
+# entry it closed is in docs/deferred.md, the measurement in
+# docs/traps.md).
 expect label#0 "300 rows, 845 lines"
 # The whole collection is DATA — 300 rows declared — while a band of
 # widgets exists. THE SENTENCE: a windowed For's total is what the
 # guest inserted, not what the platform realized.
 expect_window column@varied 0 300
+# THE INNER LIST OF A REALIZED ROW. Each row's own For carries the row's
+# key as its automation id, so one row's lines read out on their own.
+expect_order column@r000 "r000 line 1"
 # Deep, past two hundred rows the band has never realized: every
 # position it crossed was PRESUMED from row 0's pitch, which is already
 # known to be wrong. THE SENTENCE: the scroll follows a ROW, so an
 # unrealized row is reachable by identity.
 scroll_to_row column@varied r200
 expect_window column@varied 200 300
+# THE WRITE TO AN OUT-OF-BAND ROW, READ BACK. r200's four lines were
+# inserted during the build, when the table was seeded at a screenful
+# and r200 had no widgets at all — so these are model data that became
+# widgets on realization. THE SENTENCE: a nested collection's instance
+# belongs to the ROW, not to its stamp.
+expect_order column@r200 "r200 line 1|r200 line 2|r200 line 3|r200 line 4"
 # Back to the top. The rows between were realized and measured on the
 # way, so the prefix sums above the viewport are CORRECTED now and were
 # presumed before. THE SENTENCE: correction moves arithmetic, never
 # membership — these two lines are byte-identical to the two above.
 scroll_to_row column@varied r000
 expect_window column@varied 0 300
+# AWAY AND BACK. r000's copy was torn down when the band left it and
+# stamped again on the way home; its line came back with it. THE
+# SENTENCE: teardown takes widgets and leaves data — this line is
+# byte-identical to the one before the deep scroll.
+expect_order column@r000 "r000 line 1"
 # THE ANCHORING ASSERTION (plan §5's last sentence). Park on r150 with
 # the fifty rows above it still presumed; realize them by visiting r100,
 # which corrects their heights and therefore r150's pixel position; come

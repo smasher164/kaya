@@ -127,6 +127,23 @@ func recordInfoOfType(t reflect.Type) *recordInfo {
 // CollectionOf declares a collection of T records keyed by K; the
 // struct is the schema. Returns the typed root handle.
 func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
+	return newRecordCollection[K, T](tx)
+}
+
+// TplCollectionOf is CollectionOf inside a template body: a nested
+// collection may only be declared in the template scope, so a table
+// whose rows carry named fields needs the constructor there too
+// (docs/deferred.md, the nested-record-collection gap).
+//
+// A FREE FUNCTION beside the method: Go methods take no type
+// parameters, so *Tpl cannot carry this the way Rust's Tpl::collection
+// does. Tpl.tx is unexported, which is why nothing outside this package
+// can spell it.
+func TplCollectionOf[K Key, T any](t *Tpl) RecordCollection[K, T] {
+	return newRecordCollection[K, T](t.tx)
+}
+
+func newRecordCollection[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	info := recordInfoOf[T]()
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
@@ -141,6 +158,15 @@ func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	}
 	tx.emit(TxCreateCollection(c.id, [][]uint32{info.schema}))
 	return RecordCollection[K, T]{c, info}
+}
+
+// At is the instance of this collection inside the copy keyed by key of
+// the next enclosing For; chain for deeper nesting. IT SHADOWS THE
+// EMBEDDED Collection's At and keeps K and T: the promoted one hands
+// back a bare Collection, and every record mutation takes a
+// RecordCollection.
+func (c RecordCollection[K, T]) At(key any) RecordCollection[K, T] {
+	return RecordCollection[K, T]{c.Collection.At(key), c.info}
 }
 
 // restoreKey coerces an undone entry's wire key to the type the model

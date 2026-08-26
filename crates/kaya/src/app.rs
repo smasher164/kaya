@@ -6269,6 +6269,65 @@ mod tests {
         assert_eq!(msgs.next(&ctx), Some(Msg::Sort(path, 1)));
     }
 
+    /// THE ROW'S OWN FIELDS: a nested collection declared in the
+    /// TEMPLATE zone carries the record schema, and narrowing it to one
+    /// stamped copy keeps the element type — which is what makes the
+    /// copy's entries records rather than bare values. Rust holds the
+    /// second half in the type system (`Collection<T>::at` returns
+    /// `Collection<T>`), so what a test can add is that the KEY is
+    /// threaded through and the schema is the record's. The other seven
+    /// bindings' twins are named in docs/deferred.md, closed 2026-08-25.
+    #[test]
+    fn a_nested_record_collection_carries_its_schema_and_addresses_the_copy() {
+        use crate::protocol::TxOp;
+
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let accounts = tx.collection::<String>();
+        let (_list, positions) = tx.for_each(&accounts, |t| t.collection::<Todo>());
+        tx.insert(&accounts, "brokerage", "Brokerage".to_owned());
+
+        let copy = positions.at("brokerage");
+        tx.insert(&copy, "aapl", Todo { title: "AAPL".into(), done: false });
+        assert_eq!(
+            tx.items(&copy),
+            vec![("aapl".into(), Todo { title: "AAPL".into(), done: false })],
+            "the copy's model must hold records — `at` is what carries T \
+             across the key path"
+        );
+        assert_eq!(
+            tx.len(&positions),
+            0,
+            "the write was addressed to a copy and must not reach the \
+             collection's own table"
+        );
+
+        tx.commit();
+        let ops = tx_rx.try_recv().expect("committed ops");
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                TxOp::CreateCollection { variants, .. }
+                    if variants.as_slice() == [Todo::SCHEMA.to_vec()]
+            )),
+            "the nested collection must be born with the RECORD schema; the \
+             scalar one compiles and leaves every row one string wide"
+        );
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                TxOp::CollectionInsert { path, key, .. }
+                    if path.as_slice() == [Value::from("brokerage")]
+                        && *key == Value::from("aapl")
+            )),
+            "the record insert must carry the copy's key path; a narrowing \
+             that drops it writes the parent's table in silence"
+        );
+    }
+
     #[test]
     fn columns_at_emits_the_copy_path_before_the_titles() {
         use super::Sort;

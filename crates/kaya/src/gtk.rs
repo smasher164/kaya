@@ -868,6 +868,69 @@ mod flex {
                 table_horizontal_issue(2.1, 100.0, 100.0, 100.0, 100.0),
                 Some(Issue::ContentLeftUnderfill)
             );
+
+            // PRECEDENCE where several hold at once, which is the ordinary
+            // case: the ROOT is reported, never its symptom. This order is
+            // the one all four backends carry (docs/deferred.md, the
+            // leading-edge UNDERFILL entry) — the leading edge outranks the
+            // end, because a table displaced at its start also ends in the
+            // wrong place.
+            assert_eq!(
+                table_horizontal_issue(40.0, 60.0, 60.0, 100.0, 120.0),
+                Some(Issue::TrackUnderfill)
+            );
+            assert_eq!(
+                table_horizontal_issue(40.0, 60.0, 60.0, 100.0, 100.0),
+                Some(Issue::ContentLeftUnderfill)
+            );
+            assert_eq!(
+                table_horizontal_issue(-40.0, 60.0, 140.0, 100.0, 100.0),
+                Some(Issue::ContentLeftOverflow)
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 60.0, 140.0, 100.0, 100.0),
+                Some(Issue::ContentUnderfill)
+            );
+        }
+
+        /// A PADDED CARD CONVICTS NOTHING, and the basis is the whole
+        /// reason (docs/deferred.md's table-card entry). The card's
+        /// interior padding is a CONTENT-BOX inset on the table
+        /// container: GTK4 puts the widget's coordinate origin there, so
+        /// the cells do NOT move off zero and `column.width()` shrinks
+        /// with them — measured, a 12/8 card reads cells at 0.0 and a
+        /// viewport of 776 inside an 800px parent.
+        ///
+        /// The only number left in the OUTER box is the assigned track,
+        /// and `table_horizontal_track` brings it into the viewport's
+        /// basis by subtracting the card's own span. This pins both: the
+        /// corrected basis is silent, and the basis that FORGETS to
+        /// subtract convicts a correct table — which is the shape this
+        /// test exists to keep from shipping.
+        #[test]
+        fn gtk_table_padded_card_convicts_nothing() {
+            use super::super::{table_horizontal_issue, TableHorizontalIssue as Issue};
+            // The measured frame: an 800px parent, a 12px-per-side card,
+            // cells flush at 0 inside the 776px content box.
+            let (parent, span) = (800.0, 24.0);
+            let viewport = parent - span;
+            assert_eq!(
+                table_horizontal_issue(0.0, viewport, viewport, viewport, parent - span),
+                None,
+                "a padded card is a correct table"
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, viewport, viewport, viewport, parent),
+                Some(Issue::TrackUnderfill),
+                "a track basis that forgets the card's own padding \
+                 convicts every padded table"
+            );
+            // And the padding may not be paid for twice: an UNPADDED
+            // table's track is its parent's width untouched.
+            assert_eq!(
+                table_horizontal_issue(0.0, parent, parent, parent, parent),
+                None
+            );
         }
     }
 
@@ -1125,6 +1188,37 @@ const TABLE_SPACER_CLASS: &str = "kaya-table-spacer";
 /// parent's track decides.
 const TABLE_MAX_CONTENT: i32 = 600;
 
+/// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry;
+/// ruled 2026-08-25). GTK's spelling is Adwaita's boxed-list reading.
+const TABLE_CARD_CLASS: &str = "kaya-table-card";
+
+/// A header cell's title sits FLUSH with the cells under it, so the
+/// theme's button padding and border come off: Adwaita's 10px inset
+/// would draw every title one place right of its column. Bold is the
+/// header's own weight, GTK's node name reaching the button's label.
+///
+/// THE CARD'S STROKE IS PAINT, NEVER BOX (measured 2026-08-25,
+/// docs/traps.md "A GTK table card is paint, never box"): `outline`
+/// rather than `border` because a container inset is ALREADY a border on
+/// this very widget (set_container_inset) and the two do not add — one
+/// silently wins. Flat by the ruling: no shadow, no blur.
+///
+/// THE PADDING IS THE CARD'S INTERIOR, and it is `padding` on this same
+/// widget deliberately: GTK4 puts a widget's coordinate origin at its
+/// CONTENT box, so the cells stay at 0 and `column.width()` shrinks with
+/// them (measured: a padded card reads cells at 0.0 and 776 of an 800px
+/// parent). The one number that then needs the card's own span added
+/// back is the assigned TRACK — `table_horizontal_track` does that and
+/// nothing else does.
+///
+/// 12 HORIZONTAL IS ADWAITA'S OWN, measured off a real AdwActionRow in a
+/// `.boxed-list` (its content starts at x=12). 8 vertical is kaya's
+/// container unit and not Adwaita's, because Adwaita gives a row its
+/// vertical breathing room through `min-height: 50px` — a ROW DENSITY
+/// change, which this ruling forbids. The numbers live HERE and nowhere
+/// else: nothing in this backend computes with them, because the track
+/// basis MEASURES the inset off the widget instead.
+///
 /// A header cell's title sits FLUSH with the cells under it, so the
 /// theme's button padding and border come off: Adwaita's 10px inset
 /// would draw every title one place right of its column. Bold is the
@@ -1132,6 +1226,8 @@ const TABLE_MAX_CONTENT: i32 = 600;
 const TABLE_CSS: &str = "\
 .kaya-table-header-cell { padding: 0px; border: 0px; min-width: 0px; min-height: 0px; }
 .kaya-table-header-cell label { font-weight: bold; }
+.kaya-table-card { background-color: @card_bg_color; border-radius: 12px; \
+outline: 1px solid @borders; outline-offset: -1px; padding: 8px 12px; }
 ";
 
 /// One declared table (docs/tables-plan.md): the header row this
@@ -1214,6 +1310,20 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
     content <= viewport + 2.0
 }
 
+/// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half, and the
+/// REFERENCE SET the winui and Compose siblings of this name carry
+/// (docs/deferred.md, the leading-edge UNDERFILL entry).
+///
+/// THE ORDER IS THE ROOT-BEFORE-SYMPTOM ONE, and it is the same in all
+/// four backends: track, then the LEADING edge, then the trailing one. A
+/// table displaced at its leading edge also ends in the wrong place, so
+/// conviction on the end would name the symptom.
+///
+/// The two UNDERFILL directions need cells that FILL their column —
+/// `build_table` and `reattach_table` give every cell hexpand + halign
+/// Fill, so a line's end here IS the last column's trailing edge. The two
+/// synthesized tiers place cells at their NATURAL size and cannot spell
+/// `ContentUnderfill` at all (docs/deferred.md).
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableHorizontalIssue {
@@ -1237,35 +1347,58 @@ fn table_horizontal_issue(
         Some(TableHorizontalIssue::TrackUnderfill)
     } else if assigned > 0.0 && viewport > assigned + 2.0 {
         Some(TableHorizontalIssue::TrackOverflow)
-    } else if min_end < viewport - 2.0 {
-        Some(TableHorizontalIssue::ContentUnderfill)
-    } else if max_end > viewport + 2.0 {
-        Some(TableHorizontalIssue::ContentOverflow)
     } else if min_start > 2.0 {
         Some(TableHorizontalIssue::ContentLeftUnderfill)
     } else if min_start < -2.0 {
         Some(TableHorizontalIssue::ContentLeftOverflow)
+    } else if min_end < viewport - 2.0 {
+        Some(TableHorizontalIssue::ContentUnderfill)
+    } else if max_end > viewport + 2.0 {
+        Some(TableHorizontalIssue::ContentOverflow)
     } else {
         None
     }
 }
 
+/// The card's own horizontal padding, MEASURED off the widget rather than
+/// read back from the number that wrote it: `compute_bounds(w, w)` is the
+/// BORDER box in a space whose origin GTK4 puts at the CONTENT box
+/// (css_inset_of's read), so the two widths differ by exactly the inset's
+/// span. 0 for a table with no card, which is what keeps this honest for
+/// every other caller.
+#[cfg(feature = "harness")]
+fn css_inset_span(column: &gtk4::Box) -> f64 {
+    use gtk4::prelude::WidgetExt;
+    column
+        .compute_bounds(column)
+        .map(|b| (f64::from(b.width()) - f64::from(column.width())).max(0.0))
+        .unwrap_or(0.0)
+}
+
+/// THE ASSIGNED TRACK, IN THE VIEWPORT'S OWN BASIS. Every arm below reads
+/// an OUTER box — a flex track, a parent's content width — while the
+/// caller compares against `column.width()`, which is the CONTENT width;
+/// the card's interior padding is the difference and comes off here.
+/// Without that, a padded card underfills its own track by its own
+/// padding and expect_column_edges convicts a correct table
+/// (docs/deferred.md's table-card entry).
 #[cfg(feature = "harness")]
 fn table_horizontal_track(column: &gtk4::Box) -> f64 {
     let viewport = f64::from(column.width());
+    let inset = css_inset_span(column);
     let target: gtk4::Widget = column.clone().upcast();
     let Some(parent) = target.parent() else { return viewport };
     let Some(manager) = parent.layout_manager() else { return viewport };
     if let Some(layout) = manager.downcast_ref::<flex::FlexLayout>() {
         return if layout.orientation() == gtk4::Orientation::Horizontal {
-            child_track(&target).unwrap_or(viewport)
+            child_track(&target).map_or(viewport, |track| track - inset)
         } else {
-            f64::from(parent.width())
+            f64::from(parent.width()) - inset
         };
     }
     if let Some(layout) = manager.downcast_ref::<gtk4::BoxLayout>() {
         return if layout.orientation() == gtk4::Orientation::Vertical {
-            f64::from(parent.width())
+            f64::from(parent.width()) - inset
         } else {
             viewport
         };
@@ -1656,7 +1789,15 @@ fn row_position(
 /// destroy widgets. Every caller is an idle, a harness step, or the
 /// end of a drained batch.
 fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
-    use gtk4::prelude::{AdjustmentExt, WidgetExt};
+    use gtk4::prelude::{AdjustmentExt, Cast, WidgetExt};
+    // Read before the scene borrow below: a GROWN table's height is its
+    // parent's business, and set_table_scrolling needs to know.
+    let grown = match core.widgets.get(&WidgetId(id)) {
+        Some(NativeWidget::Column(column)) => {
+            grow_weight(column.upcast_ref::<gtk4::Widget>()) > 0.0
+        }
+        _ => false,
+    };
     let Some(table) = core.tables.get(&id) else {
         return (0, 0);
     };
@@ -1809,8 +1950,37 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         let below = (band.extent - band.offset - realized).max(0.0);
         set_spacer(&top, band.first > 0 && above > 0.5, above);
         set_spacer(&bottom, below > 0.5, below);
+        set_table_scrolling(&body, grown || band.extent > f64::from(TABLE_MAX_CONTENT));
     }
     (first, total)
+}
+
+/// A TABLE HUGS WHAT IT HOLDS (docs/deferred.md's viewport-floor entry).
+///
+/// A VERTICAL SCROLLBAR'S OWN MINIMUM IS THE FLOOR, measured 2026-08-25
+/// and 58px on the lane's GTK: `GtkScrolledWindow` folds it into its own
+/// MINIMUM wherever the policy may show a bar — AUTOMATIC and ALWAYS both
+/// do, overlay scrolling does not exempt it — and a minimum outranks the
+/// natural height `propagate_natural_height` asks for. So a one-row table
+/// was allocated 58px with 42px of nothing under its row (docs/traps.md).
+/// The policy IS the toolkit's way to say "this does not scroll", so a
+/// table that cannot need a bar stops claiming one.
+///
+/// BOTH DECIDING NUMBERS ARE ALREADY OWNED: the collection's extent is the
+/// CORE's (never re-derived here, §2), and the grow weight is the flex
+/// contract's. A GROWN table keeps AUTOMATIC whatever its extent, because
+/// its parent's track decides its height and it must be able to scroll
+/// inside it; an ungrown one scrolls only past its own cap.
+fn set_table_scrolling(body: &gtk4::ScrolledWindow, scrolls: bool) {
+    let want = if scrolls {
+        gtk4::PolicyType::Automatic
+    } else {
+        gtk4::PolicyType::Never
+    };
+    // Written only when it moved: this runs on every scroll frame.
+    if body.policy().1 != want {
+        body.set_policy(gtk4::PolicyType::Never, want);
+    }
 }
 
 /// One navigation entry: a pushed scene root, retained while covered
@@ -6731,6 +6901,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 return;
             };
             let column = column.clone();
+            // The card: this container IS the table's extent, and the
+            // class is the whole lowering (TABLE_CSS).
+            column.add_css_class(TABLE_CARD_CLASS);
             let rebuild = !core
                 .tables
                 .get(&id.0)
@@ -10091,6 +10264,23 @@ impl crate::harness::Stage for GtkStage {
                         table_tag(core, *widget).is_some_and(|tag| {
                             crate::harness::table_tag_matches_keys(&tag, node, keys)
                         })
+                    })
+                    .map(|i| i as isize);
+            }
+            // A DESTROYED WIDGET MAY NOT ANSWER A TARGET. These registries
+            // are push-only, so a stamped copy that left the band is still
+            // in `columns` carrying its authored key — and a windowed row's
+            // copy dies on every scroll (docs/virtualization-plan.md §1).
+            // The keyed arm above already filters this way; `column_ids` is
+            // the only id vector the harness keeps, so this is the Column
+            // arm's clause.
+            if kind == K::Column {
+                return core
+                    .columns
+                    .iter()
+                    .zip(&core.column_ids)
+                    .position(|(w, wid)| {
+                        w.widget_name() == id && core.widgets.contains_key(wid)
                     })
                     .map(|i| i as isize);
             }

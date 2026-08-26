@@ -340,6 +340,59 @@ check(
     keyed_header,
 )
 
+# THE ROW'S OWN FIELDS. A nested table is FOR rows that carry named
+# fields: the record-schema constructor must reach the TEMPLATE zone
+# (Python's is ambient, so the open-For edge is what puts it there), and
+# narrowing to one stamped copy must keep the record type — an instance
+# that lost it would encode the copy's entries against no schema. Six
+# other bindings' twins closed 2026-08-25 (docs/deferred.md).
+app_rec = kaya.App()
+with app_rec.window():
+    rec_accounts = kaya.collection()
+    with kaya.column():
+        for rec_account in rec_accounts:
+            with kaya.column():
+                rec_before = len(kaya._tx)
+                rec_positions = kaya.collection(TracedTodo)
+                rec_birth = kaya._tx[rec_before:]
+                for rec_position in rec_positions:
+                    with kaya.row():
+                        kaya.label(bind=rec_position.title)
+                        kaya.checkbox(checked=rec_position.done)
+check(
+    "a nested record collection is born with the RECORD schema",
+    rec_birth == [kaya.wire.tx_create_collection(
+        rec_positions._id, [[kaya.wire.VALUE_STR, kaya.wire.VALUE_BOOL]],
+    )],
+)
+check(
+    "a collection declared inside a For records the teardown edge that "
+    "makes it the copies' rather than the live tree's",
+    rec_positions in rec_accounts._children,
+)
+with app_rec.build():
+    rec_accounts.insert("brokerage", "Brokerage")
+    rec_copy = rec_positions.at("brokerage")
+    rec_at_before = len(kaya._tx)
+    rec_copy.insert("aapl", TracedTodo("AAPL", False))
+    rec_insert = kaya._tx[rec_at_before:]
+    check(
+        "the typed instance insert carries the copy's key path and the "
+        "record's fields",
+        rec_insert == [kaya.wire.tx_collection_insert(
+            rec_positions._id, ["brokerage"], "aapl", 0, ["AAPL", False],
+        )],
+    )
+    check(
+        "the copy's model holds the record itself",
+        rec_copy.items() == [("aapl", TracedTodo("AAPL", False))],
+    )
+    check(
+        "the write was addressed to a copy and does not reach the "
+        "collection's own table",
+        len(rec_positions) == 0,
+    )
+
 # One-shot commands: a Widget carries clear/focus, a Node is a blueprint
 # and has neither. Commands carry no mirror state, so an aborted build's
 # rollback is the records dying.
@@ -409,6 +462,44 @@ with app_rows_props.window():
     check(
         "rows(a11y_id=) reaches its For",
         kaya.wire.tx_set_a11y_id(rows_for, "accounts") in rows_records,
+    )
+
+
+# A NESTED For's a11y_id MAY COME FROM THE ROW. The copies of one
+# template node share a node id, so a constant names N containers at
+# once and the harness cannot tell them apart — which is exactly what
+# tools/scenes/varied.steps needs (`expect_order column@r200`). The
+# failure this watches for is the coercing arm: `str(row.key)` succeeds
+# and writes a FieldRef's repr onto every copy.
+app_nested_key = kaya.App()
+with app_nested_key.window():
+
+    @dataclass
+    class Outer:
+        key: str
+
+    outers = kaya.collection(Outer)
+    for outer in outers.rows():
+        inners = kaya.collection()
+        before = len(kaya._tx)
+        for inner in inners.rows(a11y_id=outer.key):
+            kaya.label(bind=inner)
+        inner_records = kaya._tx[before:]
+    inner_for_ids = [
+        int.from_bytes(rec[8:16], "little")
+        for rec in inner_records
+        if _rec_kind(rec) == kaya.wire.TX_CREATE_FOR
+    ]
+    inner_for = inner_for_ids[0] if len(inner_for_ids) == 1 else 0
+    check(
+        "a nested rows(a11y_id=row.field) binds the element, never its repr",
+        kaya.wire.tx_bind_a11y_id_element(inner_for, 0, 0) in inner_records
+        and not any(
+            _rec_kind(rec) == kaya.wire.TX_SET_PROPERTY
+            and int.from_bytes(rec[16:20], "little") == kaya.wire.PROP_A11Y_ID
+            and int.from_bytes(rec[20:24], "little") == kaya.wire.SOURCE_CONST
+            for rec in inner_records
+        ),
     )
 
 

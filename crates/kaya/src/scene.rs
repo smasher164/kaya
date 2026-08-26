@@ -72,16 +72,29 @@ enum TplOp {
     ContextAttachNode { node: u64, item: MenuItemId },
 }
 
-/// Does this body declare collection state of its own — a nested For,
-/// at any depth, including under a When? Such a copy owns model
-/// instances that live and die with it, which is what keeps its table
-/// off the seed (`seed_window`).
-fn body_owns_a_collection(body: &TplBody) -> bool {
-    body.ops.iter().any(|op| match op {
-        TplOp::Collection { .. } | TplOp::For { .. } => true,
-        TplOp::When { body, .. } => body_owns_a_collection(body),
-        _ => false,
-    })
+/// The collections ONE COPY of each variant's blueprint owns as data:
+/// every `Collection` declared directly in that body, When bodies
+/// included (they stamp at the same copy path). A nested For's own body
+/// is NOT walked — its Collections belong to ITS rows, one key deeper,
+/// and are born when those rows are inserted.
+fn owned_collections(bodies: &[Arc<TplBody>]) -> Vec<Vec<CollectionId>> {
+    fn walk(body: &TplBody, out: &mut Vec<CollectionId>) {
+        for op in &body.ops {
+            match op {
+                TplOp::Collection { id } => out.push(*id),
+                TplOp::When { body, .. } => walk(body, out),
+                _ => {}
+            }
+        }
+    }
+    bodies
+        .iter()
+        .map(|body| {
+            let mut out = Vec::new();
+            walk(body, &mut out);
+            out
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -499,6 +512,15 @@ pub(crate) struct Scene {
     template_nodes: HashMap<u64, WidgetKind>,
     collections: HashMap<CollectionId, CollDecl>,
     coll_instances: HashMap<(CollectionId, PathKey), CollInstance>,
+    /// What ONE ROW of each collection owns as data: the nested
+    /// collections its blueprint declares, per variant, recorded when its
+    /// For's scope closes (live or nested). It is what lets a row's own
+    /// nested collections be born with its RECORD instead of with its
+    /// stamp (`birth_nested`) — data-outliving-widgets one level down.
+    /// `bind_collection` asserts one For per collection, so the key is
+    /// unambiguous, and the overwhelmingly common empty entry costs the
+    /// insert path a lookup and no allocation.
+    row_owned: HashMap<CollectionId, Vec<Vec<CollectionId>>>,
     for_sites: HashMap<(CollectionId, PathKey), ForSite>,
     stamps: HashMap<EntryRef, Stamp>,
     /// A nested For's TEMPLATE-SCOPED header bar (docs/tables-plan.md,
@@ -4093,8 +4115,9 @@ impl Scene {
                         parent.current.ops.push(TplOp::For {
                             node: id,
                             collection,
-                            bodies,
+                            bodies: bodies.clone(),
                         });
+                        self.register_row_owned(collection, &bodies);
                     }
                     (Some(parent), ClosedScope::When { id, signal, body }) => {
                         parent.current.ops.push(TplOp::When {
@@ -4106,6 +4129,7 @@ impl Scene {
                     // Top level: the live site starts rendering now. Its
                     // columns, if it has any, are declared after this.
                     (None, ClosedScope::For { id, collection, bodies }) => {
+                        self.register_row_owned(collection, &bodies);
                         self.register_for_site(
                             collection,
                             vec![],
@@ -4367,6 +4391,88 @@ impl Scene {
             })
     }
 
+    /// A row's own nested collections are born WITH ITS RECORD, never
+    /// with its stamp: an unrealized row's inner list is model data the
+    /// guest writes and reads like any other, and the band rebuilds its
+    /// widgets from that data on entry (docs/virtualization-plan.md §1
+    /// one level down — the ruling that closed docs/deferred.md's
+    /// nested-collection-instance entry).
+    fn birth_nested(&mut self, id: CollectionId, path: &PathKey, key: &Key, variant: u32) {
+        // No For over this collection yet (rows may precede it): its
+        // registration births what is already there.
+        let owned = match self
+            .row_owned
+            .get(&id)
+            .and_then(|per_variant| per_variant.get(variant as usize))
+        {
+            Some(owned) if !owned.is_empty() => owned.clone(),
+            _ => return,
+        };
+        let mut copy_path = path.clone();
+        copy_path.push(key.clone());
+        for cid in owned {
+            self.coll_instances.entry((cid, copy_path.clone())).or_default();
+        }
+    }
+
+    /// The row is GONE from its collection, so everything its copies
+    /// owned goes with it — the death widget teardown no longer performs.
+    /// Recursive: an inner row's own nested collections die with it.
+    fn reap_nested(&mut self, id: CollectionId, path: &PathKey, key: &Key) {
+        // EVERY VARIANT'S, not the stored one's: a variant change reaps
+        // before it births, and the cases' collections are disjoint.
+        let owned: Vec<CollectionId> = match self.row_owned.get(&id) {
+            Some(per_variant) => per_variant.iter().flatten().copied().collect(),
+            None => return,
+        };
+        if owned.is_empty() {
+            return;
+        }
+        let mut copy_path = path.clone();
+        copy_path.push(key.clone());
+        for cid in owned {
+            let Some(inst) = self.coll_instances.remove(&(cid, copy_path.clone())) else {
+                continue;
+            };
+            for inner in inst.order {
+                self.reap_nested(cid, &copy_path, &inner);
+            }
+        }
+        self.bar_overrides.retain(|(_, p), _| *p != copy_path);
+    }
+
+    /// The blueprint over `collection` is known: record what one of its
+    /// rows owns, and birth the nested instances of every row already
+    /// inserted. Rows may arrive before their For binds ("data without a
+    /// For yet"), and those rows owe their inner lists just the same.
+    fn register_row_owned(&mut self, collection: CollectionId, bodies: &[Arc<TplBody>]) {
+        let owned = owned_collections(bodies);
+        if owned.iter().all(Vec::is_empty) {
+            self.row_owned.insert(collection, owned);
+            return;
+        }
+        self.row_owned.insert(collection, owned);
+        let existing: Vec<(PathKey, Vec<(Key, u32)>)> = self
+            .coll_instances
+            .iter()
+            .filter(|((id, _), _)| *id == collection)
+            .map(|((_, path), inst)| {
+                (
+                    path.clone(),
+                    inst.order
+                        .iter()
+                        .map(|k| (k.clone(), inst.entries[k].0))
+                        .collect(),
+                )
+            })
+            .collect();
+        for (path, rows) in existing {
+            for (key, variant) in rows {
+                self.birth_nested(collection, &path, &key, variant);
+            }
+        }
+    }
+
     fn variants_of(&self, id: CollectionId) -> Vec<Vec<ValueType>> {
         self.collections
             .get(&id)
@@ -4405,6 +4511,7 @@ impl Scene {
         );
         inst.order.push(key.clone());
         inst.entries.insert(key.clone(), (variant, record));
+        self.birth_nested(id, &path, &key, variant);
         if self.windowed(id, &path) {
             self.window_order_moved(id, &path, out);
         } else {
@@ -4440,6 +4547,10 @@ impl Scene {
             if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
                 self.teardown(stamp, out);
             }
+            // The old case's data goes with the old case; the new one's
+            // instances are born empty, as they would be for a fresh row.
+            self.reap_nested(id, &path, &key);
+            self.birth_nested(id, &path, &key, variant);
             if self.windowed(id, &path) {
                 // The copy is gone, so reconcile sees the row as entering
                 // and stamps the new case's blueprint in its band place.
@@ -4570,9 +4681,10 @@ impl Scene {
             "kaya: remove of missing key {key:?} in {id:?}"
         );
         inst.order.retain(|k| k != &key);
-        if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key)) {
+        if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
             self.teardown(stamp, out);
         }
+        self.reap_nested(id, &path, &key);
         if self.windowed(id, &path) {
             // Every row below shifted up: the band is a position, so one
             // more row at the bottom enters.
@@ -4763,8 +4875,13 @@ impl Scene {
                     child: node_map[child],
                 }),
                 TplOp::Collection { id } => {
-                    self.coll_instances
-                        .insert((*id, copy_path.clone()), CollInstance::default());
+                    // THE INSTANCE IS ALREADY THERE, born with the row's
+                    // record (`birth_nested`), and a re-stamp on band
+                    // entry must read the rows the guest wrote while this
+                    // copy did not exist — an insert here would erase
+                    // them. It is entered rather than merely read because
+                    // the blueprint may be registered after its rows.
+                    self.coll_instances.entry((*id, copy_path.clone())).or_default();
                     stamp.colls.push((*id, copy_path.clone()));
                 }
                 TplOp::For {
@@ -4980,13 +5097,14 @@ impl Scene {
     }
 
     fn teardown(&mut self, stamp: Stamp, out: &mut Vec<ApplyOp>) {
-        // The copy's header bookkeeping goes with its widgets — an
-        // override outliving its copy would resurrect on a same-key
-        // re-insert (docs/tables-plan.md, dynamic tables).
+        // The copy's WIDGET bookkeeping goes with its widgets. Its
+        // per-copy header override does NOT: that is guest-declared state
+        // addressed by the copy's keys, and a windowed row's copy dies on
+        // every scroll — so it is reaped where the ROW dies
+        // (`reap_nested`), which keeps the property the coupling existed
+        // for (no resurrection on a same-key re-insert).
         let dead: std::collections::HashSet<WidgetId> = stamp.widgets.iter().copied().collect();
         self.bar_instances.retain(|_, wid| !dead.contains(wid));
-        let live = &self.bar_instances;
-        self.bar_overrides.retain(|key, _| live.contains_key(key));
         for site_id in &stamp.when_sites {
             if let Some(mut site) = self.when_sites.remove(site_id) {
                 if let Some(bysig) = self.when_by_signal.get_mut(&site.signal) {
@@ -4997,13 +5115,21 @@ impl Scene {
                 }
             }
         }
+        // THE INSTANCE STAYS: it is the copy's data, keyed by the copy's
+        // path, and it outlives the copy's widgets exactly as the outer
+        // collection outlives its unrealized rows
+        // (docs/virtualization-plan.md §1, extended one level down). Only
+        // the widgets leave — the site and every inner copy's stamp.
         for (cid, path) in &stamp.colls {
             self.for_sites.remove(&(*cid, path.clone()));
-            if let Some(inst) = self.coll_instances.remove(&(*cid, path.clone())) {
-                for key in inst.order {
-                    if let Some(inner) = self.stamps.remove(&(*cid, path.clone(), key)) {
-                        self.teardown(inner, out);
-                    }
+            let order = self
+                .coll_instances
+                .get(&(*cid, path.clone()))
+                .map(|inst| inst.order.clone())
+                .unwrap_or_default();
+            for key in order {
+                if let Some(inner) = self.stamps.remove(&(*cid, path.clone(), key)) {
+                    self.teardown(inner, out);
                 }
             }
         }
@@ -5062,26 +5188,17 @@ impl Scene {
     /// For would cap it at k rows on a tier that never reports on one,
     /// and nothing the guest can read would say so.
     ///
-    /// AND ITS ROWS MUST OWN NO NESTED COLLECTION. A nested For's
-    /// instance is born with its copy and dies with it, so an unrealized
-    /// row HAS no instance — `lines.at("r128")` then dies naming a path
-    /// that was never stamped (measured here on varied.py, 300 rows,
-    /// which writes every row's inner lines inside the build
-    /// transaction). The band already loses a realized row's nested rows
-    /// when it leaves; making rows unrealized from birth turns that into
-    /// a fault, so a table whose template owns collection state stays on
-    /// the bridge until instances outlive their stamps (docs/traps.md).
+    /// ROWS THAT OWN NESTED COLLECTIONS ARE SEEDED TOO (ruled 2026-08-25,
+    /// the entry this closed in docs/deferred.md): their instances are
+    /// born with the row's record and outlive its widgets, so an
+    /// unrealized row's inner list is written and read like any other.
     fn seed_window(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
         if !self.windowing {
             return;
         }
         let site = (id, path.clone());
         match self.for_sites.get(&site) {
-            Some(s) if !s.window.is_bounded() => {
-                if s.bodies.iter().any(|b| body_owns_a_collection(b)) {
-                    return;
-                }
-            }
+            Some(s) if !s.window.is_bounded() => {}
             _ => return,
         }
         // A site seeded after its rows were stamped (columns declared
@@ -11157,17 +11274,12 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         );
     }
 
-    /// A TABLE WHOSE ROWS OWN A COLLECTION STAYS ON THE BRIDGE: a nested
-    /// For's instance is born with its copy, so an unrealized row has
-    /// none and the guest's write to it dies naming a path nothing
-    /// stamped. Measured on varied.py, which writes every row's inner
-    /// lines inside the build transaction (docs/traps.md).
-    #[test]
-    fn a_table_whose_rows_own_a_collection_stays_on_the_bridge() {
+    /// varied.py's shape: a one-column table (node 4) whose cell holds a
+    /// column with the row's own label and the row's own inner For over
+    /// collection 2 (node 20), filled with `rows` accounts.
+    fn nested_lines_table(rows: i64) -> Scene {
         let mut scene = Scene::new();
         scene.declare_windowing();
-        // varied.py's shape: a one-column table whose cell is a column
-        // of the row's own inner For.
         scene.apply(vec![
             TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
             TxOp::CreateCollection {
@@ -11196,6 +11308,14 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
                 value: PropValue::Element { level: 0, field: 0 },
             },
             TxOp::TemplateEnd,
+            // varied.py's `lines.rows(a11y_id=row.key)`: the inner For's
+            // CONTAINER takes the outer row's own key as its automation
+            // id, which is how a scene reads one copy's inner list.
+            TxOp::SetProperty {
+                widget: WidgetId(20),
+                prop: Prop::A11yId,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
             TxOp::AddChild { parent: WidgetId(11), child: WidgetId(20) },
             TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
             TxOp::TemplateEnd,
@@ -11210,20 +11330,136 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             titles: vec!["Account".into()],
         }]);
         scene.apply(
-            (0..200)
+            (0..rows)
                 .map(|i| insert_account(&format!("a{i:03}")))
                 .collect(),
         );
-        assert_eq!(stamped_rows(&scene), 200, "every row, so every row has its instance");
-        // The write the seed would have faulted: the 200th row's own
-        // nested collection.
-        scene.apply(vec![TxOp::CollectionInsert {
+        scene
+    }
+
+    fn add_line(account: &str, key: &str) -> TxOp {
+        TxOp::CollectionInsert {
             id: CollectionId(2),
-            path: vec![v("a199")],
-            key: v("t1"),
+            path: vec![v(account)],
+            key: v(key),
             variant: 0,
-            record: vec![v("AAPL"), v("10")],
+            record: vec![v(account), v(key)],
+        }
+    }
+
+    /// One account's inner lines, as DATA — the instance, whether or not
+    /// its row has widgets.
+    fn inner_lines(scene: &Scene, account: &str) -> Vec<String> {
+        scene.coll_instances[&(CollectionId(2), vec![Key::Str(account.into())])]
+            .order
+            .iter()
+            .map(|k| match k {
+                Key::Str(s) => s.clone(),
+                other => panic!("unexpected key {other:?}"),
+            })
+            .collect()
+    }
+
+    /// One account's inner lines, as WIDGETS — the stamps its inner For
+    /// actually put in the world.
+    fn inner_stamps(scene: &Scene, account: &str) -> usize {
+        scene
+            .stamps
+            .keys()
+            .filter(|(id, path, _)| {
+                *id == CollectionId(2) && path == &vec![Key::Str(account.into())]
+            })
+            .count()
+    }
+
+    /// A TABLE WHOSE ROWS OWN A COLLECTION WINDOWS LIKE EVERYTHING ELSE
+    /// (ruled 2026-08-25; this replaces the bridge exemption that stood
+    /// here). The write to an out-of-band row's inner list SUCCEEDS and
+    /// lands in data — the fault varied.py met, `no instance of
+    /// CollectionId(2) at path [Str("a199")]`, is what this asserts away.
+    #[test]
+    fn an_unrealized_rows_inner_list_takes_writes_and_realizes_them() {
+        let mut scene = nested_lines_table(200);
+        assert_eq!(stamped_rows(&scene), WINDOW_SEED_ROWS, "seeded, not bridged");
+
+        // a199 is 71 rows past the band: no widgets, and an instance all
+        // the same.
+        let ops = scene.apply(vec![add_line("a199", "l0"), add_line("a199", "l1")]);
+        assert!(creates(&ops).is_empty(), "an unrealized row stamps nothing");
+        assert_eq!(inner_lines(&scene, "a199"), vec!["l0", "l1"]);
+        assert_eq!(inner_stamps(&scene, "a199"), 0);
+
+        // The band reaches it: the inner rows stamp from the DATA, through
+        // the ordinary reconcile, with no window report of their own.
+        let ops = scene.window_moved(4, 199, 1);
+        assert!(scene.for_sites.contains_key(&(CollectionId(2), vec![Key::Str("a199".into())])));
+        assert_eq!(inner_stamps(&scene, "a199"), 2, "both lines are widgets now");
+        // The band is 198..200 (visible 199 plus one viewport each side,
+        // clamped): two rows' own labels, and a199's two lines.
+        assert_eq!(
+            creates(&ops).iter().filter(|(kind, _)| *kind == WidgetKind::Label).count(),
+            4
+        );
+    }
+
+    /// SCROLL AWAY AND BACK: the copy's widgets go, its data does not,
+    /// and the return rebuilds the inner rows from that data. This is the
+    /// half that was already broken under a report, before any seed
+    /// existed (docs/traps.md).
+    #[test]
+    fn an_inner_list_survives_its_rows_teardown() {
+        let mut scene = nested_lines_table(200);
+        scene.apply(vec![add_line("a000", "l0"), add_line("a000", "l1"), add_line("a000", "l2")]);
+        assert_eq!(inner_stamps(&scene, "a000"), 3, "a000 is in the seed's band");
+
+        // Away: a000 leaves the band with the rest of the seed.
+        scene.window_moved(4, 199, 1);
+        assert_eq!(inner_stamps(&scene, "a000"), 0, "the widgets left");
+        assert!(
+            !scene.for_sites.contains_key(&(CollectionId(2), vec![Key::Str("a000".into())])),
+            "and so did the inner site"
+        );
+        assert_eq!(inner_lines(&scene, "a000"), vec!["l0", "l1", "l2"], "the data stayed");
+
+        // A write while it is gone lands, and is not a fault.
+        scene.apply(vec![add_line("a000", "l3")]);
+
+        // Back: four lines, all of them widgets again.
+        let ops = scene.window_moved(4, 0, 1);
+        assert_eq!(inner_lines(&scene, "a000"), vec!["l0", "l1", "l2", "l3"]);
+        assert_eq!(inner_stamps(&scene, "a000"), 4, "rebuilt from the data");
+        // AND THE COPY IS ADDRESSABLE AGAIN: the inner For's container
+        // carries the row's own key, which is what varied.steps targets.
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::SetProp { prop: Prop::A11yId, value: Value::Str(s), .. }
+                    if s == "a000"
+            )),
+            "the re-stamped inner container re-declares its authored key"
+        );
+    }
+
+    /// THE ROW'S REMOVAL IS WHAT KILLS ITS DATA, now that its teardown
+    /// does not: the instance goes, and a same-key re-insert starts empty
+    /// rather than inheriting the dead row's lines.
+    #[test]
+    fn a_removed_row_takes_its_inner_list_with_it() {
+        let mut scene = nested_lines_table(4);
+        scene.apply(vec![add_line("a000", "l0"), add_line("a000", "l1")]);
+        scene.apply(vec![TxOp::CollectionRemove {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a000"),
         }]);
+        assert!(
+            !scene
+                .coll_instances
+                .contains_key(&(CollectionId(2), vec![Key::Str("a000".into())])),
+            "the row is gone, so its inner instance is"
+        );
+        scene.apply(vec![insert_account("a000")]);
+        assert!(inner_lines(&scene, "a000").is_empty(), "a fresh row, not a haunted one");
     }
 
     /// THE FIRST REPORT REPLACES THE SEED, wherever it lands: the rows

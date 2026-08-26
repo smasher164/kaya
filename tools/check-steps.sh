@@ -337,7 +337,7 @@ if starget is not None and not has_all(starget, [
     '!path.contains(where: { $0.isEmpty })',
     '!authored.contains(where: { $0 == "]" || $0 == "@" })',
     'guard !id.isEmpty else { return nil }',
-    'guard let keys else { return registry.first { $0.a11yId == id } }',
+    'return registry.first { kayaScene.nodes[$0.id] === $0 && $0.a11yId == id }',
 ]):
     fail("swift/KayaSwiftUI.swift target grammar is not kind@id[key.path] with bare @ preserved")
 if starget is not None and not has_all(starget, [
@@ -517,7 +517,7 @@ if ktarget is not None and not has_all(ktarget, [
     "keyText.isEmpty() || keys.any { it.isEmpty() }",
     "authored.any { it == ']' || it == '@' }",
     "if (id.isEmpty()) return null",
-    "if (keys == null) return registry.firstOrNull { it.a11yId == id }",
+    "KayaSceneModel.nodes[it.id] === it && it.a11yId == id",
 ]):
     fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt target grammar is not kind@id[key.path] with bare @ preserved")
 if ktarget is not None and not has_all(ktarget, [

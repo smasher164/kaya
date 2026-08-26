@@ -260,3 +260,115 @@ func TestACopysSortHandlerIsRegisteredAtItsForAndKeepsTheKeyPath(t *testing.T) {
 		t.Fatalf("indicator (%d, %d), want column 0 ascending", h.sorted, h.direction)
 	}
 }
+
+// A NESTED table's rows carrying NAMED FIELDS: the record-schema
+// constructor stands in the template zone, and narrowing the handle to
+// one stamped copy keeps the element type (docs/deferred.md, the
+// nested-record-collection gap). Both halves are read off the wire and
+// the model, because both lie in ways that COMPILE: a constructor that
+// opened its own transaction would emit the create_collection outside
+// the parent's scope, and a narrowing that dropped the key would write
+// the PARENT's table with no error anywhere.
+type nestedPosition struct {
+	Symbol string
+	Shares string
+}
+
+func nestedSymbol(p *nestedPosition) *string { return &p.Symbol }
+func nestedShares(p *nestedPosition) *string { return &p.Shares }
+
+func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *testing.T) {
+	app := NewApp()
+	var positions RecordCollection[string, nestedPosition]
+	recs := queued(t, app, func(tx *Tx) {
+		accounts := tx.Collection()
+		for account := range tx.Rows(accounts).All() {
+			// THE TEMPLATE ZONE'S OWN CONSTRUCTOR: the row surface embeds
+			// *Tpl and Tpl.tx is unexported, so this free function is the
+			// only way into the scope from here.
+			positions = TplCollectionOf[string, nestedPosition](account.Tpl)
+			nested := account.Rows(positions.Collection)
+			for row := range nested.All() {
+				row.Row(func() {
+					positions.Label(row.Tpl, nestedSymbol)
+					positions.Label(row.Tpl, nestedShares)
+				})
+			}
+		}
+		tx.Insert(accounts, "brokerage", "Brokerage")
+		// `At` KEEPS THE RECORD TYPE, so this is the record insert. An
+		// untyped handle here would take a bare value and the row's two
+		// fields would be unreachable.
+		positions.At("brokerage").Insert(tx, "aapl", nestedPosition{"AAPL", "10"})
+	})
+
+	// The collection was born with the RECORD schema: two fields, not the
+	// one string a scalar collection carries.
+	births := recordsOfKind(recs, txCreateCollection)
+	if len(births) != 2 {
+		t.Fatalf("the probe queued %d create_collection records, want 2 (the "+
+			"accounts table and the nested positions one)", len(births))
+	}
+	birth := recs[births[1]]
+	variants := binary.LittleEndian.Uint32(birth[16:])
+	fields := binary.LittleEndian.Uint32(birth[24:])
+	if variants != 1 || fields != 2 {
+		t.Fatalf("the nested collection's schema is %d variant(s) of %d field(s), "+
+			"want 1 of 2 — a record collection born with the scalar schema "+
+			"typechecks and leaves every row one string wide", variants, fields)
+	}
+
+	// And it was born INSIDE the parent's template scope: after the
+	// create_for that opened it, before the template_end that closed it.
+	fors := recordsOfKind(recs, txCreateFor)
+	ends := recordsOfKind(recs, txTemplateEnd)
+	if len(fors) != 2 || len(ends) != 2 {
+		t.Fatalf("found %d create_for and %d template_end records, want 2 each — "+
+			"the probe is no longer building a nested table", len(fors), len(ends))
+	}
+	if births[1] < fors[0] || births[1] > ends[1] {
+		t.Fatalf("the nested collection is record %d, outside the parent's "+
+			"template scope (%d..%d). A collection declared in the LIVE zone is "+
+			"one table for every copy, not one per copy",
+			births[1], fors[0], ends[1])
+	}
+
+	// The typed narrowing addresses the COPY, on the wire.
+	inserts := recordsOfKind(recs, txCollectionInsert)
+	if len(inserts) != 2 {
+		t.Fatalf("the probe queued %d collection_insert records, want 2", len(inserts))
+	}
+	if pathLen := binary.LittleEndian.Uint32(recs[inserts[1]][16:]); pathLen != 1 {
+		t.Fatalf("the record insert carries path_len %d, want 1 — a narrowing "+
+			"that drops the key writes the parent's table in silence", pathLen)
+	}
+
+	// And in the model, which is the half the wire cannot show: the copy's
+	// entry is a nestedPosition, and the collection's own table is empty.
+	app2 := NewApp()
+	var copyEntries, ownEntries []RecordEntry[string, nestedPosition]
+	app2.Build(func(tx *Tx) {
+		var inner RecordCollection[string, nestedPosition]
+		accounts := tx.Collection()
+		for account := range tx.Rows(accounts).All() {
+			inner = TplCollectionOf[string, nestedPosition](account.Tpl)
+			for row := range account.Rows(inner.Collection).All() {
+				row.Row(func() { inner.Label(row.Tpl, nestedSymbol) })
+			}
+		}
+		tx.Insert(accounts, "brokerage", "Brokerage")
+		inner.At("brokerage").Insert(tx, "aapl", nestedPosition{"AAPL", "10"})
+		copyEntries = inner.At("brokerage").Items(tx)
+		ownEntries = inner.Items(tx)
+	})
+	if len(copyEntries) != 1 || copyEntries[0].Key != "aapl" ||
+		copyEntries[0].Value != (nestedPosition{"AAPL", "10"}) {
+		t.Fatalf("the copy's model holds %v, want one aapl/AAPL/10 record — the "+
+			"typed At is what keeps the mirror's entries records rather than "+
+			"bare values", copyEntries)
+	}
+	if len(ownEntries) != 0 {
+		t.Fatalf("the collection's OWN table holds %d entries; the write was "+
+			"addressed to a copy and must not reach it", len(ownEntries))
+	}
+}

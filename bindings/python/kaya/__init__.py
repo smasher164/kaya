@@ -1353,8 +1353,11 @@ class _ForTrace:
                 _records().append(
                     wire.tx_set_align(self._template.handle.id, _align_value(self._align)))
             if self._a11y_id is not None:
-                _records().append(
-                    wire.tx_set_a11y_id(self._template.handle.id, self._a11y_id))
+                # THE SAME THREE SOURCES the handle setter takes: the
+                # copies of one For node share a node id, so a constant
+                # names N containers at once and only the ROW's own field
+                # tells them apart (`_Handle.a11y_id`).
+                self._template.handle.a11y_id(self._a11y_id)
         raise StopIteration
 
 
@@ -1476,7 +1479,7 @@ class _ColumnsTrace:
             if self._grow is not None:
                 _records().append(wire.tx_set_grow(handle.id, float(self._grow)))
             if self._a11y_id is not None:
-                _records().append(wire.tx_set_a11y_id(handle.id, self._a11y_id))
+                handle.a11y_id(self._a11y_id)
             raise
 
 

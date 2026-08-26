@@ -127,7 +127,10 @@ is a separate admission if a real app ever needs one).
    implemented: `expect_column_edges <target> <n>` asserts BOTH halves
    — the cells form exactly n leading-edge clusters (within two device
    units) AND the table spans its assigned track — read from real
-   layout by every backend. The span half exists because the
+   layout by every backend. Since 2026-08-25 the span half is
+   two-directional: the cells must also START flush, not merely stay
+   inside (docs/deferred.md, the ContentUnderfill entry, which carries
+   what each backend can and cannot see here). The span half exists because the
    content-hug cut kept every cluster exactly right while leaving 90%
    of the viewport empty: alignment alone cannot see it. macOS native
    columns add user resize on top (the affordance the touch tiers
@@ -196,9 +199,15 @@ is a separate admission if a real app ever needs one).
    removed: collapse; height inflated 100pt: "leaves 109pt below its
    last row"). The portfolio dashboard is the ungrown consumer and
    asserts the hug on column@positions[brokerage]; table.steps' grown
-   table is the other half. GTK's and Compose's synthesized tiers are
-   content-height by construction; iOS ungrown native metrics stay
-   unpinned until a scene exercises one.
+   table is the other half. Compose's synthesized tier is content-height
+   by construction; GTK's was NOT, measured 2026-08-25 — its scroll
+   viewport carried the vertical scrollbar's OWN 58px minimum, so a
+   one-row table drew 42px of empty card under its row (docs/traps.md,
+   "A GTK table's viewport floor is the scrollbar's own minimum"). It
+   hugs now: the vertical policy is written from the core's extent and
+   the container's grow weight, so a table that cannot need a bar stops
+   claiming one. iOS ungrown native metrics stay unpinned until a scene
+   exercises one.
 
 ## The wire (append-only ids)
 
@@ -247,7 +256,9 @@ is a separate admission if a real app ever needs one).
   decision 6, both halves promised everywhere; the exact column
   widths stay platform metrics. Added 2026-08-21 with the
   geometry-rule ratification, so the same scene measures the same
-  claim on every platform.
+  claim on every platform. The span half convicts UNDERFILL as well as
+  overflow since 2026-08-25, and what each backend can see of it is
+  docs/deferred.md's ContentUnderfill entry.
 
 ## The scene (tools/scenes/table.steps)
 

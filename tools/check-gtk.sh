@@ -68,6 +68,21 @@ ENTRIES = (
     ("table viewport overflow test",
      "fn gtk_table_viewport_rejects_overflow()",
      "fn gtk_table_viewport_rejects_overflow_disabled()"),
+    ("padded-card truth table",
+     "fn gtk_table_padded_card_convicts_nothing()",
+     "fn gtk_table_padded_card_convicts_nothing_disabled()"),
+    # THE VIEWPORT'S FLOOR (docs/deferred.md, closed 2026-08-25): a
+    # vertical scrollbar's own 58px minimum reaches the scroller through
+    # the POLICY, so a table that cannot need a bar stops claiming one.
+    # Both deciding numbers are already owned — the core's extent and the
+    # flex contract's grow weight — and a policy pinned open is the shape
+    # that would silently bring the empty card back.
+    ("the hug's policy write",
+     "set_table_scrolling(&body, grown || band.extent > f64::from(TABLE_MAX_CONTENT));",
+     "set_table_scrolling(&body, true);"),
+    ("the grow weight the hug consults",
+     "grow_weight(column.upcast_ref::<gtk4::Widget>()) > 0.0",
+     "true"),
     ("allocator rounding dust",
      "let rounding_error = (growers.len().saturating_sub(1) as f64) / 2.0;",
      "let rounding_error = 0.0;"),
@@ -224,6 +239,7 @@ PY
         && run_exact_test gtk::flex::tests::gtk_flex_measure_holds_grower_requirements \
         && run_exact_test gtk::flex::tests::gtk_flex_allocator_never_negative \
         && run_exact_test gtk::flex::tests::gtk_table_viewport_rejects_overflow \
+        && run_exact_test gtk::flex::tests::gtk_table_padded_card_convicts_nothing \
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \
             >/dev/null 2>&1; then
                 echo "check-gtk: zero-test self-test was accepted" >&2

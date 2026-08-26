@@ -1717,7 +1717,16 @@ fn trace_enabled() -> bool {
 fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     let own = core.container_insets.get(&id).copied().unwrap_or(0.0);
     let root = core.mounted_roots.values().any(|&r| r == id);
-    own + if root { core.inset } else { 0.0 }
+    // A DECLARED TABLE'S CARD INTERIOR RIDES THIS NUMBER deliberately
+    // (TABLE_CARD_XAML): it is the one every track arithmetic already
+    // subtracts, so the card holds the content off its stroke without
+    // moving a single cell edge.
+    let card = if TABLES.with_borrow(|tables| tables.contains_key(&id.0)) {
+        TABLE_CARD_PAD
+    } else {
+        0.0
+    };
+    own + card + if root { core.inset } else { 0.0 }
 }
 
 /// Write [`container_padding`] onto a container. Not a container (or
@@ -2118,6 +2127,46 @@ const TABLE_RULE_XAML: &str = concat!(
     "Height=\"1\" Background=\"#40808080\" HorizontalAlignment=\"Stretch\"/>"
 );
 
+/// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry;
+/// ruled 2026-08-25) — Fluent's layer card, FLAT: fill, a 1 DIP stroke
+/// and the radius, no shadow and no elevation. A Grid for
+/// TABLE_RULE_XAML's reason.
+///
+/// THE CARD SITS BEHIND THE THREE TRACKS, NOT AROUND THEM. Written onto
+/// the container itself, a BorderThickness takes 2 DIP out of the box
+/// every track arithmetic here divides (`table_stamp`'s `inner`,
+/// `column_edges`' `drawn`) — the card must cost the cells nothing, so it
+/// is a child spanning the header, the rule and the scroll host, inserted
+/// at 0 because a XAML panel paints its children in order.
+///
+/// The radius is the 8 of Fluent's family, not the 4: `ControlCornerRadius`
+/// is for small controls and `OverlayCornerRadius` is the one the design
+/// language assigns to CARDS.
+///
+/// AND IT CARRIES A NEGATIVE MARGIN of exactly the card's interior
+/// padding. The padding rides the CONTAINER's own Padding
+/// (`container_padding`) because that is the one number every arithmetic
+/// here already subtracts — `table_stamp`'s `inner`, `column_edges`'
+/// content-box frame — so the card cannot move a cell edge. But the card
+/// is a CHILD of that container, so the same padding would push the card
+/// in too and it would hug the text again; the margin pulls it back out
+/// to the box the guest's own inset leaves it.
+const TABLE_CARD_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Background=\"{ThemeResource CardBackgroundFillColorDefaultBrush}\" ",
+    "BorderBrush=\"{ThemeResource CardStrokeColorDefaultBrush}\" ",
+    "BorderThickness=\"1\" CornerRadius=\"{ThemeResource OverlayCornerRadius}\" ",
+    "HorizontalAlignment=\"Stretch\" VerticalAlignment=\"Stretch\"/>"
+);
+
+/// The card's interior, per side. FLUENT'S CARD CONTENT INSET is 12epx —
+/// the number its own card-shaped surfaces use for content (the
+/// SettingsCard family's 12/16 pair, of which 12 is the tighter one and
+/// the one a DENSE table wants). Symmetric, because `pad` is one number
+/// for four sides here and splitting it would mean touching every
+/// `2.0 * pad` in the table's arithmetic.
+const TABLE_CARD_PAD: f64 = 12.0;
+
 /// The ascending / descending indicator, appended to the sorted column's
 /// title. The GLYPHS the other synthesized tiers use; `columns_presented`
 /// reads them back off the control and turns them into the `^N`/`vN` the
@@ -2140,6 +2189,8 @@ struct WinTable {
     tag: Vec<u8>,
     /// The For's own container.
     grid: Grid,
+    /// The card behind the three tracks (TABLE_CARD_XAML).
+    card: Grid,
     header: Grid,
     rule: Grid,
     /// THE SCROLL CONTAINER THIS TIER OWNS (docs/virtualization-plan.md
@@ -2254,7 +2305,7 @@ fn declare_table(
         return Ok(());
     };
     let grid = grid.clone();
-    let mut minted: Option<(Grid, Grid, ScrollViewer, Grid, Vec<Button>)> = None;
+    let mut minted: Option<(Grid, Grid, Grid, ScrollViewer, Grid, Vec<Button>)> = None;
     let remint = TABLES.with_borrow(|tables| match tables.get(&id.0) {
         Some(live) => live.titles.len() != titles.len(),
         None => true,
@@ -2263,12 +2314,23 @@ fn declare_table(
         let header = Grid::new()?;
         header.SetColumnSpacing(TABLE_COL_GAP)?;
         header.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        let card: Grid = XamlReader::Load(&HSTRING::from(TABLE_CARD_XAML))?.cast()?;
+        // ONE number, written here rather than spelled again in the
+        // markup: the card sits back out at the container's own box while
+        // the content stays inside the padding it shares with the track
+        // arithmetic.
+        card.SetMargin(Thickness {
+            Left: -TABLE_CARD_PAD,
+            Top: -TABLE_CARD_PAD,
+            Right: -TABLE_CARD_PAD,
+            Bottom: -TABLE_CARD_PAD,
+        })?;
         let rule: Grid = XamlReader::Load(&HSTRING::from(TABLE_RULE_XAML))?.cast()?;
         // THE SCROLL CONTAINER (§4). Vertical only, and its scrollbar is
         // an OVERLAY (Auto, never Visible): a reserved gutter would take
         // its width out of the rows and leave them narrower than the
-        // pinned header, which `column_edges` reads as an underfilled
-        // track.
+        // pinned header, which `column_edges` convicts as a
+        // ContentUnderfill — its per-line end is there for exactly this.
         let host = ScrollViewer::new()?;
         host.SetHorizontalScrollMode(ScrollMode::Disabled)?;
         host.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
@@ -2309,12 +2371,12 @@ fn declare_table(
             cell.Click(&handler)?;
             cells.push(cell);
         }
-        minted = Some((header, rule, host, band, cells));
+        minted = Some((card, header, rule, host, band, cells));
     }
     let fresh = minted.is_some();
     let gap = core.spacings.get(&id).copied().unwrap_or(8.0);
     TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
-        if let Some((header, rule, host, band, cells)) = minted {
+        if let Some((card, header, rule, host, band, cells)) = minted {
             tables.insert(
                 id.0,
                 WinTable {
@@ -2323,6 +2385,7 @@ fn declare_table(
                     direction,
                     tag,
                     grid: grid.clone(),
+                    card,
                     header,
                     rule,
                     host,
@@ -2364,13 +2427,24 @@ fn declare_table(
     })?;
     if fresh {
         let children = grid.Children()?;
-        let (header, rule, host) = TABLES.with_borrow(|tables| {
+        let (card, header, rule, host) = TABLES.with_borrow(|tables| {
             let table = &tables[&id.0];
-            (table.header.clone(), table.rule.clone(), table.host.clone())
+            (
+                table.card.clone(),
+                table.header.clone(),
+                table.rule.clone(),
+                table.host.clone(),
+            )
         });
+        // The card spans the three tracks and is inserted FIRST, which is
+        // what puts it behind them (TABLE_CARD_XAML).
+        let card_element = card.cast::<FrameworkElement>()?;
+        Grid::SetRow(&card_element, 0)?;
+        Grid::SetRowSpan(&card_element, 3)?;
         Grid::SetRow(&header.cast::<FrameworkElement>()?, 0)?;
         Grid::SetRow(&rule.cast::<FrameworkElement>()?, 1)?;
         Grid::SetRow(&host.cast::<FrameworkElement>()?, 2)?;
+        children.InsertAt(0, &card)?;
         children.Append(&header)?;
         children.Append(&rule)?;
         children.Append(&host)?;
@@ -2400,6 +2474,11 @@ fn declare_table(
         });
         grid.LayoutUpdated(&laid)?;
     }
+    // The card's interior joins the container's padding the moment the
+    // table exists, and container_padding only answers for a table it can
+    // already see in TABLES — so the stamp is re-run HERE rather than
+    // waiting for an inset prop that may never arrive.
+    stamp_container_padding(core, id)?;
     // The two head tracks the rows now shift down past.
     core.child_order.mark(id);
     Ok(())
@@ -2920,46 +2999,131 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
 }
 
 /// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half — the
-/// gtk.rs sibling of the same name. A disjunction here would print one
-/// sentence for four causes and three of them would read compliant
-/// (invariant 3).
+/// gtk.rs sibling of the same name, and gtk.rs's variant set except that
+/// `ColumnsOverflow` reads a resolved ColumnDefinition sum GTK never
+/// sees. A disjunction here would print one sentence for six causes and
+/// five of them would read compliant (invariant 3).
 ///
-/// NOT GTK's variant set: `ColumnsOverflow` reads a resolved
-/// ColumnDefinition sum GTK never sees, GTK's `ContentUnderfill` wants
-/// a per-line end this read does not collect, and its leading-edge
-/// UNDERFILL direction is unswept on this backend.
+/// EVERY NUMBER IS IN THE GRID'S CONTENT BOX, which is what makes these
+/// gtk.rs's clauses and not merely their names: XAML gives a UIElement's
+/// coordinate space its PADDING box, where GTK4 gives a widget's own
+/// space the content box, so `column_edges` takes both pads off before it
+/// classifies. Without that a table with a declared inset convicts itself
+/// of starting inside its own viewport.
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableHorizontalIssue {
     TrackUnderfill,
     ColumnsOverflow,
+    ContentLeftUnderfill,
     ContentLeftOverflow,
+    ContentUnderfill,
     ContentOverflow,
 }
 
-/// `drawn` is the resolved column tracks plus their spacing plus both
-/// pads, `track` what the parent gave the table, `viewport` the table
-/// surface's own width, `left`/`right` the cell ink in that surface's
-/// space.
+/// `drawn` is the resolved column tracks plus their spacing, `track` what
+/// the parent gave the table, `viewport` the table surface's own width —
+/// all in the grid's content box, like the three ink/track numbers below.
+///
+/// THE THREE EDGE NUMBERS DO NOT SHARE A BASIS, and that is the whole
+/// lesson of 2026-08-25 (docs/deferred.md):
+///   `min_start`  the leftmost cell's INK. Where the content begins is a
+///                question ink answers, and this backend's cells sit at
+///                their tracks' leading edges, so it reads flush.
+///   `min_end`    the SHORTEST of the lines' TRACK ends. Ink cannot serve:
+///                a table cell here is not stretched to its track, so a
+///                correct line's ink stops at its text. This is the
+///                header-versus-rows instrument — a reserved scrollbar
+///                gutter takes its width out of the rows and not out of
+///                the pinned header, which `declare_table` promises this
+///                read can see.
+///   `max_end`    the furthest cell's INK, which is the only basis that
+///                can see ink spilling PAST its own track; tracks
+///                overflowing the viewport are `ColumnsOverflow`'s job.
 #[cfg(any(feature = "harness", test))]
 fn table_horizontal_issue(
     drawn: f64,
     track: f64,
     viewport: f64,
-    left: f64,
-    right: f64,
+    min_start: f64,
+    min_end: f64,
+    max_end: f64,
 ) -> Option<TableHorizontalIssue> {
     if drawn < track - 2.0 {
         Some(TableHorizontalIssue::TrackUnderfill)
     } else if drawn > viewport + 2.0 {
         Some(TableHorizontalIssue::ColumnsOverflow)
-    } else if left < -2.0 {
+    } else if min_start > 2.0 {
+        Some(TableHorizontalIssue::ContentLeftUnderfill)
+    } else if min_start < -2.0 {
         Some(TableHorizontalIssue::ContentLeftOverflow)
-    } else if right > viewport + 2.0 {
+    } else if min_end < viewport - 2.0 {
+        Some(TableHorizontalIssue::ContentUnderfill)
+    } else if max_end > viewport + 2.0 {
         Some(TableHorizontalIssue::ContentOverflow)
     } else {
         None
     }
+}
+
+/// ONE CELL'S TWO BASES, in the table surface's own space: where the cell
+/// DRAWS, and where its Grid TRACK is.
+///
+/// THEY ARE DIFFERENT ON THIS BACKEND, and believing otherwise cost a
+/// windows lane (2026-08-25, docs/deferred.md). `flush_tracks` stamps
+/// HorizontalAlignment::Stretch on FLEX children; a table's cells are not
+/// flex children — `table_stamp` writes explicit pixel tracks onto the
+/// header and every row, and the cells sit in the band panel inside them —
+/// so a cell's ActualWidth is its own content. Every table-bearing leg
+/// failed with "draws 289dip of a 508dip viewport", the 289 tracking the
+/// row's text.
+#[cfg(any(feature = "harness", test))]
+#[derive(Debug, Clone, Copy)]
+struct TableCellBox {
+    ink_start: f64,
+    ink_end: f64,
+    track_start: f64,
+    track_end: f64,
+}
+
+/// One line's trailing edge: the far side of the furthest TRACK any of its
+/// cells occupies, or None for a line with no placed cell.
+///
+/// THE TRACK, NEVER THE INK. gtk.rs's cells FILL their columns (hexpand +
+/// halign Fill), so its line end IS the track edge and one read answers
+/// both; reading ink here would put a different question in the same
+/// sentence. `mod tests` pins the measured field geometry both ways.
+#[cfg(any(feature = "harness", test))]
+fn table_line_end(cells: &[TableCellBox]) -> Option<f64> {
+    cells.iter().fold(None, |far: Option<f64>, cell| {
+        Some(far.map_or(cell.track_end, |edge| edge.max(cell.track_end)))
+    })
+}
+
+/// `column_edges`' FIVE NUMBERS, moved into the grid's CONTENT box.
+///
+/// TransformToVisual's origin is the grid's PADDING box and
+/// `assigned_track`/`ActualWidth` are its OUTER one, so `pad` comes off
+/// each of them — and since 2026-08-25 `pad` includes the table card's
+/// interior (`container_padding`), which is exactly what lets the card
+/// hold content off its stroke without moving a cell edge. Pure and
+/// separate from the read so `mod tests` can pin the padded case; a basis
+/// that forgets this subtraction convicts every correct padded table.
+#[cfg(any(feature = "harness", test))]
+fn table_content_frame(
+    pad: f64,
+    track: f64,
+    viewport: f64,
+    ink: (f64, f64, f64),
+) -> (f64, f64, f64, f64, f64) {
+    let (min_start, min_end, max_end) = ink;
+    (
+        track - 2.0 * pad,
+        viewport - 2.0 * pad,
+        min_start - pad,
+        min_end - pad,
+        max_end - pad,
+    )
 }
 
 /// The convicting sentence for each cause, or empty when there is none.
@@ -2970,11 +3134,12 @@ fn table_horizontal_complaint(
     drawn: f64,
     track: f64,
     viewport: f64,
-    left: f64,
-    right: f64,
+    min_start: f64,
+    min_end: f64,
+    max_end: f64,
 ) -> String {
     let dip = |x: f64| x.round() as i64;
-    match table_horizontal_issue(drawn, track, viewport, left, right) {
+    match table_horizontal_issue(drawn, track, viewport, min_start, min_end, max_end) {
         Some(TableHorizontalIssue::TrackUnderfill) => {
             format!("draws {}dip of a {}dip track", dip(drawn), dip(track))
         }
@@ -2983,14 +3148,24 @@ fn table_horizontal_complaint(
             dip(drawn),
             dip(viewport)
         ),
+        Some(TableHorizontalIssue::ContentLeftUnderfill) => format!(
+            "cells start at {}dip inside a {}dip viewport",
+            dip(min_start),
+            dip(viewport)
+        ),
         Some(TableHorizontalIssue::ContentLeftOverflow) => format!(
             "cells start at {}dip outside a {}dip viewport",
-            dip(left),
+            dip(min_start),
+            dip(viewport)
+        ),
+        Some(TableHorizontalIssue::ContentUnderfill) => format!(
+            "draws {}dip of a {}dip viewport",
+            dip(min_end),
             dip(viewport)
         ),
         Some(TableHorizontalIssue::ContentOverflow) => format!(
             "cells end at {}dip outside a {}dip viewport",
-            dip(right),
+            dip(max_end),
             dip(viewport)
         ),
         None => String::new(),
@@ -15144,34 +15319,77 @@ impl crate::harness::Stage for WinUiStage {
             // the table's own space — kaya's header cells included, since
             // this backend composes the header — through the transform,
             // never through the tracks that were asked for.
+            //
+            // BY LINE, because the header and a row can end in different
+            // places and one global maximum cannot see it (the
+            // `table_horizontal_issue` note).
             let surface: UIElement = grid.cast()?;
-            let mut edges: Vec<f64> = Vec::new();
-            let mut right = f64::NEG_INFINITY;
-            let mut push = |cell: &UIElement| -> windows_core::Result<()> {
-                let at = cell
-                    .TransformToVisual(&surface)?
-                    .TransformPoint(Point { X: 0.0, Y: 0.0 })?;
-                let element: FrameworkElement = cell.cast()?;
-                let left = f64::from(at.X);
-                edges.push(left);
-                right = right.max(left + element.ActualWidth()?);
-                Ok(())
-            };
-            let header_cells = header.Children()?;
-            for at in 0..header_cells.Size()? {
-                push(&header_cells.GetAt(at)?)?;
-            }
             let Some(rows) = table_rows_in_track_order(core, t)? else {
                 return Ok("<no such target>".to_string());
             };
-            for row in &rows {
-                let children = row.Children()?;
+            let mut lines: Vec<Grid> = vec![header.clone()];
+            lines.extend(rows.iter().cloned());
+            let mut edges: Vec<f64> = Vec::new();
+            let mut min_start = f64::MAX;
+            let mut min_end = f64::MAX;
+            let mut max_end = f64::NEG_INFINITY;
+            for line in &lines {
+                let origin = f64::from(
+                    line.cast::<UIElement>()?
+                        .TransformToVisual(&surface)?
+                        .TransformPoint(Point { X: 0.0, Y: 0.0 })?
+                        .X,
+                );
+                // THIS LINE'S OWN RESOLVED TRACKS, never the header's: a
+                // row that arrived after the last `table_stamp` still
+                // carries the container defaults, and that is exactly the
+                // state ContentUnderfill exists to name.
+                let defs = line.ColumnDefinitions()?;
+                let spacing = line.ColumnSpacing()?;
+                let mut tracks: Vec<(f64, f64)> = Vec::new();
+                let mut acc = 0.0;
+                for at in 0..defs.Size()? {
+                    let width = defs.GetAt(at)?.ActualWidth()?;
+                    tracks.push((origin + acc, origin + acc + width));
+                    acc += width + spacing;
+                }
+                let children = line.Children()?;
+                let mut boxes: Vec<TableCellBox> = Vec::new();
                 for at in 0..children.Size()? {
-                    push(&children.GetAt(at)?)?;
+                    let cell = children.GetAt(at)?;
+                    let element: FrameworkElement = cell.cast()?;
+                    let ink_start = f64::from(
+                        cell.TransformToVisual(&surface)?
+                            .TransformPoint(Point { X: 0.0, Y: 0.0 })?
+                            .X,
+                    );
+                    let ink_end = ink_start + element.ActualWidth()?;
+                    edges.push(ink_start);
+                    min_start = min_start.min(ink_start);
+                    max_end = max_end.max(ink_end);
+                    // Out of range is `table_floors`' own defensive skip,
+                    // one read over: the cell contributes no track edge
+                    // rather than a wrong one, and a placement the tracks
+                    // disagree with shows up in the cluster count.
+                    let column = Grid::GetColumn(&element)? as usize;
+                    if let Some(&(track_start, track_end)) = tracks.get(column) {
+                        boxes.push(TableCellBox {
+                            ink_start,
+                            ink_end,
+                            track_start,
+                            track_end,
+                        });
+                    }
+                }
+                if let Some(end) = table_line_end(&boxes) {
+                    min_end = min_end.min(end);
                 }
             }
             if edges.is_empty() {
                 return Ok("no cells".to_string());
+            }
+            if min_end == f64::MAX {
+                return Ok("no resolved column tracks on any line".to_owned());
             }
             edges.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let mut clusters: Vec<f64> = Vec::new();
@@ -15193,19 +15411,33 @@ impl crate::harness::Stage for WinUiStage {
             // while drawing in a corner of its assigned track. The
             // resolved columns are also allowed to exceed neither the
             // table surface's own horizontal viewport nor its padding.
+            //
+            // IN THE GRID'S CONTENT BOX: the cell edges above came out of
+            // TransformToVisual, whose origin is the grid's PADDING box,
+            // so the pads come off both the frame and the ink here (the
+            // `TableHorizontalIssue` note).
             let defs = header.ColumnDefinitions()?;
             let mut drawn = header.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1));
             for at in 0..defs.Size()? {
                 drawn += defs.GetAt(at)?.ActualWidth()?;
             }
-            drawn += 2.0 * pad;
-            let track = assigned_track(core, &grid)?;
-            let viewport = grid.ActualWidth()?;
-            let left = edges.first().copied().unwrap_or(f64::INFINITY);
+            let (track, viewport, min_start, min_end, max_end) = table_content_frame(
+                pad,
+                assigned_track(core, &grid)?,
+                grid.ActualWidth()?,
+                (min_start, min_end, max_end),
+            );
             if track <= 0.0 || viewport <= 0.0 {
                 return Ok("no live table viewport geometry".to_owned());
             }
-            Ok(table_horizontal_complaint(drawn, track, viewport, left, right))
+            Ok(table_horizontal_complaint(
+                drawn,
+                track,
+                viewport,
+                min_start,
+                min_end,
+                max_end,
+            ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
@@ -15396,6 +15628,20 @@ impl crate::harness::Stage for WinUiStage {
                         })
                         .map(|i| i as isize))
                 });
+            }
+            // A DESTROYED WIDGET MAY NOT ANSWER A TARGET — see gtk.rs's
+            // twin: the registries are push-only and a windowed row's copy
+            // dies on every scroll, so the Column arm (the only kind with
+            // an id vector) filters to what `widgets` still holds.
+            if kind == K::Column {
+                return Ok(core
+                    .columns
+                    .iter()
+                    .zip(&core.column_ids)
+                    .position(|(column, widget)| {
+                        core.widgets.contains_key(widget) && carries_id(column, &id)
+                    })
+                    .map(|i| i as isize));
             }
             Ok(match kind {
                 // The buttons registry stores click TAGS by design (the
@@ -16705,7 +16951,24 @@ impl crate::harness::Stage for WinUiStage {
             if children.Size()? == 0 {
                 return Ok("<no children to measure against>".to_owned());
             }
-            let child = children.GetAt(0)?;
+            // NOT THE CARD, which is a table's first child and carries a
+            // NEGATIVE margin of the card interior (TABLE_CARD_XAML): it
+            // is arranged at the guest's own inset, and reading it here
+            // would report that inset plus the card's padding.
+            let card = TABLES.with_borrow(|tables| {
+                tables.values().find(|t| t.grid == grid).map(|t| t.card.clone())
+            });
+            let mut at = 0u32;
+            if let Some(card) = card {
+                let mut found = 0u32;
+                if children.IndexOf(&card, &mut found)?.into() {
+                    at = found + 1;
+                }
+            }
+            if at >= children.Size()? {
+                return Ok("<no children to measure against>".to_owned());
+            }
+            let child = children.GetAt(at)?;
             let origin = child
                 .TransformToVisual(&grid)?
                 .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
@@ -16728,8 +16991,19 @@ impl crate::harness::Stage for WinUiStage {
                 )
             });
             let window_term = if root { core.inset } else { 0.0 };
-            let x = (f64::from(origin.X) - margin.Left - window_term).round() as i64;
-            let y = (f64::from(origin.Y) - margin.Top - window_term).round() as i64;
+            // AND A DECLARED TABLE'S CARD INTERIOR, which rides this same
+            // Padding (container_padding): the guest declared the inset,
+            // not the card, so the card's own term comes back off or this
+            // verb answers `inset + 12` for every table.
+            let card_term = TABLES.with_borrow(|tables| {
+                if tables.values().any(|t| t.grid == grid) {
+                    TABLE_CARD_PAD
+                } else {
+                    0.0
+                }
+            });
+            let x = (f64::from(origin.X) - margin.Left - window_term - card_term).round() as i64;
+            let y = (f64::from(origin.Y) - margin.Top - window_term - card_term).round() as i64;
             Ok(if x == y {
                 format!("{x}")
             } else {
@@ -17534,93 +17808,231 @@ mod tests {
         assert!(!table_content_fits(102.1, 100.0));
     }
 
-    /// FOUR CAUSES, FOUR SENTENCES, and the precedence between them —
-    /// the half a refactor loses. Both sides of every 2.0 boundary are
+    /// SIX CAUSES, SIX SENTENCES, and the precedence between them — the
+    /// half a refactor loses. Both sides of every 2.0 boundary are
     /// pinned, because that slack is what keeps a subpixel arrange from
     /// reddening a correct table.
     ///
-    /// The last case is the measured one this exists for: before the
-    /// split, a table whose resolved columns overflowed a 300dip
-    /// viewport while its ink stayed inside printed "cells span 290dip
-    /// inside a 300dip viewport" — two numbers asserting the opposite of
-    /// the failure, on a red leg.
+    /// The ColumnsOverflow case is the measured one this exists for:
+    /// before the split, a table whose resolved columns overflowed a
+    /// 300dip viewport while its ink stayed inside printed "cells span
+    /// 290dip inside a 300dip viewport" — two numbers asserting the
+    /// opposite of the failure, on a red leg.
+    ///
+    /// The two UNDERFILL directions joined 2026-08-25 (docs/deferred.md):
+    /// this backend convicted the overflow directions alone, so a table
+    /// whose cells started 40dip inside their own viewport was RED on
+    /// Linux and GREEN here off the same byte-shared expect_column_edges.
     #[test]
     fn table_horizontal_issue_convicts_one_cause() {
         use TableHorizontalIssue as Issue;
         let issue = table_horizontal_issue;
         let say = table_horizontal_complaint;
-        // drawn, track, viewport, left, right — a table filling its
-        // track and its viewport, ink flush inside: silent.
-        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 100.0), None);
-        assert_eq!(say(100.0, 100.0, 100.0, 0.0, 100.0), "");
+        // drawn, track, viewport, min_start, min_end, max_end — a table
+        // filling its track and its viewport, every line flush inside:
+        // silent.
+        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 100.0, 100.0), None);
+        assert_eq!(say(100.0, 100.0, 100.0, 0.0, 100.0, 100.0), "");
 
-        // Every sentence below is read off five PAIRWISE DISTINCT
-        // numbers, so an arm that prints the wrong one of the five is a
+        // Every sentence below is read off six PAIRWISE DISTINCT
+        // numbers, so an arm that prints the wrong one of the six is a
         // red rather than a coincidence.
-        assert_eq!(issue(98.0, 100.0, 100.0, 0.0, 98.0), None);
+        assert_eq!(issue(98.0, 100.0, 100.0, 0.0, 98.0, 98.0), None);
         assert_eq!(
-            issue(97.9, 100.0, 100.0, 0.0, 97.9),
+            issue(97.9, 100.0, 100.0, 0.0, 97.9, 97.9),
             Some(Issue::TrackUnderfill)
         );
         assert_eq!(
-            say(80.0, 120.0, 100.0, 0.0, 70.0),
+            say(80.0, 120.0, 100.0, 0.0, 70.0, 75.0),
             "draws 80dip of a 120dip track"
         );
 
-        assert_eq!(issue(102.0, 100.0, 100.0, 0.0, 100.0), None);
+        assert_eq!(issue(102.0, 100.0, 100.0, 0.0, 100.0, 100.0), None);
         assert_eq!(
-            issue(102.1, 100.0, 100.0, 0.0, 100.0),
+            issue(102.1, 100.0, 100.0, 0.0, 100.0, 100.0),
             Some(Issue::ColumnsOverflow)
         );
         assert_eq!(
-            say(140.0, 120.0, 100.0, 0.0, 110.0),
+            say(140.0, 120.0, 100.0, 0.0, 105.0, 110.0),
             "columns resolve to 140dip in a 100dip viewport"
         );
 
-        assert_eq!(issue(100.0, 100.0, 100.0, -2.0, 100.0), None);
+        assert_eq!(issue(100.0, 100.0, 100.0, 2.0, 100.0, 100.0), None);
         assert_eq!(
-            issue(100.0, 100.0, 100.0, -2.1, 100.0),
+            issue(100.0, 100.0, 100.0, 2.1, 100.0, 100.0),
+            Some(Issue::ContentLeftUnderfill)
+        );
+        assert_eq!(
+            say(98.0, 99.0, 100.0, 40.0, 130.0, 140.0),
+            "cells start at 40dip inside a 100dip viewport"
+        );
+
+        assert_eq!(issue(100.0, 100.0, 100.0, -2.0, 100.0, 100.0), None);
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, -2.1, 100.0, 100.0),
             Some(Issue::ContentLeftOverflow)
         );
         assert_eq!(
-            say(98.0, 99.0, 100.0, -40.0, 90.0),
+            say(98.0, 99.0, 100.0, -40.0, 85.0, 90.0),
             "cells start at -40dip outside a 100dip viewport"
         );
 
-        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 102.0), None);
+        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 98.0, 100.0), None);
         assert_eq!(
-            issue(100.0, 100.0, 100.0, 0.0, 102.1),
+            issue(100.0, 100.0, 100.0, 0.0, 97.9, 100.0),
+            Some(Issue::ContentUnderfill)
+        );
+        assert_eq!(
+            say(98.0, 99.0, 100.0, 0.0, 70.0, 95.0),
+            "draws 70dip of a 100dip viewport"
+        );
+
+        assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 100.0, 102.0), None);
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, 0.0, 100.0, 102.1),
             Some(Issue::ContentOverflow)
         );
         assert_eq!(
-            say(98.0, 99.0, 100.0, 5.0, 140.0),
+            say(98.0, 99.0, 100.0, 0.0, 105.0, 140.0),
             "cells end at 140dip outside a 100dip viewport"
         );
 
         // PRECEDENCE where several hold at once, which is the ordinary
-        // case: the root is reported, never its symptom.
+        // case: the root is reported, never its symptom. Track, then the
+        // LEADING edge, then the trailing one — one order in all four
+        // backends (gtk.rs's `TableHorizontalIssue`).
         assert_eq!(
-            issue(80.0, 100.0, 100.0, -40.0, 200.0),
+            issue(80.0, 100.0, 100.0, -40.0, 60.0, 200.0),
             Some(Issue::TrackUnderfill)
         );
         assert_eq!(
-            issue(140.0, 100.0, 100.0, 0.0, 140.0),
+            issue(140.0, 100.0, 100.0, 0.0, 60.0, 140.0),
             Some(Issue::ColumnsOverflow)
         );
+        // A table displaced at its leading edge also ends in the wrong
+        // place, both ways round: the end is the symptom either way.
         assert_eq!(
-            issue(100.0, 100.0, 100.0, -40.0, 140.0),
+            issue(100.0, 100.0, 100.0, 40.0, 60.0, 60.0),
+            Some(Issue::ContentLeftUnderfill)
+        );
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, -40.0, 60.0, 140.0),
             Some(Issue::ContentLeftOverflow)
+        );
+        // A line that ends SHORT outranks another line that ends long —
+        // the header-versus-rows split is the root, the spill its
+        // symptom.
+        assert_eq!(
+            issue(100.0, 100.0, 100.0, 0.0, 60.0, 140.0),
+            Some(Issue::ContentUnderfill)
         );
 
         // The reproduction: 310dip of columns in a 300dip viewport, ink
         // from 5 to 295 — a 290dip span that reads compliant.
         assert_eq!(
-            issue(310.0, 300.0, 300.0, 5.0, 295.0),
+            issue(310.0, 300.0, 300.0, 5.0, 290.0, 295.0),
             Some(Issue::ColumnsOverflow)
         );
         assert_eq!(
-            say(310.0, 300.0, 300.0, 5.0, 295.0),
+            say(310.0, 300.0, 300.0, 5.0, 290.0, 295.0),
             "columns resolve to 310dip in a 300dip viewport"
+        );
+    }
+
+    /// THE FIELD'S OWN GEOMETRY, from the windows lane that convicted
+    /// every table-bearing leg on 2026-08-25 (docs/deferred.md): a
+    /// 508dip viewport, two 250dip tracks 8dip apart, and a row whose
+    /// text stops at 289. The line ENDS at 508 and its INK ends at 289,
+    /// and the whole failure was reading the second number for the first.
+    ///
+    /// Both numbers are pinned, and so is what the classifier does with
+    /// each, so the two bases can never quietly swap back.
+    #[test]
+    fn table_line_end_reads_the_track_not_the_ink() {
+        use TableHorizontalIssue as Issue;
+        let issue = table_horizontal_issue;
+        let say = table_horizontal_complaint;
+        // Column 0: track 0..250, a 40dip label. Column 1: track
+        // 258..508, a 31dip label — 289 is where its ink stops.
+        let line = [
+            TableCellBox { ink_start: 0.0, ink_end: 40.0, track_start: 0.0, track_end: 250.0 },
+            TableCellBox {
+                ink_start: 258.0,
+                ink_end: 289.0,
+                track_start: 258.0,
+                track_end: 508.0,
+            },
+        ];
+        assert_eq!(table_line_end(&line), Some(508.0));
+        assert_eq!(table_line_end(&[]), None);
+        // The ink basis, computed here so the number the lane printed is
+        // on the record beside the one that replaced it.
+        let ink_end = line.iter().fold(f64::NEG_INFINITY, |far, cell| far.max(cell.ink_end));
+        assert_eq!(ink_end, 289.0);
+
+        // A LINE WHOSE INK ENDS SHORT WHILE ITS TRACKS SPAN IS CORRECT.
+        // This is the case the host taught us and no arithmetic could:
+        // min_end from the track is silent, max_end from the ink is too,
+        // because ink stopping early is what a text cell does.
+        assert_eq!(issue(508.0, 508.0, 508.0, 0.0, 508.0, ink_end), None);
+        assert_eq!(say(508.0, 508.0, 508.0, 0.0, 508.0, ink_end), "");
+
+        // And the same table under the OLD basis — the exact sentence
+        // every table-bearing windows leg printed.
+        assert_eq!(
+            issue(508.0, 508.0, 508.0, 0.0, ink_end, ink_end),
+            Some(Issue::ContentUnderfill)
+        );
+        assert_eq!(
+            say(508.0, 508.0, 508.0, 0.0, ink_end, ink_end),
+            "draws 289dip of a 508dip viewport"
+        );
+
+        // The gutter this instrument is FOR still convicts: rows 16dip
+        // narrower than the pinned header because a scrollbar reserved
+        // its width. The tracks are what shrank, so the track basis sees
+        // it — which is the half a global maximum could never do.
+        assert_eq!(
+            issue(508.0, 508.0, 508.0, 0.0, 492.0, ink_end),
+            Some(Issue::ContentUnderfill)
+        );
+    }
+
+    /// A PADDED CARD CONVICTS NOTHING (docs/deferred.md's table-card
+    /// entry). The card's interior rides the CONTAINER's Padding, so it
+    /// is `pad` — the number `column_edges` already takes off the frame
+    /// AND the ink — and a cell edge cannot move because both sides of
+    /// every comparison move together.
+    ///
+    /// The second half is the one that would ship silently: a frame that
+    /// FORGETS the subtraction convicts every padded table, which is the
+    /// windows lane's 2026-08-25 failure one basis over.
+    #[test]
+    fn a_padded_card_convicts_nothing() {
+        use TableHorizontalIssue as Issue;
+        let issue = table_horizontal_issue;
+        // The field's own numbers with a 12dip card: a 508dip grid, ink
+        // and tracks starting at the padding edge and ending 12 short of
+        // the far one.
+        let (pad, outer) = (TABLE_CARD_PAD, 508.0);
+        let inner = outer - 2.0 * pad;
+        let (track, viewport, min_start, min_end, max_end) =
+            table_content_frame(pad, outer, outer, (pad, outer - pad, outer - pad));
+        assert_eq!((track, viewport, min_start), (inner, inner, 0.0));
+        assert_eq!((min_end, max_end), (inner, inner));
+        assert_eq!(issue(inner, track, viewport, min_start, min_end, max_end), None);
+
+        // THE BASIS THAT FORGETS: the same live geometry read straight
+        // out of the toolkit, with no pad taken off anything.
+        assert_eq!(
+            issue(inner, outer, outer, pad, outer - pad, outer - pad),
+            Some(Issue::TrackUnderfill)
+        );
+        // And with the frame corrected but the INK left in the padding
+        // box — the half a partial fix would leave behind.
+        assert_eq!(
+            issue(inner, track, viewport, pad, outer - pad, outer - pad),
+            Some(Issue::ContentLeftUnderfill)
         );
     }
 

@@ -4246,6 +4246,15 @@ public final class KayaApp {
             this.tx = tx;
         }
 
+        // PACKAGE-PRIVATE, for KayaRecords.collectionOf(Tpl, Class): the
+        // record constructor is a static in this package's own
+        // KayaRecords and needs the enclosing transaction. Not public —
+        // a guest that reached the live zone from inside a template
+        // would cross zones.
+        Tx tx() {
+            return tx;
+        }
+
         public Node widget(int kind) {
             Node n = new Node(++widgets);
             tx.emit(KayaWire.txCreateWidget(n.id, kind));

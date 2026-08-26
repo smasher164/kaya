@@ -5026,7 +5026,15 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
             keys = nil
         }
         guard !id.isEmpty else { return nil }
-        guard let keys else { return registry.first { $0.a11yId == id } }
+        // A DESTROYED NODE MAY NOT ANSWER A TARGET: the registries are
+        // append-only and `kayaScene.nodes` is the liveness record, so a
+        // stamped copy that left the band would otherwise answer with the
+        // empty children its teardown left behind. The keyed arm below
+        // has always filtered this way; a windowed row's copy dies on
+        // every scroll (docs/virtualization-plan.md §1).
+        guard let keys else {
+            return registry.first { kayaScene.nodes[$0.id] === $0 && $0.a11yId == id }
+        }
         guard kind == "column" else { return nil }
         let live = registry.filter { kayaScene.nodes[$0.id] === $0 }
         guard
@@ -5692,12 +5700,15 @@ private func kayaRunScript(_ script: String) {
                 // "A table viewport contains rows".
                 let want = Int(parts[2]) ?? -1
                 let got = DispatchQueue.main.sync {
-                    () -> (KayaCurrentTableGeometry, Double?)? in
+                    () -> (KayaCurrentTableGeometry, Double?, Bool)? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return nil
                     }
                     let trackWidth = kayaCurrentTableTrackWidth(node)
-                    return (kayaCurrentTableGeometry(node), trackWidth)
+                    return (
+                        kayaCurrentTableGeometry(node), trackWidth,
+                        kayaCurrentTableSynthesized(node)
+                    )
                 }
                 guard let got else {
                     failures.append("no such target \(parts[1])")
@@ -5745,10 +5756,22 @@ private func kayaRunScript(_ script: String) {
                             break
                         }
                         let frames = columns.flatMap { $0 }
+                        // TRACK, THEN THE LEADING EDGE, THEN THE TRAILING
+                        // ONE — one precedence in all four backends
+                        // (gtk.rs's `TableHorizontalIssue`): a table
+                        // displaced at its start also ends in the wrong
+                        // place, so the end is the symptom.
                         if !kayaTableViewportMatchesTrack(viewport, track: track) {
                             failures.append(
                                 "\(parts[1]) draws a \(Int(viewport.width.rounded()))pt viewport "
                                     + "for a \(Int(track.rounded()))pt track")
+                        } else if let leading = representatives.first,
+                            let inside = kayaTableLeadingUnderfill(
+                                leading, viewport: viewport, synthesized: got.2)
+                        {
+                            failures.append(
+                                "\(parts[1]) cells start at \(Int(inside.rounded()))pt inside a "
+                                    + "\(Int(viewport.width.rounded()))pt viewport")
                         } else if !kayaTableFramesFitHorizontally(frames, inside: viewport),
                             let bounds = kayaTableBounds(frames)
                         {
@@ -8045,6 +8068,37 @@ func kayaTableViewportMatchesTrack(
     _ viewport: CGRect, track: Double, tolerance: Double = 2
 ) -> Bool {
     track > 0 && abs(Double(viewport.width) - track) <= tolerance
+}
+
+/// gtk.rs's `ContentLeftUnderfill` in this file's spelling: how far inside
+/// its own viewport a table's cells start, or nil when they start flush.
+/// The number, not a Bool, because the sentence must name what convicted
+/// it (invariant 3).
+///
+/// SYNTHESIZED ONLY, and that is a MEASUREMENT rather than an omission.
+/// The synthesized tier is kaya's own layout and places column 0 at
+/// bounds.minX — measured 0.0pt on every line, this host, 2026-08-25. The
+/// mac native tier is an inset-style NSTableView whose cells sit 16pt in
+/// on both sides (same run); AppKit publishes no accessor for that amount,
+/// so the only reference available is the cells' OWN leading edge and a
+/// clause built on it would either be vacuous or print a clamp residue.
+/// docs/deferred.md carries that as the open half.
+func kayaTableLeadingUnderfill(
+    _ leading: Double, viewport: CGRect, synthesized: Bool, tolerance: Double = 2
+) -> Double? {
+    guard synthesized else { return nil }
+    let inside = leading - Double(viewport.minX)
+    return inside > tolerance ? inside : nil
+}
+
+/// Whether the tier that recorded this table's CURRENT viewport
+/// synthesized it — `kayaCurrentTableTrackWidth`'s staleness rule, one
+/// field over.
+func kayaCurrentTableSynthesized(_ table: KayaNode) -> Bool {
+    guard let observation = table.tableViewport,
+        observation.generation == kayaTableGeometryGeneration(table)
+    else { return false }
+    return observation.synthesized
 }
 
 func kayaTableFramesFitVertically(

@@ -28,6 +28,14 @@ which is how every platform's own list already behaves.
   plus one viewport of overscan each side. Rows entering stamp; rows
   leaving tear down. Stamping-on-entry reads current data, so an
   update to an unrealized row costs a model write and nothing else.
+- NESTED COLLECTIONS FOLLOW THE SAME RULE, ONE LEVEL DOWN (ruled
+  2026-08-25). A For inside a row template owns a collection INSTANCE per
+  outer row, keyed by (collection, that row's copy path). It is model
+  data: born with the row's record, untouched by the copy's widget
+  teardown, rebuilt into widgets when the row enters the band. So a write
+  to an unrealized row's inner list succeeds and shows up when that row
+  scrolls into view, exactly as a write to an unrealized row does. The
+  row's own removal is what reaps it.
 - The guest writes ZERO windowing code and makes ZERO promises. The
   backend (which owns scroll geometry) drives; the core (which owns
   stamping) serves.
@@ -165,6 +173,12 @@ One machine, two paths, chosen per For by measurement:
   assertion: with the viewport parked on a row, realizing taller rows
   above it must not move that row out of the viewport (the sentence
   the anchoring policy exists to keep true).
+  IT ALSO READS THE INNER LISTS (2026-08-25, closing the
+  nested-collection-instance entry): one realized row's lines, one
+  out-of-band row's lines after scrolling to it, and the first row's
+  again after the deep scroll and back. `expect_order column@<row key>`
+  — each row's inner For carries THAT ROW's key as its automation id,
+  because the copies of one template node share a node id.
 
 ## §6 — Sequencing (each layer proven before the next)
 

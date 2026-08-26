@@ -255,7 +255,24 @@ the same patterns return through interpreter drop-downs
   viewport because the last label ends before its column does; the
   broken capture was the opposite fact, 409pt of ink inside a 145pt
   viewport. A cell-ink endpoint may reject overflow, never demand
-  equality with a native column boundary. The first cross-backend audit
+  equality with a native column boundary. THAT RULE DECIDED THE
+  2026-08-25 sweep: `ContentUnderfill` (a line ending short of the
+  viewport) is only measurable where a cell's recorded box IS its
+  column's, and a correct Compose table's lines read 161-177pt short
+  because that tier measures ink (docs/deferred.md).
+  **AND WINUI IS NOT THE EXCEPTION IT LOOKS LIKE.** `flush_tracks`
+  stamps HorizontalAlignment::Stretch on every FLEX child, so it is easy
+  to conclude a WinUI cell's ActualWidth is its track. TABLE CELLS ARE
+  NOT FLEX CHILDREN: `table_stamp` writes explicit pixel
+  ColumnDefinitions onto the header and every row, the cells sit in the
+  band panel inside those tracks, and their ActualWidth is their own
+  text. Shipped on that premise and measured the same day — every
+  table-bearing windows leg red with "draws 289dip of a 508dip
+  viewport", the 289 following the row's text, while TrackUnderfill and
+  ColumnsOverflow stayed silent on the same read and so PROVED the
+  tracks spanned. A line's end there must come from the line's own
+  resolved ColumnDefinitions (`TableCellBox`, `table_line_end`), never
+  from `ActualWidth` of the cell. The first cross-backend audit
   found three different `expect_fills` meanings hiding behind that
   sentence: Swift returned success without reading rows, Compose had no
   table extent, and WinUI demanded exact equality. The shared table
@@ -4745,13 +4762,21 @@ faulted on the first row past the seed. varied.steps could not see the
 already-open half, because it asserts row identity and totals and never
 a realized row's inner CONTENT — which is also why nobody had met it.
 
-The ruling for now (docs/deferred.md, the declares-windowing entry): a
-table whose row template owns collection state — a nested For at any
-depth, `When` included — stays on §1's bridge and is not seeded
-(`seed_window`'s `body_owns_a_collection`). The real fix is a nested
-instance that outlives its stamp, which is a model change and not a
-band change; until then, a scene that scrolls such a table away and
-back should assert the inner rows and will fail.
+RULED 2026-08-25 (the maintainer, closing docs/deferred.md's
+nested-collection-instance entry): DATA OUTLIVES WIDGETS, one level
+down. The instance is keyed by (collection, the outer row's copy path),
+born with the row's RECORD (`Scene::birth_nested`), untouched by the
+copy's teardown, and rebuilt into widgets on band entry through the
+ordinary reconcile. The bridge exemption above is GONE —
+`body_owns_a_collection` is deleted and such a table is seeded like any
+other. The row's own removal is what reaps the instance now
+(`reap_nested`), so a same-key re-insert still starts empty.
+WHAT THIS ENTRY IS STILL FOR: the shape of the failure, and that
+varied.steps could not see it. A scene that scrolls a nested-collection
+table away and back MUST assert the inner rows — varied.steps does, by
+`expect_order column@<row key>`, which needs the inner For's a11y_id
+bound to the row's own field, since the copies of one template node
+share a node id.
 
 
 ## A window seed smaller than one viewport converges by DOUBLING (2026-08-25)
@@ -4819,3 +4844,94 @@ THIS, because the band's width deliberately left `expect_window`
 (docs/virtualization-plan.md §5), so a tier that realizes every row
 answers every windowing observable correctly and merely loses the leg on
 a loaded machine.
+
+## A GTK table card is paint, never box (2026-08-25)
+
+MEASURED in the lane's own container with PyGObject against real
+libadwaita, positive controls in the same run so a "nothing moved" line
+could not be a probe that never applied any CSS. All three readings are
+of one 800px column holding a header of two cells, `compute_bounds` of
+each cell taken against the column itself and `column.get_width()`
+beside it — the two numbers `column_edges` reads.
+
+    bare                         column.width=800  cells at 0.0, 420.0
+    background+radius+outline    column.width=800  cells at 0.0, 420.0
+    ... + border: 1px            column.width=798  cells at 0.0, 419.0
+    ... + padding: 12px          column.width=776  cells at 0.0, 408.0
+
+THE COORDINATE SPACE IS THE CONTENT BOX, BOTH SIDES. A GTK4 widget's
+own origin is its content-box origin and `get_width()` is its content
+width, so padding on a container moves its children and its reported
+width TOGETHER: `min_start` stays 0 and `min_end` stays flush, and
+NEITHER leading-edge clause can see an inset container. What does see
+it is the track clause, which compares that content width against the
+PARENT's — 12px of padding is a 24px underfill and
+`expect_column_edges` convicts "viewport draws 776px of its assigned
+800px track". That is why the card carries no padding: an apron here is
+not a style choice, it is a measurement-basis change.
+
+AND `outline` RATHER THAN `border`, for a second measured reason. A
+container's `inset` prop is ALREADY a border on that very widget
+(gtk.rs's set_container_inset, a transparent one), and two `border`
+declarations from two providers do not add — one wins, silently. With
+`.kaya-inset8` and a 1px card border on one widget the column measured
+784px, i.e. the INSET won and the card's stroke was simply not drawn;
+the reverse would have been a lost inset. `outline` is a different CSS
+box, costs the content box nothing (line 2 above) and follows
+`border-radius`, so it coexists with an inset of any size.
+
+AND THE CARD'S INTERIOR IS THE SAME CONTENT-BOX FACT, USED THE OTHER
+WAY (added 2026-08-25 when the captures came back flush): `padding` on
+the card moves the cells and `column.width()` TOGETHER, so a 12/8 card
+still reads its cells at 0.0 and its viewport as 776 of an 800px parent.
+The one number left in the outer box is the assigned TRACK, and
+`table_horizontal_track` subtracts the card's own span — measured off
+the widget by `css_inset_span`, never re-derived from the number that
+wrote it — so a padded card underfills nothing. 12px horizontal is
+Adwaita's own, read off a real AdwActionRow in a `.boxed-list` (its
+content starts at x=12); the vertical is kaya's own 8, because Adwaita
+gives a row its vertical room through `min-height: 50px`, which is a row
+DENSITY change and the ruling forbids one.
+
+@card_bg_color and @borders both resolve, and both are theme-aware:
+white/opaque and black at 12% in light, white at 8% and white at 15% in
+dark. An undefined `@name` is NOT a parse error here (the bogus token
+raised nothing and fell back), so `load_kaya_css`'s panic cannot vouch
+for a token name — read the resolved value beside a deliberately
+undefined one, which is how these were confirmed.
+
+## A GTK table's viewport floor is the scrollbar's own minimum (2026-08-25)
+
+MEASURED in the lane's own container, `build_table`'s exact
+configuration, after the suspect in the ledger entry (a minimum content
+height in gtk.rs) turned out not to exist anywhere in the file.
+
+    Gtk.Scrollbar(VERTICAL).measure(VERTICAL)        -> (58, 58)
+    empty scroller, policy(NEVER, AUTOMATIC)         -> (58, 58)
+    empty scroller, policy(NEVER, ALWAYS)            -> (58, 58)
+    empty scroller, policy(NEVER, NEVER)             -> ( 0,  0)
+    empty scroller, policy(NEVER, EXTERNAL)          -> ( 0,  0)
+
+A VERTICAL SCROLLBAR CANNOT BE SHORTER THAN 58px on this GTK, and
+GtkScrolledWindow folds that into its OWN minimum wherever the policy
+may show one. A minimum outranks the natural size
+`propagate_natural_height` propagates, so a short table never hugs:
+
+    rows=1: content(16,16) -> scroller(58,58)   42px of empty card
+    rows=2: content(40,40) -> scroller(58,58)   18px
+    rows=3: content(64,64) -> scroller(58,64)   hugs
+
+which is the portfolio capture to the pixel (it read 41 and 17).
+
+TWO THINGS THAT DO NOT HELP, both measured before the fix was chosen:
+`max-content-height` caps the NATURAL only and leaves the minimum at 58
+(set to the content's own 16, the scroller still measured (58,58)), and
+`min-content-height` only ever raises. Overlay scrolling does not
+exempt the bar either — it is about where the bar DRAWS, not whether one
+may exist.
+
+THE FIX IS THE POLICY, because the policy is the toolkit's own way to
+say "this does not scroll" (gtk.rs's `set_table_scrolling`). It is
+driven by numbers kaya already owns — the CORE's extent and the flex
+contract's grow weight — never by measuring the child, which would be a
+second estimator racing the one in docs/virtualization-plan.md §2.

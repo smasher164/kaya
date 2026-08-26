@@ -290,7 +290,17 @@ in docs/deferred.md.
    KEYWORD on `columns`, OCaml's a labelled argument, Go's and Rust's a
    chained call — and is app-registered in the registry family (C#,
    Java, Swift, Haskell), which is why the eight patterns are written
-   out rather than derived from one casing rule),
+   out rather than derived from one casing rule.
+   AND THE ROW'S OWN FIELDS SINCE 2026-08-25, which is what a table
+   inside a row template is FOR: the record-schema constructor must
+   stand in the TEMPLATE zone (the only scope a nested collection may be
+   declared in) and narrowing the handle to one stamped copy must KEEP
+   the element type, or every record mutation is out of reach and the
+   rows stay scalar. Both points, all eight, out of the block that owns
+   them — six bindings spell the typed narrowing exactly as the untyped
+   one and are told apart only by the receiver's type. Fourteen watched
+   census reds beside the Haskell four, each a shape that COMPILES and
+   lies),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -580,6 +590,21 @@ in docs/deferred.md.
    emitted markup to exactly the six stops, self-tested both directions
    on every run; winui::tests' brand test is its rendered-output sibling
    on the windows guest's unit phase),
+   `tools/check-table-card.sh` (A TABLE BOUNDS ITS OWN EXTENT — one
+   semantics, three spellings (ruled 2026-08-25). macOS has it from the
+   native widget and is out of the rule; GTK, WinUI and Compose each draw
+   a card. NO SCENE CAN FAIL THIS: the card is pixels, and every table
+   observable — expect_columns, expect_rows, expect_column_edges,
+   expect_window — answers identically with it gone, which is how all
+   three shipped a table's OPENING grammar and never its close, running
+   the last row into the label under it. So it holds three things a
+   capture would otherwise be the only witness to: the card is THERE,
+   it is FLAT (no shadow, no blur, no elevation) and its colours are the
+   platform's own tokens rather than literals. The flatness clause reads
+   the card's OWN BLOCK with comments stripped — all three files
+   legitimately name shadows elsewhere, and a comment saying the card
+   carries no elevation is the rule written down rather than a breach.
+   14 watched negatives, counts printed, red demanded on every run),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing but RECORDS its

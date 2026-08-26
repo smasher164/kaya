@@ -2833,6 +2833,13 @@ sealed class Tpl
 
     internal Tpl(Tx enclosing) => tx = enclosing;
 
+    // INTERNAL, for KayaRecords.CollectionOf(this Tpl): a type parameter
+    // cannot ride on a method of this class the way Rust's
+    // Tpl::collection does, so the record constructor is an extension
+    // and needs the enclosing transaction. Not public — a guest that
+    // reached the live zone from inside a template would cross zones.
+    internal Tx Tx => tx;
+
     public Node Widget(uint kind)
     {
         var n = tx.App.NextNode();

@@ -13,6 +13,11 @@ Nothing here is windowing code. There is no height to declare, no
 prototype to nominate and no callback to implement; this guest inserts
 1,200 rows of data and reads none of them back.
 
+AND ITS INNER LISTS ARE WRITTEN TO UNREALIZED ROWS: the table is seeded
+at a screenful, so every row past it has no widgets while this build
+runs and `lines.at("r200")` addresses model data alone (the ruling that
+closed docs/deferred.md's nested-collection-instance entry).
+
 Build the library first (cargo build), then:
     KAYA_SELFTEST=varied python3 guests/python/varied.py
 """
@@ -25,6 +30,10 @@ import kaya
 
 @dataclass
 class Row:
+    # The row's key, carried as a field so the row's OWN inner For can be
+    # addressed by it: the copies of one template node share a node id, so
+    # a constant a11y_id would name three hundred containers at once.
+    key: str
     name: str
 
 
@@ -76,11 +85,15 @@ with app.window(title="varied", width=520, height=600):
                     # correction may not disturb.
                     kaya.label(bind=row.name)
                     lines = kaya.collection(Line)
-                    for line in lines.rows():
+                    # The inner container's automation key is THE ROW'S OWN
+                    # KEY, so a scene can read one row's lines
+                    # (`expect_order column@r200 ...`) whether that row was
+                    # realized at build time or arrived with the band.
+                    for line in lines.rows(a11y_id=row.key):
                         kaya.label(bind=line.text)
     for i in range(N):
         key = f"r{i:03d}"
-        rows.insert(key, Row(name=f"{key} x{lines_in(i)}"))
+        rows.insert(key, Row(key=key, name=f"{key} x{lines_in(i)}"))
         inner = lines.at(key)
         for j in range(lines_in(i)):
             inner.insert(f"l{j}", Line(text=f"{key} line {j + 1}"))

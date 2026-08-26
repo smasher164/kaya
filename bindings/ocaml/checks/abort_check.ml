@@ -568,4 +568,133 @@ let () =
       fail "the live sort handler saw [%s], wanted one request on column 1"
         (String.concat ", " (List.map string_of_int l)));
 
+  (* THE ROW'S OWN FIELDS. A nested table is FOR rows that carry named
+     fields, and until 2026-08-25 nothing narrowed a record collection to
+     one stamped copy — a guest had to rebuild the record by hand from
+     [record_handle] (docs/deferred.md, the nested-record-collection
+     gap). Both halves lie in ways that COMPILE: a collection born with
+     the scalar schema, and a narrowing that addresses the parent. So
+     both are read off the queued records, and the model read is the
+     half the wire cannot show. *)
+  let positions_rt =
+    {
+      rt_schema = [ Kaya_wire.value_str; Kaya_wire.value_str ];
+      rt_to_values = (fun (sym, qty) -> [ Str sym; Str qty ]);
+      rt_of_values =
+        (function [ Str s; Str q ] -> (s, q) | _ -> invalid_arg "position");
+    }
+  in
+  let nested_recs, nested_positions =
+    build app
+      (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        let _, positions =
+          for_each accounts
+            (fun () ->
+              (* THE TEMPLATE ZONE'S OWN CONSTRUCTOR, beside
+                 [Tpl.collection] and record-schema'd. *)
+              let positions = Tpl.collection_of positions_rt in
+              let node, () =
+                Tpl.for_each (record_handle positions)
+                  (fun () ->
+                    ignore
+                      Tpl.(
+                        row
+                          [
+                            label ~bind_field:(str_field 0);
+                            label ~bind_field:(str_field 1);
+                          ]
+                          ()))
+                  ()
+              in
+              ignore Tpl.(column [ w node ] ());
+              positions)
+            ()
+        in
+        (queued_since tx before, positions))
+  in
+  (match
+     List.filter
+       (fun r -> rec_kind r = Kaya_wire.tx_kind_create_collection)
+       nested_recs
+   with
+  | [ r ] when rec_u32 r 16 = 1 && rec_u32 r 24 = 2 -> ()
+  | [ r ] ->
+      fail
+        "the nested collection's schema is %d variant(s) of %d field(s), \
+         wanted 1 of 2 — a record collection born with the scalar schema \
+         typechecks and leaves every row one string wide"
+        (rec_u32 r 16) (rec_u32 r 24)
+  | l ->
+      fail "the nested template queued %d create_collection records, wanted 1"
+        (List.length l));
+  (* Born INSIDE the parent's scope: [queued_since] hands the run back
+     NEWEST FIRST, so the create_for is last and the template_ends come
+     before the collection's birth in this order. *)
+  let ordered = List.rev nested_recs in
+  let position_of k =
+    let rec go i = function
+      | [] -> -1
+      | r :: rest -> if rec_kind r = k then i else go (i + 1) rest
+    in
+    go 0 ordered
+  in
+  let opened = position_of Kaya_wire.tx_kind_create_for in
+  let born = position_of Kaya_wire.tx_kind_create_collection in
+  let ended =
+    let rec last i best = function
+      | [] -> best
+      | r :: rest ->
+          last (i + 1)
+            (if rec_kind r = Kaya_wire.tx_kind_template_end then i else best)
+            rest
+    in
+    last 0 (-1) ordered
+  in
+  if opened < 0 || born < opened || born > ended then
+    fail
+      "the nested collection is record %d, outside the parent's template \
+       scope (%d..%d). A collection declared in the LIVE zone is one table \
+       for every copy, not one per copy"
+      born opened ended;
+
+  (* [record_at] keeps the element type, so this is the record insert. *)
+  let copy_recs =
+    build app (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        insert_record
+          (record_at nested_positions (Str "brokerage"))
+          (Str "aapl") ("AAPL", "10");
+        queued_since tx before)
+  in
+  (match
+     List.filter
+       (fun r -> rec_kind r = Kaya_wire.tx_kind_collection_insert)
+       copy_recs
+   with
+  | [ r ] when rec_u32 r 16 = 1 ->
+      if not (contains_sub r "AAPL" && contains_sub r "10") then
+        fail "the record insert did not carry both of the record's fields"
+  | [ r ] ->
+      fail
+        "the record insert carries path_len %d, wanted 1 — a narrowing that \
+         drops the key writes the PARENT's table with no error anywhere"
+        (rec_u32 r 16)
+  | l ->
+      fail "the typed record_at queued %d collection_insert records, wanted 1"
+        (List.length l));
+  (match
+     build app (fun () ->
+         ( record_items (record_at nested_positions (Str "brokerage")),
+           record_items nested_positions ))
+   with
+  | [ (Str "aapl", ("AAPL", "10")) ], [] -> ()
+  | copy, own ->
+      fail
+        "the copy's model holds %d entr(y/ies) and the collection's own table \
+         %d, wanted one record in the copy and nothing in the parent"
+        (List.length copy) (List.length own));
+
   print_endline "ocaml abort check: OK"

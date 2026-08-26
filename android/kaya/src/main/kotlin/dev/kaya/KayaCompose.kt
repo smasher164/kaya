@@ -26,7 +26,10 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
 // The entry/textarea path (docs/undo-plan.md §1.4). `undoState` and its
@@ -2495,7 +2498,16 @@ object KayaCompose {
                 keys = null
             }
             if (id.isEmpty()) return null
-            if (keys == null) return registry.firstOrNull { it.a11yId == id }
+            // A DESTROYED NODE MAY NOT ANSWER A TARGET: the registries are
+            // append-only and `nodes` is the liveness record, so a stamped
+            // copy that left the band would otherwise answer with the empty
+            // children its teardown left. The keyed arm below has always
+            // filtered this way (docs/virtualization-plan.md §1).
+            if (keys == null) {
+                return registry.firstOrNull {
+                    KayaSceneModel.nodes[it.id] === it && it.a11yId == id
+                }
+            }
             if (kind != "column") return null
             val live = registry.filter { KayaSceneModel.nodes[it.id] === it }
             val node = live.asSequence()
@@ -7549,12 +7561,21 @@ internal fun kayaCoreRedo() {
  * disjunction here would print one sentence for several causes and the
  * numbers in it would read compliant on a red leg (invariant 3).
  *
- * The same four causes WinUI has; GTK's two UNDERFILL directions are
- * unswept here as there.
+ * THE ORDER IS gtk.rs's: track, then the LEADING edge, then the trailing
+ * one — a table displaced at its start also ends in the wrong place, so
+ * conviction on the end would name the symptom.
+ *
+ * GTK's `ContentUnderfill` is the one cause missing here, and it is the
+ * INSTRUMENT that is missing rather than the clause: this tier measures
+ * every cell with a bare `Constraints()` and records `left + size.width`,
+ * so a cell's box is its INK and not its column. A 20dp "42" in a 200dp
+ * column ends 180dp short of the viewport on a correctly drawn table
+ * (docs/deferred.md, the leading-edge UNDERFILL entry).
  */
 private enum class KayaTableHorizontalIssue {
     TrackUnderfill,
     ColumnsOverflow,
+    ContentLeftUnderfill,
     ContentLeftOverflow,
     ContentOverflow,
 }
@@ -7579,6 +7600,7 @@ private fun kayaTableHorizontalIssue(
 ): KayaTableHorizontalIssue? = when {
     drawn < track - 2 -> KayaTableHorizontalIssue.TrackUnderfill
     content > track + 2 -> KayaTableHorizontalIssue.ColumnsOverflow
+    left > 2 -> KayaTableHorizontalIssue.ContentLeftUnderfill
     left < -2 -> KayaTableHorizontalIssue.ContentLeftOverflow
     right > viewport + 2 -> KayaTableHorizontalIssue.ContentOverflow
     else -> null
@@ -7597,6 +7619,8 @@ private fun kayaTableHorizontalComplaint(
         "draws ${drawn.toInt()}dp of a ${track.toInt()}dp track"
     KayaTableHorizontalIssue.ColumnsOverflow ->
         "columns resolve to ${content.toInt()}dp in a ${track.toInt()}dp track"
+    KayaTableHorizontalIssue.ContentLeftUnderfill ->
+        "cells start at ${left.toInt()}dp inside a ${viewport.toInt()}dp viewport"
     KayaTableHorizontalIssue.ContentLeftOverflow ->
         "cells start at ${left.toInt()}dp outside a ${viewport.toInt()}dp viewport"
     KayaTableHorizontalIssue.ContentOverflow ->
@@ -7637,6 +7661,11 @@ private fun kayaTableHorizontalSelftest(): String? {
         "columns any further over the track are a columns overflow" to
             (issue(100f, 102.1f, 100f, 100f, 0f, 100f) ==
                 KayaTableHorizontalIssue.ColumnsOverflow),
+        "cells 2dp inside the viewport are inside the slack" to
+            (issue(100f, 100f, 100f, 100f, 2f, 100f) == null),
+        "cells any further inside are a leading-edge underfill" to
+            (issue(100f, 100f, 100f, 100f, 2.1f, 100f) ==
+                KayaTableHorizontalIssue.ContentLeftUnderfill),
         "cells 2dp left of the viewport are inside the slack" to
             (issue(100f, 100f, 100f, 100f, -2f, 100f) == null),
         "cells any further left are a leading-edge overflow" to
@@ -7653,11 +7682,19 @@ private fun kayaTableHorizontalSelftest(): String? {
         "the columns-overflow sentence names the resolved columns and the track" to
             (say(119f, 140f, 120f, 110f, 0f, 130f) ==
                 "columns resolve to 140dp in a 120dp track"),
+        "the leading-underfill sentence names the cell start and the viewport" to
+            (say(98f, 95f, 99f, 100f, 40f, 90f) ==
+                "cells start at 40dp inside a 100dp viewport"),
         "the leading-edge sentence names the cell start and the viewport" to
             (say(98f, 95f, 99f, 100f, -40f, 90f) ==
                 "cells start at -40dp outside a 100dp viewport"),
+        // The leading edge here is 1dp and not the 5dp it was until
+        // 2026-08-25: 5dp inside its own viewport is a CONVICTABLE state
+        // now, so the case stopped isolating the sentence it pins. The
+        // number had no other job — six pairwise-distinct numbers, so an
+        // arm printing the wrong one is a red rather than a coincidence.
         "the trailing-edge sentence names the cell end and the viewport" to
-            (say(98f, 95f, 99f, 100f, 5f, 140f) ==
+            (say(98f, 95f, 99f, 100f, 1f, 140f) ==
                 "cells end at 140dp outside a 100dp viewport"),
         // Precedence where several hold at once, which is the ordinary
         // case: the ROOT is reported, never its symptom.
@@ -7670,6 +7707,23 @@ private fun kayaTableHorizontalSelftest(): String? {
         "a table shifted left is not convicted of overflowing right" to
             (issue(100f, 100f, 100f, 100f, -40f, 140f) ==
                 KayaTableHorizontalIssue.ContentLeftOverflow),
+        "a table drawn INSIDE its viewport is not convicted of overflowing" to
+            (issue(100f, 100f, 100f, 100f, 40f, 140f) ==
+                KayaTableHorizontalIssue.ContentLeftUnderfill),
+        // A PADDED CARD CONVICTS NOTHING (docs/deferred.md's table-card
+        // entry). ONE physical table, read twice: a 232dp outer box, this
+        // card's own 16dp interior per side, 200dp of content inside it.
+        // The chain reports the CONTENT box — Modifier.padding sits above
+        // the onGloballyPositioned that reads the viewport — so every
+        // number is that box's and the leading edge is 0.
+        "a padded card read in its own content box is silent" to
+            (issue(200f, 200f, 200f, 200f, 0f, 200f) == null),
+        // The SAME table with the padding read one modifier LOWER: the
+        // track and the viewport are the outer box, the content is not,
+        // and 16dp of card interior convicts a correct table.
+        "a viewport read outside the card's padding convicts it" to
+            (issue(200f, 200f, 232f, 232f, 16f, 216f) ==
+                KayaTableHorizontalIssue.TrackUnderfill),
         // The shape the WinUI half was MEASURED failing on: 310dp of
         // columns in a 300dp track whose ink runs 5..295, so the
         // pre-split sentence printed "cells span 290dp inside a 300dp
@@ -7957,6 +8011,19 @@ internal class KayaTableWindow(private val node: KayaNode) {
  * three viewports of them carry widgets. LazyColumn stays rejected (§7):
  * one observable mechanism, and the core owns the band.
  */
+/** The table card's corners, Material's 12 dp (TABLE CARD, ruled 2026-08-25). */
+private val KAYA_TABLE_CARD_SHAPE = RoundedCornerShape(12.dp)
+
+/**
+ * The card's interior. 16 dp horizontal is Material's own content inset —
+ * the number M3 gives a card's and a list item's contents — and 8 dp
+ * vertical is the apron: enough that the last row does not sit on the
+ * stroke, and NOT a row metric, since it is the card's padding and no
+ * row's.
+ */
+private val KAYA_TABLE_CARD_PAD_X = 16.dp
+private val KAYA_TABLE_CARD_PAD_Y = 8.dp
+
 @Composable
 private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     // The presented record expect_columns reads — written by THIS path,
@@ -8029,6 +8096,20 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             Spacer(Modifier)
         },
         modifier = modifier
+            // THE CARD (docs/deferred.md's table-card entry; ruled
+            // 2026-08-25): M3's flat card — surface container, a 1 dp
+            // outline, the radius, and no elevation, because both of
+            // these are DRAW modifiers and neither measures.
+            .background(MaterialTheme.colorScheme.surfaceContainer, KAYA_TABLE_CARD_SHAPE)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, KAYA_TABLE_CARD_SHAPE)
+            // THE CARD'S INTERIOR, AND ITS PLACE IN THIS CHAIN IS THE
+            // WHOLE POINT: it sits under the two draw modifiers, so the
+            // card paints the OUTER box, and ABOVE onGloballyPositioned,
+            // so the viewport this Layout reports is the padded content
+            // box the cells actually start at. Move it below that read
+            // and every cell edge lands `pad` inside a viewport that did
+            // not move — the leading-edge underfill, on every table.
+            .padding(horizontal = KAYA_TABLE_CARD_PAD_X, vertical = KAYA_TABLE_CARD_PAD_Y)
             .onGloballyPositioned {
                 val left = it.positionInWindow().x / density
                 node.tableViewportLeftX = left

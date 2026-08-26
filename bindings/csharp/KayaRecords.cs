@@ -156,6 +156,13 @@ sealed class RecordCollection<T>
         Info = info;
     }
 
+    /// The instance of this collection inside the copy keyed by `key`
+    /// of the next enclosing For; chain for deeper nesting. TYPED: the
+    /// plain handle's At hands back a bare Collection, and every record
+    /// mutation below takes a RecordCollection<T>.
+    public RecordCollection<T> At(object key) =>
+        new RecordCollection<T>(Collection.At(key), Info);
+
     public void Insert(Tx tx, object key, T value) =>
         tx.InsertRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 
@@ -276,7 +283,16 @@ static class KayaRecords
 {
     /// Declare a collection of T records; the record type is the
     /// schema. Returns the typed root handle.
-    public static RecordCollection<T> CollectionOf<T>(this Tx tx)
+    public static RecordCollection<T> CollectionOf<T>(this Tx tx) => Declare<T>(tx);
+
+    /// CollectionOf inside a template body: a nested collection may only
+    /// be declared in the template scope, so a table whose rows carry
+    /// named fields needs the constructor there too (docs/deferred.md,
+    /// the nested-record-collection gap). Tpl.Tx is internal, which is
+    /// why nothing outside this assembly can spell it.
+    public static RecordCollection<T> CollectionOf<T>(this Tpl t) => Declare<T>(t.Tx);
+
+    static RecordCollection<T> Declare<T>(Tx tx)
     {
         var info = RecordInfo.Of(typeof(T));
         var c = tx.CollectionWithSchema(info.Schema);

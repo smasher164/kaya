@@ -864,20 +864,25 @@ row_points = (
     (
         "grow", "_grow", "grow",
         "wire.tx_set_grow(self._template.handle.id, float(self._grow))",
+        "wire.tx_removed_set_grow(self._template.handle.id, float(self._grow))",
         "ordinary For grow", "FAIL rows(grow=) reaches its For",
     ),
     (
         "align", "_align", "align",
         "wire.tx_set_align(self._template.handle.id, _align_value(self._align))",
+        "wire.tx_removed_set_align(self._template.handle.id, _align_value(self._align))",
         "ordinary For align", "FAIL rows(align=) reaches its For",
     ),
     (
+        # The handle setter, not a const emitter: `rows(a11y_id=row.key)`
+        # must reach the ELEMENT arm (tools/tpl-surfaces.py says why).
         "a11y", "_a11y_id", "a11y_id",
-        "wire.tx_set_a11y_id(self._template.handle.id, self._a11y_id)",
+        "self._template.handle.a11y_id(self._a11y_id)",
+        "self._template.handle.a11y_removed_id(self._a11y_id)",
         "ordinary For a11y id", "FAIL rows(a11y_id=) reaches its For",
     ),
 )
-for name, field, arg, emitter, point, check_want in row_points:
+for name, field, arg, emitter, broken, point, check_want in row_points:
     surface_want = f"python's TEMPLATE-zone table cannot spell {point}"
     text, n = scoped(
         py, "class Collection(_BoundCollection):", "class _Scope:",
@@ -887,8 +892,7 @@ for name, field, arg, emitter, point, check_want in row_points:
         f"python-rows-{name}", src, text or py, n, surface_want, check_want,
     )
     text, n = scoped(
-        py, "class _ForTrace:", "def _alloc_widget_or_node",
-        emitter, emitter.replace("wire.tx_", "wire.tx_removed_"),
+        py, "class _ForTrace:", "def _alloc_widget_or_node", emitter, broken,
     )
     run_python(
         f"python-rows-{name}-emitter", src, text or py, n, surface_want,
@@ -1395,6 +1399,182 @@ fi
 echo "check-sugar-surface: haskell nested-record perturbations applied:"
 echo "$hs_record_probe"
 unset hs_record_probe want_hs_record_probe
+
+# (c2e) THE ROW'S OWN FIELDS IN THE OTHER SEVEN. The Haskell block above
+#       was written as a Haskell gap; the sweep that closed it found the
+#       same two halves missing in five more bindings, and the census
+#       reads all eight now (docs/deferred.md, closed 2026-08-25).
+#
+#       EACH PERTURBATION IS A SHAPE THAT COMPILES AND LIES, which is why
+#       a census earns its keep here and a typecheck cannot stand in: a
+#       template-zone constructor that opens its own transaction, a
+#       narrowing that hands back a typed handle addressing the PARENT,
+#       and Python's collection born without the open-For edge all build
+#       and run. Both points are watched in every binding — fourteen
+#       reds, the four Haskell ones being (c2c)'s.
+#
+#       A block of its own, additive: these two files are merged by hand
+#       across parallel worktrees.
+record_probe=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+
+
+def link_children(source, destination, skip):
+    os.makedirs(destination, exist_ok=True)
+    for name in os.listdir(source):
+        if name != skip:
+            os.symlink(os.path.abspath(f"{source}/{name}"), f"{destination}/{name}")
+
+
+def stage_one(rel, text):
+    """A staged repo root where exactly `rel` differs from the tree.
+
+    One helper rather than seven: the surfaces this block watches sit in
+    six different files across five directory depths, and a per-language
+    stager would be six copies of the same walk.
+    """
+    root = tempfile.mkdtemp()
+    parts = rel.split("/")
+    for top in os.listdir("."):
+        if top != parts[0]:
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for i in range(1, len(parts)):
+        link_children("/".join(parts[:i]),
+                      f"{root}/" + "/".join(parts[:i]), parts[i])
+    open(f"{root}/{rel}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def census(name, rel, old, new, lang, point):
+    src = open(rel, encoding="utf-8").read()
+    n = src.count(old)
+    if n != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {n}, expected 1)")
+        return
+    root = stage_one(rel, src.replace(old, new))
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    want = f"{lang}'s TEMPLATE-zone table cannot spell {point}"
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+RUST = "crates/kaya/src/app.rs"
+GO = "bindings/go/records.go"
+CS = "bindings/csharp/KayaRecords.cs"
+JAVA = "bindings/java/dev/kaya/KayaRecords.java"
+SWIFT_APP = "bindings/swift/KayaApp.swift"
+SWIFT_REC = "bindings/swift/KayaRecords.swift"
+ML = "bindings/ocaml/kaya_app.ml"
+PY = "bindings/python/kaya/__init__.py"
+
+census("rust-record-zone", RUST,
+       "    pub fn collection<T: KayaSum>(&mut self) -> Collection<T> {\n"
+       "        let id = self.tx.ctx.alloc_collection();",
+       "    pub fn collection_removed<T: KayaSum>(&mut self) -> Collection<T> {\n"
+       "        let id = self.tx.ctx.alloc_collection();",
+       "rust", "nested record collection")
+# The key DROPPED on the way to the copy: the handle stays Collection<T>
+# and every mutation through it addresses the parent's table.
+census("rust-record-at", RUST,
+       "        let mut path = self.path.clone();\n        path.push(key.into());",
+       "        let path = self.path.clone();",
+       "rust", "record instance addressing")
+
+# The zone handle IGNORED: a body that opens its own transaction declares
+# the collection outside the template scope and the core refuses the
+# nested For — at run time, on one platform, with the guest already built.
+census("go-record-zone", GO,
+       "func TplCollectionOf[K Key, T any](t *Tpl) RecordCollection[K, T] {\n"
+       "\treturn newRecordCollection[K, T](t.tx)",
+       "func TplCollectionOf[K Key, T any](t *Tpl) RecordCollection[K, T] {\n"
+       "\treturn newRecordCollection[K, T](theTx())",
+       "go", "nested record collection")
+census("go-record-at", GO,
+       "\treturn RecordCollection[K, T]{c.Collection.At(key), c.info}",
+       "\treturn RecordCollection[K, T]{c.Collection, c.info}",
+       "go", "record instance addressing")
+
+census("csharp-record-zone", CS,
+       "    public static RecordCollection<T> CollectionOf<T>(this Tpl t) => Declare<T>(t.Tx);",
+       "",
+       "csharp", "nested record collection")
+# The PRE-FIX state exactly: the promoted untyped narrowing, which drops
+# T and puts Insert/Patch/UpdateField out of reach.
+census("csharp-record-at", CS,
+       "    public RecordCollection<T> At(object key) =>\n"
+       "        new RecordCollection<T>(Collection.At(key), Info);",
+       "    public Collection At(object key) => Collection.At(key);",
+       "csharp", "record instance addressing")
+
+# The ROW SURFACE overload, which is the handle a Java scene actually
+# holds: with only the Tpl one, `tx.rows(c)`'s body cannot spell it.
+census("java-record-zone", JAVA,
+       "    public static <K, T> Collection<K, T> collectionOf(KayaApp.RowSurface row, Class<T> type) {",
+       "    public static <K, T> Collection<K, T> collectionOfRow(KayaApp.RowSurface row, Class<T> type) {",
+       "java", "nested record collection")
+census("java-record-at", JAVA,
+       "            return new Collection<>(handle.at(key), info);",
+       "            return new Collection<>(handle, info);",
+       "java", "record instance addressing")
+
+census("swift-record-zone", SWIFT_APP,
+       "    func collection<T: KayaRecord>(of type: T.Type) -> KayaRecordCollection<T> {\n"
+       "        tx.collection(of: type)\n    }",
+       "",
+       "swift", "nested record collection")
+census("swift-record-at", SWIFT_REC,
+       "        KayaRecordCollection(collection: collection.at(key))",
+       "        KayaRecordCollection(collection: collection)",
+       "swift", "record instance addressing")
+
+census("ocaml-record-zone", ML,
+       "  let collection_of rt = collection_of rt\n",
+       "",
+       "ocaml", "nested record collection")
+census("ocaml-record-at", ML,
+       "let record_at rc key = { rc with rc_handle = at rc.rc_handle key }",
+       "let record_at rc _key = rc",
+       "ocaml", "record instance addressing")
+
+# Python's constructor is AMBIENT, so the open-For edge is the only thing
+# that says a collection born inside a template belongs to the copies
+# rather than to the live tree.
+census("python-record-zone", PY,
+       "        _for_collections[-1]._children.append(handle)",
+       "        pass",
+       "python", "nested record collection")
+census("python-record-at", PY,
+       "        return _BoundCollection(self, list(path))",
+       "        return _BoundCollection(_app._collections[self._id], list(path))",
+       "python", "record instance addressing")
+PROBE
+)
+want_record_probe="rust-record-zone=applied:1 rc:1 named:True
+rust-record-at=applied:1 rc:1 named:True
+go-record-zone=applied:1 rc:1 named:True
+go-record-at=applied:1 rc:1 named:True
+csharp-record-zone=applied:1 rc:1 named:True
+csharp-record-at=applied:1 rc:1 named:True
+java-record-zone=applied:1 rc:1 named:True
+java-record-at=applied:1 rc:1 named:True
+swift-record-zone=applied:1 rc:1 named:True
+swift-record-at=applied:1 rc:1 named:True
+ocaml-record-zone=applied:1 rc:1 named:True
+ocaml-record-at=applied:1 rc:1 named:True
+python-record-zone=applied:1 rc:1 named:True
+python-record-at=applied:1 rc:1 named:True"
+if [ "$record_probe" != "$want_record_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the nested-record census did not" \
+        "catch its watched perturbations). Wanted:" >&2
+    echo "$want_record_probe" >&2
+    echo "Got:" >&2
+    echo "$record_probe" >&2
+    exit 1
+fi
+echo "check-sugar-surface: nested-record perturbations applied (7 bindings):"
+echo "$record_probe"
+unset record_probe want_record_probe
 
 # (c2d) THE ZONE-SPANNING SURFACES, watched from the COMPILER side. Every
 #       `*Node` twin is gone — one name dispatches on the handle (the

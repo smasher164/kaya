@@ -55,6 +55,7 @@ cat >"$TMP/probe/NestedTableCheck.java" <<'PROBE'
 package dev.kaya.milestone2kt;
 
 import dev.kaya.KayaApp;
+import dev.kaya.KayaRecords;
 
 /** A table per row: the header bar declared on a nested For, one sort
  * handler for every stamped copy, and a re-declaration that names ONE
@@ -96,13 +97,24 @@ public final class NestedTableCheck {
 
     /** The same nesting through a GENERATED record surface: the rows
      * value takes the row it is nested in, and hands back that zone's
-     * template node. */
+     * template node.
+     *
+     * <p>THE COLLECTION IS DECLARED FROM THE ROW, not from the enclosing
+     * Tx: a nested collection may only be declared in the template
+     * scope, and the zone handle is what says so at the surface rather
+     * than by where the call happens to sit (the ledger's
+     * nested-record-collection entry). And `at` keeps the element type, so
+     * ONE stamped copy's table is filled with records — a
+     * KayaApp.Collection there would take a bare Object and the row's
+     * named fields would be unreachable. */
     static void nestedRecordTable(KayaApp app) {
         app.build(tx -> {
             KayaApp.Collection accounts = tx.collection();
             for (KayaApp.Row account : tx.rows(accounts)) {
+                KayaRecords.Collection<String, Table.TableItem> positions =
+                        KayaRecords.collectionOf(account, Table.TableItem.class);
                 KayaApp.Rows<KayaApp.Node, TableItemKaya.Row> inner =
-                        TableItemKaya.rows(account, TableItemKaya.collection(tx));
+                        TableItemKaya.rows(account, positions);
                 for (TableItemKaya.Row position : inner) {
                     position.row(() -> {
                         position.label(position.name);
@@ -111,6 +123,10 @@ public final class NestedTableCheck {
                 }
                 inner.columns(TITLES, KayaApp.Sort.none());
                 app.onSort(inner.handle, (t, keys, column) -> {
+                    KayaRecords.Collection<String, Table.TableItem> copy =
+                            positions.at(keys.get(0));
+                    copy.insert(t, "aapl", new Table.TableItem("AAPL", "10"));
+                    copy.updateField(t, "aapl", TableItemKaya.SIZE, "20");
                     t.columnsAt(inner.handle, keys, TITLES, KayaApp.Sort.desc(column));
                 });
             }
