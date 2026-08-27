@@ -1579,6 +1579,69 @@ supposed to stay red while half the work is outstanding.
    reviewed. This is where the looks get ruled on and where any second
    round of visual fixes belongs. The palette of §6 is the thing to look
    at hardest, in both modes.
+   LANDED 2026-08-27, mac capture taken and the looks ruling still
+   OPEN. What the dashboard draws is the book valued at each of the last
+   90 days' prices — one series, an area under it, five gridlines on a
+   1-2-5 ladder, an L axis, the money and date labels in kaya's embedded
+   face, and a marker on today — all app arithmetic in
+   guests/python/portfolio.py, no new core surface.
+   THE DATA IS A NEW DERIVED ASSET, and the measurement that forced it:
+   the ledger carries a price on every row, so a history looked
+   derivable from transactions.csv and is not — only 43 of its 1,033
+   retained days carry all six tickers, and two tickers' last traded
+   price sits days short of the anchor, so a carry-forward series would
+   end where the dashboard does not. tools/gen-market.py now writes
+   guests/assets/market/prices.csv beside the ledger, the whole walk,
+   and refuses a history whose last day is not the book's live prices.
+   THE TIE-OUT IS THE LEDGER'S, one screen over: the series' last point
+   is label#0's money to the byte, held by the generator, by
+   check-assets' C11 (which also DERIVES the chart's two frozen
+   accessible names from the artifact) and by the guest at startup.
+   THE SIZE POLICY WAS NOT TAKEN HERE. Ruling 12's declaration exists
+   nowhere yet — no prop in the spec, no letterbox in the core, no track
+   report from any backend — so spelling `scale` in eight bindings would
+   have named a semantics nothing performs. The chart is laid out at its
+   NATURAL SIZE instead (no grow, in a hugging column), which is the one
+   geometry where all three modes agree; docs/deferred.md's stretch
+   entry carries it.
+   ROWS 5 AND 6 OF THE LIST BELOW WERE MEASURED HERE
+   (docs/measurements/canvas-chart-raster-2026-08-27.txt), and the way
+   they were NOT measured is worth as much: the harness A/B saw nothing,
+   because the tick's whole round trip lands inside one poll and the
+   step stamps are whole milliseconds, so both arms read 0ms.
+   AND §6'S PALETTE WAS LOOKED AT IN BOTH MODES
+   (docs/measurements/canvas-palette-look-2026-08-27.txt) WITHOUT
+   touching the host's appearance: the guest's real 220-op stream is
+   captured through the binding and rasterized by the core once per
+   mode, composited over each mode's window ground, and viewed. No
+   palette value was nudged — dark is stronger than light on six of
+   seven contrast rows — and the eyeball reading that dark's gridlines
+   vanish into the area fill is WRONG, which the pixels say (1.34
+   against light's 1.24; what differs is polarity). ONE QUESTION IS
+   STILL OPEN: the plot ground is a raised white card in light and a
+   RECESS in dark, at the weakest separation in the table, while the
+   tables beside the chart draw their card in the platform's own token.
+   IT NO LONGER NEEDS A DARK MACHINE, which is what changed 2026-08-28.
+   `KAYA_APPEARANCE=light|dark` makes ONE PROCESS adopt an appearance
+   through each platform's own supported override — `NSApp.appearance`,
+   `overrideUserInterfaceStyle`, libadwaita's forced colour scheme,
+   `FrameworkElement.RequestedTheme` at ELEMENT scope (the
+   application-scope property throws once the app is running) and
+   and, on Android, the window background resolved out of the `-night`
+   theme together with `LocalConfiguration`'s night bits (NOT
+   `UiModeManager.setApplicationNightMode`, which relaunches the activity
+   and kills the process — see the ledger) — so a real dark window opens
+   on a light desk and no host setting is written. That is also what
+   retires the `-AppleInterfaceStyle Dark` dead end the measurement
+   recorded: the argument domain does not feed `NSApp.appearance`.
+   THE DARK ARM IS A LEG NOW, not a lane re-run: `canvasdark-*` runs the
+   byte-shared canvas script under the override on all five lanes, so the
+   half of `expect_ink`'s frozen string that only a dark host could reach
+   is asserted on every one of them. Unset changes nothing, which is the
+   half no lane can see and tools/check-appearance.sh therefore holds
+   statically, with the guard required to DOMINATE each install site and
+   no backend permitted to report the variable instead of reading its own
+   toolkit back.
 5. **The matrix.** tools/validate-all.sh, all five lanes, before this is
    called done.
 
@@ -1594,8 +1657,8 @@ an assumption:
 | 2 | ~~WinUI `WriteableBitmap` pixel format and whether the swizzle is needed (§8)~~ MEASURED 2026-08-26 on the VM, the swizzle is right: `canvas_rust`'s `expect_ink` reads the window's own pixels (`PrintWindow`, after RenderTargetBitmap turned out to answer with no buffer at all — docs/traps.md) and gets `FFFFFF/D2E3F7`, the core's own bytes; a swizzle error would read `F7E3D2` | phase 3 written, phase 5 measures |
 | 3 | does `\.displayScale` update on a cross-display move? (§5, inferred) | phase 2, on a two-display mac |
 | 4 | does GDK set the cairo device scale, and what does `gdk_surface_get_scale` return at fractional scales? (§5, inferred) — moot for cairo (the GTK arm is a GdkMemoryTexture in a GtkPicture, no cairo context anywhere) and the double is now read; what the container returns is still unmeasured, since it runs Xvfb at scale 1 | phase 3 written, needs a fractional display |
-| 5 | re-raster + blit cost at the portfolio's real canvas size, per tick (§1.3) | phase 4 |
-| 6 | shaping cost for a chart's label set, and whether shaped runs need caching | phase 4 |
+| 5 | ~~re-raster + blit cost at the portfolio's real canvas size, per tick (§1.3)~~ MEASURED 2026-08-27: 0.45ms release, 12.6ms debug, per redeclaration at 280x180 scale 1 over 220 ops — 2.7% of a 60Hz frame for a redraw that happens on a data change (docs/measurements/canvas-chart-raster-2026-08-27.txt) | phase 4 |
+| 6 | ~~shaping cost for a chart's label set, and whether shaped runs need caching~~ MEASURED in the same probe: the seven runs are 0.164ms, a THIRD of the raster, and no cache is warranted at that total. The ratio is what carries forward — hundreds of runs would pay a third of a much larger raster, which is §15's lever question and not a chart's | phase 4 |
 | 7 | the marshal cost of a 2886-op stream in PYTHON and in JAVA, against Rust's measured 0.019ms (§15, ruling 15) | phase 3, before breadth hardens |
 | 8 | band tiling on a phone-class core — §15's 3.4x is an M5 Pro number and the phone lane is the one over budget (ruling 14, lever i) | when a lever is taken |
 

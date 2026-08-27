@@ -13,6 +13,15 @@ fi
 # Lint every tools/ shell script with shellcheck at warning level, plus
 # the repo's own shell rules (--locked, $?, no sed/awk, ffmpeg -nostdin,
 # no exec out of a build directory).
+#
+# ITS SCOPE DID NOT SHRINK, ITS POPULATION DID (docs/deferred.md's
+# 2026-08-27 ruling). A converted gate is a two-line `exec python3` shim
+# over a tools/check-*.py, so it is still walked here and passes every
+# clause vacuously — there is no shell in it to get wrong. The rules that
+# DO apply to its body are check-python.sh's, and the shim's exact bytes
+# are pinned there too, so it can never grow logic this file would then
+# have to hold. What stays here is what shell is still for: the runners,
+# keyed.sh, the generators and tools/lib/*.sh.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

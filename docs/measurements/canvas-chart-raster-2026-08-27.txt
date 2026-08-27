@@ -1,0 +1,70 @@
+WHAT THE PORTFOLIO CHART'S RE-RASTER COSTS, AND HOW MUCH OF IT IS TEXT
+measured 2026-08-27, while landing the canvas chart (phase 4)
+the obligation: docs/canvas-plan.md §11 rows 5 and 6, "re-raster + blit
+cost at the portfolio's real canvas size, per tick" and "shaping cost
+for a chart's label set, and whether shaped runs need caching"
+
+THE QUESTION
+------------
+The chart re-rasters on data change, not per frame (§1.3, "the blit is
+bandwidth"). Phase 4 owed the number at the REAL canvas size, and beside
+it whether the label set's shaped runs want a cache — §4.1 puts one
+shaping engine in the core and nothing had ever timed it.
+
+WHAT WAS MEASURED, AND WHAT WAS NOT
+-----------------------------------
+NOT the harness A/B, which was tried FIRST and cannot see this: the
+tick's whole round trip — three table refills, six model writes and the
+redraw — lands inside one harness poll, and the step stamps are whole
+milliseconds, so `click button#0` to the step after it read 0ms with the
+redraw and 0ms without it, five runs a side. A measurement whose two
+arms are both zero measures the instrument.
+
+So the raster was timed where it happens, in the core: a scratch #[test]
+spliced into crates/kaya/src/canvas.rs's own test module, run, and the
+file restored by hash. The stream is the chart's SHAPE rather than its
+exact numbers — 280x180 viewbox, scale 1, light mode, 220 ops: a ground
+rect, five gridlines, a 90-point series drawn twice (once closed into an
+area fill, once stroked), an L axis, a 4-point marker, and SEVEN shaped
+text runs (five money labels, two ISO dates) in the embedded default
+face. That is op-for-op what guests/python/portfolio.py declares. 200
+rasterizations after one warm-up, then the same stream with every `font`
+and `text` op dropped, so the difference is the runs.
+
+THE RESULT
+----------
+  build      whole raster   geometry only   the seven runs
+  release      0.4522 ms       0.2882 ms       0.1640 ms  (36%)
+  debug       12.5615 ms       8.3542 ms       4.2073 ms  (33%)
+
+  ops = 220, of which 212 are geometry.
+
+WHAT IT MEANS
+-------------
+1. A TICK IS FREE. 0.45ms of raster per redeclaration is 2.7% of a 60Hz
+   frame, for a redraw that happens when the data changes. §1.3's
+   worry — that the blit is bandwidth — is about the buffer's SIZE, and
+   280x180 at scale 1 is 201KB; nothing here is near a budget.
+2. SHAPED RUNS DO NOT NEED A CACHE, for this. Seven runs are a third of
+   the raster, and a third of 0.45ms is not worth a cache's invalidation
+   rules. The number to carry forward is the RATIO, not the total: a
+   drawing whose text grows into the hundreds of runs pays a third of
+   its raster for them, and that is where §15's lever list would want
+   shaped-run caching. An animated canvas is the case, not a chart.
+3. THE DEBUG NUMBER IS THE ONE THE LANES RUN, and it is 28x the release
+   number — 12.6ms, three quarters of a frame. Nothing in the tree
+   redraws per frame, so no lane is near it either; it is written down
+   because the first person to animate something WILL do it against a
+   debug libkaya and should not read 12.6ms as the rasterizer's cost.
+   tiny-skia's antialiased path fill is the whole ceiling either way
+   (§15.2), and it is the part that does not vectorize in a debug build.
+
+HOW TO REDO IT
+--------------
+The probe is not checked in — it is 100 lines of op-stream construction
+against `canvas::rasterize`, and a checked-in timing test is a flaky
+test. Rebuild it from this file's description: validate() a stream of
+that shape, rasterize it 200 times at (280.0, 180.0) with
+Presentation { scale: 1.0, mode: Mode::Light }, black_box the result,
+and subtract the same stream with the text ops removed. Run it
+--release, because the debug number is a different question.

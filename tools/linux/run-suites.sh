@@ -1038,6 +1038,12 @@ for proto in x11 wayland; do
     # DBUS_SESSION_BUS_ADDRESS, which no plain leg exports).
     run "$proto" canvas-rust env KAYA_SELFTEST=canvas \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"
+    # The same script under the other appearance, per-process rather than
+    # by moving the container's session preference — which pins nothing,
+    # so Adwaita's default is light and every leg before this one ran it
+    # (docs/canvas-plan.md phase 4).
+    run "$proto" canvasdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py
@@ -1250,8 +1256,14 @@ for proto in x11 wayland; do
     # through KAYA_SCENES_DIR like every pooled leg's. ALONE BETWEEN
     # DRAINS since the transactions view joined it: 15,000 windowed rows
     # are its own load (docs/virtualization-plan.md §6.2).
+    #
+    # THROUGH a11y-leg.sh since the chart joined it (docs/canvas-plan.md
+    # §10): a drawing is an IMAGE with an authored name, so the chart's
+    # numbers are asserted with expect_ax, and GTK publishes its tree on
+    # a session bus this leg has to own (the traps entry on the a11y
+    # session bus). check-steps refuses this leg without it.
     run "$proto" portfolio-python env KAYA_SELFTEST=portfolio KAYA_LIB="$LIB" \
-        python3 guests/python/portfolio.py
+        tools/linux/a11y-leg.sh python3 guests/python/portfolio.py
     drain
     # ROW WINDOWING'S VARIABLE-HEIGHT SCENE (docs/virtualization-plan.md
     # §5): the portfolio's uniform 15k rows drive the EXACT path, this

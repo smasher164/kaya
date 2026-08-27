@@ -22,6 +22,8 @@ anything.
 | `canvas-marshal-2026-08-26.txt` | What one animated canvas frame costs a guest to BUILD AND SUBMIT, in python, java and rust — the number that decides whether the reserved packed-encoding lane is needed. Found the Java record encoder's 4096-byte ceiling on the way. |
 | `canvas-marshal-guest-2026-08-26.py` | That report's python guest. |
 | `canvas-marshal-guest-2026-08-26.java` | Its java twin, in package `dev.kaya`. Run against the tree's own `KayaWire` it prints the 4096-byte ceiling and stops, which is the watched negative for that defect. |
+| `canvas-chart-raster-2026-08-27.txt` | What the portfolio chart's re-raster costs per tick, and how much of it is the seven shaped label runs — docs/canvas-plan.md §11's rows 5 and 6. Also records the measurement that did NOT work: a harness A/B whose two arms both read 0ms. |
+| `canvas-palette-look-2026-08-27.txt` | The §6 palette reviewed in BOTH modes on the real chart, by rendering the core's own display raster per mode instead of switching the host's appearance. Contrast numbers per role, the eyeball reading the pixels corrected, and the one question a dark machine still owes. |
 
 `canvas-marshal-2026-08-26.txt` keeps its two guests beside it, on the
 `choke-ios-guest-2026-08-24.swift` precedent, and its own recipe; its

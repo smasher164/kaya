@@ -64,3 +64,4 @@ guests/haskell/dist-newstyle/
 # build-id marker); never committed.
 /android/kaya/generated
 guests/assets/market/transactions.csv
+guests/assets/market/prices.csv

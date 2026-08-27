@@ -64,6 +64,7 @@ ACCOUNT_ORDER = ["brokerage", "retirement", "savings"]
 # The one resolver (crates/kaya/src/assets.rs): the bytes come from the
 # asset root the lane staged, never from a path this guest spells.
 LEDGER = "market/transactions.csv"
+HISTORY = "market/prices.csv"
 
 # The transactions view's surface id, and the filter's options with the
 # account each names. The first is "no filter", which is what "or all"
@@ -114,7 +115,37 @@ def read_ledger():
     return out
 
 
+def read_history():
+    """The price walk: every day, every ticker. Returns the days in file
+    order and each ticker's series against them."""
+    with kaya.asset(HISTORY) as csv:
+        lines = csv.bytes().decode("ascii").splitlines()
+    days, series = [], {}
+    for line in lines[1:]:
+        date, ticker, cents = line.split(",")
+        if not days or days[-1] != date:
+            days.append(date)
+        series.setdefault(ticker, []).append(int(cents))
+    return days, series
+
+
 txns = read_ledger()
+history_days, history = read_history()
+
+# THE CHART TIES TO THE BOOK, the ledger's tie-out one column over: the
+# last day of history IS the dashboard's present, so the series the chart
+# draws ends on the money label#0 shows. Asserted here rather than
+# assumed, because a history that ended a few days short would draw a
+# plausible chart nobody could tell was wrong (tools/gen-market.py
+# refuses to write one, and check-assets holds the artifact to the same
+# book).
+for _ticker, _cents in prices.items():
+    if history[_ticker][-1] != _cents:
+        raise SystemExit(
+            f"portfolio: {HISTORY} ends {_ticker} at {history[_ticker][-1]} "
+            f"and the book prices it at {_cents} — the chart would end "
+            "somewhere this dashboard does not; regenerate with "
+            "`python3 tools/gen-market.py --ensure`")
 
 
 def account_total(account):
@@ -167,6 +198,121 @@ def on_positions_sort(account, column):
     apply_order(account, column, descending)
 
 
+# ---------------------------------------------------------------- the
+# chart (docs/canvas-plan.md §10). APP ARITHMETIC, NOT A CORE SURFACE:
+# everything below is ordinary python over the price history, spoken to
+# the core as the op vocabulary of §3.3 in the paint roles of §3.4.
+#
+# THE CANVAS IS AT ITS NATURAL SIZE — no grow, in a hugging column — and
+# that is deliberate. The size policy's `scale`/`fixed`/`redraw`
+# declaration (ruling 12) is not built: no prop exists in the spec, the
+# core rasterizes at the viewbox and every backend still stretches that
+# image into its track. At the natural size the three modes coincide, so
+# this chart is exact and unstretched on all three desktop lanes today
+# and needs no re-look when the declaration lands.
+CHART_BOX = (280.0, 180.0)
+# The plot rect inside the box: a left gutter for the money labels, a
+# bottom gutter for the dates. INSET ON PURPOSE — a drawing that filled
+# its box reads 0,0,100,100 in expect_drawing whatever the transform did
+# (docs/canvas-plan.md §7.2).
+PLOT = (44.0, 12.0, 274.0, 150.0)
+CHART_DAYS = 90
+# Half the last point's marker square.
+MARK = 2.5
+
+
+def axis_band(low, high):
+    """The gridline floor, ceiling and step in cents: the smallest 1-2-5
+    step that covers the range in at most four intervals, so every
+    gridline is a round number of dollars whatever the window holds."""
+    for step in (10_000, 20_000, 25_000, 50_000, 100_000,
+                 200_000, 250_000, 500_000, 1_000_000):
+        floor = low // step * step
+        ceiling = -(-high // step) * step
+        if ceiling - floor <= 4 * step:
+            return floor, ceiling, step
+    raise SystemExit(
+        f"portfolio: no 1-2-5 step covers {low}..{high} in four intervals")
+
+
+def value_series():
+    """The book valued at each of the last CHART_DAYS days' prices,
+    oldest first. THE LAST POINT IS TODAY, priced from the live book, so
+    a tick moves the chart's right edge and the dashboard's total by the
+    same arithmetic."""
+    qty = {t: q for _, holdings in BOOK.values() for t, q, _ in holdings}
+    days = history_days[-CHART_DAYS:]
+    first = len(history_days) - CHART_DAYS
+    values = [sum(q * history[t][first + i] for t, q in qty.items())
+              for i in range(CHART_DAYS)]
+    values[-1] = portfolio_total()
+    return days, values
+
+
+def chart_summary_text(days, values):
+    """What a screen reader is told, and the chart's tie-out said out
+    loud: a drawing is pixels, so the numbers live in the widget's
+    accessible name (docs/canvas-plan.md §9)."""
+    return (f"Portfolio value, {len(days)} days to {days[-1]}, "
+            f"{money(min(values))} to {money(max(values))}, "
+            f"now {money(values[-1])}")
+
+
+def draw_chart():
+    """Re-declare the whole drawing. One record replaces it atomically —
+    never a patch (docs/canvas-plan.md §2.1)."""
+    days, values = value_series()
+    floor, ceiling, step = axis_band(min(values), max(values))
+    left, top, right, bottom = PLOT
+
+    def x_at(i):
+        return left + (right - left) * i / (len(values) - 1)
+
+    def y_at(cents):
+        return bottom - (bottom - top) * (cents - floor) / (ceiling - floor)
+
+    points = [(x_at(i), y_at(v)) for i, v in enumerate(values)]
+    gridlines = list(range(floor, ceiling + 1, step))
+    chart_summary.set(chart_summary_text(days, values))
+    with chart.draw() as d:
+        # The plot ground: the PLOT RECT, not the box, so the gutters
+        # stay transparent and the ink bounds are the figure's.
+        d.move_to(left, top).line_to(right, top)
+        d.line_to(right, bottom).line_to(left, bottom).close()
+        d.fill("ground")
+        for cents in gridlines:
+            d.move_to(left, y_at(cents)).line_to(right, y_at(cents))
+        d.stroke("grid", width=1)
+        # The area under the series, closed down to the plot's baseline.
+        d.polyline(points).line_to(right, bottom).line_to(left, bottom)
+        d.close().fill("series_fill")
+        d.polyline(points).stroke("series", width=1.5)
+        # The axis is an L: the money edge and the date edge, drawn over
+        # the fill so the plot has a boundary the eye can find.
+        d.move_to(left, top).line_to(left, bottom).line_to(right, bottom)
+        d.stroke("axis", width=1)
+        # Today, marked: the one point the dashboard's own total names.
+        # CLAMPED WHOLLY INSIDE THE PLOT, never centred on its edge —
+        # the last point IS the right edge, so an uncentred box is what
+        # keeps the marker off the window's own ground (ruled from the
+        # first capture, 2026-08-27).
+        x = min(max(points[-1][0], left + MARK), right - MARK)
+        y = min(max(points[-1][1], top + MARK), bottom - MARK)
+        d.move_to(x - MARK, y - MARK).line_to(x + MARK, y - MARK)
+        d.line_to(x + MARK, y + MARK).line_to(x - MARK, y + MARK)
+        d.close().fill("series")
+        # kaya's own embedded face (`""`), so the labels draw on a lane
+        # whose asset root staged no typeface (docs/canvas-plan.md §4.2).
+        d.font(9)
+        for cents in gridlines:
+            d.text(left - 4, y_at(cents), f"${cents // 100}",
+                   paint="axis", align="end", baseline="middle")
+        d.text(left, bottom + 5, days[0],
+               paint="axis", align="start", baseline="top")
+        d.text(right, bottom + 5, days[-1],
+               paint="axis", align="end", baseline="top")
+
+
 def tick():
     for ticker, delta in TICK.items():
         prices[ticker] += delta
@@ -179,6 +325,9 @@ def tick():
         if account in sorted_accounts:
             apply_order(account, *sorted_accounts[account])
     portfolio_value.set(f"Portfolio: {money(portfolio_total())}")
+    # The chart's right edge IS the total above it, so it is redrawn from
+    # the same prices in the same transaction.
+    draw_chart()
     txns.extend(POSTED)
     book_size.set(f"Transactions: {len(txns)}")
     # THE VIEW IS ONLY THERE WHILE IT IS PUSHED: its collections die with
@@ -368,6 +517,19 @@ with app.window(title="portfolio", width=900, height=600):
         with kaya.column():
             kaya.label(bind=portfolio_value)  # label#0
             kaya.label(bind=book_size)  # label#1
+            # THE CHART, beside the account tables in a column that hugs,
+            # so the canvas is laid out at the natural size its viewbox
+            # declares. Its numbers are spoken through the accessible
+            # name — a drawing is an image to every platform's
+            # accessibility tree (docs/canvas-plan.md §9).
+            # DECLARED WITH THE REAL TEXT, never "": an empty a11y label
+            # is refused at the tx (crates/kaya/src/scene.rs), and the
+            # summary is computable here — draw_chart() recomputes the
+            # same string from the same series on the next line.
+            chart_summary = kaya.signal(chart_summary_text(*value_series()))
+            chart = kaya.canvas(CHART_BOX)
+            chart.a11y_id("chart").a11y_label(chart_summary)
+            draw_chart()
             kaya.button("Day tick", on_click=tick)  # button#0
             kaya.button("Transactions", on_click=open_transactions)  # button#1
         accounts = kaya.collection(Account)

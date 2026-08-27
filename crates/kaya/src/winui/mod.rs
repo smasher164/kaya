@@ -1271,6 +1271,28 @@ fn defer_role_refresh() {
 fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     let Ok(root) = core.window.Content() else { return Ok(()) };
     let element: FrameworkElement = windows_core::Interface::cast(&root)?;
+    // The harness appearance, on the SAME element whose ActualTheme this
+    // function reads below. ELEMENT SCOPE, NOT APPLICATION SCOPE: the
+    // Remarks on Application.RequestedTheme say it "can only be set when
+    // the app is started, not while it's running. Attempting to set
+    // RequestedTheme while the app is running throws an exception", and
+    // kaya's content root arrives with the app's FIRST MOUNT, long after
+    // Application::Start — while FrameworkElement.RequestedTheme is the
+    // documented run-time route ("You can change specific theme values at
+    // run-time ... if you use the FrameworkElement.RequestedTheme
+    // property"). Re-applied on every report because a mount REPLACES the
+    // content root, and only when it differs, so setting it cannot loop
+    // through the ActualThemeChanged edge wired just below
+    // (tools/check-appearance.sh).
+    if let Some(mode) = crate::canvas::appearance_override() {
+        let want = match mode {
+            crate::canvas::Mode::Dark => ElementTheme::Dark,
+            crate::canvas::Mode::Light => ElementTheme::Light,
+        };
+        if element.RequestedTheme()? != want {
+            element.SetRequestedTheme(want)?;
+        }
+    }
     // THE TWO EDGES, wired the first time there is a XamlRoot to wire one
     // of them to. Windows delivers a DPI change per top-level window and
     // a theme change per element; without these a display move or an
@@ -12102,21 +12124,39 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // Empty means unset, and unset stays untouched: UIA
                 // derives a control's name from its content, and writing
                 // "" would SILENCE it.
-                (w, Prop::A11yLabel, Value::Str(label)) if !label.is_empty() => {
-                    let element = w.element()?;
-                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
-                        &element,
-                        &windows_core::HSTRING::from(label.as_str()),
-                    )?;
+                //
+                // THE EMPTINESS TEST IS INSIDE THE ARM, never a pattern
+                // guard, and gtk.rs:A11yLabel has the same shape for the
+                // same reason: a guard makes an empty label match NO arm,
+                // so it falls through to this match's catch-all panic and
+                // aborts the drain. That is exactly what shipped — the
+                // guest declaration three backends no-opped on killed the
+                // windows lane (docs/deferred.md a11y-empty-label).
+                // A DECLARED empty is refused at the tx now, but a label
+                // bound to a ROW FIELD is not: scene.rs's
+                // PropValue::Element arm has no value to check at declare
+                // time, so an empty row datum still arrives here and must
+                // land as the same no-op the other three make of it.
+                (w, Prop::A11yLabel, Value::Str(label)) => {
+                    if !label.is_empty() {
+                        let element = w.element()?;
+                        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+                            &element,
+                            &windows_core::HSTRING::from(label.as_str()),
+                        )?;
+                    }
                 }
                 // The HINT: UIA's HelpText, the slot for what acting on
-                // the control does. Empty means unset, like the name.
-                (w, Prop::A11yHint, Value::Str(hint)) if !hint.is_empty() => {
-                    let element = w.element()?;
-                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHelpText(
-                        &element,
-                        &windows_core::HSTRING::from(hint.as_str()),
-                    )?;
+                // the control does. Empty means unset, like the name —
+                // and inside the arm for the name's reason.
+                (w, Prop::A11yHint, Value::Str(hint)) => {
+                    if !hint.is_empty() {
+                        let element = w.element()?;
+                        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHelpText(
+                            &element,
+                            &windows_core::HSTRING::from(hint.as_str()),
+                        )?;
+                    }
                 }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard):
                 // the list drives the paste split and Paste's

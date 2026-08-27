@@ -1,0 +1,128 @@
+THE §6 PALETTE, LOOKED AT IN BOTH MODES, ON THE REAL CHART
+measured 2026-08-27, while landing the canvas chart (phase 4)
+the obligation: docs/canvas-plan.md §11 phase 4, "the palette of §6 is
+the thing to look at hardest, in both modes", and §7.3, which says a
+human looking at a picture is currently kaya's best detector of look
+bugs
+
+THE PROBLEM THIS SOLVES
+-----------------------
+A capture shows ONE mode: the host's. This mac is light, and switching
+the machine's appearance to review the other half is not something a
+session should do to someone's desktop. `expect_ink` freezes the dark
+palette's BYTES, so the numbers are asserted — but nobody had LOOKED at
+the dark chart, and §7.3's whole point is that every scene assertion was
+green through the two look bugs the portfolio has already shipped.
+
+HOW IT WAS DONE, WITHOUT TOUCHING THE HOST
+------------------------------------------
+The core renders the display raster per mode already, so the review is a
+render rather than a screenshot:
+
+1. The guest's REAL op stream is captured through the binding — the one
+   `wire.tx_set_drawing` call is wrapped, its arguments recorded, and the
+   guest aborted before it opens a window. 220 ops, viewbox 280x180,
+   which is the count tools/scenes/portfolio.steps freezes, so the stream
+   under review is the one the mac leg asserts.
+2. A scratch #[test] spliced into crates/kaya/src/canvas.rs (run, file
+   restored by hash) validates that stream and rasterizes it at scale
+   2.0 for Mode::Light and Mode::Dark.
+3. The gutters carry no ground fill — the ground rect is the PLOT rect —
+   so each raster is composited over the window ground it will sit on
+   before being written as a PNG. Light is EEF1F2, MEASURED off the mac
+   capture. DARK IS 1E1E1E, STATED (macOS's dark window background) and
+   NOT measured on this host. That assumption is the one thing below
+   that a dark machine could still overturn.
+
+WHAT WAS TRIED AND DID NOT WORK: `-AppleInterfaceStyle Dark` in the
+guest's own arguments, which is the per-process appearance override and
+would have given a real dark window. The captured window came back
+light (EEF1F2 at the same pixels as the ordinary run), so the override
+did not reach this stack. Recorded so the next person does not spend the
+same ten minutes.
+
+RESOLVED 2026-08-28, and the argument-domain route was the wrong lever
+rather than a broken one. `-AppleInterfaceStyle Dark` writes the
+process's NSUserDefaults argument domain; what AppKit resolves an
+appearance from is `NSApp.appearance`, which that domain does not feed.
+Setting it directly does work, and is now the knob: `KAYA_APPEARANCE=dark`
+makes ONE PROCESS adopt an appearance through each platform's own
+supported override — `NSApp.appearance` on macOS,
+`overrideUserInterfaceStyle` on iOS, libadwaita's forced colour scheme on
+GTK, `FrameworkElement.RequestedTheme` on WinUI (element scope: the
+application-scope property throws once the app is running) and
+and on Android the window background resolved out of the `-night` theme
+together with `LocalConfiguration`'s night bits. No host setting is
+written, so the "not something a session should do to someone's desktop"
+constraint above is met rather than worked around.
+
+(Android's app-level `UiModeManager.setApplicationNightMode` was the
+first mechanism and is NOT the one that shipped: it relaunches the
+activity, `onCreate` runs twice in one process, and the second mount dies
+on a duplicate widget id. Measured on the lane 2026-08-27; the
+re-entrancy gap it exposed is its own ledger entry.)
+
+WHAT THAT CHANGES FOR THIS DOCUMENT: the dark render below is still a
+composite over a STATED window ground (1E1E1E), and that assumption is
+still the one thing a dark machine could overturn — but it no longer
+needs a dark machine. `KAYA_APPEARANCE=dark` on the mac canvas leg
+produces a real dark window on this light desk, so §3's open question is
+answerable by a capture whenever the maintainer wants to look at it. The
+knob is held by tools/check-appearance.sh and exercised by the
+`canvasdark-*` leg on all five lanes.
+
+THE NUMBERS (WCAG contrast ratios, palette values read out of
+PALETTE_LIGHT / PALETTE_DARK rather than retyped)
+---------------------------------------------------------------
+                                    light    dark
+  plot ground vs window ground       1.14    1.07
+  series      vs plot ground         4.77    7.21
+  series      vs area fill           3.65    4.68
+  area fill   vs plot ground         1.31    1.54
+  grid        vs plot ground         1.27    1.36
+  axis line   vs plot ground         7.96    8.23
+  axis text   vs window ground       7.02    7.72
+
+And the same two gridlines sampled out of the RENDERED pixels, where a
+gridline crosses the area fill rather than bare ground:
+
+  light  $9800 line BACDE6 on fill D2E3F7   contrast 1.24
+  dark   $9800 line 3C4E65 on fill 2B3B4F   contrast 1.34
+
+WHAT I SEE, AND THE ONE THING THAT IS NOT SETTLED
+-------------------------------------------------
+1. NO PALETTE VALUE WAS NUDGED, and the measurement is why. Dark is
+   STRONGER than light on six of the seven rows — the series stands off
+   its ground at 7.21 against light's 4.77 — and the one row where it is
+   weaker rests on the assumed window ground. Ruling 13 makes these
+   values tweakable pixels; there was nothing here to justify tweaking.
+2. MY EYE WAS WRONG ABOUT THE GRIDLINES and the pixels corrected it.
+   Looking at the dark render I read the gridlines as vanishing into the
+   area fill. They do not: dark's gridline-on-fill is 1.34 against
+   light's 1.24. What changes is POLARITY — light's gridline goes DARKER
+   than the fill it crosses, dark's goes LIGHTER — and that reads as
+   disappearance without being it. Written down because the obvious
+   "fix" would have made the dark gridlines louder than the light ones
+   for no measured reason.
+3. THE ONE OPEN QUESTION IS THE PANEL'S RELATIONSHIP TO ITS WINDOW.
+   In light the plot ground is WHITE on a EEF1F2 window: a raised card,
+   matching the tables beside it. In dark the plot ground 16181C is
+   DARKER than any plausible macOS dark window: a recess, the opposite
+   reading, at the weakest separation in the table (1.07). Whether that
+   is right is a taste question AND a consistency question, because the
+   tables next to the chart draw their card in the PLATFORM's own token
+   (tools/check-table-card.sh) while the canvas draws in kaya's palette
+   — so on a dark host the chart could sit visibly darker than the
+   cards it is beside. NOT DECIDABLE HERE: it needs a dark machine, one
+   capture, and the maintainer's eye on whether a chart well should read
+   raised or recessed.
+
+HOW TO REDO IT
+--------------
+The three scratch scripts are not checked in (a capture harness that
+splices a test into the crate is not something to leave lying in
+tools/). Rebuild from the description above: wrap
+`kaya.wire.tx_set_drawing`, run the guest under runpy, abort from the
+wrapper; write the values out tagged one per line; read them back in a
+spliced #[test], `validate` then `rasterize` at scale 2.0 per mode,
+composite over the window ground, `Pixmap::save_png`.

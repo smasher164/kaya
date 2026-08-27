@@ -563,7 +563,8 @@ kadmit = section(
     defaults[2],
 )
 if kmount is not None:
-    render = kmount.find("activity.setContent { KayaTheme { KayaRoot() } }")
+    render = kmount.find(
+        "activity.setContent { KayaAppearance { KayaTheme { KayaRoot() } } }")
     admit = kmount.find("admitSelftestOnFirstDraw(activity)")
     if render < 0 or admit < render or "startSelftest(activity)" in kmount:
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt starts the harness before first-draw admission")

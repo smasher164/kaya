@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Regenerates guests/assets/market/transactions.csv, byte-stable.
+"""Regenerates the market family's two derived artifacts, byte-stable:
+transactions.csv (the ledger) and prices.csv (the price history the
+portfolio's chart draws).
 
 Synthetic by doctrine (docs/portfolio-plan.md: deterministic data keeps
 the scenes honest) and by licence (real market data is not
@@ -22,6 +24,16 @@ docs/deferred.md's tie-out entry named:
     on the first row, so a net over what the file contains is the book's.
   - CASH is a book holding, so it is a tradeable ticker here — flat, at
     its anchor, because a unit of account does not walk.
+
+AND THE HISTORY TIES TO THE SAME BOOK, one column over (2026-08-27, the
+canvas chart): prices.csv is the WHOLE walk, every day and every ticker,
+and its last day is the anchors — which is the book's live prices. The
+ledger could not serve as that history and this is measured, not
+assumed: only 43 of the retained 1033 days carry all six tickers, and
+two tickers' last traded price sits days short of the anchor, so a
+carry-forward series off transactions.csv ends somewhere the dashboard
+does not. The refusal below holds the last day to the book the way the
+net check holds the quantities.
 """
 
 import ast
@@ -29,13 +41,18 @@ import pathlib
 
 import os
 
-# KAYA_GEN_MARKET_OUT: check-assets regenerates into a scratch file to
-# byte-compare (the derivation clause); the default is the real root.
+# KAYA_GEN_MARKET_DIR: check-assets regenerates into a scratch DIRECTORY
+# to byte-compare (the derivation clause); the default is the real root.
+# A directory rather than a file since 2026-08-27, when the family grew
+# its second artifact — one env var naming one of two outputs would have
+# left the other regenerating over the real root.
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-OUT = pathlib.Path(
-    os.environ.get("KAYA_GEN_MARKET_OUT")
-    or ROOT / "guests" / "assets" / "market" / "transactions.csv"
+DIR = pathlib.Path(
+    os.environ.get("KAYA_GEN_MARKET_DIR")
+    or ROOT / "guests" / "assets" / "market"
 )
+OUT = DIR / "transactions.csv"
+PRICES = DIR / "prices.csv"
 GUEST = ROOT / "guests" / "python" / "portfolio.py"
 
 DAYS = 1096  # three years, fixed span ending 2026-08-24
@@ -118,17 +135,19 @@ STAMP = ROOT / "target" / "gen-market.src"
 
 
 def stamp_id():
-    """Generator bytes, GUEST bytes and artifact bytes: a stamp keyed on
-    the generator alone calls a corrupted artifact current, and one blind
-    to the guest would call a ledger current after the book it nets to
-    moved."""
+    """Generator bytes, GUEST bytes and BOTH artifacts' bytes: a stamp
+    keyed on the generator alone calls a corrupted artifact current, one
+    blind to the guest would call a ledger current after the book it nets
+    to moved, and one blind to either artifact would call the family
+    current with that file deleted."""
     import hashlib
+
+    def digest(path):
+        return (hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+                if path.exists() else "absent")
+
     gid = hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
-    bid = (hashlib.sha256(GUEST.read_bytes()).hexdigest()[:16]
-           if GUEST.exists() else "absent")
-    aid = (hashlib.sha256(OUT.read_bytes()).hexdigest()[:16]
-           if OUT.exists() else "absent")
-    return f"{gid} {bid} {aid}"
+    return f"{gid} {digest(GUEST)} {digest(OUT)} {digest(PRICES)}"
 
 
 def write_stamp():
@@ -137,10 +156,11 @@ def write_stamp():
 
 
 def ensure():
-    """Regenerate unless generator, guest AND artifact all match the
-    stamp — the artifact is DERIVED, never committed (maintainer,
+    """Regenerate unless generator, guest AND both artifacts match the
+    stamp — the artifacts are DERIVED, never committed (maintainer,
     2026-08-24)."""
-    if OUT.exists() and STAMP.exists() and STAMP.read_text().strip() == stamp_id():
+    if (OUT.exists() and PRICES.exists() and STAMP.exists()
+            and STAMP.read_text().strip() == stamp_id()):
         return False
     generate()
     write_stamp()
@@ -251,6 +271,24 @@ def generate():
     OUT.write_bytes(("\n".join(lines) + "\n").encode("ascii"))
     print(f"{OUT}: {len(rows)} transactions, {OUT.stat().st_size} bytes")
 
+    # THE HISTORY, the same walk one column over: every day and every
+    # ticker, so a chart reads a series rather than reconstructing one
+    # out of whatever days happened to trade.
+    for ticker, anchor in anchors.items():
+        if prices[ticker][-1] != anchor:
+            raise SystemExit(
+                f"gen-market: {ticker}'s history ends at {prices[ticker][-1]} "
+                f"and the book prices it at {anchor} — the last day of "
+                "history IS the dashboard's present, and a chart drawn off "
+                "this file would end somewhere the dashboard does not")
+    history = ["date,ticker,price_cents"]
+    for i, day in enumerate(span):
+        for ticker in sorted(universe):
+            history.append(f"{day},{ticker},{prices[ticker][i]}")
+    PRICES.write_bytes(("\n".join(history) + "\n").encode("ascii"))
+    print(f"{PRICES}: {len(span)} days x {len(universe)} tickers, "
+          f"{PRICES.stat().st_size} bytes")
+
 
 if __name__ == "__main__":
     import sys
@@ -258,5 +296,5 @@ if __name__ == "__main__":
         print("regenerated" if ensure() else "current (stamp matches)")
     else:
         generate()
-        if "KAYA_GEN_MARKET_OUT" not in os.environ:
+        if "KAYA_GEN_MARKET_DIR" not in os.environ:
             write_stamp()

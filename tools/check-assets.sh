@@ -456,28 +456,43 @@ if gradle_path.is_file():
 import subprocess
 import tempfile
 gen = root / "tools" / "gen-market.py"
-art = root / "guests" / "assets" / "market" / "transactions.csv"
+market = root / "guests" / "assets" / "market"
+art = market / "transactions.csv"
+hist = market / "prices.csv"
+# BOTH artifacts, because the family grew a second one (2026-08-27) and a
+# clause that regenerated one of two would call a stale history current.
+DERIVED = [("transactions.csv", art), ("prices.csv", hist)]
 if not gen.is_file():
     bad.append("tools/gen-market.py is gone while the market family exists — "
-               "the derived artifact would have no regeneration story")
-elif not art.is_file():
-    bad.append("guests/assets/market/transactions.csv is missing — it is "
-               "derived, never committed: run `python3 tools/gen-market.py "
-               "--ensure` (docs, guests/assets/market/README.md)")
+               "the derived artifacts would have no regeneration story")
+elif [n for n, p in DERIVED if not p.is_file()]:
+    for name, path in DERIVED:
+        if not path.is_file():
+            bad.append(f"guests/assets/market/{name} is missing — it is "
+                       "derived, never committed: run `python3 "
+                       "tools/gen-market.py --ensure` (docs, "
+                       "guests/assets/market/README.md)")
 else:
     with tempfile.TemporaryDirectory() as td:
-        scratch = pathlib.Path(td) / "t.csv"
-        env = dict(os.environ, KAYA_GEN_MARKET_OUT=str(scratch))
+        scratch = pathlib.Path(td)
+        env = dict(os.environ, KAYA_GEN_MARKET_DIR=str(scratch))
         r = subprocess.run([sys.executable, str(gen)], env=env,
                            capture_output=True, text=True)
         if r.returncode != 0:
             bad.append("tools/gen-market.py failed to run for the derivation "
                        "check: " + r.stderr.strip()[:200])
-        elif scratch.read_bytes() != art.read_bytes():
-            bad.append("guests/assets/market/transactions.csv does not match "
-                       "what tools/gen-market.py generates — the artifact is "
-                       "derived, never hand-edited: run `python3 "
-                       "tools/gen-market.py --ensure`")
+        else:
+            for name, path in DERIVED:
+                fresh = scratch / name
+                if not fresh.is_file():
+                    bad.append(f"tools/gen-market.py wrote no {name} into the "
+                               "scratch directory, so the derivation check "
+                               "had nothing to compare that artifact against")
+                elif fresh.read_bytes() != path.read_bytes():
+                    bad.append(f"guests/assets/market/{name} does not match "
+                               "what tools/gen-market.py generates — the "
+                               "artifact is derived, never hand-edited: run "
+                               "`python3 tools/gen-market.py --ensure`")
 
 # ------------------------------------------------------------------ C9
 # THE SCENE IS DERIVED FROM THE ARTIFACT TOO. C8 holds the CSV to its
@@ -609,6 +624,73 @@ elif art.is_file():
                     "same positions, so a ledger that disagrees makes the "
                     "dashboard a fiction. Regenerate: `python3 "
                     "tools/gen-market.py --ensure`")
+
+        # ---------------------------------------------------------- C11
+        # THE HISTORY TIES TO THE SAME BOOK, one column over
+        # (2026-08-27, docs/canvas-plan.md §10): prices.csv's LAST DAY is
+        # the dashboard's live prices, so the chart's right edge is the
+        # money label#0 shows. Held here on the ARTIFACT ON DISK, the
+        # half a doctored or half-written file breaks with the generator
+        # innocent — and then the scene's own chart lines are DERIVED
+        # from that artifact, C9's rule for the ledger applied to the
+        # chart: retuning the walk without moving the scene is a red
+        # naming this file instead of three failing lanes.
+        CHART_DAYS = _const("CHART_DAYS")
+        if not hist.is_file():
+            pass  # C8 already named the missing artifact.
+        elif not isinstance(CHART_DAYS, int):
+            bad.append(f"{GUEST} no longer spells CHART_DAYS (an int) at "
+                       "module scope — C11 derives the chart's frozen "
+                       "accessible name from that window, and a reader that "
+                       "cannot find it would agree with any chart at all")
+        else:
+            hist_days, walk = [], {}
+            for line in hist.read_text().splitlines()[1:]:
+                date, ticker, cents = line.split(",")
+                if not hist_days or hist_days[-1] != date:
+                    hist_days.append(date)
+                walk.setdefault(ticker, []).append(int(cents))
+            for ticker, anchor in sorted(anchors.items()):
+                end = walk.get(ticker, [None])[-1]
+                if end != anchor:
+                    bad.append(
+                        f"guests/assets/market/prices.csv ends {ticker} at "
+                        f"{end} and {GUEST}'s BOOK prices it at {anchor}. THE "
+                        "LAST DAY OF HISTORY IS THE DASHBOARD'S PRESENT "
+                        "(docs/canvas-plan.md §10) — a history that ends "
+                        "anywhere else draws a plausible chart nobody can see "
+                        "is wrong. Regenerate: `python3 tools/gen-market.py "
+                        "--ensure`")
+            qty = {t: q for _n, hs in BOOK.values() for t, q, _c in hs}
+            first = len(hist_days) - CHART_DAYS
+            if first < 0:
+                bad.append("guests/assets/market/prices.csv holds "
+                           f"{len(hist_days)} days and {GUEST} charts "
+                           f"{CHART_DAYS}")
+            else:
+                window = [sum(q * walk[t][first + i] for t, q in qty.items())
+                          for i in range(CHART_DAYS)]
+                for last, when in ((sum(q * anchors[t] for t, q in qty.items()),
+                                    "at rest"),
+                                   (sum(q * live[t] for t, q in qty.items()),
+                                    "after the tick")):
+                    series = window[:-1] + [last]
+                    derived.append((
+                        f'expect_ax canvas@chart "image/Portfolio value, '
+                        f'{CHART_DAYS} days to {hist_days[-1]}, '
+                        f'{_money(min(series))} to {_money(max(series))}, '
+                        f'now {_money(last)}"',
+                        f"the chart's accessible name {when}"))
+                    # The chart's own tie-out: its right edge is money the
+                    # dashboard says out loud on the same screen.
+                    twin = f'"Portfolio: {_money(last)}"'
+                    if twin not in scene_text:
+                        bad.append(
+                            f"{SCENE} freezes a chart whose last point is "
+                            f"{_money(last)} {when} and never asserts {twin} "
+                            "beside it. The chart's tie-out is only a guard "
+                            "while ONE scene says the same money twice "
+                            "(docs/canvas-plan.md §10)")
 
         def _net_line(subset):
             held = {}
@@ -944,7 +1026,57 @@ hits="$(doctor "$s" guests/python/portfolio.py '\nBOOK = \{' '\nHOLDINGS = {')"
 applied "$hits" "N23's renamed BOOK"
 refuses "$s" "no longer spells BOOK" "N23 (a tie-out census with no book)"
 
-echo "check-assets: self-test: 23 watched negatives, each with its" \
+# N24 — C8's second artifact: the HISTORY is hand-edited while the
+# ledger stays honest. A derivation clause that regenerated one of two
+# files would call this current, which is the hole the family's second
+# artifact opened (2026-08-27).
+s="$(fresh n24)"
+hits="$(doctor "$s" guests/assets/market/prices.csv '2026-08-24,VTI,26025' \
+    '2026-08-24,VTI,26026')"
+applied "$hits" "N24's hand-edited history"
+refuses "$s" "prices.csv does not match" "N24 (a hand-edited price history)"
+
+# N25 — C8: the history is absent while the ledger is present, which is
+# every checkout made before this artifact existed.
+s="$(fresh n25)"
+rm "$s/guests/assets/market/prices.csv"
+refuses "$s" "prices.csv is missing" "N25 (a missing price history)"
+
+# N26 — C11: THE HISTORY STOPS ENDING ON THE BOOK. The book moves and
+# the walk does not, which is how the chart's tie-out will actually
+# break. C8 reds beside it (the generator reads BOOK), so the fragment
+# demanded here is C11's own.
+s="$(fresh n26)"
+hits="$(doctor "$s" guests/python/portfolio.py '\("VTI", 6, 26025\)' \
+    '("VTI", 6, 26030)')"
+applied "$hits" "N26's re-priced holding"
+refuses "$s" "IS THE DASHBOARD'S PRESENT" "N26 (a history that ends off the book)"
+
+# N27 — C11's scene half, and the only perturbation here that reaches
+# C11 alone: the artifact and the book still agree, and the chart's
+# frozen accessible name does not.
+s="$(fresh n27)"
+hits="$(doctor "$s" tools/scenes/portfolio.steps 'now \$10026\.50"' 'now $10026.51"')"
+applied "$hits" "N27's drifted chart summary"
+refuses "$s" "the chart's accessible name at rest" "N27 (a stale chart assertion)"
+
+# N28 — C11's other half: the chart's last point survives and the
+# DASHBOARD stops saying the same money. A tie-out one widget asserts
+# alone ties nothing.
+s="$(fresh n28)"
+hits="$(doctor "$s" tools/scenes/portfolio.steps 'Portfolio: \$10023\.00' \
+    'Portfolio: $10023.01')"
+applied "$hits" "N28's silenced dashboard twin"
+refuses "$s" "The chart's tie-out is only a guard" "N28 (a chart tie-out asserted alone)"
+
+# N29 — C11: the guest stops spelling the window this clause derives
+# the chart's frozen name from.
+s="$(fresh n29)"
+hits="$(doctor "$s" guests/python/portfolio.py '\nCHART_DAYS = ' '\nCHART_WINDOW = ')"
+applied "$hits" "N29's renamed CHART_DAYS"
+refuses "$s" "no longer spells CHART_DAYS" "N29 (a chart census with no window)"
+
+echo "check-assets: self-test: 29 watched negatives, each with its" \
     "perturbation proven applied"
 
 # ---------------------------------------------------------------------

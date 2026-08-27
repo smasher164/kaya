@@ -72,6 +72,13 @@ GATES = [
      "the run it would skip"),
     ("check-targets", ["tools/check-targets.sh"], True, ""),
     ("check-shell", ["tools/check-shell.sh"], True, ""),
+    # check-shell's opposite number: the gate bodies are python now
+    # (docs/deferred.md's 2026-08-27 ruling), which retires the `$?` class
+    # and puts swallowed exceptions, shell=True, implicit encodings and a
+    # mid-gate exit(0) in its place. It also runs the prelude's own
+    # negatives, so the file every converted gate imports proves its
+    # refusals on a path nobody can avoid.
+    ("check-python", ["tools/check-python.sh"], True, ""),
     ("check-mirror", ["tools/check-mirror.sh"], True, ""),
     ("check-gates", ["tools/check-gates.sh"], True, ""),
     # The ledger may not disagree with itself — an unstruck headline
@@ -127,6 +134,12 @@ GATES = [
     # pixel format survives a symmetric probe point, and a rounded scale
     # is invisible on every lane this project runs.
     ("check-canvas-blit", ["tools/check-canvas-blit.sh"], False,
+     "no input set is declared for it in build-id.sh's GATES; same shape as "
+     "check-tx-liveness below"),
+    # KAYA_APPEARANCE is inert unless asked for, and the backend still
+    # reads the platform back when it is — no lane can see either half go
+    # wrong, since every lane host is light.
+    ("check-appearance", ["tools/check-appearance.sh"], False,
      "no input set is declared for it in build-id.sh's GATES; same shape as "
      "check-tx-liveness below"),
     ("check-wheel", ["tools/check-wheel.sh"], True, ""),

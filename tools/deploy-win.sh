@@ -164,7 +164,7 @@ for arg in "$@"; do
         # THE CANVAS (docs/canvas-plan.md): compiled and rust-only for
         # windowed's reason — the drawing is declared in viewbox units,
         # so one guest's op stream is every platform's.
-        canvas_rust) SUITE="$arg" ;;
+        canvas_rust|canvasdark_rust) SUITE="$arg" ;;
         varied_python) SUITE="$arg" ;;
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
         stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
@@ -1934,6 +1934,11 @@ case "$SUITE" in
         # here is a finding about the blit — the BGRA swizzle first — and
         # never about the drawing.
         run_suite canvas_rust
+        # The same script under the other appearance — one leg, this
+        # PROCESS's RequestedTheme, never the VM's personalization setting
+        # (tools/guest/run_canvasdark_rust.cmd sets KAYA_APPEARANCE=dark
+        # and runs the same canvas.exe).
+        run_suite canvasdark_rust
         run_suite portfolio_python
         run_suite varied_python
         run_suite a11yrows_rust

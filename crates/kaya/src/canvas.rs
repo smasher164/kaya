@@ -43,6 +43,36 @@ impl Default for Presentation {
 pub const CANONICAL_SCALE: f64 = 1.0;
 pub const CANONICAL_MODE: Mode = Mode::Light;
 
+/// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance, for
+/// the two backends written in Rust.
+///
+/// UNSET RETURNS None AND NOTHING IS INSTALLED — the platform default, byte
+/// for byte (tools/check-appearance.sh's inert clause). A value that is
+/// neither word panics rather than being ignored: a typo would otherwise
+/// run a whole leg under the host's palette and freeze a wrong string.
+///
+/// This does NOT change what a backend REPORTS. Each backend installs the
+/// override on its own toolkit and then reads that toolkit back as it
+/// always did, so the report keeps coming from the platform rather than
+/// from this variable — which is what makes the dark leg a real proof and
+/// not a self-fulfilling one.
+///
+/// CFG'd TO ITS TWO CALLERS. gtk.rs and winui/mod.rs are the only users
+/// and each compiles on one target, so on a mac host this is dead code
+/// and rustc says so. NOT wired into the raster's mode selection, which
+/// would be the same self-fulfilling defect the gate refuses: the core
+/// takes its mode from the backend's presentation report, never from
+/// this variable.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn appearance_override() -> Option<Mode> {
+    let want = std::env::var("KAYA_APPEARANCE").ok()?;
+    match want.as_str() {
+        "light" => Some(Mode::Light),
+        "dark" => Some(Mode::Dark),
+        other => panic!("kaya: KAYA_APPEARANCE={other} is not a mode; use light or dark"),
+    }
+}
+
 /// A validated drawing: the viewbox plus the op stream folded into a
 /// form that cannot fail again. Held on the widget so a scale or
 /// appearance change re-rasters without re-validating.

@@ -8318,6 +8318,19 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // constructed, and the list-detail arm constructs one. Safe to call
         // more than once, and it must come after GTK is up.
         adw::init().expect("libadwaita init");
+        // The harness appearance, BEFORE the first widget: libadwaita's own
+        // app-level override, which outranks the session preference the
+        // container does not express (nothing here pins light — the image
+        // ships no portal and no gsettings value, so Adwaita's default IS
+        // light). Every `StyleManager::is_dark()` reading in this file then
+        // answers the forced scheme, including the one presentation_report
+        // sends (tools/check-appearance.sh).
+        if let Some(mode) = crate::canvas::appearance_override() {
+            adw::StyleManager::default().set_color_scheme(match mode {
+                crate::canvas::Mode::Dark => adw::ColorScheme::ForceDark,
+                crate::canvas::Mode::Light => adw::ColorScheme::ForceLight,
+            });
+        }
         let Some((occ_tx, tx_rx)) = ends.borrow_mut().take() else {
             return;
         };

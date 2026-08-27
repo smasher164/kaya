@@ -5,7 +5,7 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
         echo "$0: not inside the dev shell — run this under \`nix develop\`" >&2
     else
-        echo "$0: dev shell is stale — re-enter \`nix develop\`" >&2
+        echo "$0: dev shell is stale — the flake changed since it was entered; re-enter \`nix develop\`" >&2
     fi
     exit 1
 fi

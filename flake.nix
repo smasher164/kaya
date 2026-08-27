@@ -125,6 +125,15 @@
             ffmpeg
             # The tools/ scripts are load-bearing validation; lint them.
             shellcheck
+            # The gate bodies are python now (docs/deferred.md's ruling,
+            # 2026-08-27) and ruff is shellcheck's opposite number:
+            # tools/check-python.py runs it over tools/lib and every
+            # converted gate, and takes three of its eight rules straight
+            # off ruff's (BLE001 swallowed exceptions, S602/S604/S605
+            # shell=True, PLR1722 exit()). From the pinned nixpkgs like
+            # everything else here — no network resolution of its own, so
+            # check-pins has nothing to hold.
+            ruff
             # AddressSanitizer's compiler (see asanClang above):
             # tools/check-c-bounds.sh's companion mode, by that name.
             asanClang

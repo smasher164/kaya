@@ -386,6 +386,15 @@ hand-authors both runs, where those walls do NOT bite — scene.rs keeps
 `widgets` and `template_nodes` as separate maps — so `tools/check-c-ids.sh`
 is its teeth instead.
 
+**An empty accessible name is refused, not applied** (ruled 2026-08-27).
+`a11y_label("")` dies at the root in every binding — an accessible name
+that says nothing is not a declaration, and leaving the prop off is how
+a guest asks the platform to derive the name from the control's own
+content. CLEARING a label already set is a different act with no
+spelling today; if it is ever wanted it gets its own explicit one rather
+than riding on the empty string (docs/deferred.md a11y-empty-label,
+where the four backends' four answers to `""` are recorded).
+
 **The C floor's transaction buffer is caller-sized, and the packers refuse
 past it** (ruled 2026-08-26). `KayaTx` is `{uint8_t *buf; size_t len; size_t
 cap;}` — a Go slice header, third field included — and the caller owns,

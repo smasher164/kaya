@@ -44,6 +44,9 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         } else if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
             NSApplication.shared.setActivationPolicy(.accessory)
         }
+        // BEFORE ANY WINDOW EXISTS, so every one of them inherits it and no
+        // first frame is drawn in the host's mode (tools/check-appearance.sh).
+        kayaApplyAppearanceOverride()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

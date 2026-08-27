@@ -1683,6 +1683,17 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity canvas \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script canvas)'"
+    # The same script under the other appearance. The AVDs boot `notnight`
+    # and every leg before this one ran light; KAYA_APPEARANCE rides the
+    # extras-to-env bridge in MainActivity and moves THIS APP's night mode
+    # (UiModeManager.setApplicationNightMode), never the device's setting,
+    # so no AVD state is touched and the dark arm costs one leg instead of
+    # a whole lane re-run.
+    run_apk canvasdark-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity canvas \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script canvas)'" \
+        --es KAYA_APPEARANCE dark
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \

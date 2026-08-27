@@ -3631,6 +3631,24 @@ that timed out eleven legs at 180s on 2026-07-25 (tools/linux/run-suites.sh
 names the four languages). The per-leg bus stays; the gate makes forgetting
 it impossible.
 
+## A pruned agent worktree falls back to the SHARED CHECKOUT, and the write lands mid-matrix (2026-08-28)
+
+The quiescent-tree rule's newest cause, caught by the agent itself
+sixty seconds after the write: a worktree-isolated agent was resumed
+after its (unchanged) worktree had been auto-pruned, its shell fell
+back to the repo root, an earlier isolation assertion had gone stale,
+and an 8,130-line staged batch plus a local commit landed on `main`
+while a five-lane matrix was building from that tree. The tree carried
+foreign bytes for ~60s of the matrix's build phase; the agent reset to
+the run's commit, preserved the batch (patch sha-verified, the commit
+left dangling), and called for the kill — restoring loudly beats
+validating quietly wrong. THE RULES THIS RATIFIES: a coordinator never
+prunes a worktree whose agent may still be resumed; a patch handoff is
+exported by the coordinator BEFORE launch, never fetched by the agent
+(the isolation guard refuses it for exactly this reason); and an agent
+resuming into any directory verifies `git rev-parse --git-dir` shape
+and worktree identity BEFORE its first write, not once at spawn.
+
 ## A windows race can stop reproducing, and a green run then proves nothing
 
 MEASURED 2026-08-03 while fixing the filedialog_java coin flip

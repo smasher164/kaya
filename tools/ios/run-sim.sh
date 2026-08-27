@@ -1452,7 +1452,16 @@ $extra"
     # interpreter — ruling 4's byte-equality check, running where the
     # lane can watch it.
     local out
-    out=$(env SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
+    # THE HARNESS APPEARANCE, when the caller asked for one: a simulator
+    # child sees only SIMCTL_CHILD_-prefixed variables, so the knob rides
+    # the same bridge KAYA_SELFTEST does. Unset adds no variable at all,
+    # which is what keeps every other leg byte-identical to before.
+    local appearance=()
+    if [ -n "${KAYA_LEG_APPEARANCE:-}" ]; then
+        appearance=(SIMCTL_CHILD_KAYA_APPEARANCE="$KAYA_LEG_APPEARANCE")
+    fi
+    out=$(env ${appearance[@]+"${appearance[@]}"} \
+        SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
         SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$script" \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
@@ -1829,6 +1838,16 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
             # that opens it — and the keep guard holds the section
             # asserts above the cut.
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest" "" expect_windows "expect_section expect_section_symbol"
+        elif [ "$guest" = canvas ]; then
+            # BOTH APPEARANCES, one bundle. expect_ink's answer names the
+            # mode the HOST is in, and every simulator this lane boots is
+            # light, so the dark half of that frozen string was never
+            # evaluated here. KAYA_APPEARANCE moves the APP's own
+            # overrideUserInterfaceStyle, so no simulator's Settings are
+            # written (docs/canvas-plan.md phase 4).
+            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest"
+            KAYA_LEG_APPEARANCE=dark queue_leg run_swiftui_on "${guest}dark-swift" \
+                "$APP" "dev.kaya.${guest}swift" "${guest}dark-swift" "$guest" "$guest"
         elif [ "$guest" = dirty ]; then
             # The cut this mechanism was designed around: dirty's last
             # six steps hang off a chrome close and iOS's close grammar

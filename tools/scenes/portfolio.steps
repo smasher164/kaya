@@ -39,6 +39,50 @@ expect label#4 "Retirement"
 expect label#5 "Account total: $2363.00"
 expect label#6 "Savings"
 expect label#7 "Account total: $500.00"
+# THE CHART (docs/canvas-plan.md §10), the artifact the canvas milestone
+# exists to feed: the book valued at each of the last 90 days' prices,
+# drawn by the CORE from an op stream this app computed, and blitted by
+# whichever backend is under it.
+#
+# THE THREE VERBS ARE NOT REDUNDANT (§7). expect_drawing is the legible
+# one — ops replayed and where the ink landed — so a failure reads as a
+# diagnosis rather than as a hash mismatch. expect_drawing_hash proves
+# this platform's libkaya produced the SAME PIXELS as the other two, down
+# to antialiasing, and proves nothing about the screen. expect_ink is the
+# only one that fails when the BLIT dropped.
+#
+# ONE STRING ON THREE LANES: the op stream is app arithmetic over
+# guests/assets/market/prices.csv, which every lane stages and verifies
+# by hash, and the coordinates are VIEWBOX units, so no platform's track
+# can move one (§3.2, invariant 6).
+#
+# THE FIGURE IS INSET INSIDE ITS VIEWBOX — a left gutter for the money
+# labels and a bottom one for the dates — so these four numbers can
+# discriminate at all: a drawing that filled its box would read
+# 0,0,100,100 whatever the transform did.
+expect_drawing canvas@chart "220/1,4,98,91"
+expect_drawing_hash canvas@chart "98ad246fcf87c572"
+# THE BLIT, sampled at flat-region CENTRES and never at a boundary
+# (expect_app_icon's measured discipline). 18,36 is plot ground high
+# above the series and clear of both gridlines around it; 18,73 is deep
+# inside the filled area beneath it.
+#
+# THESE ARE THE CORE'S OWN BYTES, and both modes are named because the
+# DISPLAY raster uses the platform's appearance and kaya's palette has
+# two of them. They are the SAME PAIR tools/scenes/canvas.steps freezes,
+# and necessarily so: the same two paints over the same ground —
+# `ground` alone, then `series_fill` composited over it — which
+# crates/kaya/src/canvas.rs's the_scene_probe_points_are_opaque_and_pinned
+# rasterizes and prints for both modes. Never retyped from a platform's
+# read; this verb alone compares within ±1 per channel, because a macOS
+# window's backing store carries the display's profile (§7.2).
+expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F"
+# A DRAWING IS AN IMAGE to every platform's accessibility tree, and the
+# numbers a screen reader is told are the app's own (§9). This line is
+# also the chart's TIE-OUT said out loud: `now` is label#0's money to the
+# byte, because the series' last point is the live book — the same
+# discipline the ledger's `label@net` carries on the other screen.
+expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10026.50"
 expect_window_size 900x600
 expect_aligned column@detail "stretch"
 expect_aligned column@accounts "stretch"
@@ -95,6 +139,16 @@ expect_column_edges column@positions[retirement] 4
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
 expect_column_edges column@positions[savings] 4
 expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
+# AND THE CHART FOLLOWED THE PRICES. The tick moves the series' last
+# point and nothing else — the window, the axis band and every label are
+# where they were — so the op count and the ink bounds are UNCHANGED
+# while the hash moves. That pairing is what proves the hash sees what
+# the bounds cannot (docs/canvas-plan.md §7.4), and it proves the
+# redeclaration replaced the whole drawing rather than patching it
+# (§2.1). `now` is again label#0's money to the byte.
+expect_drawing canvas@chart "220/1,4,98,91"
+expect_drawing_hash canvas@chart "6fc708cad68264c3"
+expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10023.00"
 # THE TRANSACTIONS VIEW, one push from the dashboard. The four status
 # labels are addressed by AUTHORED ID: their creation index sits behind
 # every stamped cell the dashboard made, and a band decides how many of

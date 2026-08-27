@@ -79,6 +79,10 @@ GATES = {
     # REMOVING a declaration is what makes the missing legs a failure.
     "check-steps": ["guests", "crates", "swift", "android"],
     "check-shell": [],
+    # Everything it reads — tools/lib/kaya_gate.py, every tools/check-*.py
+    # and every shim — is under tools/, which rides EVERY gate key
+    # implicitly (see gate_key). check-shell's shape, for the same reason.
+    "check-python": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
     # AGENTS.md is declared although this gate does not read it, per the
     # over-approximate rule: check-mirror holds the two identical.

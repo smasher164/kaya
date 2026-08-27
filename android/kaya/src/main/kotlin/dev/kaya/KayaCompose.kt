@@ -5,10 +5,12 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.ContentResolver
+import android.content.res.Configuration
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
@@ -1282,8 +1284,78 @@ object KayaCompose {
     @JvmStatic
     private var mountedActivity: ComponentActivity? = null
 
+    /**
+     * The forced appearance for this process, or null. Read by
+     * `KayaAppearance` below; written once, before `setContent`.
+     */
+    internal var appearanceOverride: String? = null
+
+    /**
+     * `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance.
+     *
+     * UNSET INSTALLS NOTHING — the platform default, byte for byte
+     * (tools/check-appearance.sh's inert clause). A value that is neither
+     * word dies here rather than being ignored, which would run the whole
+     * leg under the host's palette and freeze a wrong string.
+     *
+     * NOT `UiModeManager.setApplicationNightMode`, AND THE REASON IS
+     * MEASURED, not preferred. That call is the framework's app-level
+     * night mode and it was this knob's first mechanism; it changes the
+     * app's resource configuration, which makes Android RELAUNCH the
+     * activity. The relaunch runs `onCreate` TWICE IN ONE PROCESS, so the
+     * guest builds its scene twice into a core that is process-global and
+     * the core dies on the duplicate:
+     *
+     *     wm_relaunch_resume_activity … MainActivity
+     *     wm_on_create_called  performCreate      <- mount #1
+     *     wm_on_destroy_called performDestroy
+     *     E kaya log_panics: 'kaya: widget id … already exists'
+     *     wm_on_create_called  performCreate      <- mount #2, dead
+     *     ActivityManager: Process dev.kaya.milestone2 has died
+     *
+     * (measured on the android lane 2026-08-27; the kept buffers are
+     * target/validate-failures/android-canvasdark-compose-buffers.log).
+     * That kaya's mount is not re-entrant across an activity relaunch is
+     * a REAL gap this knob merely exposed — any config change reaches it,
+     * rotation included — and it is filed in docs/deferred.md rather than
+     * fixed here, because making mount re-entrant changes lifecycle
+     * semantics for every kaya app and is not one leg's call to make.
+     *
+     * SO BOTH HALVES ARE MOVED DIRECTLY, WITHOUT A RELAUNCH, and both are
+     * required: `isSystemInDarkTheme()` alone would leave the MANIFEST
+     * theme's window background light, which is the measured half-dark app
+     * D1 exists to have fixed (values/themes.xml). The window background
+     * is not hardcoded — it is resolved out of the SAME
+     * `Theme.Kaya.NoActionBar` the `-night` file declares, read under a
+     * night-forced configuration, so it is whatever that theme says.
+     */
+    private fun applyAppearanceOverride(activity: ComponentActivity) {
+        val want = System.getenv("KAYA_APPEARANCE") ?: return
+        check(want == "light" || want == "dark") {
+            "kaya: KAYA_APPEARANCE=$want is not a mode; use light or dark"
+        }
+        appearanceOverride = want
+        // THE WINDOW BACKGROUND HALF. createConfigurationContext gives the
+        // app's own resources under the forced night bits; setting the
+        // manifest theme on it resolves values-night/themes.xml exactly as
+        // the system would have on a night device.
+        val forced = Configuration(activity.resources.configuration).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightBits(want)
+        }
+        val themed = activity.createConfigurationContext(forced)
+        themed.setTheme(activity.applicationInfo.theme)
+        val attrs = themed.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
+        val background = attrs.getDrawable(0) ?: ColorDrawable(attrs.getColor(0, 0))
+        attrs.recycle()
+        activity.window.setBackgroundDrawable(background)
+    }
+
+    internal fun nightBits(want: String): Int =
+        if (want == "dark") Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+
     fun mount(activity: ComponentActivity) {
         mountedActivity = activity
+        applyAppearanceOverride(activity)
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
         // (KayaHarnessAccessibility.dismiss): a dialog activity on top
         // means this one is PAUSED, and it is resumed again only once
@@ -1309,7 +1381,7 @@ object KayaCompose {
         startPump(activity)
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
-        activity.setContent { KayaTheme { KayaRoot() } }
+        activity.setContent { KayaAppearance { KayaTheme { KayaRoot() } } }
         if (System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
     }
 
@@ -10538,10 +10610,11 @@ private fun Typography.kayaWithFamily(f: FontFamily) = Typography(
  * (android/kaya/src/main/res/values{,-night}/themes.xml), this wrapper
  * paints `colorScheme.background` and takes the matching content colour
  * (a black label on a dark page is the other half of that same bug), and
- * the appearance follows `isSystemInDarkTheme()`. The lane still runs
- * `notnight` on all four AVDs, so the dark arm is proven the way the
- * foundation proved it: the whole lane re-run with every device forced to
- * night mode, with the setting read back before and after.
+ * the appearance follows `isSystemInDarkTheme()`. The AVDs still boot
+ * `notnight`, but the dark arm no longer costs a whole lane re-run with
+ * every device's setting flipped: `KAYA_APPEARANCE=dark` moves THIS
+ * PROCESS (KayaCompose.applyAppearanceOverride) and the canvas scene runs
+ * a dark leg beside the light one on every lane.
  *
  * MaterialTheme ALSO PROVIDES A TEXT STYLE, and that one is not a
  * fallback anybody was already getting: it ends in
@@ -10559,6 +10632,36 @@ private fun Typography.kayaWithFamily(f: FontFamily) = Typography(
  * into `typography` for ITS tier and nothing else does — a tier picked
  * per widget is not a scale changed under everything.
  */
+/**
+ * The composition half of `KAYA_APPEARANCE` (KayaCompose.mount holds the
+ * window-background half and the reasoning for both).
+ *
+ * `isSystemInDarkTheme()` reads `LocalConfiguration`'s night bits and
+ * NOTHING ELSE, so providing a configuration with those bits forced moves
+ * every reading in one place — the theme's `dark`, and the appearance the
+ * presentation report sends. Unset provides nothing and the composition is
+ * the platform's own, which is what keeps an ordinary leg byte-identical.
+ *
+ * The rest of the configuration is COPIED, not synthesized: screenWidthDp
+ * is right beside these bits and the size class reads it.
+ */
+@Composable
+internal fun KayaAppearance(content: @Composable () -> Unit) {
+    val want = KayaCompose.appearanceOverride
+    if (want == null) {
+        content()
+        return
+    }
+    val base = LocalConfiguration.current
+    val forced = remember(base, want) {
+        Configuration(base).apply {
+            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                KayaCompose.nightBits(want)
+        }
+    }
+    CompositionLocalProvider(LocalConfiguration provides forced, content = content)
+}
+
 @Composable
 internal fun KayaTheme(content: @Composable () -> Unit) {
     // Read BEFORE the theme, which is what makes them the pre-theme

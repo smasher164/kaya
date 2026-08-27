@@ -2,7 +2,16 @@
 
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
-    echo "$0: not inside the dev shell — run this under \`nix develop\`" >&2
+    # TWO CAUSES, TWO SENTENCES. This copy printed the "never entered" one
+    # for both until 2026-08-27, so a shell that WAS entered — before the
+    # flake moved — was told to do the thing it had already done. The
+    # canonical pair now lives once, in tools/lib/kaya_gate.py's
+    # dev_shell_refusal, whose self-test prints both branches.
+    if [ -z "${KAYA_DEV_SHELL:-}" ]; then
+        echo "$0: not inside the dev shell — run this under \`nix develop\`" >&2
+    else
+        echo "$0: dev shell is stale — the flake changed since it was entered; re-enter \`nix develop\`" >&2
+    fi
     exit 1
 fi
 # THROWAWAY runner for the WinUI undo-arm probe (docs/undo-plan.md §3a).

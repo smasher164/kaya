@@ -189,6 +189,40 @@ in docs/deferred.md.
    silently reverted any hand-edit to a generated file and then called
    the tree clean),
    `tools/check-steps.sh`, `tools/check-shell.sh`,
+   `tools/check-python.sh` (check-shell's opposite number, and the
+   gate the 2026-08-27 ruling asked for: the gate BODIES are python
+   now, imported against tools/lib/kaya_gate.py — never a launcher,
+   so every gate stays standalone-runnable. That retires the `$?`
+   class and puts ten rules in its place, each mapping to a defect
+   this repo has already been bitten by ONE SURFACE OVER: no
+   swallowed exception (a caught-and-dropped one is the new false
+   green), no shell=True or os.system (the sed/awk rule's
+   descendant — a filename with a space must not become two words),
+   an explicit `encoding="utf-8"` on every text read and write (the
+   javac -encoding trap, which bites hardest on the Windows guest),
+   NO LITERAL-ZERO EXIT (a gate leaves by falling off the end or
+   through its verdict; `sys.exit(0)` in the middle is the false-PASS
+   class with a keyword), every `walk()` paired with a
+   `counted(..., floor=)`, `re.subn` only through the prelude's
+   count-printing `doctor()`, the five-line import header held
+   BYTE-IDENTICAL (check-mirror's job description, on the lines that
+   replace SIX drifted copies of the dev-shell preamble — one of
+   which printed ONE sentence for BOTH causes), and `ast.parse` over
+   every body, which has no analogue today: a SyntaxError in a
+   rarely-taken heredoc branch was invisible until that branch ran.
+   Rules 1, 2 and 4 come off `ruff` for free, which is why ruff
+   joined the flake. A CONVERTED GATE KEEPS ITS `.sh` NAME as a
+   two-line exec shim, because ~50 path-shaped citations in
+   docs/probes, docs/chrome, docs/traps.md and the plans name it and
+   check-doc-refs holds every one to a file that exists; the shim may
+   hold NOTHING BUT THE EXEC, pinned byte for byte here, so it can
+   never grow logic and there is nothing in it to drift. It also runs
+   the prelude's OWN negatives — the fingerprint against the real
+   shell pipeline, both dev-shell sentences, a perturbation that
+   applied nothing, the census floor, scratch surviving nothing —
+   because the file every converted gate imports must prove its
+   refusals somewhere nobody can skip. Eleven watched negatives,
+   counts printed, red demanded on every run),
    `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
    modulo the line-3 comment — they drifted once, silently, for two
    milestones),
@@ -443,6 +477,40 @@ in docs/deferred.md.
    caught the gate's own first draft, whose comment-stripping shifted
    every line number and whose block reader stopped at the first bracket
    it found rather than the one at the block's indent),
+   `tools/check-appearance.sh` (THE APPEARANCE OVERRIDE IS INERT UNLESS
+   ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
+   PROCESS adopt an appearance through each platform's own supported
+   override — NSApp.appearance, overrideUserInterfaceStyle, libadwaita's
+   forced colour scheme, FrameworkElement.RequestedTheme, and on Android
+   the window background plus LocalConfiguration's night bits — so the
+   dark half of
+   `expect_ink`'s frozen string is a leg on a light desk instead of a whole
+   lane re-run with the machine's own setting flipped. NEITHER HALF IS
+   VISIBLE TO ANY LANE: an override installed with the variable UNSET would
+   move every leg to a default that is light, which is what every lane host
+   already is, and a backend that reported the VARIABLE instead of reading
+   its toolkit back would make the dark leg self-fulfilling — passing with
+   the window still light, which is the exact bug the dark leg exists to
+   catch. So the guard must DOMINATE each install site rather than merely
+   share its file, and no reporter may derive its mode from the variable.
+   Patterns are call-shaped and read comment-stripped code, and a guard
+   must dominate its call IN THE SAME FUNCTION BODY: two of its own
+   negatives first passed because the night-mode call and
+   `kayaAppearanceOverride()` are named in the PROSE beside their calls,
+   and a pure character window later called a real guard absent.
+   ANDROID IS THE ONE PLATFORM THAT NEEDS TWO INSTALLS, and the gate
+   demands both plus the absence of the mechanism they replaced:
+   `UiModeManager.setApplicationNightMode` moves the app's resource
+   configuration, which RELAUNCHES the activity — `onCreate` then runs
+   twice in ONE process and the second mount dies on a duplicate widget
+   id, measured on the android lane 2026-08-27 (the leg died at ~63s with
+   no verdict). So Compose sets the window background out of the SAME
+   `-night` theme the system would have picked, and provides
+   `LocalConfiguration` with the night bits forced; either half alone is
+   the measured half-dark app D1 exists to have fixed.
+   Twelve watched negatives, counts printed. The runtime halves are the legs:
+   `canvas-*` is the unset proof and `canvasdark-*` the set proof, on all
+   five lanes),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside

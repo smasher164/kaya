@@ -69,9 +69,9 @@ javac -encoding UTF-8 -d "$TMP/java" bindings/java-desktop/dev/kaya/KayaRing.jav
 java -cp "$TMP/java" AbortCheck >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java; }
 
 # OCaml: the checks/ executable beside the binding.
-dune build ./bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
+dune build --root . ./bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
     || { cat "$TMP/ml.log"; fail ocaml-build; }
-dune exec bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
+dune exec --root . bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
     || { cat "$TMP/ml.log"; fail ocaml; }
 
 # Haskell: the kaya-abort-check executable beside the scene guests.

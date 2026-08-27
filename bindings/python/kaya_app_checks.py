@@ -629,6 +629,36 @@ with app.build():
             and not _prop_write(kaya.wire.PROP_INSET, kaya.wire.VALUE_I64),
         )
 
+# AN EMPTY A11Y LABEL PASSES THROUGH FOR THE ROOT'S WALL TO REFUSE —
+# brand_accent's rule one prop over (crates/kaya/src/scene.rs,
+# an_empty_a11y_label_dies_at_declare). The refusal is deliberately the
+# ROOT'S and not this binding's: four backends each answered `A11yLabel
+# = ""` their own way and only WinUI's aborted, so the semantics is
+# settled once at the chokepoint all eight bindings reach rather than
+# eight times (invariant 1, docs/deferred.md a11y-empty-label).
+# WHAT THIS WATCHES FOR is the helpful binding: a Python tier that
+# dropped an empty label as a no-op would leave the root nothing to
+# refuse, and the divergence would be back with every gate green.
+with app.build():
+    if True:
+        before = len(kaya._tx)
+        with kaya.column():
+            kaya.label("x").a11y_label("")
+        queued = kaya._tx[before:]
+        empty_label = [
+            r for r in queued
+            if _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+            and int.from_bytes(r[16:20], "little") == kaya.wire.PROP_A11Y_LABEL
+            and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+            and int.from_bytes(r[24:28], "little") == kaya.wire.VALUE_STR
+        ]
+        check(
+            "an empty a11y label reaches the records for the ROOT to refuse",
+            len(empty_label) == 1
+            # and it is EMPTY on the wire: the length word after the tag.
+            and int.from_bytes(empty_label[0][28:32], "little") == 0,
+        )
+
 # The generated shortcut canonicalizer (DESIGN.md, Menus): spelling is
 # canonicalized here, POLICY dies at the core on the canonical form. The
 # vectors mirror kaya-bindgen's reference table.

@@ -10628,6 +10628,46 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
     return dark ? "dark" : "light"
 }
 
+/// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance.
+///
+/// UNSET RETURNS nil AND NOTHING IS INSTALLED — the platform default, byte
+/// for byte (tools/check-appearance.sh's inert clause). A value that is
+/// neither word is a typo in a lane, and a silently ignored one would run
+/// the whole leg under the wrong palette and freeze a wrong string, so it
+/// dies here naming both accepted spellings.
+func kayaAppearanceOverride() -> String? {
+    guard let want = ProcessInfo.processInfo.environment["KAYA_APPEARANCE"] else { return nil }
+    guard want == "light" || want == "dark" else {
+        fatalError("kaya: KAYA_APPEARANCE=\(want) is not a mode; use light or dark")
+    }
+    return want
+}
+
+/// Installs that override on the PLATFORM's own appearance.
+///
+/// NOT `.preferredColorScheme`, and that is the whole point: kaya reads the
+/// appearance TWICE (kayaCanvasAppearance off the harness thread,
+/// KayaPresentationReporter's `\.colorScheme` in a view), and a SwiftUI-only
+/// override moves the second while `NSApp.effectiveAppearance` keeps
+/// answering the host's — the divergence kayaCanvasAppearance's own comment
+/// says would report a mode the raster did not use. Moving NSApp's
+/// appearance (and the window's style on iOS) moves both.
+///
+/// Why an override at all: `-AppleInterfaceStyle Dark` in the guest's
+/// arguments does NOT reach this stack — measured, with the window coming
+/// back light (docs/measurements/canvas-palette-look-2026-08-27.txt).
+@MainActor func kayaApplyAppearanceOverride() {
+    guard let mode = kayaAppearanceOverride() else { return }
+    #if os(macOS)
+        NSApp.appearance = NSAppearance(named: mode == "dark" ? .darkAqua : .aqua)
+    #else
+        let style: UIUserInterfaceStyle = mode == "dark" ? .dark : .light
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { window.overrideUserInterfaceStyle = style }
+        }
+    #endif
+}
+
 /// kayaIconQuadrants' sampler with the probe points named rather than
 /// fixed at the quadrant centres. THE 16-BIT CONTEXT AND THE SINGLE
 /// ROUND ARE THE MEASURED PART: an 8-bit context quantizes twice and
@@ -16372,7 +16412,14 @@ private struct KayaPresentationReporter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onAppear { report() }
+            .onAppear {
+                // iOS's windows exist only now (macOS installed it before its
+                // first window, in KayaAppDelegate). Installing it here flips
+                // the trait, which fires the colorScheme onChange below, so the
+                // report corrects itself whatever order these run in.
+                kayaApplyAppearanceOverride()
+                report()
+            }
             .onChange(of: displayScale) { _, _ in report() }
             .onChange(of: colorScheme) { _, _ in report() }
     }

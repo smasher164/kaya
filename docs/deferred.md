@@ -286,6 +286,51 @@ every converted gate's watched negatives are re-proven red on the
 converted body before the old body is deleted. Phasing per the
 analysis: the six zero-negative gates first.
 
+PHASE 0 LANDED 2026-08-27 (the ruling stands as written; this is the
+work, not a re-strike). tools/lib/kaya_gate.py is the imported prelude
+— ROOT from `__file__`, the dev-shell fingerprint computed EXACTLY as
+the shell preamble's `cat flake.nix flake.lock | shasum -a 256 |
+cut -c1-12` and proven against that real pipeline in its own
+self-test, the two causes back to two sentences (the drifted variant
+printed ONE for both, an invariant-3 defect inside the block 81
+scripts copy), plus doctor/perturb with the count printed and a
+refusal at zero, a census floor, atexit scratch and negatives_ran.
+Eight watched property groups, every refusal MADE TO PRINT. `ruff`
+joined flake.nix from the PINNED nixpkgs (flake.lock unmoved), and
+the fingerprint moved with it as ruled: 5061dae8d7b8 -> e232b0560910.
+tools/check-python.sh is the new gate, 49th in the sweep, holding ten
+rules ruff cannot plus ruff itself, and running the prelude's
+negatives so the file every gate imports proves its refusals where
+nobody can skip them. Eleven watched negatives.
+
+THE SIX ARE CONVERTED — check-ledger, check-doc-refs, check-gates,
+check-table-card, check-jni, check-universal-props — with the rider
+honoured: each old body and its converted body were run BACK TO BACK
+on the same tree and stdout, stderr and exit status compared. Eleven
+of the twelve pass/fail comparisons are BYTE-IDENTICAL. The twelfth
+is check-doc-refs' N6 self-test narration, which cites its own source
+as its in-range line-anchor fixture and skips its own source in the
+mortal-path clause: the body moved, so the sentence must name the
+file that now holds it. No verdict, finding or exit status moved.
+
+A CONVERTED GATE KEEPS ITS `.sh` NAME, as a two-line exec shim. The
+research wanted no stub; the count that overrules it is ~50
+path-shaped citations of these six `.sh` names in docs/probes,
+docs/chrome, docs/traps.md, the plans and crates/kaya/src/jvm.rs, every
+one of which check-doc-refs holds to a file that exists — a rename
+falsifies recorded history or buries it under `(gone)`. The stub's
+own risk (a second place for the preamble to drift) is closed by
+check-python pinning its exact bytes, so it can never hold anything
+but the exec. This also left gates.sh's GATES, check-gates' census
+and both doctrine mirrors untouched by the conversion itself, so a
+phase-0 mistake could not be a list mistake.
+
+WHAT PHASE 1 OWES, recorded so it is not rediscovered: rule 6 (`re.subn`
+only through the prelude) carries all five verbatim-converted bodies in
+check-python's SUBN_EXEMPT, each with a reason and each required to name
+a real file. That table SHRINKS — the next conversion is held to the
+rule — and the clause stops needing a table the day it empties.
+
 Akhil's framing, to discuss before anyone acts: lots of the project's
 shell scripts do a little work and then launch python scripts — the
 gate shape is typically a bash preamble (the dev-shell fingerprint
@@ -340,6 +385,80 @@ observations there and agreed with everything. Five watched negatives,
 counts printed, each scored against the real check's own findings.
 No `.steps` file re-freezes: all 41 `expect_ax`/`expect_ax_hint` lines
 are argument-side, already quoted by the scene grammar.
+
+## ~~GAP — an empty a11y label had four semantics and only WinUI's aborted (found 2026-08-27 by the day batch's first matrix)~~
+KEY: a11y-empty-label, A11yLabel empty, chart_summary, empty accessible name, winui cannot apply, pattern guard fall-through, A11yHint empty
+
+CLOSED 2026-08-27, RULED REFUSED AT THE ROOT. The windows lane's
+portfolio_python leg died with `kaya: draining a transaction: kaya:
+winui cannot apply A11yLabel = Str("") here`, and the FINDER WAS THE
+FLIGHT RECORDER's bundle for that leg — the entry at the top of this
+file, on its first day carrying a real failure.
+
+THE DECLARATION WAS `chart_summary = kaya.signal("")` filled by `set()`
+one line later, so the INITIAL application delivered an empty label. All
+four backends' comments claim the same intent, "empty means unset, and
+unset stays untouched"; three implement it and one does not:
+  - gtk.rs matches the arm unconditionally and tests emptiness INSIDE
+    the body — silent no-op.
+  - KayaSwiftUI.swift stores it and skips `.accessibilityLabel` when
+    empty; the AX host writes nil. Silent no-op — WHICH IS WHY THE MAC
+    LEG PASSED THREE TIMES.
+  - KayaCompose.kt: `contentDescription = a11yLabel.ifEmpty { null }`.
+    Silent no-op.
+  - winui/mod.rs put the emptiness test in the PATTERN GUARD, so an
+    empty label matched no arm and fell through to the match's
+    catch-all `panic!`. The author wrote the comment for gtk's shape
+    and the code for a fall-through.
+
+TWO LAYERS, because the wall alone does not reach the whole failure:
+ 1. The guest declares the real text — `chart_summary_text(*value_series())`
+    is computable at build time, which `draw_chart()` proves by
+    recomputing the identical string from the identical series on the
+    next line. The transient empty never existed for a reason.
+ 2. The ROOT refuses an empty a11y label at `check_prop_value`
+    (crates/kaya/src/scene.rs), the one chokepoint all eight bindings
+    reach, in a sentence naming the widget's kind. An empty accessible
+    name is not a declaration; settling it once beats settling it four
+    times differently (invariant 1).
+
+CLEARING A LABEL that was set is a DIFFERENT ACT and has no spelling
+today. If it is ever wanted it gets its own explicit one rather than
+riding on `""` (DESIGN.md, Binding conventions).
+
+WHY THE WINUI ARM WAS FIXED AND NOT DELETED as unreachable belt. The
+root's wall sees `PropValue::Const` and `PropValue::Signal` — it does
+NOT see `PropValue::Element`, the row-field carrier, because
+scene.rs:3993 has no value to check at declare time and only checks the
+nesting level. A label bound to a row field (`a11yrows` in all eight
+languages, and the whole template zone) still arrives at the backend
+with whatever the row holds. So winui's two arms moved to gtk's shape
+— match unconditionally, test inside — and the row-data empty is now
+the same no-op on all four backends instead of an abort on one.
+`A11yHint` carried the IDENTICAL pattern-guard fall-through one line
+down and was fixed with it; nothing declares an empty hint today, which
+is precisely why it would have been found the way the label was, on a
+lane, months from now.
+
+THE CENSUS, run BEFORE the wall landed (146 a11y-label sites across all
+8 bindings plus the C floor): ZERO literal empty labels anywhere in
+`guests/`, and `portfolio.py`'s signal was the only declaration that
+delivered one. Every `a11yrows` guest inserts non-empty notes, so no
+lane was carrying a second instance of this class.
+
+GUARDS: three core tests (`an_empty_a11y_label_dies_at_declare`,
+`an_a11y_label_bound_to_an_empty_signal_dies_at_declare` — the shipped
+shape — and a positive control `a_spoken_a11y_label_records_by_either_carrier`,
+without which the two negatives would pass against a wall that refused
+every label there is), plus a clause in the Python check family. That
+clause is deliberately NOT a second refusal: `kaya_app_checks.py` never
+enters the core, and `brand_accent`'s neighbouring comment already
+ruled this shape ("the 24-bit rule is deliberately the ROOT's ... a
+binding-local copy of a root wall was once the only wall in eight").
+It checks instead that the empty label REACHES THE WIRE with an empty
+length word — because the way this fix unravels silently is a binding
+that gets helpful and drops the empty itself, leaving the root nothing
+to refuse and every gate green.
 
 ## Next milestones (in rough priority order)
 
@@ -2649,12 +2768,40 @@ count, so the saving is measured rather than assumed.
   The canvas scene is wired on all five lanes (`canvas-rust` on linux,
   `canvas_rust` on windows, `canvas-compose` on android,
   `canvas-rust-swiftui` on mac, and `canvas` from the iOS swift suite
-  over the new guests/swift/canvas.swift). The headline stays open for
-  what is left: PHASE 4, the portfolio chart and the captures on five
-  platforms, and PHASE 5, the matrix — which is also the only thing
+  over the new guests/swift/canvas.swift).
+  THE CHART LANDED 2026-08-27 (phase 4), which is the artifact this
+  whole feature exists to feed: guests/python/portfolio.py's dashboard
+  draws the book valued at each of the last 90 days' prices, as app
+  arithmetic over a new derived asset (guests/assets/market/prices.csv,
+  which tools/gen-market.py now writes beside the ledger) spoken in the
+  op vocabulary and the paint roles — no new core surface. The scene
+  freezes the three verbs plus the drawing's accessible name on the
+  three desktop lanes, at rest and after the tick, where the op count
+  and ink bounds hold still and only the hash moves. THE CHART TIES OUT
+  the way the ledger does: the history's last day IS the book's live
+  prices, so the series' last point is label#0's money to the byte —
+  refused by the generator, by check-assets' new C11 and by the guest at
+  startup, all three watched red. BOTH MODES WERE LOOKED AT, by
+  rendering the core's own display raster per mode rather than switching
+  the host's appearance (docs/measurements/canvas-palette-look-2026-08-27.txt):
+  no palette value needed nudging, dark measures stronger than light on
+  six of seven contrast rows, and the one open question is whether the
+  plot ground should read RECESSED in dark when it reads as a raised
+  card in light — the tables beside it draw their card in the platform's
+  own token, so a dark host may show the chart sitting darker than they
+  do. The headline stays open for what is
+  left: the LOOKS RULING on the captures (mac captured 2026-08-27;
+  linux, windows, and the two mobile lanes when packaging reaches them),
+  and PHASE 5, the matrix — which is also the only thing
   that can answer §11's measure-at-implementation #2 (the WinUI BGRA
   swizzle) and #4 (what GDK's scale returns at a fraction), since both
-  are readings no host that types `cargo check` performs.
+  are readings no host that types `cargo check` performs. Phase 4 did
+  NOT build ruling 12's size-mode declaration and deliberately so: no
+  prop exists in the spec, the core rasterizes at the viewbox and all
+  four backends still stretch, so a binding surface alone would spell
+  `scale` in eight languages over a core that letterboxes in none of
+  them. The chart is laid out at its NATURAL SIZE instead, the one
+  geometry where the three modes coincide (see the stretch entry).
   POST-DEPTH RULINGS 2026-08-26 (Akhil, after the animation research
   round — docs/canvas-plan.md §0 rows 12-16, where each is recorded
   with its reasoning). Five, and one supersedes ratified text.
@@ -2843,6 +2990,125 @@ count, so the saving is measured rather than assumed.
   `PRESENTATION_REPORTED` latch); the mechanism is a CLASS and is written
   up in docs/traps.md, "A presentation-side report that arrives before
   the scene".
+  AND THE OTHER ROUTE EXISTS NOW TOO (2026-08-28), which matters because
+  this entry named exactly two and a future reader would otherwise think
+  only one was ever built: "the harness pins the appearance for a leg the
+  way it pins the scale" is `KAYA_APPEARANCE=light|dark`
+  (tools/check-appearance.sh). It does not replace the two-mode string —
+  that is what makes the VERDICT byte-identical across platforms — it
+  makes the dark half REACHABLE, as the `canvasdark-*` leg on all five
+  lanes, instead of only on a machine somebody had set to dark.
+- **The portfolio chart's well reads RAISED in light and RECESSED in
+  dark, and nobody has ruled on it** (measured 2026-08-27,
+  docs/measurements/canvas-palette-look-2026-08-27.txt §3). In light the
+  plot ground is WHITE on a EEF1F2 window — a raised card, matching the
+  tables beside it. In dark the plot ground 16181C is DARKER than any
+  plausible macOS dark window: the opposite reading, at the weakest
+  separation in the whole contrast table (1.07). It is a taste question
+  AND a consistency question, because the tables next to the chart draw
+  their card in the PLATFORM's own token (tools/check-table-card.sh)
+  while the canvas draws in kaya's palette, so on a dark host the chart
+  can sit visibly darker than the cards beside it.
+  WHAT WAS BLOCKING IT IS GONE: the measurement said this "needs a dark
+  machine, one capture, and the maintainer's eye", and the dark window
+  half LANDED 2026-08-28 as `KAYA_APPEARANCE=light|dark` — a per-process
+  override through each platform's own mechanism, so a real dark window
+  opens on a light desk and no host setting is written. The capture is
+  now one command on this machine.
+  WHAT IS STILL OPEN is only the ruling: whether a chart well should read
+  raised or recessed in dark, and whether the canvas should reach for the
+  platform's card token the way the tables do. Not decidable without the
+  maintainer's eye on a picture, which is §7.3's whole point — every
+  scene assertion was green through the two look bugs the portfolio has
+  already shipped.
+  KEY: palette-look, plot ground, raised, recessed, card, well,
+  KAYA_APPEARANCE, check-table-card
+- **kaya's Android mount is not re-entrant across an activity relaunch,
+  and the second mount kills the process** (measured 2026-08-27 on the
+  android lane, while landing `KAYA_APPEARANCE`). Android relaunches an
+  activity for any configuration change the activity does not declare —
+  night mode, ROTATION, locale, font scale, density. The relaunch runs
+  `onCreate` twice IN ONE PROCESS, so `KayaCompose.mount` starts the pump
+  twice, the guest builds its scene twice, and the core — which is a
+  process-global singleton — dies on the duplicate:
+
+      wm_relaunch_resume_activity … MainActivity
+      wm_on_create_called  performCreate            <- mount #1
+      wm_on_destroy_called performDestroy
+      E kaya log_panics: 'kaya: widget id … already exists' scene.rs:1419
+      wm_on_create_called  performCreate            <- mount #2
+      ActivityManager: Process dev.kaya.milestone2 has died
+
+  The buffers this came out of were
+  `target/validate-failures/android-canvasdark-compose-buffers.log (gone)`
+  — that directory is a lane artifact and is cleaned between runs, which
+  is why the sequence above is quoted here in full rather than cited.
+  HOW IT WAS FOUND: the appearance knob's first Android mechanism was
+  `UiModeManager.setApplicationNightMode`, which is exactly such a
+  configuration change, and the dark canvas leg died at ~63s having
+  printed no verdict — three launch attempts, three identical deaths.
+  NOT A DEFECT OF THAT KNOB, which no longer uses that call: any kaya app
+  on Android has this today. A phone rotation is the ordinary way in, and
+  no scene rotates a device, which is why nothing has ever seen it.
+  WHAT WOULD CLOSE IT: either mount becomes re-entrant — detecting a
+  second entry in the same process and re-attaching the existing scene to
+  the new activity rather than rebuilding — or every kaya activity
+  declares the configuration changes it absorbs, which trades the crash
+  for the half-dark window the manifest theme would no longer re-resolve.
+  The first is the real fix and is a LIFECYCLE SEMANTICS change for every
+  kaya app, so it wants the maintainer's ruling rather than a leg's.
+  THE RULING CAME 2026-08-27, in two parts. (1) Recreation is INVISIBLE
+  TO GUESTS: no new binding surface, no lifecycle callback — the only
+  observables are the size and appearance changes that caused the
+  relaunch, which already arrive as the uniform events every platform
+  delivers. (2) The guest builds ONCE PER PROCESS behind a latch taken
+  on the FIRST `onCreate` — deliberately not `Application.onCreate`,
+  because the harness maps `KAYA_*` intent extras into libc's environ
+  before the guest library starts (check-go-env's ordering) and an
+  Application has no intent, so building there starts every selftest
+  under an unset `KAYA_SELFTEST`, which is the default arm and not an
+  error. Later `onCreate`s RE-ATTACH ONLY: swap `mountedActivity`
+  (identity-guarded, nulled on the mounted activity's ON_DESTROY so the
+  verbs that need an activity — pickers, clipboard — refuse through
+  their existing null checks instead of touching a destroyed one),
+  re-apply the appearance override to the new window, re-add the
+  lifecycle observer, `setContent`. The pump's captured activity becomes
+  a main-looper Handler. NO CORE RESYNC: `KayaSceneModel` is
+  process-global and a fresh composition re-projects the whole of it by
+  construction — Compose's snapshot system is itself a process
+  singleton, two successive compositions read one model safely, and a
+  write landing in the destroy/create gap keeps its value and loses
+  only the apply notification, which the new composition's first read
+  covers.
+  THE ECOSYSTEM AGREES, measured against sources 2026-08-27 rather than
+  recalled: every engine-owns-state framework ALSO absorbs config
+  changes in the manifest (Flutter declares 11 flags including uiMode,
+  SDL3 13, Godot 11, React Native 7, MAUI 6), and Google's own guidance
+  says "It is impossible to entirely disable Activity recreation" — so
+  absorption is an optimization and re-attach is the correctness floor;
+  back-out-and-reopen recreates the activity under a living process no
+  matter what the manifest declares. Of them all only Flutter truly
+  re-attaches (evicting the incumbent activity before the newcomer
+  attaches — our identity guard's sibling); SDL and Godot kill the
+  process instead; MAUI, Avalonia and React Native hand each new
+  activity a FRESH tree off the surviving engine, which is exactly the
+  `KayaSceneModel` shape. iOS runs every configuration change by
+  mutating traits in place — no teardown — but CAN disconnect a scene
+  (window and views die, process and model survive), so
+  re-projection-from-model is the cross-platform rule while the
+  recreation PROOF is android-only: drive `activity.recreate()`
+  mid-scene as an android-lane phase, on the windows lane's
+  on-guest-unit-tests precedent, never as a shared .steps verb the
+  other platforms would have to stub.
+  DECIDED IN THE CLOSING SLICE: whether kaya's manifest absorbs too
+  (the knob's `createConfigurationContext` machinery already re-resolves
+  windowBackground under a forced configuration, which is the one piece
+  absorption was missing); and the AUDIT: whatever `KayaRing.attach` /
+  `KayaGo.attach` retain across JNI must be application-scoped, never
+  activity-scoped.
+  KEY: mount, re-entrant, relaunch, onCreate, configChanges, rotation,
+  already exists, scene.rs, KayaCompose.mount, am_proc_died, build-once
+  latch, activity.recreate
 - A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
   assigned track (found while landing the depth slice 2026-08-26). The
   core rasters at the VIEWBOX times the reported scale, and the backend
@@ -2868,6 +3134,16 @@ count, so the saving is measured rather than assumed.
   ruling replaced. AND ONE THING NOT TO DO MEANWHILE: do not copy the
   mac arm's stretch into the three phase-3 blits, since that turns a
   one-file correction into a four-file one (docs/canvas-plan.md §11).
+  STILL OPEN AFTER PHASE 4 (2026-08-27), and phase 4 says why it was not
+  taken there: the portfolio chart wanted a size declaration, and the
+  declaration a guest could have spelled would have named a semantics no
+  backend performs — the prop is in no spec, the letterbox is in no
+  core, and the track report the first paragraph asks for is still
+  missing. So the chart is laid out at its NATURAL SIZE (no grow, in a
+  hugging column), the one geometry where `scale`, `fixed` and the
+  present stretch all agree, and the guest says so at the site. That is
+  the honest state until the three modes land; it is also why no scene
+  in the tree exercises a stretched canvas.
   KEY: viewbox, stretch, emit_drawing, presentation, rasterize, redraw,
   scale mode, fixed, letterbox
 - ~~CROSS-ISA byte-identity of the canvas raster is UNMEASURED~~ —
@@ -6144,6 +6420,34 @@ executable census derives that set from the shared picker verbs. Removing
 red with one proven substitution. The unchanged 112-leg standalone lane
 passed in 142s (Compose 49s, JVM 32s, Go 36s), including all seven live
 DocumentsUI legs.
+
+THIRTEENTH SIGHTING (2026-08-27, save-jvm on emulator-5558 under the
+day stack's five-lane matrix; bundle preserved at
+~/.local/state/kaya/flightrec/sightings/2026-08-27-save-jvm-13th-*),
+and it is a shape none of the twelve had: A PICKER FINISHED ITSELF.
+The leg's open dialog was seen slow under contention
+(KAYA_DIALOG_UNSEEN at 5150ms with an EMPTY readable list, SEEN at
+9188ms); save dialog 2 was seen at 1954ms and took the cancel path's
+three earned BACKs (key_back_press 29.480/32.203/33.760 — the first
+two consumed inside DocumentsUI, AutofillManagerService logging each,
+consistent with the IME eating the first; A.2's breadcrumb rule earned
+each one), dying on the third. Then save dialog 3: created 35.054,
+SEEN at 877ms, and FINISHED BY APP-REQUEST at 36.110 — 260ms after
+the service saw it, BEFORE the harness pressed anything, with NO
+key_back_press logged in the gap and no result delivered; DocumentsUI
+logged "Content updated." twice at 36.050 and nothing else. The title
+expect at 36.937 then failed clean at the guests' post-fourth-sighting
+sentence ("no file dialog live, wanted kaya-save-29528"), which is
+this entry's walls holding. The armed setResult instrumentation has
+nothing to say and that is CONSISTENT, not a miss: nothing was pressed,
+so there was no result to lose. WHAT THIS SIGHTING CANNOT SAY: who
+finished it — app-request names DocumentsUI's own process, and the log
+cannot tell a late internal back-dispatch (the eleventh sighting's
+straggler, one layer deeper than injection, which A.2 governs and this
+would not be) from DocumentsUI closing over its own content refresh.
+The next sighting should read DocumentsUI's back-dispatch and
+onProviderChanged paths first. Standalone rerun green (save-jvm 8s,
+full jvm suite green), classified with its family.
 
 The next nice-only matrices still took Android 339/333/338s. The last
 one exposed the startup boundary: `clipboard-compose` expired its first

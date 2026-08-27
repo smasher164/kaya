@@ -1200,6 +1200,26 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     if let (Prop::Accepts, Value::Str(list)) = (prop, value) {
         crate::wire::check_accept_list(list, "accepts");
     }
+    // AN EMPTY ACCESSIBLE NAME IS NOT A DECLARATION. The four backends
+    // each documented "empty means unset" and three implemented it as a
+    // silent no-op while WinUI's pattern guard fell through to its
+    // catch-all panic — so the same guest declaration was a working app
+    // on three platforms and an aborted drain on the fourth
+    // (docs/deferred.md a11y-empty-label). The divergence dies here, at
+    // the one chokepoint all eight bindings reach, rather than being
+    // settled four times: a label the guest never filled in is refused
+    // where the guest can still see which widget it was.
+    // CLEARING a label that was set is a different act and has no
+    // spelling today; if it is ever wanted it gets its own one
+    // (DESIGN.md, Binding conventions).
+    if let (Prop::A11yLabel, Value::Str(label)) = (prop, value) {
+        assert!(
+            !label.is_empty(),
+            "kaya: {kind:?} declares an empty a11y label — an accessible \
+             name must say something (bind the text you meant, or leave \
+             the label off and let the platform derive the name)"
+        );
+    }
     // Same argument as grow's domain: negative padding has no reading,
     // and every backend would invent one.
     if let (Prop::Inset, Value::F64(pad)) = (prop, value) {
@@ -6323,6 +6343,83 @@ mod tests {
                 value: PropValue::Const(Value::I64(3)),
             },
         ]);
+    }
+
+    /// THE EMPTY ACCESSIBLE NAME, both carriers. Four backends had four
+    /// answers to `A11yLabel = ""` and the guest could not tell which
+    /// one it would get: three no-opped, WinUI's pattern guard fell
+    /// through to its catch-all and aborted the drain
+    /// (docs/deferred.md a11y-empty-label). One answer now, at declare
+    /// time, in the root's words.
+    #[test]
+    #[should_panic(expected = "declares an empty a11y label")]
+    fn an_empty_a11y_label_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::A11yLabel,
+                value: PropValue::Const(Value::Str(String::new())),
+            },
+        ]);
+    }
+
+    /// THE SHAPE THAT ACTUALLY SHIPPED: not a literal but a signal
+    /// declared empty and filled a line later, which the binding
+    /// resolves to its CURRENT value at declare time. The portfolio
+    /// dashboard's chart summary was exactly this.
+    #[test]
+    #[should_panic(expected = "declares an empty a11y label")]
+    fn an_a11y_label_bound_to_an_empty_signal_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal {
+                id: SignalId(1),
+                initial: Value::Str(String::new()),
+            },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Canvas },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::A11yLabel,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
+    }
+
+    /// The positive control: a label that says something records, by
+    /// both carriers. Without this the two negatives above would pass
+    /// against a wall that refused every a11y label there is.
+    #[test]
+    fn a_spoken_a11y_label_records_by_either_carrier() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateSignal {
+                id: SignalId(1),
+                initial: v("Portfolio value, 30 days"),
+            },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Canvas },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::A11yLabel,
+                value: PropValue::Signal(SignalId(1)),
+            },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::A11yLabel,
+                value: PropValue::Const(v("Day tick")),
+            },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let labels = ops
+            .iter()
+            .filter(|op| matches!(op, ApplyOp::SetProp { prop: Prop::A11yLabel, .. }))
+            .count();
+        assert_eq!(labels, 2, "both a11y labels should reach the backend");
     }
 
     #[test]

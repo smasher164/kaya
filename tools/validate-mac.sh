@@ -1178,6 +1178,14 @@ drain
 KAYA_SELFTEST_SCRIPT="$(scene_script canvas)"
 export KAYA_SELFTEST_SCRIPT
 run canvas-rust-swiftui env KAYA_SELFTEST=canvas "$RUST_GUESTS"/canvas
+# THE SAME SCRIPT UNDER THE OTHER APPEARANCE. expect_ink's answer names
+# the mode the HOST is in, so the light-mode machines every lane runs on
+# never evaluated the dark half of that frozen string — which is how a
+# light-only expectation reached a dark host and reddened a scene nobody
+# had touched (docs/traps.md). KAYA_APPEARANCE moves THIS PROCESS, never
+# the machine's own setting, so the dark arm is a leg on a light desk.
+run canvasdark-rust-swiftui env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
+    "$RUST_GUESTS"/canvas
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome
