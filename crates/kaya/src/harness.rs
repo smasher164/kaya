@@ -43,6 +43,7 @@
 //! language; container creation order is not, so tools/check-steps.sh
 //! rejects every container target except `column#0`/`row#0`.
 
+use crate::vtrace;
 use std::time::{Duration, Instant};
 
 /// The scene scripts, embedded from tools/scenes at build time.
@@ -2746,6 +2747,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
     // Offsets are relative to here — after the gate, so the recording
     // contains every step from its own t=0 onward.
     let start = Instant::now();
+    // The verb trace counts from the same zero, and the ring is this
+    // run's alone (crates/kaya/src/vtrace.rs).
+    vtrace::begin(start);
     let log = log.map(|log| (log, start));
     if let Some((log, _)) = log {
         // The wall-clock anchor recording mode pairs with the
@@ -2776,7 +2780,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
     // already collected died with the process (docs/deferred.md, "A
     // GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE").
     let mut faulted = false;
-    for step in &steps {
+    for (ordinal, step) in steps.iter().enumerate() {
         if let Some(sentence) = crate::fault::latched() {
             if let Some((log, _)) = log {
                 log(&format!("KAYA_HARNESS: step-failed {sentence}"));
@@ -2791,6 +2795,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
         // (Stage::resolve_id), and with the step as the script wrote it
         // so the sentence names what the trace names.
         watch.enter(format!("{step:?}"));
+        vtrace::step(ordinal, format_args!("{step:?}"));
         // kind@id targets normalize HERE, once per step, through the
         // backend's own records (Stage::resolve_id) — so the dozens of
         // index-shaped Stage reads below never learn about ids. An
@@ -2805,11 +2810,31 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             for t in step_norm.targets_mut() {
                 let Some(id) = t.id else { continue };
                 let deadline = Instant::now() + POLL_DEADLINE;
+                let mut tries = 0u32;
+                vtrace::note(
+                    "resolve_id",
+                    format_args!(
+                        "-> searching for a {:?} carrying a11y_id {id:?}{}",
+                        t.kind,
+                        t.keys.map_or(String::new(), |keys| format!(" at copy [{keys}]"))
+                    ),
+                );
                 loop {
+                    tries += 1;
                     if let Some(index) = stage.resolve_id(t.kind, id, t.keys) {
+                        vtrace::attempt(
+                            "resolve_id",
+                            tries,
+                            format_args!("<- {id:?} resolved to index {index}"),
+                        );
                         *t = Target { kind: t.kind, index, id: None, keys: None };
                         break;
                     }
+                    vtrace::attempt(
+                        "resolve_id",
+                        tries,
+                        format_args!("<- no {:?} carries {id:?} yet", t.kind),
+                    );
                     if !retry || Instant::now() >= deadline {
                         unresolved = Some(format!(
                             "{} names no widget: no {:?} carries a11y_id \"{id}\"{}",
@@ -2850,7 +2875,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 None
             }
             Step::Click(t) => {
+                vtrace::note("click", format_args!("-> stage.click {}", target_spec(t)));
                 stage.click(*t);
+                vtrace::note("click", format_args!("<- stage.click {}", target_spec(t)));
                 None
             }
             // WRAPPED IN `poll` because the watchdog needs its
@@ -2892,7 +2919,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 None
             }
             Step::Type(s) => {
+                vtrace::note("type", format_args!("-> stage.type_text {s:?}"));
                 stage.type_text(s);
+                vtrace::note("type", format_args!("<- stage.type_text {s:?}"));
                 None
             }
             Step::SelectSection(i) => {
@@ -2958,7 +2987,28 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                          location and the scene would compare against that"
                     )))
                 } else {
+                    vtrace::note(
+                        "file_dialog_goto",
+                        format_args!("-> stage.goto_directory {resolved} (scene wrote {path})"),
+                    );
                     stage.goto_directory(&resolved);
+                    // THE AIM BESIDE THE ANSWER, which is the record
+                    // docs/deferred.md's iOS-sheets WATCH entry asked
+                    // for: the fifth face of that family was a picker
+                    // sitting in the PARENT directory, and nothing in
+                    // any log paired the goto with the breadcrumb. Read
+                    // only when something is recording — it is one more
+                    // hop to the UI thread.
+                    if vtrace::on() {
+                        let breadcrumb = stage.file_dialog_state().map(|(where_, _)| where_);
+                        vtrace::note(
+                            "file_dialog_goto",
+                            format_args!(
+                                "<- asked for {resolved}; the picker's breadcrumb right \
+                                 after the call reads {breadcrumb:?}"
+                            ),
+                        );
+                    }
                     None
                 }
             }
@@ -3013,9 +3063,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // still returns a file"). Checked here rather than per
                 // backend, so no backend checks its own work.
                 match name {
-                    Some(want) => match stage.file_dialog_state() {
+                    Some(want) => match traced_file_dialog_state("file_choose", &stage) {
                         Some((_, rows)) if rows.iter().any(|r| r == want) => {
+                            vtrace::note(
+                                "file_choose",
+                                format_args!("-> stage.choose_file(Some({want:?}))"),
+                            );
                             stage.choose_file(Some(want));
+                            vtrace::note("file_choose", format_args!("<- stage.choose_file"));
                             // AND THE DIALOG MUST BE GONE. A press that
                             // lands before the dialog is interactive is
                             // swallowed with no error anywhere, so the
@@ -3023,7 +3078,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                             // assertion about the GUEST. Measured on
                             // Windows, where it passed once and flaked
                             // on the next run.
-                            match poll(|| match stage.file_dialog_state() {
+                            match poll_named("file_choose", || match stage.file_dialog_state() {
                                 None => Ok(String::new()),
                                 Some((_, rows)) => Err(format!(
                                     "file_choose {want:?}: the dialog is still up \
@@ -3044,6 +3099,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                             // naming the wrong cause. Cancel is the
                             // honest "we did not choose", and the failure
                             // below is already recorded.
+                            vtrace::note(
+                                "file_choose",
+                                format_args!(
+                                    "-> stage.choose_file(None) (cancelling: {want:?} is \
+                                     not among {rows:?})"
+                                ),
+                            );
                             stage.choose_file(None);
                             Some(Err(format!(
                                 "file_choose {want:?}: the dialog lists {rows:?} — \
@@ -3056,10 +3118,12 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                         ))),
                     },
                     None => {
+                        vtrace::note("file_choose", format_args!("-> stage.choose_file(None)"));
                         stage.choose_file(None);
+                        vtrace::note("file_choose", format_args!("<- stage.choose_file"));
                         // Cancel has the same postcondition: the dialog
                         // is gone, or the press did not take.
-                        match poll(|| match stage.file_dialog_state() {
+                        match poll_named("file_choose", || match stage.file_dialog_state() {
                             None => Ok(String::new()),
                             Some((_, rows)) => Err(format!(
                                 "file_choose cancel: the dialog is still up \
@@ -3080,9 +3144,22 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // then save under the SUGGESTED name with every byte
                 // assertion still passing. The file_choose rule, one
                 // dialog over.
-                match stage.save_dialog_state() {
-                    Some(_) => {
+                match traced_save_dialog_state("file_dialog_name", &stage) {
+                    // THE NAME THE PANEL ALREADY CARRIED is what makes
+                    // "we set it and it took" tellable from "we set it
+                    // and the panel saved under its suggestion": the
+                    // read was there all along and thrown away as
+                    // `Some(_)`.
+                    Some((dir, was)) => {
+                        vtrace::note(
+                            "file_dialog_name",
+                            format_args!(
+                                "-> stage.set_save_name {name:?} (the panel at {dir:?} \
+                                 already names {was:?})"
+                            ),
+                        );
                         stage.set_save_name(name);
+                        vtrace::note("file_dialog_name", format_args!("<- stage.set_save_name"));
                         None
                     }
                     None => Some(Err(format!(
@@ -3095,11 +3172,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // lands before the dialog is interactive is swallowed
                 // with no error anywhere, and the leg then fails three
                 // steps later on an assertion about the GUEST.
-                if stage.save_dialog_state().is_none() {
+                if traced_save_dialog_state("file_save", &stage).is_none() {
                     Some(Err("file_save: no save dialog is live".to_string()))
                 } else {
+                    vtrace::note("file_save", format_args!("-> stage.confirm_save({save})"));
                     stage.confirm_save(*save);
-                    match poll(|| match stage.save_dialog_state() {
+                    vtrace::note("file_save", format_args!("<- stage.confirm_save"));
+                    match poll_named("file_save", || match stage.save_dialog_state() {
                         None => Ok(String::new()),
                         Some((_, name)) => Err(format!(
                             "file_save: the dialog is still up (naming {name:?}) — the \
@@ -3659,7 +3738,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
-            Step::ExpectFocused(t) => Some(poll(|| {
+            Step::ExpectFocused(t) => Some(poll_named("expect_focused", || {
                 if stage.is_focused(*t) {
                     Ok(format!("{t:?} focused"))
                 } else {
@@ -3950,6 +4029,11 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
     } else {
         (1, format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")))
     };
+    // FAILURE ONLY, and BEFORE the publish: after it the watchdog may
+    // end the process at any moment (crates/kaya/src/vtrace.rs).
+    if code != 0 {
+        vtrace::dump(&format!("the verdict failed: {verdict}"));
+    }
     // EXIT_GRACE covers `finish` itself: it prints the verdict and then
     // hops to the UI thread for the exit, and that hop wedges with the
     // rest (the linux lane's N=6000, verdict at 103.63s and no exit).
@@ -4144,7 +4228,15 @@ impl StepWatchdog {
                 drop(watched);
                 if let Some((code, verdict)) = fire {
                     match verdict {
-                        Some(text) => eprintln!("{text}"),
+                        Some(text) => {
+                            // THE WEDGE IS WHAT THE TRACE IS FOR: this
+                            // is the case where nobody knows what the
+                            // verb was doing, and the harness thread is
+                            // still inside it (crates/kaya/src/vtrace.rs).
+                            // The failed-verdict path dumps its own.
+                            crate::vtrace::dump("the step ceiling fired: no verdict");
+                            eprintln!("{text}")
+                        }
                         // NOT a second verdict: the leg's own is
                         // already out, and overwriting it would lose
                         // the answer the run reached.
@@ -4293,10 +4385,37 @@ mod expand_tests {
     }
 }
 
-fn poll(mut eval: impl FnMut() -> Result<String, String>) -> Result<String, String> {
+fn poll(eval: impl FnMut() -> Result<String, String>) -> Result<String, String> {
+    poll_inner(None, eval)
+}
+
+/// `poll` with every ATTEMPT on the verb trace — only the last of them
+/// survives anywhere else, in the failure sentence
+/// (crates/kaya/src/vtrace.rs). ONE BODY with `poll`, so the retry
+/// semantics cannot differ between a traced verb and an untraced one.
+fn poll_named(
+    verb: &'static str,
+    eval: impl FnMut() -> Result<String, String>,
+) -> Result<String, String> {
+    poll_inner(Some(verb), eval)
+}
+
+fn poll_inner(
+    verb: Option<&'static str>,
+    mut eval: impl FnMut() -> Result<String, String>,
+) -> Result<String, String> {
     let deadline = Instant::now() + POLL_DEADLINE;
+    let mut tries = 0u32;
     loop {
         let outcome = eval();
+        if let Some(verb) = verb {
+            tries += 1;
+            match &outcome {
+                Ok(o) if o.is_empty() => vtrace::attempt(verb, tries, format_args!("<- ok")),
+                Ok(o) => vtrace::attempt(verb, tries, format_args!("<- ok: {o}")),
+                Err(e) => vtrace::attempt(verb, tries, format_args!("<- not yet: {e}")),
+            }
+        }
         // A LATCHED FAULT ENDS THE WAIT. Nothing more will be applied,
         // so the rest of POLL_DEADLINE is dead time — and this is
         // exactly the "six steps took EXACTLY 15.0s" shape the
@@ -4306,6 +4425,38 @@ fn poll(mut eval: impl FnMut() -> Result<String, String>) -> Result<String, Stri
         }
         std::thread::sleep(POLL_INTERVAL);
     }
+}
+
+/// The picker's state, ON THE RECORD. "the picker listed six stale
+/// siblings" is this family's exact failure face (docs/deferred.md's
+/// iOS-sheets WATCH entry) and the read that saw it is discarded
+/// everywhere else.
+fn traced_file_dialog_state(
+    verb: &'static str,
+    stage: &impl Stage,
+) -> Option<(String, Vec<String>)> {
+    let state = stage.file_dialog_state();
+    match &state {
+        Some((where_, rows)) => vtrace::note(
+            verb,
+            format_args!("<- stage.file_dialog_state at {where_:?} listing {rows:?}"),
+        ),
+        None => vtrace::note(verb, format_args!("<- stage.file_dialog_state: none is live")),
+    }
+    state
+}
+
+/// Its save-panel half.
+fn traced_save_dialog_state(verb: &'static str, stage: &impl Stage) -> Option<(String, String)> {
+    let state = stage.save_dialog_state();
+    match &state {
+        Some((where_, name)) => vtrace::note(
+            verb,
+            format_args!("<- stage.save_dialog_state at {where_:?} naming {name:?}"),
+        ),
+        None => vtrace::note(verb, format_args!("<- stage.save_dialog_state: none is live")),
+    }
+    state
 }
 
 /// The total flavor for OBSERVATION reads (retried, so absence is a
@@ -4760,13 +4911,18 @@ mod tests {
             None
         }
         fn choose_alert(&self, _choice: u32) {}
+        /// A picker that ANSWERS A FIXED NUMBER OF READS and is then
+        /// gone: every dialog verb's postcondition is that the panel
+        /// leaves, so a mock that says the same thing forever can only
+        /// ever walk the swallowed-press path. Unset (the default) is
+        /// the no-dialog answer every other test relies on.
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
-            None
+            countdown(&DIALOG_READS).then(|| DIALOG.lock().unwrap().clone())?
         }
         fn choose_file(&self, _: Option<&str>) {}
         fn goto_directory(&self, _: &str) {}
         fn save_dialog_state(&self) -> Option<(String, String)> {
-            None
+            countdown(&SAVE_READS).then(|| SAVE.lock().unwrap().clone())?
         }
         fn set_save_name(&self, _: &str) {}
         fn confirm_save(&self, _: bool) {}
@@ -4937,6 +5093,20 @@ mod tests {
     /// tests in the same binary cannot read each other's answer.
     static INK_ANSWER: Mutex<Option<String>> = Mutex::new(None);
     static INK_SERIAL: Mutex<()> = Mutex::new(());
+    /// The picker and the save panel MockStage answers with, and how
+    /// many more reads each has left in it. Written only by the verb
+    /// trace's child processes, where nothing else runs.
+    static DIALOG: Mutex<Option<(String, Vec<String>)>> = Mutex::new(None);
+    static SAVE: Mutex<Option<(String, String)>> = Mutex::new(None);
+    static DIALOG_READS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    static SAVE_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// One read off a dialog's remaining budget; false once it is spent.
+    fn countdown(left: &std::sync::atomic::AtomicUsize) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        left.fetch_update(Relaxed, Relaxed, |n| n.checked_sub(1)).is_ok()
+    }
 
     /// A WEDGED STEP ENDS THE RUN LEGIBLY. Before the step ceiling a
     /// step that never returned printed NOTHING — no verdict, no
@@ -5053,6 +5223,195 @@ mod tests {
         );
         assert!(waited >= EXIT_GRACE, "the exit grace fired early ({waited:?})");
         assert!(waited < cap, "{waited:?}");
+    }
+
+    /// THE VERB TRACE, on the four things it promises: a failing run
+    /// writes the attempts, a passing one writes nothing, the ring says
+    /// how much it dropped, and a WEDGED step — where the harness thread
+    /// is still inside the verb and nothing else knows what it was
+    /// doing — dumps from the watchdog (crates/kaya/src/vtrace.rs).
+    ///
+    /// IN CHILD PROCESSES, and the reason is not the watchdog this time
+    /// but the parallelism: the ring and the env var that arms it are
+    /// both process-global, `cargo test` runs these tests in threads of
+    /// ONE process, and every other test that calls `run` begins a run
+    /// of its own — which resets the ring and, armed, would dump its own
+    /// failure into this test's file. A serial lock holds the trace
+    /// tests apart from each other and not from those. The child is this
+    /// same test binary with this one test selected, the wedge test's
+    /// idiom.
+    #[test]
+    fn the_verb_trace_is_written_on_failure_only() {
+        use std::sync::atomic::Ordering::Relaxed;
+        const CHILD: &str = "KAYA_VERB_TRACE_CHILD";
+        let me = format!(
+            "{}::the_verb_trace_is_written_on_failure_only",
+            module_path!().splitn(2, "::").nth(1).unwrap()
+        );
+        // Every ghost-family verb in one run, then an ACTION whose id
+        // resolves to nothing — the one failure that lands at once
+        // instead of after the 15s poll deadline.
+        let dialog_stage = || {
+            *DIALOG.lock().unwrap() = Some((
+                "/nowhere".to_owned(),
+                vec!["wanted.txt".to_owned(), "stale-sibling.txt".to_owned()],
+            ));
+            *SAVE.lock().unwrap() = Some(("/nowhere".to_owned(), "suggested.txt".to_owned()));
+            // The picker answers the goto's breadcrumb read, the
+            // file_choose row check and two dismissal attempts, then it
+            // is gone — so the third attempt is the one that passes.
+            DIALOG_READS.store(4, Relaxed);
+            // The name read, file_save's check, and one dismissal
+            // attempt.
+            SAVE_READS.store(3, Relaxed);
+            let (tx, _rx) = std::sync::mpsc::channel();
+            run(
+                parse(&format!(
+                    "expect label#0 \"ok-text\"\nfile_dialog_goto {}\nfile_choose wanted.txt\n\
+                     file_dialog_name final\nfile_save\nclick button@missing",
+                    std::env::temp_dir().to_string_lossy()
+                ))
+                .unwrap(),
+                MockStage { seen: &SEEN, verdict: tx },
+            );
+        };
+        match std::env::var(CHILD).as_deref() {
+            Ok("fail") => {
+                dialog_stage();
+                return;
+            }
+            Ok("pass") => {
+                let (tx, _rx) = std::sync::mpsc::channel();
+                run(
+                    parse("expect label#0 \"ok-text\"").unwrap(),
+                    MockStage { seen: &SEEN, verdict: tx },
+                );
+                return;
+            }
+            Ok("cap") => {
+                crate::vtrace::begin(Instant::now());
+                crate::vtrace::step(0, format_args!("Overflow"));
+                for i in 0..crate::vtrace::CAP + 50 {
+                    crate::vtrace::note("cap", format_args!("record {i}"));
+                }
+                crate::vtrace::dump("the ring test");
+                return;
+            }
+            Ok("wedge") => {
+                // The highest-value dump: the harness thread is still
+                // inside the verb, so nothing else knows what it was
+                // doing.
+                WEDGE.store(true, Relaxed);
+                let (tx, _rx) = std::sync::mpsc::channel();
+                run(
+                    parse("expect label#0 \"ok-text\"").unwrap(),
+                    MockStage { seen: &SEEN, verdict: tx },
+                );
+                println!("KAYA_TEST: the wedged run returned on its own");
+                return;
+            }
+            _ => {}
+        }
+        let drive = |mode: &str| -> (std::process::Output, std::path::PathBuf, String) {
+            let trace = std::env::temp_dir()
+                .join(format!("kaya-vtrace-{}-{mode}.log", std::process::id()));
+            let _ = std::fs::remove_file(&trace);
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "--nocapture", "--test-threads=1", &me])
+                .env(CHILD, mode)
+                .env("KAYA_VERB_TRACE", &trace)
+                .env("KAYA_STEP_CEILING_MS", "800")
+                .output()
+                .unwrap();
+            let text = std::fs::read_to_string(&trace).unwrap_or_default();
+            (out, trace, text)
+        };
+
+        let (out, trace, text) = drive("fail");
+        let _ = std::fs::remove_file(&trace);
+        assert!(
+            out.status.success(),
+            "the failing-run child did not finish: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        for want in [
+            // The dump says why it was written and what it lost.
+            "dump reason=\"the verdict failed",
+            "dropped=0",
+            // The step boundary, so a record knows what it was inside.
+            "step=5 text=\"Click(",
+            // The picker's own listing: "six stale siblings" is this
+            // family's failure face and nothing else keeps it.
+            "stale-sibling.txt",
+            // EVERY attempt of the dismissal poll — the FAILING ones by
+            // name, since the last attempt is the only one that reaches
+            // the failure sentence today and asserting on it alone
+            // passes with the per-attempt records deleted (watched
+            // 2026-08-27).
+            "verb=file_choose try=2 what=\"<- not yet: file_choose 'wanted.txt': the dialog \
+             is still up",
+            "verb=file_choose try=3",
+            // The press, paired with the read that preceded it.
+            // A `what` is one key=value field, so its own quotes are
+            // flattened to `'` (vtrace's `quoted`, simdrive's rule).
+            "-> stage.choose_file(Some('wanted.txt'))",
+            // The aim beside the answer (docs/deferred.md's iOS-sheets
+            // WATCH entry asked for exactly this).
+            "the picker's breadcrumb right after the call reads",
+            // The name the panel already carried, which the verb used
+            // to throw away as `Some(_)`.
+            "already names 'suggested.txt'",
+            "verb=file_save try=1 what=\"<- not yet: file_save: the dialog is still up",
+            "verb=file_save try=2",
+            // The id search, and each attempt that resolved nothing.
+            "-> searching for a Button carrying a11y_id 'missing'",
+            "<- no Button carries 'missing' yet",
+            "verb=resolve_id try=1",
+        ] {
+            assert!(text.contains(want), "the trace has no {want:?}:\n{text}");
+        }
+
+        let (out, trace, text) = drive("pass");
+        let existed = trace.exists();
+        let _ = std::fs::remove_file(&trace);
+        assert!(out.status.success(), "the passing-run child did not finish");
+        assert!(
+            !existed && text.is_empty(),
+            "a PASSING run wrote a trace — retention is failure-only:\n{text}"
+        );
+
+        let (out, trace, text) = drive("cap");
+        let _ = std::fs::remove_file(&trace);
+        assert!(out.status.success(), "the ring child did not finish");
+        assert!(
+            text.contains(&format!("records={} dropped=50", crate::vtrace::CAP)),
+            "the ring does not report what it dropped:\n{}",
+            text.lines().next().unwrap_or_default()
+        );
+        assert!(!text.contains("what=\"record 0\""), "the oldest record was not dropped");
+        assert!(text.contains("what=\"record 50\""), "the ring dropped more than it said");
+        assert!(
+            text.contains(&format!("what=\"record {}\"", crate::vtrace::CAP + 49)),
+            "the newest record is missing"
+        );
+
+        let (out, trace, text) = drive("wedge");
+        let _ = std::fs::remove_file(&trace);
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "the wedged child left with the wrong code: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            text.contains("dump reason=\"the step ceiling fired"),
+            "the step ceiling ended the run and wrote no trace — that is the case the \
+             trace exists for:\n{text}"
+        );
+        assert!(
+            text.contains("step=0 text=\"Expect(Target { kind: Label"),
+            "the wedge dump does not name the step it was inside:\n{text}"
+        );
     }
 
     /// The zero-expect guard fires: a script a transport mangled into

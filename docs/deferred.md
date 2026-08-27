@@ -9,6 +9,153 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the flight recorder: one failure is enough evidence (Akhil, 2026-08-27)
+KEY: flightrec, flight recorder, capture bundle, journal jsonl, XDG_STATE_HOME, KAYA_FLIGHTREC_DIR, KAYA_VERB_TRACE, vtrace, verb trace, foreground sampler, PrintWindow shot, flightrec-selftest
+
+A leg that fails once and passes on the rerun leaves nothing behind but a
+verdict, so the next sighting starts from zero — and the ghost families
+(the file dialogs, the contended pickers) are exactly the ones that do
+that. ONE FAILURE MUST BE ENOUGH EVIDENCE: every leg is journalled, and
+every FAIL collects the state that was live at the time.
+
+DEPTH LANDED 2026-08-27 — journal + windows + mac + the Rust verb trace.
+BREADTH IS OPEN and is what keeps this entry unstruck: linux, iOS and
+Android runners are not wired, and the two interpreter harnesses
+(KayaSwiftUI.swift, KayaCompose.kt) have no ring.
+
+WHAT LANDED
+- THE JOURNAL, `tools/lib/flightrec.py` + `tools/lib/flightrec.sh`. JSONL
+  under `${KAYA_FLIGHTREC_DIR:-${XDG_STATE_HOME:-~/.local/state}/kaya/flightrec}`:
+  a run header (run id, all three tree ids from build-id.sh, host load,
+  free disk, memory pressure) and a record per leg (lane, leg, verdict,
+  duration, failure sentence, bundle path). Retention is newest N run
+  directories (default 20), enforced at run start with the cap PRINTED;
+  bundles live inside the run directory, so a bundle can never outlive its
+  own journal record.
+  THE LOCATION IS THE DESIGN DECISION, read against the storage-cleanup
+  entry below: target/ (including target/validate-failures), the
+  worktrees "and their targets", docker, the nix store and the /private/tmp
+  scratchpads are all named by that sweep. A dot-dir under the repo root
+  is the trap that looks safe — agents work inside `.claude/worktrees/<id>/`,
+  so it resolves INSIDE a worktree the sweep deletes, `git clean -xdf`
+  eats it, and it fragments one journal into one per checkout. The XDG
+  state dir is named by no candidate, survives `rm -rf target`, and is one
+  home per machine, which is what lets two lanes from two worktrees appear
+  in one journal.
+- MAC AT-FAIL CAPTURE, in `tools/validate-mac.sh`'s `run()` on all three
+  of its paths. Seven sections: the per-leg sampler's history, `sample`
+  of the live guest, the leg log, WindowServer CPU, the CGWindowList
+  window list (`tools/mac/flightrec-winlist.swift`, built on demand to a
+  content-hashed path), a screencapture of the guest's OWN window by id,
+  and a bounded kaya-scoped `log show` slice.
+- WINDOWS AT-FAIL CAPTURE, `tools/guest/flightrec.ps1` (+ `flightrec.cmd`
+  and `run-hidden-args.vbs`, because `run-hidden.vbs` eats its second
+  argument as KAYA_WIN_SLOT and cannot forward a leg name). A foreground
+  sampler for the life of the leg, then a collect: visible windows, any
+  live dialog's UIA tree, a bounded wevtutil slice, the filtered process
+  list, and a PrintWindow shot. Wired at TWO sites — every FAIL, and
+  run_one_suite's TIMEOUT path BEFORE `kill_guests`, which is the only
+  moment a failing guest still has a window to photograph.
+- THE VERB TRACE, `crates/kaya/src/vtrace.rs`: a 2048-record ring behind a
+  const-constructible Mutex static, dumped to `KAYA_VERB_TRACE` on failure
+  only, from both the failed verdict and the watchdog's wedge arm. It had
+  to be a static and not a local because the watchdog thread exits the
+  process itself. The file-dialog family, click, type, focus and the
+  id-normalization search are instrumented; `poll_named` gives a retried
+  observation its per-attempt records, which plain `poll` never kept.
+
+WHY A SELF-TEST AND NOT A NUMBERED GATE. `tools/flightrec-selftest.sh` is
+deliberately not named `check-*.sh`: check-gates' delegation clause forbids
+validate-mac from invoking anything gate-shaped, its census would demand
+registration in four places, and what needs proving is a RUNTIME property
+of a host — that these capture commands answer here — which no static gate
+can see. It cuts the REAL `run()` out of validate-mac by brace depth and
+drives it with an always-failing leg. Six clauses, four watched
+perturbations, and the tree's hashes compared before and after.
+
+FOUR DEFECTS IT CAUGHT WHILE BEING BUILT, all in the recorder itself, and
+each one a diagnostic that would have lied rather than gone quiet:
+ 1. `flightrec_start` captured the writer with `2>&1`. Stderr is unbuffered
+    and stdout is not, so the retention sentence came out first and became
+    the run id; every leg record was filed under a path made of it.
+ 2. The mac shot matched any window whose line contained "kaya" and
+    PHOTOGRAPHED THE MAINTAINER'S EDITOR, whose window is titled after the
+    repository — docs/traps.md's privacy leak arriving by a door the trap
+    does not name. It is addressed by the guest's pid now.
+ 3. Giving the serial path a `tee` put tee in the leg's descendants, and a
+    name-blocklist picked it as the guest: `sample` profiled TEE and the
+    bundle recorded that as the guest's stack. Pid resolution is anchored
+    on `timeout` now, and every sampler line carries the pid's own name.
+ 4. `GetClassNameW`/`GetWindowTextW` without `CharSet.Unicode` returned ONE
+    CHARACTER per name, so `#32770` could never match, the UIA walk could
+    never fire and the shot could never find its window — three sections
+    that would have answered "nothing was there" forever. Beside it, a
+    .ps1 with an em-dash in a string literal does not parse at all on the
+    guest (PowerShell 5.1 reads the ANSI codepage and the mojibake carries
+    a double quote); both are in docs/traps.md and clause N5 holds the
+    second.
+
+THE RECORDER'S FIRST MATRIX CAUGHT THE RECORDER (2026-08-27, and this is
+the finding worth keeping). Every leg went green on all five lanes and the
+journal worked — and the WINDOWS LANE TRIPPED ITS DURATION CEILING at 605s
+against a 520s ceiling and a ~495s warm baseline. The every-leg signature,
+and the per-leg hooks were the only work added: ~110s over 194 legs, about
+0.55s each, ALL OF IT ON THE PASS PATH.
+
+Measured on the VM rather than guessed, same ssh mux, quiescent, n=10:
+`flightrec_win_leg_reset` 37ms, `sampler_start` (schtasks create+run)
+155ms, `sampler_stop` 85ms, `flightrec_leg` (one python3 spawn) 27ms —
+304ms of three ssh round trips plus a process, on every leg whether it
+failed or not. 304ms quiescent against ~550ms observed is the expected
+inflation at KAYA_WIN_JOBS=6 on oversubscribed vCPUs, which this lane's
+own comments already record.
+
+THE RULE IT COST US: AN OBSERVER MUST BE FREE WHEN NOTHING FAILS. The
+diagnostics belong on the failure path, and anything the pass path pays is
+multiplied by every leg on every lane forever. The fixes are all the same
+shape — move the cost off the leg:
+- The foreground sampler is ONE LANE-WIDE PROCESS, started once, writing a
+  capped ring with guest-epoch timestamps; the failure path reads the
+  leg's window out of it, using an offset read once at lane start. The
+  foreground is a machine-wide property, so per-leg samplers were always
+  the wrong unit.
+- The journal SPOOLS. A leg appends one TAB-separated line with a bash
+  `printf` builtin — no subprocess — and one python3 turns the spool into
+  JSONL at lane end and again from the EXIT trap (the flush truncates, so
+  the second call cannot double the records).
+- Nothing bundle-shaped is created on the pass path; `flightrec_win_leg`
+  returns after that one printf.
+Re-measured, same method: the pass path is 0.130ms per leg (n=200), down
+from 304ms, and the whole lane now pays ~509ms once (clock sync 336ms,
+sampler start 123ms, flush of 200 records 50ms). One real windows suite,
+five legs concurrent, alternating: hooks-off median 2605ms (spread
+2515-4278), hooks-on median 2622ms (2616-2797) — the hooks-on runs sit
+inside hooks-off's own spread, and they include that once-per-lane setup.
+tools/flightrec-selftest.sh clause N6 is the wall: a PASSING leg must
+scaffold no bundle, must still be journalled through the spool, must leave
+the spool truncated, and `flightrec_leg`'s body may not name python3,
+run_ssh, scp or mkdir. A lane ceiling noticed this once, after a whole
+matrix; N6 notices in seconds.
+
+WHAT IS OPEN
+- BREADTH: linux (`tools/validate-linux.sh`), iOS (`tools/ios/run-sim.sh`)
+  and Android (`tools/android/run-emulator.sh`) do not journal or capture.
+  Android and iOS already dump some at-fail evidence into
+  target/validate-failures; folding those into the bundle is the shape.
+- THE INTERPRETER RINGS. Both re-implement the verbs and their
+  `while retryStep` wrapper is a CHEAPER attempt point than Rust's, but a
+  hand-copied diagnostic in three harnesses with no compile-time link is
+  the drift class that let the ax observation sit spelled two ways for
+  months. If they get it, one slice, with a check-verbs clause pinning the
+  env var name, the failure-only rule and the line format.
+- RETENTION IS PER-RUN-COUNT, not per-byte. A run whose every leg fails
+  with a large bundle is bounded only by the section and bundle caps
+  (2 MiB / 32 MiB, both printed). A byte ceiling across the whole home is
+  the obvious next turn if this ever grows teeth.
+- NOBODY RUNS THE SELF-TEST AUTOMATICALLY. It is standalone by choice (see
+  above), so the standing wall is the bundle report's own printed counts
+  on every failure. If that proves too quiet, the answer is a gate.
+
 ## CHORE — storage cleanup: the host is nearing disk capacity (Akhil, 2026-08-27)
 KEY: disk cleanup, target directory size, scratchpad growth, docker prune, nix store gc, validate-failures logs
 
@@ -118,8 +265,26 @@ ASan negatives for C-floor guards and any future native-memory probe.
 The guard-page technique from the txcap round stays either way — it is
 deterministic where redzones are heuristic and runs on the linux lane.
 
-## DISCUSS — the shell-then-python two-step: why not python all the way down? (Akhil, 2026-08-27)
+## ~~DISCUSS — the shell-then-python two-step: why not python all the way down? (Akhil, 2026-08-27)~~
 KEY: shell wrapper python census, gate script language, check-shell scope, dev-shell preamble
+
+CLOSED 2026-08-27 BY RULING, same day, on the measured analysis
+(shellpy-research.md, session scratchpad; the numbers that decided
+it: gates already 53% python; one gate spending 21.7s spawning
+47,877 greps beside its own 86ms python census; SIX drifted copies
+of the dev-shell preamble; 76 duplicated heredoc helpers; ~292
+watched negatives as the honest migration price). Three rulings:
+(1) gates convert incrementally against an IMPORTED shared library,
+an imported shared gate library under tools/lib (kaya_gate, built by phase 0) — never a launcher, so every gate stays
+standalone-runnable; (2) ruff joins the flake in phase 0, paying
+the one-time fingerprint move; (3) the RUNNERS STAY SHELL FOR NOW —
+recorded as a present-tense boundary, NOT as never (Akhil,
+verbatim in spirit: do not codify never-convert, we do not know
+what the infra will look like) — python decides, shell launches,
+revisit when the infra changes shape. The non-negotiable rider:
+every converted gate's watched negatives are re-proven red on the
+converted body before the old body is deleted. Phasing per the
+analysis: the six zero-negative gates first.
 
 Akhil's framing, to discuss before anyone acts: lots of the project's
 shell scripts do a little work and then launch python scripts — the

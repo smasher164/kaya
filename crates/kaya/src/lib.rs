@@ -29,6 +29,12 @@ mod scene;
 mod stall;
 /// The protocol as data — the root document tools/kaya-bindgen walks.
 pub mod spec;
+// The harness's verb trace, gated exactly like harness: it is that
+// module's alone, and a scripted-verb instrument is not something a
+// shipped app carries.
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
+#[cfg(feature = "harness")]
+mod vtrace;
 mod wire;
 
 

@@ -154,6 +154,18 @@ status=0
 JOBS="${KAYA_JOBS:-8}"
 LEGS_DIR="$(mktemp -d)"
 
+# The flight recorder: one journal outside the build tree for every leg,
+# and a capture bundle for every FAIL. One failure is enough evidence —
+# a leg that fails once and passes on the rerun leaves nothing behind
+# otherwise. tools/lib/flightrec.sh holds the rules; a runner that cannot
+# open the journal prints the miss once and still runs every leg.
+FLIGHTREC_ROOT="$ROOT"
+export FLIGHTREC_ROOT
+# shellcheck source=tools/lib/flightrec.sh
+source "$ROOT/tools/lib/flightrec.sh"
+flightrec_start mac
+FLIGHTREC_SCRATCH="$(mktemp -d)"
+
 # ── THE MAC FILE-PANEL VIEW MODE, ROTATED RATHER THAN INHERITED ──────
 # NSOpenPanel's file browser publishes a DIFFERENT accessibility
 # identifier per view mode, and the mode is machine-wide
@@ -256,7 +268,7 @@ if [ -f "$PANEL_MODE_STAMP" ]; then
     panel_mode_restore || status=1
 fi
 
-trap 'rm -rf "$LEGS_DIR"; panel_mode_restore' EXIT
+trap 'flightrec_flush; rm -rf "$LEGS_DIR" "$FLIGHTREC_SCRATCH"; panel_mode_restore' EXIT
 # EXIT alone is not enough for ^C: whether a signal death runs the EXIT
 # trap depends on the shell and on whether the signal is trapped, and a
 # lane interrupted mid-rotation must still hand the box back. Restore,
@@ -445,12 +457,19 @@ run() {
     if [ -n "${KAYA_RECORD:-}" ]; then
         (
             local t0=$SECONDS
+            local verdict
             if run_recorded "$name" "$@" >"$LEGS_DIR/$name.log" 2>&1; then
-                echo PASS >"$LEGS_DIR/$name.verdict"
+                verdict=PASS
             else
-                echo FAIL >"$LEGS_DIR/$name.verdict"
+                verdict=FAIL
             fi
+            echo "$verdict" >"$LEGS_DIR/$name.verdict"
             echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
+            # Journalled, but no sampler and no bundle: recording mode is
+            # already filming every leg, and a poller beside a capture
+            # stream is load on the one run that is timed for its frames.
+            flightrec_leg mac "$name" "$verdict" "$((SECONDS - t0))" \
+                "$(flightrec_fail_sentence "$LEGS_DIR/$name.log")" ""
         ) &
         leg_pids+=($!)
         leg_names+=("$name")
@@ -462,24 +481,47 @@ run() {
     if [ "$JOBS" = 1 ]; then
         echo "== $name =="
         local t0=$SECONDS
-        if KAYA_SELFTEST=1 timeout 120 "$@"; then
+        local sampler verdict
+        sampler="$(flightrec_mac_sampler_start "$FLIGHTREC_SCRATCH/$name" $$)"
+        # STILL STREAMED — serial mode exists to watch a leg live — but
+        # through a tee, so the flight recorder has the same log the
+        # pooled path gives it and the journal carries the failure
+        # SENTENCE rather than only the verdict. PIPESTATUS[0], never $?:
+        # the pipeline's status is tee's, which is the exact defect
+        # CLAUDE.md's tail/head rule names.
+        KAYA_SELFTEST=1 timeout 120 "$@" 2>&1 | tee "$LEGS_DIR/$name.log"
+        local rc=${PIPESTATUS[0]}
+        if [ "$rc" = 0 ]; then
+            verdict=PASS
             echo "$name: PASS ($((SECONDS - t0))s)"
         else
+            verdict=FAIL
             echo "$name: FAIL ($((SECONDS - t0))s)"
             status=1
         fi
+        flightrec_mac_sampler_stop "$sampler"
+        flightrec_mac_leg "$name" "$verdict" "$((SECONDS - t0))" \
+            "$LEGS_DIR/$name.log" "$FLIGHTREC_SCRATCH/$name"
         return
     fi
     (
         # Per-leg wall time rides the verdict, so a bottleneck hunt greps
         # instead of guessing.
         local t0=$SECONDS
+        local sampler verdict
+        # The sampler polls THIS subshell's descendants — the guest runs
+        # under `timeout`, so the leg's own pid is never the app's.
+        sampler="$(flightrec_mac_sampler_start "$FLIGHTREC_SCRATCH/$name" "$BASHPID")"
         if KAYA_SELFTEST=1 timeout 120 "$@" >"$LEGS_DIR/$name.log" 2>&1; then
-            echo PASS >"$LEGS_DIR/$name.verdict"
+            verdict=PASS
         else
-            echo FAIL >"$LEGS_DIR/$name.verdict"
+            verdict=FAIL
         fi
+        echo "$verdict" >"$LEGS_DIR/$name.verdict"
         echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
+        flightrec_mac_sampler_stop "$sampler"
+        flightrec_mac_leg "$name" "$verdict" "$((SECONDS - t0))" \
+            "$LEGS_DIR/$name.log" "$FLIGHTREC_SCRATCH/$name"
     ) &
     leg_pids+=($!)
     leg_names+=("$name")

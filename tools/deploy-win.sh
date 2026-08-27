@@ -837,8 +837,25 @@ vm_restart() {
 }
 
 LEGS_DIR="$(mktemp -d)"
+
+# The flight recorder: one journal outside the build tree for every leg,
+# and a capture bundle for every FAIL. tools/lib/flightrec.sh holds the
+# rules and the guest half is tools/guest/flightrec.ps1; a runner that
+# cannot open the journal prints the miss once and still runs every leg.
+FLIGHTREC_ROOT="$ROOT"
+export FLIGHTREC_ROOT
+# shellcheck source=tools/lib/flightrec.sh
+source "$ROOT/tools/lib/flightrec.sh"
+flightrec_start windows
+flightrec_win_lane_start
+
 cleanup() {
     kill_guests
+    flightrec_win_cleanup
+    # The spool becomes journal records here as well as at lane end: the
+    # flush truncates it, so whichever runs first wins and an interrupted
+    # lane still lands the legs it finished.
+    flightrec_flush
     rm -rf "$LEGS_DIR"
 }
 trap cleanup EXIT
@@ -871,6 +888,7 @@ deploy_stamp() {
             "$ROOT/tools/guest/shot.ps1" \
             "$ROOT/tools/guest/desk-warm.ps1" \
             "$ROOT/tools/guest/wait-exit.ps1" \
+            "$ROOT/tools/guest/flightrec.ps1" \
             "$ROOT"/bindings/go/*.go \
             "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
             "$ROOT"/bindings/csharp/*.cs \
@@ -911,6 +929,12 @@ else
         "$ROOT/tools/guest/shot.ps1"
         "$ROOT/tools/guest/desk-warm.ps1"
         "$ROOT/tools/guest/wait-exit.ps1"
+        # The .cmd/.vbs globs above ship themselves; a .ps1 is named
+        # individually, in BOTH this list and deploy_stamp's. Missing it
+        # from the stamp is the worse half: the stamp would not move, the
+        # whole deploy block would be skipped, and the lane would run
+        # against a file that is not there.
+        "$ROOT/tools/guest/flightrec.ps1"
     )
     shasum -a 256 "${DEPLOY_ARTIFACTS[@]}" >"$LEGS_DIR/local.sums"
     run_ssh 'cmd /c type C:\kaya\deploy.manifest' 2>/dev/null \
@@ -1536,6 +1560,13 @@ run_one_suite() {
             touch "$LEGS_DIR/.vm-dead"
             return 1
         fi
+        # THE ONLY MOMENT A FAILING GUEST IS STILL ALIVE. Every other
+        # failure path reaches this function after the guest has written
+        # EXIT= and gone, so a window, a live dialog and a stack exist
+        # here and nowhere else. Collected BEFORE kill_guests, which is
+        # what destroys the evidence.
+        flightrec_win_collect "$name"
+        touch "$LEGS_DIR/$name.collected"
         kill_guests
         # A plain timeout is recoverable; the WEDGED state is not, and
         # taskkill cannot tell you which you have. Fingerprint it,
@@ -1588,12 +1619,22 @@ run_suite() {
         # instrumentation, uniform across runners).
         local t0=$SECONDS
         local verdict=FAIL
+        # THE FLIGHT RECORDER ADDS NOTHING HERE. The foreground sampler is
+        # one lane-wide process started at lane start, not a per-leg pair
+        # of schtasks round trips — that shape cost this lane 110s over
+        # its ceiling (docs/deferred.md). A passing leg's whole cost is
+        # the single `printf` inside flightrec_win_leg.
+        local leg_epoch="${EPOCHSECONDS:-0}"
         if run_one_suite "$name" "$slot"; then
             verdict=PASS
         fi
         echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
         rmdir "$LEGS_DIR/.slot-$slot" 2>/dev/null
         echo "$verdict" >"$LEGS_DIR/$name.verdict"
+        flightrec_win_leg "$name" "$verdict" "$((SECONDS - t0))" \
+            "$LEGS_DIR/$name.log" \
+            "$([ -f "$LEGS_DIR/$name.collected" ] && echo 1 || echo 0)" \
+            "$leg_epoch"
     ) >"$LEGS_DIR/$name.log" 2>&1 &
     leg_pids+=($!)
     while [ "$(jobs -rp | wc -l)" -ge "$WIDTH" ]; do

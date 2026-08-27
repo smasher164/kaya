@@ -625,6 +625,80 @@ the same patterns return through interpreter drop-downs
 
 ## Process / testing
 
+- **A shipped `.ps1` must be ASCII on its code lines.** Windows
+  PowerShell 5.1 reads a script in the machine's ANSI CODEPAGE, not as
+  UTF-8, so an em-dash in a **string literal** arrives as three CP1252
+  bytes that CONTAIN A DOUBLE QUOTE: the string closes early and the file
+  dies with "Unexpected token" before its first statement. Launched as a
+  scheduled task, it exits having created nothing, and the runner sees
+  only missing files — indistinguishable from a capture that had nothing
+  to collect. Whole-line COMMENTS are safe (PowerShell ignores to end of
+  line), which is why tools/guest/desk-warm.ps1 and wait-exit.ps1 have
+  carried em-dashes for months and work; the rule is therefore code lines,
+  not all lines. Nothing else looks: check-shell walks tools/ for `.sh`
+  and `.cmd` and never `.ps1`. Guard: tools/flightrec-selftest.sh clause
+  N5, with a watched negative that puts an em-dash back into a literal.
+  Measured 2026-08-27 building the flight recorder.
+
+- **A `*W` P/Invoke without `CharSet.Unicode` truncates every string to
+  one character.** `DllImport` defaults to `CharSet.Ansi`, so a wide
+  function handed an ANSI buffer writes UTF-16 into it and the unmarshal
+  stops at the first NUL byte. `GetClassNameW` returned `W` for
+  `WinUIDesktopWin32WindowClass` and `GetWindowTextW` returned `k` for
+  `kaya milestone 2 [0]`. THE DAMAGE IS SILENT AND TOTAL: the `#32770`
+  test could never match, so the UIA dialog walk could never fire; the
+  window-class match could never find the app, so the PrintWindow shot
+  could never happen — three sections that would have reported "nothing
+  was there" forever, which is a diagnostic printing a false answer
+  rather than going quiet (invariant 3). Measured 2026-08-27; the fix is
+  `[DllImport("user32.dll", CharSet = CharSet.Unicode)]` on both.
+  `Out-File -Encoding utf8` on 5.1 also writes a BOM, which makes the
+  artifact `file`-detect as binary and makes grep refuse to print
+  matches — write through `System.IO.File` with a BOM-less UTF8Encoding.
+
+- **A capture of "the app's window" must be addressed by the app's PID,
+  never by a title match.** Matching windows whose title contained "kaya"
+  photographed the maintainer's EDITOR, whose window is titled after the
+  repository. This is the same privacy leak the screencapture entry above
+  names, arriving through a door that entry does not: the shot was already
+  correctly one-window-by-id rather than full-screen, and it still grabbed
+  the wrong window. Measured 2026-08-27. Guard: the mac sampler resolves
+  the guest's pid while it is alive and the shot filters the window list
+  by it; no pid means no shot and a sentence saying so.
+
+- **An observer must be free when nothing fails.** The flight recorder's
+  first matrix went green on all five lanes and took the WINDOWS LANE 110s
+  past its duration ceiling — 605s against 520 — because its per-leg hooks
+  cost three ssh round trips and a python3 spawn on EVERY leg, pass or
+  fail. Measured on the VM, quiescent, n=10: `schtasks /create` + `/run`
+  155ms, the stop-and-delete 85ms, a stale-file reset 37ms, the journal's
+  process 27ms; 304ms quiescent, ~0.55s each under six concurrent legs.
+  The every-leg signature is the tell — a uniform slowdown with no leg
+  standing out means work added to the loop, not a slow leg. THE RULE:
+  diagnostics live on the FAILURE path; anything the pass path pays is
+  multiplied by every leg of every lane forever. The three fixes are one
+  shape — move the cost off the leg: a lane-wide sampler instead of a
+  per-leg one (the foreground is machine-wide, so per-leg was always the
+  wrong unit), a spooled journal (a bash `printf` builtin per leg, one
+  python3 per lane), and nothing bundle-shaped created on a pass. After:
+  0.130ms per leg, n=200. Guard: tools/flightrec-selftest.sh N6, which
+  runs a PASSING leg and refuses a bundle, a surviving spool, or a
+  `flightrec_leg` body naming python3/run_ssh/scp/mkdir. A lane ceiling
+  caught this after a whole matrix; the clause catches it in seconds.
+
+- **An expensive capture must not run before a vanishing one.** The mac
+  at-fail sampler took `sample <pid> 2` — which BLOCKS for two seconds —
+  before its screenshot, and a leg that ended inside those two seconds got
+  a stack and no picture. Order the cheap, instantaneous captures first;
+  the window is the thing that disappears. Measured 2026-08-27. The same
+  round found the sibling: resolving "the guest" out of a leg's
+  descendants by a blocklist of wrapper NAMES picked up a `tee` added to
+  the pipeline, and `sample` then profiled tee for two seconds and the
+  bundle recorded it as the guest's stack — a section that read `ok 8481`
+  and was evidence about the wrong process. Anchor on the wrapper you
+  KNOW is there (`timeout`), and put the sampled process's own name in
+  every line so a wrong pid is visible in the artifact.
+
 - **The stale-artifact class**: an old dylib × new guest decodes
   garbage. Guard: spec hash baked into every wire file, asserted at
   load. Suites rebuild; standalone checks against a stale
