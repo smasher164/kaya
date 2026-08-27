@@ -58,13 +58,17 @@ expect_drawing_hash canvas@chart "e5ac8a2c0b240633"
 # colour no palette entry has. 15,20 is plot ground above the series;
 # 70,63 is deep inside the filled area under it.
 #
-# THE APPEARANCE IS PART OF THE OBSERVATION. The DISPLAY raster uses the
-# platform's mode and kaya's palette has two of them (§6), so a bare
-# colour string would be a frozen expectation quietly depending on the
-# host's appearance setting. Naming the mode makes a dark-mode host fail
-# with a sentence that says why. Making the ink assertion
-# appearance-independent is phase 4's business, where the palette gets
-# looked at hardest in both modes (docs/deferred.md).
+# THE APPEARANCE IS PART OF THE OBSERVATION, and BOTH MODES ARE NAMED.
+# The DISPLAY raster uses the platform's mode and kaya's palette has two
+# of them (§6), so a bare colour string — or a string that knew only
+# light, which is what this line was until 2026-08-27 — is a frozen
+# expectation quietly depending on the host's appearance setting. It cost
+# a night: the lane is green on a light-mode machine and red on a
+# dark-mode one, on a scene nobody changed.
+#
+# The platform picks the half its own appearance names, each within the
+# same ±1; the VERDICT is this whole line either way, so a dark mac and a
+# light emulator publish byte-identical text (invariant 6).
 #
 # THESE ARE THE CORE'S OWN BYTES, and this verb alone compares them
 # WITHIN ±1 PER CHANNEL (ruled 2026-08-26, §7.2). A macOS window's
@@ -73,9 +77,11 @@ expect_drawing_hash canvas@chart "e5ac8a2c0b240633"
 # PixelCopy reports D2E3F7 — no one frozen string can exact-match both,
 # and the byte-exact assertion is the hash above, which crosses no
 # colour space. Freeze from the core (crates/kaya/src/canvas.rs's
-# the_scene_probe_points_are_opaque_and_pinned prints both pixels), never
-# from a platform's read.
-expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7"
+# the_scene_probe_points_are_opaque_and_pinned rasterizes BOTH modes and
+# prints both pixels of each), never from a platform's read — the dark
+# pair was guessed wrong by one on each of two channels before it was
+# derived.
+expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F"
 # AND THE CANVAS IS A WIDGET, with a widget's universal props: a drawing
 # is an IMAGE to every platform's accessibility tree and the app authors
 # the spoken name (§9). Nothing here builds a semantics tree out of the

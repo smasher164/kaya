@@ -3487,6 +3487,76 @@ rebuild its whole accessibility hierarchy and drive a full layout pass,
 which on 2026-07-25 put legs past a 120s timeout under the 8-wide pool
 while the same binary passed standalone.
 
+## On linux, GTK and the harness find the session bus by DIFFERENT means
+
+MEASURED 2026-08-27. `KAYA_ONLY=canvas tools/validate-linux.sh` failed both
+legs with `ax "<not in the accessibility tree>", wanted "image/Portfolio
+value"`, the wayland one behind `Gtk-WARNING: Unable to acquire session
+bus: Cannot autolaunch D-Bus without X11 $DISPLAY`.
+
+THE TWO HALVES LOOK IN DIFFERENT PLACES:
+
+- GTK publishes its tree over libdbus, which on X11 AUTOLAUNCHES a session
+  bus and needs no environment variable. Measured: a plain canvas leg on a
+  virgin Xvfb left `dbus-daemon --session`, `at-spi-bus-launcher` and
+  `at-spi2-registryd` running, with a socket at `/tmp/xdg/at-spi/bus_100`.
+  The tree was published.
+- The harness READS with the atspi/zbus crate, which finds a session bus
+  ONLY through `DBUS_SESSION_BUS_ADDRESS` (or `$XDG_RUNTIME_DIR/bus`, which
+  does not exist in the image). A plain leg exports neither.
+
+So the publisher and the reader land on different busses and every ax read
+misses — silently on x11, behind that warning on wayland. SAME verdict,
+different noise, which is the whole reason x11 "looked more reliable".
+`tools/linux/a11y-leg.sh` reconciles them: `eval $(dbus-launch --sh-syntax)`
+puts the address in the environment.
+
+THE DISCRIMINATOR IS THE ENVIRONMENT VARIABLE AND NOTHING ELSE, isolated:
+
+| arm                                                     | canvas ax |
+|---------------------------------------------------------|-----------|
+| plain leg (GTK autolaunches its own bus)                 | FAIL      |
+| `GTK_A11Y=atspi`, no bus in the env                      | FAIL      |
+| `dbus-run-session` only — no `GTK_A11Y`, no at-spi launcher | PASS   |
+| `dbus-run-session` + `GTK_A11Y=atspi`                    | PASS      |
+| through `a11y-leg.sh`                                    | PASS      |
+
+IT IS NOT ORDER DEPENDENCE, which is what it was first reported as. A prior
+a11y leg on the SAME pooled display does not help (its bus is torn down with
+it, and the reader would need the address anyway), nor does one running
+CONCURRENTLY, nor does a never-touched display differ. The canvas leg was
+red on both protocols from the commit that wired it: `expect_ax
+canvas@chart` entered tools/scenes/canvas.steps in e3db8fe, when the scene
+was mac-only and GTK still held the canvas stub, and the linux leg was wired
+in ee7bc41 without the bus every other ax-asserting scene gets. The green
+matrices people remembered predate the leg.
+
+WHY NOTHING SAW IT. Thirteen of the fourteen ax-asserting scenes go through
+a11y-leg.sh; canvas was the fourteenth. The failure sentence named a missing
+NODE, so it read as a lowering bug and sent the reader to the widget — and
+the canvas ax read does not diverge at all: it is a `gtk4::Picture`, so
+`atspi_role_of` gives it `Role::Image` and it walks the same
+`atspi_rank` (in-process) then `atspi_collect` (bus) path as every other
+widget. `tools/check-steps.sh`'s `ax_bus()` holds the rule now: a scene
+asserting any ax-family verb has every linux leg launched through
+a11y-leg.sh, and the bus-reading gtk.rs methods are pinned so a sixth one
+cannot ship outside the rule.
+
+AND THE SENTENCE NOW DISCRIMINATES (invariant 3). `atspi_collect` and
+`atspi_range_read` answer in `Option`, so a failed CONNECT and a missing
+NODE arrived as the same `None` — unlike `atspi_window_marker`, which says
+"no accessibility bus" outright. `atspi_absent()` in gtk.rs is asked on the
+failure path only; both of its branches were watched printing, the second
+against a build doctored to miss the node with a live bus, where it
+correctly still names the node and prints the `KAYA_AX_TRACE` census.
+
+THE LANE-WIDE ALTERNATIVE IS DELIBERATELY NOT TAKEN. A session bus for
+every leg would be simpler, but GTK's default a11y backend on linux is
+atspi, so exporting one turns accessibility on lane-wide — the configuration
+that timed out eleven legs at 180s on 2026-07-25 (tools/linux/run-suites.sh
+names the four languages). The per-leg bus stays; the gate makes forgetting
+it impossible.
+
 ## A windows race can stop reproducing, and a green run then proves nothing
 
 MEASURED 2026-08-03 while fixing the filedialog_java coin flip
@@ -3795,7 +3865,12 @@ building the same target into a FRESH `--builddir` succeeds. The lane
 failure looks like a code regression in the binding that was just
 edited. It is not; nothing is wrong with the tree.
 
-The fix is `rm -rf guests/haskell/dist-newstyle` and rebuild.
+The fix is removing the guests' haskell build directory
+(dist-newstyle, a build product) and rebuilding:
+
+```
+rm -rf guests/haskell/dist-newstyle
+```
 
 The habit that avoids it: when compile-checking one Haskell guest by
 hand, either pass the same three flags the lane passes, or send the
@@ -5274,3 +5349,102 @@ names this defect class one layer up — an 8-bit sampling context that
 "quantizes twice and reported `1D71D8` for a declared `1C71D8`" — and
 this is the same class one layer further out, in a context nobody
 chose.
+
+## AddressSanitizer does not run on this host: an -fsanitize=address binary hangs before main (2026-08-26)
+
+Measured while building the C floor's cap probe. `clang -fsanitize=address`
+BUILDS fine and the binary then never reaches `main`: it prints nothing,
+spins at 98% CPU, and has to be killed. It is not about the program under
+test — a clean `malloc(8)`/`memcpy`/`printf` with no error in it does the
+same, while the identical source with no sanitizer runs correctly. With
+`ASAN_OPTIONS=verbosity=1` the last thing it ever says is
+
+    ==N==AddressSanitizer: libc interceptors initialized
+
+and then silence. `symbolize=0` does not help, because the hang is before
+any report. Measured on clang 21.1.8 (the nix wrapper — `/usr/bin/clang`
+resolves to the same 21.1.8, so Xcode's is shadowed and there is no second
+toolchain to fall back to) on Darwin 25.5, arm64. Three runs: clean
+program `timeout 20` -> rc 124; same source unsanitized -> rc 0, correct
+output; deliberate heap-buffer-overflow -> rc 124 and zero bytes of report.
+
+**Reach for a guard page instead, and prefer it anyway.** `mmap` two
+pages, `mprotect` the second `PROT_NONE`, and place the buffer so that
+`buf + cap` is exactly the boundary: a write one byte past cap is then a
+FAULT rather than a redzone heuristic, the fault is byte-exact rather than
+granular, and there is no sanitizer runtime involved, so the same probe
+runs on any POSIX lane. tools/checks/c-tx-cap.c is that shape and
+tools/check-c-bounds.sh reads the child's exit status — 138 (SIGBUS) or
+139 (SIGSEGV) is the smash, 0 with a sentence on stderr is the refusal.
+
+The cost if you do not know this: half an hour watching a probe that
+"hangs", concluding the probe is wrong, and rewriting a test that was
+already correct.
+
+## A presentation-side report that arrives before the scene is DROPPED
+
+MEASURED 2026-08-27, overnight, on a dark-mode mac.
+`KAYA_ONLY=canvas` on the mac lane failed with
+
+    ink dark FFFFFF/D2E2F7 at 15,20 70,63, wanted light FFFFFF/D2E3F7
+
+and the first reading of that sentence is the wrong one. It looks like an
+expectation that only knows the light palette meeting a dark host — which
+was ALSO true, and was the filed limitation. The real finding is in the
+BYTES: `FFFFFF` ground and `D2E2F7` fill are the LIGHT palette's values,
+read off a window the verb correctly reports as `dark`. The canvas had
+rendered light in a dark window. The frozen string being light-only is
+what hid it: on every light-mode lane the two defects cancel exactly.
+
+THE MECHANISM, probed end to end in one instrumented run:
+
+    PROBE report scale=2.0 colorScheme=dark nsapp=dark
+    PROBE kaya_presentation scale=2 dark=true scene_live=false
+    PROBE emit_drawing presentation=Presentation { scale: 1.0, mode: Light }
+
+The backend reports correctly. `kaya_presentation` then runs with
+`PRESENTATION_SCENE` still `None` — the presentation scene is built
+LAZILY, on the first `kaya_next_commands` — so `with_window_scene` takes
+its `else { return R::default() }` and the report is dropped in silence.
+Every later raster uses `Presentation::default()`, light at scale 1.0.
+
+WHAT MAKES IT PERMANENT rather than a startup flicker: nothing reports
+again. SwiftUI's `KayaPresentationReporter` fires `onAppear` once, and
+its `onChange(of: colorScheme)` never fires because the appearance never
+CHANGES — the machine was already dark when the app launched. A report is
+a fact about the window, and it was being delivered as an event.
+
+WHY NO LANE SAW IT. The wrong palette is only observable where the host's
+appearance differs from the core's default, and every lane this project
+runs is light: the mac and iOS simulators, the Windows VM, the Linux
+container's Xvfb, the Android emulator. The scale half — a 2.0 display
+rastered at 1.0 — is observable by NO scene at all.
+
+THE CLASS, which is why this is here and not just in the ledger:
+`with_window_scene` silently drops EVERY presentation-side call that
+beats the scene, and this is the second time it has bitten. The first was
+`declare_windowing`, whose fix is the `WINDOWING_DECLARED` latch sitting
+six lines above the code that dropped this one. Anything a backend
+reports at host init or first layout — rather than in response to a
+question the core asked — needs a latch, not a call. `kaya_presentation`
+has one now (`PRESENTATION_REPORTED`), and both pre-scene facts are
+applied by ONE constructor, `presentation_scene()`, so a third such fact
+has an obvious place to go.
+
+GTK and WinUI were never exposed: they own their scene and call
+`scene.set_presentation` with it in hand. Android reaches the same C
+entry point as macOS and was fixed by the same three lines.
+
+The guard is a unit test, because a leg cannot be: it reports before
+building a scene and asserts the first raster carries the reported mode
+AND the reported scale (`capi::tests::
+a_presentation_reported_before_the_scene_exists_seeds_it`). Watched
+failing two ways — the seeding removed, and the seeding kept with the
+mode forced light, which reproduces the shipped pixels exactly.
+
+AND ONE STALE COMMENT FELL OUT OF IT. `kayaCanvasAppearance()` claimed to
+be "the ONE reading, so the report and the answer cannot disagree". It is
+not: it reads `NSApp.effectiveAppearance` while the reporter reads
+SwiftUI's `\.colorScheme`, and only a view can read the latter. They were
+measured AGREEING here, which is the evidence for the claim rather than
+the claim itself, and the comment now says so.

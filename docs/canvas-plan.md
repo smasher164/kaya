@@ -1194,13 +1194,43 @@ half was invented for, recorded in docs/tables-plan.md: "the content-hug
 cut kept every cluster exactly right while leaving 90% of the viewport
 empty: alignment alone cannot see it."
 
-**`expect_ink <target> "<RRGGBB>/<RRGGBB>/..."`** — the colour at
-declared normalized probe points, sampled from THE BACKEND'S OWN
-RENDERED SURFACE. This is `expect_app_icon`'s move, and under the buffer
-its job is sharper than it was in the draft: the hash already covers
-"did the core draw the right thing", so this verb exists to prove the
-blit — that the buffer reached the platform's image object, in the right
-pixel format, the right way up, at the right size, unswizzled.
+**`expect_ink <target> "<x,y> ... = light <RRGGBB>/... dark <RRGGBB>/..."`**
+— the colour at declared normalized probe points, sampled from THE
+BACKEND'S OWN RENDERED SURFACE. This is `expect_app_icon`'s move, and
+under the buffer its job is sharper than it was in the draft: the hash
+already covers "did the core draw the right thing", so this verb exists
+to prove the blit — that the buffer reached the platform's image object,
+in the right pixel format, the right way up, at the right size,
+unswizzled.
+
+**BOTH MODES ARE NAMED, in one byte-shared spelling** (amended
+2026-08-27). The display raster uses the platform's own appearance and
+kaya's palette has two of them (§6), so a single colour run is a frozen
+expectation that quietly depends on the host's appearance setting. The
+RHS after ` = ` is therefore alternating mode word and colour run; each
+harness selects the half its own appearance names — `ink_for_mode` in
+harness.rs, `kayaInkForMode` in KayaSwiftUI.swift and KayaCompose.kt —
+and compares it within the same ±1 (§7.2). A mode the string does not
+name never matches.
+
+Two consequences worth stating, because both are load-bearing:
+
+- **The verdict is the WHOLE line**, on every platform, whichever half
+  was compared. So a dark mac and a light emulator publish
+  byte-identical text and invariant 6 holds across appearances, which
+  the single-mode form could not do — its published text named the one
+  mode that ran.
+- **The tolerance is not the place to absorb a mode difference.** A dark
+  palette is a different colour, not a rounding; ±1 stays ±1 in all
+  three harnesses.
+
+What this closed: a light-only frozen string is green on every
+light-mode lane and red on a dark-mode host, on a scene nobody touched.
+It also HID a real defect for the whole milestone — the canvas rendering
+light in a dark window, because the backend's presentation report was
+dropped before the presentation scene existed. On a light host the two
+defects cancel exactly. See docs/traps.md, "A presentation-side report
+that arrives before the scene".
 
 It inherits `expect_app_icon`'s measured discipline verbatim, and every
 item is a rule about the scene's test figure, not about the app:
@@ -1265,13 +1295,19 @@ reads exactly what the core wrote, and **no single frozen string can
 exact-match both**. That is not a bug in either backend; it is what a
 colour-managed window read is.
 
-**The rule.** `expect_ink` compares the appearance EXACTLY and each
-channel within ±1. The scene freezes the CORE's bytes — derived from
-`crates/kaya/src/canvas.rs`'s
-`the_scene_probe_points_are_opaque_and_pinned`, never retyped from a
+**The rule.** `expect_ink` compares the appearance EXACTLY — it selects
+the named mode's half rather than tolerating a mode difference — and each
+channel within ±1. The scene freezes the CORE's bytes for BOTH modes,
+derived from `crates/kaya/src/canvas.rs`'s
+`the_scene_probe_points_are_opaque_and_pinned`, which rasterizes each
+mode and prints both probe points of each. Never retyped from a
 platform's read, because a byte read off a window encodes the monitor
 profile of the machine that froze it and is not portable to the next
-Mac. The tolerance is a number in three harnesses (harness.rs's
+Mac — and never guessed either: the dark pair was guessed wrong by one on
+two channels before it was derived (2026-08-27). Measured for the record,
+core against a real mac window in dark: ground `16181C` read back as
+`17181D`, fill `2B3B4F` read back as `2B3A4F` — both inside the same ±1
+the light mode needed. The tolerance is a number in three harnesses (harness.rs's
 `INK_TOLERANCE`, KayaSwiftUI.swift's `kayaInkTolerance`,
 KayaCompose.kt's `INK_TOLERANCE`) and `tools/check-verbs.sh` pins all
 three at the ruled value — pinned rather than merely held equal, because

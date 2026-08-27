@@ -32,7 +32,7 @@ static char order[N_ITEMS][2] = {"a", "b", "c"};
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_widget(&tx, W_ROW, KAYA_KIND_ROW);
     kaya_tx_create_widget(&tx, W_ROTATE, KAYA_KIND_BUTTON);
@@ -85,7 +85,7 @@ static void *app(void *arg) {
             memcpy(order[N_ITEMS - 1], moved, sizeof moved);
 
             uint8_t buf[256];
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             kaya_tx_collection_move(&tx, C_ITEMS, 0, 0, kaya_str(moved), 0, 0);
             kaya_submit(tx.buf, tx.len);
         } else if (id == W_LIFT) {
@@ -98,7 +98,7 @@ static void *app(void *arg) {
             memcpy(order[0], moved, sizeof moved);
 
             uint8_t buf[256];
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             kaya_tx_collection_move(&tx, C_ITEMS, 0, 0, kaya_str(moved),
                                     (KayaVal[]){kaya_str(anchor)}, 1);
             kaya_submit(tx.buf, tx.len);

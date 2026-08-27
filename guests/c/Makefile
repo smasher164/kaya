@@ -7,6 +7,10 @@ TARGET_DIR ?= $(ROOT)/target/debug
 OUT ?= $(ROOT)/target/c-guests
 
 CFLAGS += -I$(ROOT)/crates/kaya/include -I$(ROOT)/bindings/c
+# A KayaTx written `{buf, 0}` compiles with cap 0 and refuses its first
+# record at RUN time. This makes it fail the BUILD instead, naming `cap`
+# — the wall on the path nobody can avoid (tools/check-c-bounds.sh).
+CFLAGS += -Werror=missing-field-initializers
 LDFLAGS += -L$(TARGET_DIR) -lkaya -Wl,-rpath,$(TARGET_DIR)
 
 # THE HEADERS ARE PREREQUISITES, and that is the guard: without them

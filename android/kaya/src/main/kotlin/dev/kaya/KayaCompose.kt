@@ -4036,8 +4036,31 @@ object KayaCompose {
     private const val INK_TOLERANCE = 1
 
     /**
-     * The appearance exactly, every channel within [INK_TOLERANCE]. An
-     * answer that does not parse — every `<...>` diagnostic below —
+     * The half of a PER-MODE expectation that names [mode], out of
+     * `"light FFFFFF/D2E3F7 dark 16181C/2B3B4F"` — alternating mode word
+     * and colour run, in one byte-shared string (docs/canvas-plan.md
+     * §7.2).
+     *
+     * ONE SPELLING CARRYING BOTH MODES is what keeps a frozen ink
+     * expectation from depending on the host's appearance setting. A mode
+     * the string does not name is null, which never matches.
+     *
+     * harness.rs's `ink_for_mode` and KayaSwiftUI.swift's
+     * `kayaInkForMode` are the other two copies.
+     */
+    private fun kayaInkForMode(want: String, mode: String): String? {
+        val words = want.split(" ").filter { it.isNotEmpty() }
+        var i = 0
+        while (i + 1 < words.size) {
+            if (words[i] == mode) return words[i + 1]
+            i += 2
+        }
+        return null
+    }
+
+    /**
+     * The reported mode's colours, every channel within [INK_TOLERANCE].
+     * An answer that does not parse — every `<...>` diagnostic below —
      * never matches, so it reaches the failure text whole.
      */
     private fun kayaInkMatches(got: String, want: String): Boolean {
@@ -4050,12 +4073,10 @@ object KayaCompose {
             return out
         }
         val gotParts = got.split(" ", limit = 2)
-        val wantParts = want.split(" ", limit = 2)
-        if (gotParts.size != 2 || wantParts.size != 2 || gotParts[0] != wantParts[0]) {
-            return false
-        }
+        if (gotParts.size != 2) return false
+        val wanted = kayaInkForMode(want, gotParts[0]) ?: return false
         val gotInk = gotParts[1].split("/")
-        val wantInk = wantParts[1].split("/")
+        val wantInk = wanted.split("/")
         if (gotInk.size != wantInk.size) return false
         for (i in gotInk.indices) {
             val g = channels(gotInk[i]) ?: return false
@@ -6574,7 +6595,10 @@ object KayaCompose {
                     // pixels (§7.2) — the one canvas read that fails
                     // when the buffer never reached the platform's image
                     // object, and the reason the hash is not the whole
-                    // story. `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."`.
+                    // story.
+                    // `"<x,y> ... = light <RRGGBB>/... dark <RRGGBB>/..."`
+                    // — both modes named, so the expectation does not
+                    // depend on the host's appearance (kayaInkForMode).
                     "expect_ink" -> {
                         val spec = quoted(parts.drop(2))
                         val halves = spec.split(" = ")

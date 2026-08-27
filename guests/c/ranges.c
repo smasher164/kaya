@@ -81,10 +81,10 @@ static const char DOC[] =
 
 static const char NEEDLE[] = "alpha";
 
-/* The floor sizes its own buffers: kaya_wire packs into caller-owned
- * storage and never checks (bindings/c/kaya_wire.h). A highlight record
- * is 32 bytes of frame plus 16 per offset value, two values per range —
- * 1056 bytes at MAX_HITS, which is what sizes TX_BUF. */
+/* The floor sizes its own buffers and the packers refuse past the cap it
+ * declares (bindings/c/kaya_wire.h). A highlight record is 32 bytes of
+ * frame plus 16 per offset value, two values per range — 1056 bytes at
+ * MAX_HITS, which is what sizes TX_BUF. */
 #define DOC_CAP 4096
 #define MAX_HITS 32
 #define TX_BUF 2048
@@ -118,7 +118,7 @@ static void window_title(KayaTx *tx, uint64_t window, const char *title) {
 
 static void build_scene(void) {
     uint8_t buf[2048];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     window_title(&tx, 0, "ranges");
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("0 matches"));
@@ -186,7 +186,7 @@ static void *app(void *arg) {
             size_t len = text.s_len < DOC_CAP ? text.s_len : DOC_CAP - 1;
             memcpy(doc, text.s, len);
             doc[len] = '\0';
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("0 matches"));
             kaya_submit(tx.buf, tx.len);
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
@@ -194,7 +194,7 @@ static void *app(void *arg) {
                 continue;
             if (id == W_FIND) {
                 uint32_t n = find_all(doc, NEEDLE, flat, MAX_HITS);
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 /* `count` is the number of RANGES and the values list is
                  * 2*count OFFSETS; the core asserts the two agree. An
                  * empty set is the clear, which this app never sends. */
@@ -217,12 +217,12 @@ static void *app(void *arg) {
                 /* A PURE EFFECT: the viewport moves, the declared set and
                  * the selection do not, and undo does not put the scroll
                  * back (docs/undo-plan.md A2). */
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_reveal_range(&tx, W_EDITOR, flat[2 * (n - 1)],
                                      flat[2 * (n - 1) + 1]);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_FOCUS) {
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_widget_command(&tx, W_EDITOR, KAYA_COMMAND_FOCUS);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_SELECT) {
@@ -232,7 +232,7 @@ static void *app(void *arg) {
                 /* The first match, refused mid-composition (D4). An app
                  * that wants the selection asks again after the next
                  * text_changed, which ends a composition. */
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_select_range(&tx, W_EDITOR, flat[0], flat[1]);
                 kaya_submit(tx.buf, tx.len);
             }

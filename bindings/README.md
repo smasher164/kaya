@@ -124,7 +124,7 @@ Per-language status:
 | OCaml   | kaya_wire.ml | kaya_runtime.ml (Bigarray + stubs) | kaya_app.ml | direct style over an ambient tx; curried children (trailing-unit creators, `w` wraps realized widgets); Tpl as submodule, so a local open switches the zone; effect handlers are the flagged follow-up |
 | Swift   | KayaWire.swift | function floor via kaya.h | KayaApp.swift | Kaya-prefixed handles (hosts link UI frameworks with bare Widget/Node names) |
 | Java    | KayaWire.java | (ring recipe lives in KayaApp) | KayaApp.java | needs API 26 (invokeExact); Android's kaya module minSdk says so |
-| C       | kaya_wire.h | kaya.h is the runtime | — none, by decision | flat functions over a caller-owned buffer *are* C's idiomatic surface; a C app that wants handles is a C app about to become a binding |
+| C       | kaya_wire.h | kaya.h is the runtime | — none, by decision | flat functions over a caller-owned buffer *are* C's idiomatic surface; a C app that wants handles is a C app about to become a binding. `KayaTx` carries `cap` and the packers refuse past it — the caller still sizes and grows (DESIGN.md, Binding conventions) |
 
 Entry (the first owned-state widget) is in every layer-3 surface:
 `on_change` registration beside `on_click`, dispatch keyed by

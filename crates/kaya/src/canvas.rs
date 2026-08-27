@@ -901,26 +901,36 @@ mod tests {
              refuses now rather than draws)"
         );
         assert_eq!(drawing_observation(&p), "41/2,8,97,83");
-        let r = rasterize(&d, d.viewbox, Presentation { scale: 1.0, mode: Mode::Light });
-        let at = |px: f64, py: f64| -> [u8; 4] {
-            let x = ((r.width as f64) * px / 100.0) as usize;
-            let y = ((r.height as f64) * py / 100.0) as usize;
-            let i = (y * r.width as usize + x) * 4;
-            [r.pixels[i], r.pixels[i + 1], r.pixels[i + 2], r.pixels[i + 3]]
+        // BOTH MODES, because the scene's `expect_ink` names both and the
+        // DISPLAY raster uses whichever the host reports (§6). The two
+        // strings are DERIVED HERE and copied into tools/scenes/canvas.steps;
+        // neither is ever typed from a platform's read.
+        let ink = |mode: Mode, label: &str| -> String {
+            let r = rasterize(&d, d.viewbox, Presentation { scale: 1.0, mode });
+            let at = |px: f64, py: f64| -> [u8; 4] {
+                let x = ((r.width as f64) * px / 100.0) as usize;
+                let y = ((r.height as f64) * py / 100.0) as usize;
+                let i = (y * r.width as usize + x) * 4;
+                [r.pixels[i], r.pixels[i + 1], r.pixels[i + 2], r.pixels[i + 3]]
+            };
+            let ground = at(15.0, 20.0);
+            let filled = at(70.0, 63.0);
+            println!("core {label} at 15,20 = {ground:02X?}; at 70,63 = {filled:02X?}");
+            // OPACITY IS THE PRECONDITION for sampling at all: a
+            // translucent probe point reads the compositor's ground
+            // instead of the palette's.
+            assert_eq!(ground[3], 255, "{label} 15,20 must be opaque: {ground:02X?}");
+            assert_eq!(filled[3], 255, "{label} 70,63 must be opaque: {filled:02X?}");
+            format!(
+                "{label} {:02X}{:02X}{:02X}/{:02X}{:02X}{:02X}",
+                ground[0], ground[1], ground[2], filled[0], filled[1], filled[2]
+            )
         };
-        let ground = at(15.0, 20.0);
-        let filled = at(70.0, 63.0);
-        println!("core at 15,20 = {ground:02X?}; core at 70,63 = {filled:02X?}");
-        assert_eq!(ground[3], 255, "15,20 must be opaque: {ground:02X?}");
-        assert_eq!(filled[3], 255, "70,63 must be opaque: {filled:02X?}");
-        let ink = format!(
-            "light {:02X}{:02X}{:02X}/{:02X}{:02X}{:02X}",
-            ground[0], ground[1], ground[2], filled[0], filled[1], filled[2]
-        );
         assert_eq!(
-            ink, "light FFFFFF/D2E3F7",
+            format!("{} {}", ink(Mode::Light, "light"), ink(Mode::Dark, "dark")),
+            "light FFFFFF/D2E3F7 dark 16181C/2B3B4F",
             "tools/scenes/canvas.steps freezes exactly this string, and expect_ink \
-             allows each channel ±1 around it"
+             allows each channel ±1 around EACH MODE's half"
         );
     }
 

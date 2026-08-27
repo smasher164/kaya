@@ -2386,6 +2386,11 @@ double kaya_row_extent(uint64_t for_target, uint64_t index);
  * platform colour reaches one.
  *
  * A report that changes nothing emits nothing.
+ *
+ * LATCHED BEFORE IT IS APPLIED (`PRESENTATION_REPORTED`): the backends
+ * report at their first layout, which can precede the scene, and a
+ * report the scene never saw is a canvas rastered at the wrong palette
+ * for the process's whole life.
  */
 void kaya_presentation(double scale, bool dark);
 

@@ -24,7 +24,7 @@
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("no todos"));
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
@@ -77,7 +77,7 @@ static void *app(void *arg) {
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (id == W_ADD && n_keys == 0) {
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 char status[192];
                 if (draft[0] == '\0') {
                     snprintf(status, sizeof status, "nothing to add, %u total",

@@ -9,6 +9,92 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## CHORE — storage cleanup: the host is nearing disk capacity (Akhil, 2026-08-27)
+KEY: disk cleanup, target directory size, scratchpad growth, docker prune, nix store gc, validate-failures logs
+
+Akhil is nearing the disk's capacity, and last time the culprit was
+temporary data in this project (the standing doctrine from the
+2026-08-04 incident: when a disk fills, `du -sh` the session
+scratchpad FIRST — a load-generating build loop once left a 516 GB
+scratch target behind). Candidates to measure and clear, in suspicion
+order: the repo's own `target/` (multi-GB debug tree plus four cross
+targets; the artifact-reading gates link against it, so clearing it
+costs one rebuild), stale `.claude/worktrees` and their targets (the
+agent rounds trim theirs, but prune anyway), docker images and build
+cache (one 2026-08-26 round reclaimed 3.4 GB with a prune), the nix
+store (every `nix develop`/`nix run` accretes paths; `nix store gc`
+with the generations policy decided first), android build outputs
+(regrow ~1-3 GB per assemble), `target/validate-failures` logs, and
+session scratchpads under /private/tmp. Measure BEFORE deleting and
+record the numbers here; nothing is cleared while a matrix runs.
+MEASURED 2026-08-27 (disk at 93%, 66G free of 927G): `.claude/
+worktrees` 40G (stale ended-session worktrees — the per-round prunes
+only ever removed the current session's), repo `target/` 54G (months
+of accreted cross-target and incremental artifacts), docker 43.5G
+with ~21G reclaimable (images 25.5G/11.6G, build cache 18G/9.4G),
+haskell dist-newstyle 1.8G, android builds ~1.4G, failure logs and
+scratchpads ~180M. Roughly 118G reclaimable, all regenerable build
+output. The pass is HELD until the in-flight ax diagnosis lands: its
+live worktree sits inside the prune target, its container depends on
+the docker image, and a 100G deletion storm is background IO during
+timed lane runs — the quiescent-machine rule applies to cleanup too.
+SWEPT 2026-08-27 night, once the machine freed: 66G -> 168G free
+(93% -> 82%): the stale worktrees (three old workflow runs among
+them), target/ and target-linux, docker's 18G builder cache (the
+kaya-linux image kept — the lane needs it), android and haskell
+build dirs. Failure logs and the live scratchpad kept. The lane
+ceilings tripped on the two runs after the sweep with a chosen,
+recorded cause — cold caches refilling (linux 796s then 524s against
+its 470s ceiling; windows 577s then 533s against 520s; every leg
+green both runs) — and are expected back under their ceilings on the
+next warm run; a THIRD consecutive anomaly is a real investigation,
+not this note. The nix
+store gc policy remains the open half; the standing cleanup recipe
+remains the discussion half.
+Worth discussing alongside: a standing `tools/` cleanup recipe so this
+is a command, not an archaeology session, each time.
+
+## FIX — AddressSanitizer hangs pre-main under the dev shell's clang on this host (found 2026-08-26 by the KayaTx cap round; Akhil: research and fix, 2026-08-27)
+KEY: asan darwin nix, compiler-rt sanitizer runtime, clang 21.1.8 hang, libc interceptors initialized, guard page probe
+
+Measured (scratchpad txcap round, three ways): the dev shell's clang
+21.1.8 compiles and links -fsanitize=address, but ANY sanitized
+binary — a clean 8-byte malloc, a deliberate heap overflow — hangs
+before main at 98% CPU, verbosity=1 stopping right after "libc
+interceptors initialized", zero bytes of report. /usr/bin/clang inside
+the shell resolves to the SAME nix wrapper, so Xcode's working ASan is
+shadowed by the everything-inside-nix rule. Akhil is surprised the
+runtime is broken and wants it FIXED, with research first: what state
+is nixpkgs' darwin compiler-rt sanitizer support actually in (known
+issues, whether another llvm major in nixpkgs works, interposition/
+dyld interactions on current macOS), and only if nixpkgs is truly
+broken does the fallback get considered — Xcode's clang passed through
+the flake as a DECLARED exception scoped to sanitizer probes (a
+carve-out, so it comes back for sign-off). What a fix unblocks: real
+ASan negatives for C-floor guards and any future native-memory probe.
+The guard-page technique from the txcap round stays either way — it is
+deterministic where redzones are heuristic and runs on the linux lane.
+
+## DISCUSS — the shell-then-python two-step: why not python all the way down? (Akhil, 2026-08-27)
+KEY: shell wrapper python census, gate script language, check-shell scope, dev-shell preamble
+
+Akhil's framing, to discuss before anyone acts: lots of the project's
+shell scripts do a little work and then launch python scripts — the
+gate shape is typically a bash preamble (the dev-shell fingerprint
+check, arg handling, the EXIT trap) around a python3 heredoc census
+plus bash self-tests. Python can do all of it, and the move might buy
+robustness and perf. Standing context for the discussion: the repo
+already bans sed/awk in favor of python3 (BSD/GNU divergence measured
+repeatedly), the zsh word-splitting trap cost a false all-green once,
+and check-shell exists precisely because shell's $?/pipeline shapes
+keep needing enforcement — all of which argues the shell surface is
+maintained at cost. What the discussion must answer before a sweep:
+where the dev-shell fingerprint preamble lives in a python world (a
+shared prelude? a launcher?), what check-shell's role becomes, whether
+gates.sh itself converts, how the self-test/watched-negative idiom and
+EXIT-trap cleanup port, and whether the 47-gate sweep's per-process
+overhead actually moves. Nothing converts until the shape is ruled.
+
 ## GAP — Compose quotes the ax observation SwiftUI leaves bare (found 2026-08-26, by the ink-tolerance round)
 KEY: ax observation quoting, image/Portfolio value, byte-compared verdict, canvas ax
 
@@ -2456,7 +2542,7 @@ count, so the saving is measured rather than assumed.
   tools/android/run-emulator.sh. KayaCompose.kt now stubs NOTHING, so
   its `depthStub` helper is gone (an unused private function fails
   check-detekt); a comment holds the shape for the next depth slice.
-- The canvas's ink assertion NAMES THE APPEARANCE, and that is a
+- ~~The canvas's ink assertion NAMES THE APPEARANCE, and that is a
   limitation rather than a design (found 2026-08-26, while freezing
   tools/scenes/canvas.steps). `expect_drawing_hash` pins the scale and
   the palette itself, so it is one string on five platforms whatever
@@ -2489,7 +2575,38 @@ count, so the saving is measured rather than assumed.
   colours. The roles then keep being what the PORTFOLIO chart is
   painted with, where two-mode legibility is the point.
   KEY: expect_ink, canvas_ink, kayaCanvasAppearance, appearance, palette,
-  rgba
+  rgba~~
+  CLOSED 2026-08-27, by the second of the two routes this entry named —
+  the scene carries both modes' strings:
+
+      expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F"
+
+  The RHS is alternating mode word and colour run; each harness selects
+  the half its own appearance names (`ink_for_mode` in harness.rs,
+  `kayaInkForMode` in KayaSwiftUI.swift and KayaCompose.kt) and compares
+  it within the SAME ±1, which stays exactly ±1 — this entry's own note
+  about not absorbing a mode difference in the tolerance is honoured, and
+  check-verbs' four tolerance negatives are untouched. A mode the string
+  does not name never matches. The dark pair is DERIVED by the mechanism
+  that derived the light one (canvas.rs's
+  the_scene_probe_points_are_opaque_and_pinned rasterizes both modes now);
+  it was guessed wrong by one on two channels before being derived, which
+  is written into the scene comment.
+  THE VERDICT IS THE WHOLE LINE on every platform, so a dark mac and a
+  light emulator publish byte-identical text — invariant 6 is stronger
+  than before, since the old published text was the single mode's and no
+  dark host could produce it.
+  The third route (a literal-RGBA figure) is NOT taken and is not
+  reopened here: the portfolio chart stays painted in ROLES, which is the
+  thing two-mode legibility is for.
+  AND IT WAS NOT THE ONLY DEFECT ON THIS LINE. Closing it on a dark-mode
+  machine surfaced a real bug the light-only string had been hiding for
+  the whole milestone: the canvas RENDERED LIGHT IN A DARK WINDOW,
+  because the backend's presentation report was dropped before the
+  presentation scene existed. Fixed in the same round (capi.rs's
+  `PRESENTATION_REPORTED` latch); the mechanism is a CLASS and is written
+  up in docs/traps.md, "A presentation-side report that arrives before
+  the scene".
 - A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
   assigned track (found while landing the depth slice 2026-08-26). The
   core rasters at the VIEWBOX times the reported scale, and the backend
@@ -5484,6 +5601,24 @@ contended — an input never delivered, the same family in a search
 field's costume): each lane green standalone minutes later. Logged,
 not chased; the family's windows face now has two sightings.
 
+AND A FIRST MAC FACE (2026-08-27, portfolio-python-swiftui, a 817s
+cold-rebuild contended matrix): the leg failed one step after a
+`back` with
+
+    entries 0, wanted 1
+
+— the navigation stack read as empty where the scene had just
+popped to a surface holding one entry. Passed standalone minutes
+later, unchanged. Same signature as the rest of the family: a
+contended matrix only, an observation taken while the platform had
+not yet settled the state the previous step commanded, and green
+the moment the machine is quiet. Logged, not chased; the family now
+has faces on android, iOS, windows and macOS. If this one recurs,
+the thing to instrument is the gap between the back command being
+issued and the interpreter's navigation model reflecting it —
+`expect_entries` reads that model, and the mac harness has no
+debounce of the kind the android window-list reads needed.
+
 THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
 (2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in
 hand): the OPEN picker was up with its list unreadable (DocumentsUI's
@@ -7463,7 +7598,7 @@ implementations, one rule, and check-verbs' target census is where it
 would be pinned.
 
 ## ~~BUG — every Java wire record was capped at 4096 bytes (found 2026-08-26, by the canvas marshal bench)~~
-KEY: java-record-ceiling, ByteBuffer.allocate(4096), BufferOverflowException, KayaWire begin, Enc.at grow, LargeRecordCheck exerciser
+KEY: java-record-ceiling, ByteBuffer.allocate(4096), BufferOverflowException, KayaWire begin, Enc.at grow, LargeRecordCheck exerciser, KayaTx cap, kaya_wire_fits, kaya_tx_ok, kaya_wire_refused, transaction full, check-c-bounds, c-tx-cap, overflow is the caller's
 
 FIXED 2026-08-26 in the GENERATOR — tools/kaya-bindgen/src/java.rs emits
 a private `Enc` (a ByteBuffer behind an `at(int extra)` that reallocates
@@ -7509,14 +7644,69 @@ Its watched negative removes the growth from a COPY of KayaWire.java,
 prints the substitution count, and requires BufferOverflowException
 specifically. Six refusal branches, all six watched firing.
 
-WHAT THIS DID NOT TOUCH, and is a maintainer call rather than mine: the
-C floor has a ceiling too, and a worse one. bindings/c/kaya_wire.h's
-`KayaTx` is `{uint8_t *buf; size_t len;}` with no capacity field and no
-bounds check anywhere on the encode path, so a long string is an
+~~WHAT THIS DID NOT TOUCH, and is a maintainer call rather than mine: the
+C floor has a ceiling too, and a worse one.~~ RULED AND BUILT 2026-08-26,
+the day after this entry raised it. As filed: bindings/c/kaya_wire.h's
+`KayaTx` was `{uint8_t *buf; size_t len;}` with no capacity field and no
+bounds check anywhere on the encode path, so a long string was an
 unchecked memcpy into the caller's array — a stack smash, not an
-exception. In-tree callers declare 256 to 8192 bytes. That is DECLARED
-policy, not a hidden ceiling: the header says so at its top ("overflow is
-the caller's to size against") and guests/c/todos.c repeats it, which is
-consistent with the C tier being the deliberately explicit floor
-(invariant 5). Closing it would change KayaTx's public contract. Recorded
-here so the next reader finds it named rather than re-derives it.
+exception. In-tree callers declare 256 to 8192 bytes. It was DECLARED
+policy rather than a hidden ceiling (the header said so at its top,
+"overflow is the caller's to size against", and guests/c/todos.c repeated
+it), which is why it was filed as a contract question and not as a bug.
+
+THE RULING, in the maintainer's own image: `KayaTx{buf,len}` is a Go
+slice header missing its third field. It gains `.cap`, and every
+`kaya_wire_*` packer bounds-checks against it — overflow becomes a LOUD
+REFUSAL instead of undefined behaviour. The caller still owns, sizes and
+frees the buffer (the ABI's universal `(ptr, len)` contract; kaya_submit
+is read-only and untouched), and a caller wanting a bigger record
+allocates bigger. NO owning or growing constructor — that was proposed
+and explicitly withdrawn: refusing rather than smashing is precisely what
+makes caller-side grow-and-retry possible, and the pattern is written out
+in DESIGN.md's Binding conventions.
+
+HOW IT REFUSES: `kaya_wire_fits()` before every write, and nothing is
+written when the value does not fit — no partial record, ever. Past cap
+`len` goes on counting what the whole transaction WOULD take, snprintf's
+return exactly, so it is the size to grow to and `kaya_tx_ok()` is the
+caller's predicate. `kaya_wire_end` publishes the sentence ONCE, for the
+first record that did not fit, in the C floor's own refusal idiom
+(fprintf to stderr, the shape guests/c/assets.c's caller-sized-buffer
+check already used) — naming the record kind and both sizes. TWO
+branches, because the kind is read back out of the header this record
+wrote: where even those 8 bytes were past cap there is no kind to name,
+and that sentence says so rather than printing a number nothing recorded
+(invariant 3). Both branches watched printing.
+
+THE SWEEP: 17 guests/c files, not the eight the ruling guessed — all 17
+declare a KayaTx, and their 61 initializers move to the visible
+`{buf, 0, sizeof buf}` form, which is the floor teaching its own
+contract. The other seven bindings need nothing: only C hands the packers
+a bare pointer (bindings/swift's `KayaTx` is a same-named Swift struct
+over a growable Data), so this is a C-floor slice and not a binding
+sweep.
+
+NO OUTPUT BYTE MOVED, proven rather than asserted, the way the C-floor
+renumber above proved its own: tools/checks/c-tx-cap.c runs the WHOLE
+packer repertoire — begin/end, u32, u64, pad, values, variant_schemas and
+a value of all five tags, which is everything a guest can emit — into a
+generous buffer and hexdumps it, built once against the new header and
+once against ee7bc41's pre-cap header. 432 bytes, byte-identical. That is
+stronger than per-guest capture and needed no stub link.
+
+THE GUARDS, two of them. `guests/c/Makefile` gains
+`-Werror=missing-field-initializers`, so a `KayaTx tx = {buf, 0}` — which
+still COMPILES against a three-field struct, reads cap 0 and refuses
+every record at run time — now fails the BUILD naming `cap`: the wall on
+the path nobody can avoid. And `tools/check-c-bounds.sh`, the 48th gate,
+because nothing else can see any of this: every in-tree guest sizes its
+buffers correctly, so the wire bytes are identical either way and no
+scene, lane or capture is different — which is how the unchecked memcpy
+shipped from milestone 0 under green lanes. Its probe is WALLED rather
+than sanitized (mmap + mprotect, so a one-byte overrun is a fault and not
+a heuristic), and its negative is the shipped bug itself: the same probe
+built against ee7bc41's header, which dies of SIGBUS in both modes where
+this one prints a sentence. AddressSanitizer, which the ruling asked for,
+could not have served — an `-fsanitize=address` binary with no error in
+it hangs before main on this host (docs/traps.md, measured).

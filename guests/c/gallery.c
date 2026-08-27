@@ -34,7 +34,7 @@ static const uint8_t TEST_PNG[75] = {
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("urgent: false"));
     kaya_tx_create_signal(&tx, SIG_VOLUME, kaya_str("volume: 50%"));
@@ -100,7 +100,7 @@ static void *app(void *arg) {
         if (kaya_parse_toggled(rec, &id, keys, 2, &n_keys, &checked)) {
             if (id == W_URGENT && n_keys == 0) {
                 uint8_t buf[256];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 char status[32];
                 snprintf(status, sizeof status, "urgent: %s",
                          checked.i ? "true" : "false");
@@ -110,7 +110,7 @@ static void *app(void *arg) {
         } else if (kaya_parse_value_changed(rec, &id, keys, 2, &n_keys, &value)) {
             if (id == W_BAR && n_keys == 0) {
                 uint8_t buf[256];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 char volume[32];
                 /* Integer percent, so every language's formatting agrees
                  * byte for byte (tools/scenes/gallery.steps). */
@@ -125,7 +125,7 @@ static void *app(void *arg) {
                  * must NOT come back as a value_changed occurrence:
                  * only the user path and commands emit. */
                 uint8_t buf[256];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_POS, kaya_f64(0.25));
                 kaya_submit(tx.buf, tx.len);
             }

@@ -1031,8 +1031,13 @@ for proto in x11 wayland; do
     # string every other lane asserts — the raster comes out of this
     # container's own libkaya — so a leg that disagrees here is a finding
     # about the blit, never about the drawing.
+    #
+    # THROUGH a11y-leg.sh because the scene ends on `expect_ax`, like the
+    # other thirteen ax-asserting scenes: check-steps' ax_bus() holds that
+    # rule now (docs/traps.md — the reader is zbus and finds a bus only in
+    # DBUS_SESSION_BUS_ADDRESS, which no plain leg exports).
     run "$proto" canvas-rust env KAYA_SELFTEST=canvas \
-        "$CARGO_TARGET_DIR/debug/examples/canvas"
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

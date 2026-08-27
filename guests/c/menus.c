@@ -50,7 +50,7 @@
 
 static void build_scene(void) {
     uint8_t buf[4096];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("ready"));
     kaya_tx_create_signal(&tx, SIG_CAN_EXPORT, kaya_bool(0));
@@ -160,7 +160,7 @@ static void build_scene(void) {
      * and the copy's keys. */
     {
         uint8_t seed_buf[512];
-        KayaTx seed = {seed_buf, 0};
+        KayaTx seed = {seed_buf, 0, sizeof seed_buf};
         KayaVal g2 = kaya_str("g2");
         kaya_tx_collection_insert(&seed, C_GROUPS, 0, 0, kaya_str("g2"), 0,
                                   (KayaVal[]){kaya_str("Home")}, 1);
@@ -172,7 +172,7 @@ static void build_scene(void) {
 
 static void write_status(const char *status) {
     uint8_t buf[256];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
     kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
     kaya_submit(tx.buf, tx.len);
 }
@@ -194,14 +194,14 @@ static void *app(void *arg) {
         if (kaya_parse_click(rec, &id, keys, 2, &n_keys) && n_keys == 0) {
             if (id == W_ENABLE) {
                 uint8_t buf[256];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_CAN_EXPORT, kaya_bool(1));
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_RESET) {
                 /* The checked/value writes reset the backend's user-state
                  * mirror and echo no occurrence. */
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_DETAILS, kaya_bool(0));
                 kaya_tx_write_signal(&tx, SIG_SORT, kaya_f64(0.0));
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("ready"));
@@ -210,7 +210,7 @@ static void *app(void *arg) {
                 /* Append-only: rename the RETAINED File, move the
                  * promotion hint to Publish, grow the bar by Tools. */
                 uint8_t buf[1024];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_set_menu_primary(&tx, M_SHARE, 0);
                 kaya_tx_set_menu_label(&tx, M_FILE, "Document");
                 kaya_tx_menu_item_create(&tx, M_PUBLISH, KAYA_MENU_KIND_ACTION);
@@ -238,7 +238,7 @@ static void *app(void *arg) {
                 /* The keys ARE the noun: both levels straight into the
                  * instance address. */
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_collection_remove(&tx, C_ITEMS, &keys[0], 1, keys[1]);
                 char status[160];
                 snprintf(status, sizeof status, "removed %.*s/%.*s",

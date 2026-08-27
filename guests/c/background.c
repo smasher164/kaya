@@ -82,7 +82,7 @@ static void drain_posted(void) {
     if (n == 0)
         return;
     uint8_t buf[512];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
     for (unsigned i = 0; i < n; i++) {
         strncat(batch[i].acc, batch[i].step, batch[i].acc_cap - strlen(batch[i].acc) - 1);
         kaya_tx_write_signal(&tx, batch[i].signal, kaya_str(batch[i].acc));
@@ -106,7 +106,7 @@ static void *worker(void *arg) {
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("idle"));
     kaya_tx_create_signal(&tx, SIG_ALIVE, kaya_str("-"));
@@ -168,7 +168,7 @@ static void *app(void *arg) {
             continue;
 
         uint8_t buf[512];
-        KayaTx tx = {buf, 0};
+        KayaTx tx = {buf, 0, sizeof buf};
         if (id == W_START) {
             if (!started) {
                 pthread_create(&worker_thread, NULL, worker, NULL);

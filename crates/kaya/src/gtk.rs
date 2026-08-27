@@ -9045,7 +9045,7 @@ impl crate::harness::Stage for GtkStage {
             };
             return match atspi_collect(want, index, false) {
                 Some(name) => format!("{role}/{name}"),
-                None => "<not in the accessibility tree>".to_owned(),
+                None => atspi_miss("<not in the accessibility tree>"),
             };
         }
         #[allow(unreachable_code)]
@@ -9068,7 +9068,7 @@ impl crate::harness::Stage for GtkStage {
     fn highlights(&self, target: crate::harness::Target) -> String {
         match Self::range_target(target) {
             Ok(at) => atspi_range_read(at.rank, RangeRead::Highlights)
-                .unwrap_or_else(|| "<the accessibility tree did not answer>".to_owned()),
+                .unwrap_or_else(|| atspi_miss("<the accessibility tree did not answer>")),
             Err(why) => why,
         }
     }
@@ -9076,7 +9076,7 @@ impl crate::harness::Stage for GtkStage {
     fn selection(&self, target: crate::harness::Target) -> String {
         match Self::range_target(target) {
             Ok(at) => atspi_range_read(at.rank, RangeRead::Selection { preedit: at.preedit })
-                .unwrap_or_else(|| "<the accessibility tree did not answer>".to_owned()),
+                .unwrap_or_else(|| atspi_miss("<the accessibility tree did not answer>")),
             Err(why) => why,
         }
     }
@@ -9089,7 +9089,7 @@ impl crate::harness::Stage for GtkStage {
                 at.rank,
                 RangeRead::Revealed { start: range.start, stop: range.stop },
             )
-            .unwrap_or_else(|| "<the accessibility tree did not answer>".to_owned()),
+            .unwrap_or_else(|| atspi_miss("<the accessibility tree did not answer>")),
             Err(why) => why,
         }
     }
@@ -9173,7 +9173,7 @@ impl crate::harness::Stage for GtkStage {
             };
             return match atspi_collect(want, index, true) {
                 Some(description) => description,
-                None => "<not in the accessibility tree>".to_owned(),
+                None => atspi_miss("<not in the accessibility tree>"),
             };
         }
         #[allow(unreachable_code)]
@@ -12619,6 +12619,39 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
 struct AtspiMiss {
     why: String,
     retryable: bool,
+}
+
+/// THE OTHER CAUSE OF EVERY BUS MISS, which the tree-shaped readers
+/// cannot see: no bus at all. `atspi_window_marker` says "no
+/// accessibility bus" outright, but `atspi_collect` and
+/// `atspi_range_read` answer in `Option`, so a failed CONNECT and a
+/// missing NODE arrive as the same `None` — and the sentence the caller
+/// then prints names the node. That sentence is believed (invariant 3):
+/// a leg with no DBUS_SESSION_BUS_ADDRESS reads exactly like a broken
+/// lowering, and cost a session before anyone looked at the bus
+/// (measured 2026-08-27, docs/traps.md). Asked only on a failure path,
+/// so the second connect is not on anyone's clock.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_absent() -> Option<String> {
+    atspi::zbus::block_on(async {
+        atspi::connection::AccessibilityConnection::new().await.err()
+    })
+    .map(|e| {
+        format!(
+            "<no accessibility bus ({e}): GTK publishes onto a bus libdbus \
+             autolaunches for it, but this reader finds one only through \
+             DBUS_SESSION_BUS_ADDRESS. On the linux lane that is what \
+             tools/linux/a11y-leg.sh exports; a leg wired without it fails \
+             every ax read on both protocols>"
+        )
+    })
+}
+
+/// The sentence for a bus read that came back empty — the bus's absence
+/// where that is the cause, the missing node otherwise.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_miss(node: &str) -> String {
+    atspi_absent().unwrap_or_else(|| node.to_owned())
 }
 
 /// Is the marker node — a descendant named `marker` — inside the frame this

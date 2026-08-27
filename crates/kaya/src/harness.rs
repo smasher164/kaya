@@ -1563,13 +1563,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 let target = parse_target(target)?;
                 let spec = parse_string(text)?;
-                // `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."` — the
-                // points and the colours in ONE quoted argument, so the
-                // pairing is visible in the scene rather than split
-                // across two lists a reader has to zip by eye.
+                // `"<x,y> ... = light <RRGGBB>/... dark <RRGGBB>/..."` —
+                // the points and BOTH MODES' colours in ONE quoted
+                // argument, so the pairing is visible in the scene rather
+                // than split across lists a reader has to zip by eye, and
+                // so no frozen ink expectation depends on the host's
+                // appearance setting (`ink_for_mode`).
                 let (points, want) = spec.split_once(" = ").ok_or_else(|| {
                     format!(
-                        "expect_ink wants \"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/...\", got {spec:?}"
+                        "expect_ink wants \"<x,y> ... = light <RRGGBB>/... dark <RRGGBB>/...\", \
+                         got {spec:?}"
                     )
                 })?;
                 Step::ExpectInk(target, points.trim().to_owned(), want.trim().to_owned())
@@ -2674,7 +2677,29 @@ fn record_linger() {
 /// tools/check-verbs.sh holds the three equal AND pinned at the ruled 1.
 const INK_TOLERANCE: i32 = 1;
 
-/// The appearance exactly, every channel within [`INK_TOLERANCE`].
+/// The half of a PER-MODE expectation that names `mode`, out of
+/// `"light FFFFFF/D2E3F7 dark 16181C/2B3B4F"` — alternating mode word
+/// and colour run, in one byte-shared string (docs/canvas-plan.md §7.2).
+///
+/// ONE SPELLING CARRYING BOTH MODES is what keeps a frozen ink
+/// expectation from depending on the host's appearance setting: the
+/// scene names every palette the raster can use, and the platform picks
+/// the one it reported. A mode the string does not name is `None`, which
+/// never matches — the light-only string that reddened this verb on a
+/// dark-mode mac now fails saying which mode was measured.
+///
+/// KayaSwiftUI.swift and KayaCompose.kt carry their own copies.
+fn ink_for_mode<'a>(want: &'a str, mode: &str) -> Option<&'a str> {
+    let mut it = want.split_whitespace();
+    while let (Some(named), Some(colours)) = (it.next(), it.next()) {
+        if named == mode {
+            return Some(colours);
+        }
+    }
+    None
+}
+
+/// The reported mode's colours, every channel within [`INK_TOLERANCE`].
 ///
 /// An answer that does not parse never matches — every `<...>`
 /// diagnostic the backends return says what it measured, and reaches
@@ -2690,14 +2715,12 @@ fn ink_matches(got: &str, want: &str) -> bool {
         }
         Some(out)
     }
-    let (Some((got_mode, got_ink)), Some((want_mode, want_ink))) =
-        (got.split_once(' '), want.split_once(' '))
-    else {
+    let Some((got_mode, got_ink)) = got.split_once(' ') else {
         return false;
     };
-    if got_mode != want_mode {
+    let Some(want_ink) = ink_for_mode(want, got_mode) else {
         return false;
-    }
+    };
     let got_ink: Vec<&str> = got_ink.split('/').collect();
     let want_ink: Vec<&str> = want_ink.split('/').collect();
     got_ink.len() == want_ink.len()
@@ -5054,29 +5077,44 @@ mod tests {
     /// moves a channel by far more than either.
     #[test]
     fn ink_tolerates_one_channel_unit_and_no_more() {
-        let want = "light FFFFFF/D2E3F7";
-        // THE ONE MEASURED CASE FIRST: what the mac actually reads back
-        // off its own window for the bytes the core wrote.
+        // ONE STRING, BOTH MODES — the scene's own frozen spelling.
+        let want = "light FFFFFF/D2E3F7 dark 16181C/2B3B4F";
+        // THE TWO MEASURED CASES FIRST: what the mac actually reads back
+        // off its own window for the bytes the core wrote, in each
+        // appearance (2026-08-26 light, 2026-08-27 dark).
         assert!(ink_matches("light FFFFFF/D2E2F7", want));
-        assert!(ink_matches(want, want));
-        // Every channel of every colour, both directions, at the edge.
+        assert!(ink_matches("dark 17181D/2B3A4F", want));
+        // Every channel of every colour, both directions, at the edge —
+        // in BOTH modes, since the tolerance is per mode.
         for got in [
             "light FEFFFF/D2E3F7", "light FFFEFF/D2E3F7", "light FFFFFE/D2E3F7",
             "light FFFFFF/D1E3F7", "light FFFFFF/D2E2F7", "light FFFFFF/D2E3F6",
             "light FFFFFF/D3E4F8",
+            "dark 15181C/2B3B4F", "dark 16171C/2B3B4F", "dark 16181B/2B3B4F",
+            "dark 16181C/2A3B4F", "dark 16181C/2B3A4F", "dark 16181C/2B3B4E",
+            "dark 17191D/2C3C50",
         ] {
             assert!(ink_matches(got, want), "{got} is one unit away and must pass");
         }
-        // And one past it, on each side of the pair.
+        // And one past it, on each side of each mode's pair.
         for got in [
             "light FDFFFF/D2E3F7", "light FFFFFF/D0E3F7", "light FFFFFF/D2E5F7",
             "light FFFFFF/D2E3F9",
+            "dark 14181C/2B3B4F", "dark 16181C/293B4F", "dark 16181C/2B3D4F",
+            "dark 18181C/2B3B4F",
         ] {
             assert!(!ink_matches(got, want), "{got} is two units away and must fail");
         }
-        // THE APPEARANCE IS NOT TOLERANT — the palette has two modes and
-        // a dark-mode host must fail with a sentence that says so.
+        // THE MODES DO NOT BORROW EACH OTHER'S VALUES, which is the whole
+        // point of naming both: the light palette's bytes measured under a
+        // dark appearance is the defect that shipped (a canvas rendering
+        // light in a dark window), and it must fail even though every one
+        // of those bytes appears in this very string.
         assert!(!ink_matches("dark FFFFFF/D2E3F7", want));
+        assert!(!ink_matches("light 16181C/2B3B4F", want));
+        // A mode the expectation does not name never matches — it is not
+        // silently treated as either half.
+        assert!(!ink_matches("sepia FFFFFF/D2E3F7", want));
         // Neither is the SHAPE: a diagnostic answer, a missing colour,
         // an extra one and a value that is not six hex digits are all
         // non-matches, so they reach the failure text whole.
@@ -5100,7 +5138,8 @@ mod tests {
     #[test]
     fn the_ink_verb_passes_at_one_unit_and_names_both_colours_at_two() {
         let _serial = INK_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        let script = "expect_ink canvas@chart \"15,20 70,63 = light FFFFFF/D2E3F7\"";
+        let script =
+            "expect_ink canvas@chart \"15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F\"";
         let drive = |answer: &str| -> (i32, String) {
             *INK_ANSWER.lock().unwrap() = Some(answer.to_owned());
             let (tx, rx) = std::sync::mpsc::channel();
@@ -5111,19 +5150,41 @@ mod tests {
         // The mac's own reading, which is the case the ruling is for.
         let (code, verdict) = drive("light FFFFFF/D2E2F7");
         assert_eq!(code, 0, "{verdict}");
-        // THE OBSERVATION IS THE FROZEN TEXT, never the sampled bytes:
-        // the verdict is byte-compared across every platform, and the
-        // platforms legitimately sample different values (invariant 6).
-        assert!(verdict.contains("ink light FFFFFF/D2E3F7"), "{verdict}");
+        // THE OBSERVATION IS THE WHOLE FROZEN TEXT, never the sampled
+        // bytes and never just the mode that ran: the verdict is
+        // byte-compared across every platform, the platforms legitimately
+        // sample different values, AND they legitimately run in different
+        // appearances — a dark mac and a light emulator publish the same
+        // line (invariant 6).
+        assert!(
+            verdict.contains("ink light FFFFFF/D2E3F7 dark 16181C/2B3B4F"),
+            "{verdict}"
+        );
         assert!(!verdict.contains("D2E2F7"), "the verdict leaked the sampled bytes: {verdict}");
+
+        // THE SAME SCENE ON A DARK HOST publishes that same line — the
+        // failure this per-mode form closes.
+        let (code, dark_verdict) = drive("dark 17181D/2B3A4F");
+        assert_eq!(code, 0, "{dark_verdict}");
+        assert_eq!(
+            verdict, dark_verdict,
+            "the two appearances must publish a byte-identical verdict (invariant 6)"
+        );
 
         let (code, verdict) = drive("light FFFFFF/D2E5F7");
         assert_eq!(code, 1, "two units must not pass: {verdict}");
         assert!(
             verdict.contains("ink light FFFFFF/D2E5F7 at 15,20 70,63, \
-                              wanted light FFFFFF/D2E3F7"),
+                              wanted light FFFFFF/D2E3F7 dark 16181C/2B3B4F"),
             "the refusal must name what was read AND what was wanted: {verdict}"
         );
+
+        // AND THE WRONG MODE'S VALUES FAIL, which is the defect that
+        // shipped: the light palette's bytes measured under a dark
+        // appearance.
+        let (code, verdict) = drive("dark FFFFFF/D2E3F7");
+        assert_eq!(code, 1, "the light palette under a dark appearance must fail: {verdict}");
+        assert!(verdict.contains("ink dark FFFFFF/D2E3F7 at 15,20 70,63"), "{verdict}");
     }
 
     /// expect_order parses like expect, counts as an expect for the

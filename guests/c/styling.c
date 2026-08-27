@@ -41,7 +41,7 @@ static void window_prop(KayaTx *tx, uint64_t window, uint32_t prop, KayaVal valu
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     /* Adwaita blue, the derivation's empirical anchor. mask 0: no
      * per-appearance override. */
@@ -109,7 +109,7 @@ static void *app(void *arg) {
         if (status == NULL)
             continue;
         uint8_t out[256];
-        KayaTx tx = {out, 0};
+        KayaTx tx = {out, 0, sizeof out};
         kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
         kaya_submit(tx.buf, tx.len);
     }

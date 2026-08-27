@@ -1570,6 +1570,41 @@ pub(crate) fn declare_windowing() {
     }
 }
 
+/// THE WINDOW'S PRESENTATION, LATCHED — the scale-and-appearance twin of
+/// `WINDOWING_DECLARED` above, and dropped for exactly its reason until
+/// 2026-08-27. A backend reports at its first layout (SwiftUI's
+/// `KayaPresentationReporter` fires `onAppear`), which is BEFORE the
+/// first nextCommands builds the presentation scene, so the report
+/// reached `with_window_scene`, found no scene and returned in silence.
+/// The initial raster then used `Presentation::default()` — the LIGHT
+/// palette at scale 1.0 — and nothing ever corrected it, because a
+/// machine already dark at launch never fires an appearance CHANGE
+/// (measured, docs/traps.md).
+///
+/// A report is a FACT ABOUT THE WINDOW, not an event: it is recorded here
+/// whether or not a scene exists, and `presentation_scene` below is born
+/// at it.
+static PRESENTATION_REPORTED: Mutex<Option<crate::canvas::Presentation>> = Mutex::new(None);
+
+/// The presentation scene, built at the pre-scene facts both latches hold.
+/// `kaya_next_commands` builds it lazily on the first call; the unit suite
+/// reaches the same seeding here (`a_presentation_reported_before_the_scene_exists_seeds_it`).
+fn presentation_scene() -> Scene {
+    let mut scene = Scene::new();
+    if WINDOWING_DECLARED.load(std::sync::atomic::Ordering::SeqCst) {
+        scene.declare_windowing();
+    }
+    if let Some(p) = *PRESENTATION_REPORTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+    {
+        // A scene this new holds no drawings, so this seeds the field
+        // and emits nothing.
+        scene.set_presentation(p);
+    }
+    scene
+}
+
 // Where presentation-side emissions land. Defaults to the byte ring
 // (foreign guests read it via kaya_next_occurrence); the Rust API's
 // runtime-selected modes route emissions into the AppCtx mpsc instead.
@@ -3151,11 +3186,20 @@ pub extern "C" fn kaya_row_extent(for_target: u64, index: u64) -> f64 {
 /// platform colour reaches one.
 ///
 /// A report that changes nothing emits nothing.
+///
+/// LATCHED BEFORE IT IS APPLIED (`PRESENTATION_REPORTED`): the backends
+/// report at their first layout, which can precede the scene, and a
+/// report the scene never saw is a canvas rastered at the wrong palette
+/// for the process's whole life.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
     let mode = if dark { crate::canvas::Mode::Dark } else { crate::canvas::Mode::Light };
+    let reported = crate::canvas::Presentation { scale, mode };
+    *PRESENTATION_REPORTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(reported);
     with_window_scene("reporting the window's scale and appearance", |scene| {
-        (scene.set_presentation(crate::canvas::Presentation { scale, mode }), ())
+        (scene.set_presentation(reported), ())
     })
 }
 
@@ -3236,11 +3280,7 @@ pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
             return 0;
         };
         *rx_slot = Some(tx_rx);
-        let mut scene = Scene::new();
-        if WINDOWING_DECLARED.load(std::sync::atomic::Ordering::SeqCst) {
-            scene.declare_windowing();
-        }
-        *PRESENTATION_SCENE.lock().unwrap() = Some(scene);
+        *PRESENTATION_SCENE.lock().unwrap() = Some(presentation_scene());
     }
     // 0 MEANS SHUTDOWN TO EVERY PUMP, so a batch that resolved to nothing
     // must not be returned: keep waiting instead. The undo tier's wake is
@@ -3332,6 +3372,109 @@ mod tests {
         let zero = unsafe { kaya_blob_data(0, &mut len) };
         assert!(zero.is_null());
         blobs().lock().unwrap().out.clear();
+    }
+
+    /// THE INITIAL RASTER READS THE REPORTED MODE, even though the report
+    /// arrives BEFORE the scene exists — which is the ordering every
+    /// interpreter backend actually has, and the one that shipped the
+    /// canvas rendering light in a dark window (measured 2026-08-27 on a
+    /// dark-mode mac, docs/traps.md).
+    ///
+    /// NO SCENE CAN FAIL THIS on a light-mode host, and every lane before
+    /// tonight ran light: the leg reddens only where the machine's
+    /// appearance differs from `Presentation::default()`. So the ordering
+    /// is asserted here, where the host's own appearance cannot reach it.
+    #[test]
+    fn a_presentation_reported_before_the_scene_exists_seeds_it() {
+        let _serial = OUT_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let ground = |mode: crate::canvas::Mode| -> [u8; 4] {
+            // THE REPORT COMES FIRST, with no scene built — the whole
+            // point. `kaya_presentation` latches it.
+            kaya_presentation(2.0, mode == crate::canvas::Mode::Dark);
+            let mut scene = presentation_scene();
+            let id = crate::protocol::WidgetId(1);
+            let ops = vec![
+                crate::protocol::TxOp::CreateWidget {
+                    id,
+                    kind: crate::protocol::WidgetKind::Canvas,
+                },
+                crate::protocol::TxOp::SetDrawing {
+                    widget: id,
+                    viewbox: (10.0, 10.0),
+                    path: Vec::new(),
+                    // One filled rect in the ground role: every pixel is
+                    // the palette entry the mode resolved.
+                    ops: vec![
+                        crate::protocol::Value::I64(wire::DRAW_MOVE_TO),
+                        crate::protocol::Value::F64(0.0),
+                        crate::protocol::Value::F64(0.0),
+                        crate::protocol::Value::I64(wire::DRAW_LINE_TO),
+                        crate::protocol::Value::F64(10.0),
+                        crate::protocol::Value::F64(0.0),
+                        crate::protocol::Value::I64(wire::DRAW_LINE_TO),
+                        crate::protocol::Value::F64(10.0),
+                        crate::protocol::Value::F64(10.0),
+                        crate::protocol::Value::I64(wire::DRAW_LINE_TO),
+                        crate::protocol::Value::F64(0.0),
+                        crate::protocol::Value::F64(10.0),
+                        crate::protocol::Value::I64(wire::DRAW_CLOSE),
+                        crate::protocol::Value::I64(wire::DRAW_FILL),
+                        crate::protocol::Value::I64(wire::PAINT_GROUND),
+                        crate::protocol::Value::I64(wire::FILL_NONZERO),
+                    ],
+                },
+                crate::protocol::TxOp::Mount {
+                    window: crate::protocol::DEFAULT_WINDOW,
+                    root: id,
+                },
+            ];
+            // UNDER THE PUMP'S OWN GUARD, which is how kaya_next_commands
+            // drives it — fault::tests::every_scene_apply_caller_sits_under_a_guard
+            // finds this site and is right to.
+            let applied = crate::fault::guard("applying a transaction", || scene.apply(ops))
+                .expect("the canvas declaration applies without faulting");
+            let drawing = applied
+                .iter()
+                .find_map(|o| match o {
+                    crate::protocol::ApplyOp::SetDrawing {
+                        width,
+                        height,
+                        scale,
+                        pixels,
+                        ..
+                    } => Some((*width, *height, *scale, pixels)),
+                    _ => None,
+                })
+                .expect("the canvas declaration emits a SetDrawing");
+            let (width, _height, scale, pixels) = drawing;
+            // THE SCALE IS THE OTHER HALF the same dropped report cost,
+            // and no scene can see it: a 10pt viewbox at the reported 2.0
+            // is 20 pixels across.
+            assert_eq!(scale, 2.0, "the reported scale never reached the raster");
+            assert_eq!(width, 20, "a 10pt viewbox at scale 2.0 is 20px wide");
+            let centre = ((width as usize / 2) * 4) + (width as usize * 4 * (width as usize / 2));
+            [
+                pixels.0[centre],
+                pixels.0[centre + 1],
+                pixels.0[centre + 2],
+                pixels.0[centre + 3],
+            ]
+        };
+        assert_eq!(
+            ground(crate::canvas::Mode::Dark),
+            [0x16, 0x18, 0x1C, 0xFF],
+            "reported dark, rastered something else — PALETTE_DARK's ground is 16181C"
+        );
+        // The light arm is the control: it passes with the latch removed,
+        // which is why the dark arm above is the one that measures.
+        assert_eq!(
+            ground(crate::canvas::Mode::Light),
+            [0xFF, 0xFF, 0xFF, 0xFF],
+            "reported light, rastered something else — PALETTE_LIGHT's ground is FFFFFF"
+        );
+        *PRESENTATION_REPORTED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// THE FUNCTION FLOOR HAS NO SIZE CAP, because the core owns the

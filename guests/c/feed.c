@@ -44,7 +44,7 @@ static struct {
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_DONE, kaya_str("0 done"));
     kaya_tx_create_widget(&tx, W_ROW, KAYA_KIND_ROW);
@@ -130,7 +130,7 @@ static void *app(void *arg) {
                     break;
                 posts[i].done = payload.i != 0;
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_collection_update_field(&tx, C_FEED, 0, 0, keys[0],
                                                 F_TODO_DONE, V_TODO,
                                                 kaya_bool(posts[i].done));
@@ -149,7 +149,7 @@ static void *app(void *arg) {
                 posts[i].variant = V_TODO;
                 posts[i].done = 1;
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_collection_update(
                     &tx, C_FEED, 0, 0, kaya_str(posts[i].key), V_TODO,
                     (KayaVal[]){kaya_str(posts[i].text), kaya_bool(1)}, 2);

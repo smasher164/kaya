@@ -46,7 +46,7 @@ static const uint8_t TEST_PNG[75] = {
 
 static void build_scene(void) {
     uint8_t buf[4096];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_widget(&tx, W_FORM, KAYA_KIND_COLUMN);
     kaya_tx_set_a11y_id(&tx, W_FORM, "form");

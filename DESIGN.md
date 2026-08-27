@@ -386,6 +386,44 @@ hand-authors both runs, where those walls do NOT bite — scene.rs keeps
 `widgets` and `template_nodes` as separate maps — so `tools/check-c-ids.sh`
 is its teeth instead.
 
+**The C floor's transaction buffer is caller-sized, and the packers refuse
+past it** (ruled 2026-08-26). `KayaTx` is `{uint8_t *buf; size_t len; size_t
+cap;}` — a Go slice header, third field included — and the caller owns,
+sizes and frees the storage, per the ABI's universal `(ptr, len)` contract.
+There is no owning or growing constructor: a caller who wants a bigger
+record allocates a bigger buffer. What the cap buys is that overflow is a
+LOUD REFUSAL rather than undefined behaviour. Every `kaya_wire_*` packer
+checks the remaining space before it writes and writes nothing at all when
+the value does not fit; past cap, `len` goes on counting what the whole
+transaction WOULD take, exactly as `snprintf`'s return does, and
+`kaya_wire_end` says so once, on stderr, for the first record that did not
+fit. That is what makes grow-and-retry the caller's to do:
+
+```c
+size_t cap = 4096;
+uint8_t *buf = malloc(cap);
+KayaTx tx = {buf, 0, cap};
+build(&tx);
+if (!kaya_tx_ok(&tx)) {          /* tx.len is what it would have taken */
+    cap = tx.len;
+    buf = realloc(buf, cap);
+    KayaTx grown = {buf, 0, cap};
+    build(&grown);
+    tx = grown;
+}
+kaya_submit(tx.buf, tx.len);
+free(buf);
+```
+
+`kaya_submit` is unchanged and read-only: submit only a transaction
+`kaya_tx_ok()` accepts. The seven sugar bindings encode into a growable
+buffer of their own language's making (Python joins bytes, Go appends to a
+slice, Java's `Enc` doubles, Swift a `Data`, and so on), so the semantics is
+uniform — a record too big for the buffer is an error and never a silent
+truncation — while only C makes the caller do the growing, which is the C
+tier being the deliberately explicit floor. `tools/check-c-bounds.sh` holds
+it, against the pre-cap header itself.
+
 **Line separators.** Guest-visible text uses LF (`\n`) as its line
 separator on every platform — occurrence payloads, harness reads, and
 scene output strings are compared byte-for-byte across all languages,

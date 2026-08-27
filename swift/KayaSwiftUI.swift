@@ -6854,7 +6854,10 @@ private func kayaRunScript(_ script: String) {
                 // THE BLIT, sampled off the window's own pixels (§7.2) — the
                 // one canvas read that fails when the buffer never reached the
                 // platform's image object, and the reason the hash is not the
-                // whole story. `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."`.
+                // whole story.
+                // `"<x,y> ... = light <RRGGBB>/... dark <RRGGBB>/..."` — both
+                // modes named, so the expectation does not depend on the
+                // host's appearance (`kayaInkForMode`).
                 let inkSpec = Substring(parts[1])
                 let inkArg = kayaQuoted(Array(parts[2...]))
                 let inkHalves = inkArg.components(separatedBy: " = ")
@@ -10504,8 +10507,28 @@ private struct KayaCanvasReader: View {
 /// tools/check-verbs.sh holds the three equal and pinned at the ruled 1.
 let kayaInkTolerance = 1
 
-/// The appearance exactly, every channel within `kayaInkTolerance`. An
-/// answer that does not parse — every `<...>` diagnostic below — never
+/// The half of a PER-MODE expectation that names `mode`, out of
+/// `"light FFFFFF/D2E3F7 dark 16181C/2B3B4F"` — alternating mode word and
+/// colour run, in one byte-shared string (docs/canvas-plan.md §7.2).
+///
+/// ONE SPELLING CARRYING BOTH MODES is what keeps a frozen ink
+/// expectation from depending on the host's appearance setting. A mode
+/// the string does not name is nil, which never matches.
+///
+/// harness.rs's `ink_for_mode` and KayaCompose.kt's `kayaInkForMode` are
+/// the other two copies.
+func kayaInkForMode(_ want: String, _ mode: Substring) -> Substring? {
+    let words = want.split(separator: " ")
+    var i = 0
+    while i + 1 < words.count {
+        if words[i] == mode { return words[i + 1] }
+        i += 2
+    }
+    return nil
+}
+
+/// The reported mode's colours, every channel within `kayaInkTolerance`.
+/// An answer that does not parse — every `<...>` diagnostic below — never
 /// matches, so it reaches the failure text whole.
 func kayaInkMatches(_ got: String, _ want: String) -> Bool {
     func channels(_ hex: Substring) -> [Int]? {
@@ -10521,12 +10544,11 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
         return out
     }
     let gotParts = got.split(separator: " ", maxSplits: 1)
-    let wantParts = want.split(separator: " ", maxSplits: 1)
-    guard gotParts.count == 2, wantParts.count == 2, gotParts[0] == wantParts[0] else {
+    guard gotParts.count == 2, let wanted = kayaInkForMode(want, gotParts[0]) else {
         return false
     }
     let gotInk = gotParts[1].split(separator: "/")
-    let wantInk = wantParts[1].split(separator: "/")
+    let wantInk = wanted.split(separator: "/")
     guard gotInk.count == wantInk.count else { return false }
     for (g, w) in zip(gotInk, wantInk) {
         guard let g = channels(g), let w = channels(w) else { return false }
@@ -10587,9 +10609,16 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
     return "\(mode) " + kayaSampleRGB(cg, wanted)
 }
 
-/// Which palette the core last rastered with, read the same way the
-/// brand tint reads it — the ONE reading, so the report and the answer
-/// cannot disagree.
+/// Which palette the core last rastered with.
+///
+/// A SECOND READING, and it has to be: `KayaPresentationReporter` reports
+/// SwiftUI's `\.colorScheme`, which only a view can read, while this runs
+/// off the harness thread with no view in hand. They are not one reading
+/// and the comment here used to claim they were — MEASURED AGREEING
+/// 2026-08-27 (`colorScheme=dark nsapp=dark`), which is the evidence for
+/// the claim rather than the claim itself. If they ever diverge, this
+/// verb reports a mode the raster did not use and the failure names two
+/// palettes; the raster's own mode is the one in `kaya_presentation`.
 @MainActor func kayaCanvasAppearance() -> String {
     #if os(macOS)
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

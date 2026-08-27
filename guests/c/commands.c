@@ -34,7 +34,7 @@ static int settings_count;
 
 static void build_scene(void) {
     uint8_t buf[4096];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("ready"));
     kaya_tx_create_signal(&tx, SIG_DETAILS, kaya_bool(0));
@@ -99,7 +99,7 @@ static void build_scene(void) {
 
 static void write_status(const char *status) {
     uint8_t buf[256];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
     kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
     kaya_submit(tx.buf, tx.len);
 }

@@ -47,7 +47,7 @@
 
 static void build_scene(void) {
     uint8_t buf[4096];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     {
         /* Packed by hand: the generated kaya_tx_set_window_prop closes
@@ -443,7 +443,7 @@ static void *app(void *arg) {
                 /* NOT an undoable transaction: the typing is the step, and
                  * a group here would bank a second one per keystroke. */
                 note_set(keys[0].i, &text);
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 note_list(notes_text, sizeof notes_text);
                 kaya_tx_write_signal(&tx, SIG_NOTES, kaya_str(notes_text));
                 kaya_submit(tx.buf, tx.len);
@@ -452,7 +452,7 @@ static void *app(void *arg) {
             if (n_keys != 0)
                 continue;
             if (id == W_ADD) {
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 /* The empty-draft guard, and NOT an undoable step. */
                 if (draft[0] == '\0') {
                     snprintf(status, sizeof status, "nothing to add, %u total",
@@ -486,13 +486,13 @@ static void *app(void *arg) {
                  * inside an undo group is REFUSED at apply, destroying
                  * widget-owned text the core never held. */
                 uint8_t finish[64];
-                KayaTx form = {finish, 0};
+                KayaTx form = {finish, 0, sizeof finish};
                 kaya_tx_widget_command(&form, W_FIELD, KAYA_COMMAND_CLEAR);
                 kaya_submit(form.buf, form.len);
             } else if (id == W_REMOVE) {
                 /* Which entry is first is the MODEL's answer, never a
                  * widget's. */
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 if (n_todos == 0) {
                     snprintf(status, sizeof status, "nothing to remove, %u total",
                              n_todos);
@@ -521,12 +521,12 @@ static void *app(void *arg) {
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_STAR) {
                 /* A group at its smallest: one signal write. */
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_undo_group(&tx, 0, kaya_str("star"));
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("starred"));
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_FOCUS) {
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_FOCUS);
                 kaya_submit(tx.buf, tx.len);
             }
@@ -537,7 +537,7 @@ static void *app(void *arg) {
             char name[128];
             const char *step = what(&undo.label, name, sizeof name);
             fold_delta(rec, &undo, draft, sizeof draft);
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             snprintf(status, sizeof status, "undid %s, %u total", step, n_todos);
             kaya_tx_write_signal(&tx, SIG_HISTORY, kaya_str(status));
             /* Keys and notes ride the SAME transaction as the history
@@ -553,7 +553,7 @@ static void *app(void *arg) {
             char name[128];
             const char *step = what(&undo.label, name, sizeof name);
             fold_delta(rec, &undo, draft, sizeof draft);
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             snprintf(status, sizeof status, "redid %s, %u total", step, n_todos);
             kaya_tx_write_signal(&tx, SIG_HISTORY, kaya_str(status));
             key_list(keys_text, sizeof keys_text);

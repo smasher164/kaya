@@ -8,15 +8,26 @@
 #define KAYA_WIRE_H
 
 #include <kaya.h>
+#include <stdio.h>
 #include <string.h>
 
-/* A transaction under construction. The caller owns the storage and
- * submits with kaya_submit(tx.buf, tx.len); overflow is the caller's
- * to size against (records fail loudly core-side, never silently). */
+/* A transaction under construction: the caller's buffer, how far this
+ * transaction has got, and how much there is. THE CALLER SIZES IT and
+ * owns the storage; every packer below REFUSES past `cap` rather than
+ * writing past it, and past cap `len` goes on counting what the whole
+ * transaction WOULD take (snprintf's return), so it is exactly the size
+ * to grow to. Submit only what kaya_tx_ok() accepts; the grow-and-retry
+ * pattern is in DESIGN.md, Binding conventions. */
 typedef struct {
     uint8_t *buf;
     size_t len;
+    size_t cap;
 } KayaTx;
+
+/* Did every record fit? A false answer has already said why on stderr. */
+static inline int kaya_tx_ok(const KayaTx *tx) {
+    return tx->len <= tx->cap;
+}
 
 /* A scalar for keys and values, tagged with a KAYA_VALUE_* type.
  * For parsed strings, s points into the record buffer (not
@@ -63,19 +74,30 @@ static inline KayaVal kaya_blob(uint64_t handle) {
     return v;
 }
 
+/* Room for n more bytes? Past cap `len` keeps counting, so this stays
+ * false for the rest of the transaction — one refusal, not a cascade. */
+static inline int kaya_wire_fits(const KayaTx *tx, size_t n) {
+    return tx->len <= tx->cap && n <= tx->cap - tx->len;
+}
+
 static inline void kaya_wire_u32(KayaTx *tx, uint32_t v) {
-    memcpy(tx->buf + tx->len, &v, 4);
+    if (kaya_wire_fits(tx, 4))
+        memcpy(tx->buf + tx->len, &v, 4);
     tx->len += 4;
 }
 
 static inline void kaya_wire_u64(KayaTx *tx, uint64_t v) {
-    memcpy(tx->buf + tx->len, &v, 8);
+    if (kaya_wire_fits(tx, 8))
+        memcpy(tx->buf + tx->len, &v, 8);
     tx->len += 8;
 }
 
 static inline void kaya_wire_pad(KayaTx *tx) {
-    while (tx->len % 8 != 0)
-        tx->buf[tx->len++] = 0;
+    while (tx->len % 8 != 0) {
+        if (kaya_wire_fits(tx, 1))
+            tx->buf[tx->len] = 0;
+        tx->len++;
+    }
 }
 
 /* Values are self-padded to 8: they concatenate inside bodies. */
@@ -84,22 +106,27 @@ static inline void kaya_wire_value(KayaTx *tx, KayaVal v) {
     switch (v.type) {
     case KAYA_VALUE_BOOL:
         kaya_wire_u32(tx, 1);
-        tx->buf[tx->len++] = (uint8_t)v.i;
+        if (kaya_wire_fits(tx, 1))
+            tx->buf[tx->len] = (uint8_t)v.i;
+        tx->len += 1;
         break;
     case KAYA_VALUE_I64:
     case KAYA_VALUE_BLOB: /* the u64 handle rides in i */
         kaya_wire_u32(tx, 8);
-        memcpy(tx->buf + tx->len, &v.i, 8);
+        if (kaya_wire_fits(tx, 8))
+            memcpy(tx->buf + tx->len, &v.i, 8);
         tx->len += 8;
         break;
     case KAYA_VALUE_F64:
         kaya_wire_u32(tx, 8);
-        memcpy(tx->buf + tx->len, &v.f, 8);
+        if (kaya_wire_fits(tx, 8))
+            memcpy(tx->buf + tx->len, &v.f, 8);
         tx->len += 8;
         break;
     default:
         kaya_wire_u32(tx, v.s_len);
-        memcpy(tx->buf + tx->len, v.s, v.s_len);
+        if (kaya_wire_fits(tx, v.s_len))
+            memcpy(tx->buf + tx->len, v.s, v.s_len);
         tx->len += v.s_len;
     }
     kaya_wire_pad(tx);
@@ -129,16 +156,47 @@ static inline void kaya_wire_variant_schemas(KayaTx *tx, const KayaVariantSchema
 
 static inline size_t kaya_wire_begin(KayaTx *tx, uint16_t kind) {
     size_t start = tx->len;
-    memset(tx->buf + tx->len, 0, 8);
-    memcpy(tx->buf + tx->len + 4, &kind, 2);
+    if (kaya_wire_fits(tx, 8)) {
+        memset(tx->buf + tx->len, 0, 8);
+        memcpy(tx->buf + tx->len + 4, &kind, 2);
+    }
     tx->len += 8;
     return start;
 }
 
+/* The refusal, said once — for the FIRST record that did not fit, since
+ * after it every later record starts past cap. The kind is read back
+ * out of the header this record wrote; when even those 8 bytes were
+ * past cap nothing recorded it, and the second sentence says so rather
+ * than naming a kind it never saw. */
+static inline void kaya_wire_refused(const KayaTx *tx, size_t start) {
+    if (8 <= tx->cap - start) {
+        uint16_t kind = 0;
+        memcpy(&kind, tx->buf + start + 4, 2);
+        fprintf(stderr,
+                "kaya: transaction full — record kind %u needs %zu bytes "
+                "and this caller sized %zu; nothing past cap was written, "
+                "so grow to tx.len when this build ends and build it "
+                "again\n",
+                (unsigned)kind, tx->len, tx->cap);
+    } else {
+        fprintf(stderr,
+                "kaya: transaction full — a record starting at byte %zu "
+                "needs %zu bytes and this caller sized %zu; its 8-byte "
+                "header was itself past cap, so nothing recorded its kind "
+                "and this sentence cannot name it\n",
+                start, tx->len, tx->cap);
+    }
+}
+
 static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     kaya_wire_pad(tx);
-    uint32_t size = (uint32_t)(tx->len - start);
-    memcpy(tx->buf + start, &size, 4);
+    if (tx->len <= tx->cap) {
+        uint32_t size = (uint32_t)(tx->len - start);
+        memcpy(tx->buf + start, &size, 4);
+    } else if (start <= tx->cap) {
+        kaya_wire_refused(tx, start);
+    }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
 #define KAYA_SPEC_HASH 0x2f62f356091de5b6ULL

@@ -34,10 +34,10 @@
 #define F_DONE 1
 
 static void build_scene(void) {
-    /* Overflow is the caller's to size against: the packers write through
-     * a bare pointer and nothing bounds-checks (kaya_wire.h). */
+    /* The caller sizes the buffer and the packers refuse past its cap
+     * (kaya_wire.h; DESIGN.md, Binding conventions). */
     uint8_t buf[4096];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     {
         /* Packed by hand: the generated kaya_tx_set_window_prop closes
@@ -305,7 +305,7 @@ static void *app(void *arg) {
                 if (index >= 0)
                     todos[index].done = payload.i != 0;
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_collection_update_field(&tx, C_TODOS, 0, 0, keys[0],
                                                 F_DONE, 0,
                                                 kaya_bool(payload.i != 0));
@@ -325,7 +325,7 @@ static void *app(void *arg) {
                 todos[n_todos].done = 0;
                 n_todos += 1;
                 uint8_t buf[512];
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 /* AT THE FRONT OF THE BUFFER: everything after it is what
                  * the step did. */
                 kaya_tx_undo_group(&tx, 0, kaya_str(step));
@@ -338,7 +338,7 @@ static void *app(void *arg) {
                  * inside an undo group is REFUSED at apply, destroying
                  * widget-owned text the core never held. */
                 uint8_t finish[128];
-                KayaTx form = {finish, 0};
+                KayaTx form = {finish, 0, sizeof finish};
                 kaya_tx_widget_command(&form, W_FIELD, KAYA_COMMAND_CLEAR);
                 kaya_tx_widget_command(&form, W_FIELD, KAYA_COMMAND_FOCUS);
                 kaya_submit(form.buf, form.len);

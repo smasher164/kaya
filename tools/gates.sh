@@ -208,6 +208,11 @@ GATES = [
     # correctly and no lane can see it. All eight guests overlapped
     # until 2026-08-25.
     ("check-c-ids", ["tools/check-c-ids.sh"], True, ""),
+    # The C floor refuses past its cap instead of smashing past it. Every
+    # in-tree guest sizes its buffers right, so the wire bytes are the
+    # same either way and no lane, scene or capture can see the check at
+    # all — the unchecked memcpy shipped from milestone 0 under green.
+    ("check-c-bounds", ["tools/check-c-bounds.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),
     ("check-detekt", ["tools/check-detekt.sh"], True, ""),
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),

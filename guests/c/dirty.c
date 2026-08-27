@@ -43,7 +43,7 @@ static void window_bool(KayaTx *tx, uint64_t window, uint32_t prop, int on) {
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     /* Titles are byte-compared across platforms, so the dirty mark never
      * goes in the title string — the chrome diverges, the string may
@@ -135,7 +135,7 @@ static void *app(void *arg) {
             if (n_keys != 0)
                 continue;
             if (id == W_EDIT) {
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_DOC, kaya_str("notes and a line"));
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("unsaved"));
                 window_bool(&tx, 0, KAYA_WPROP_DIRTY, 1);
@@ -143,7 +143,7 @@ static void *app(void *arg) {
             } else if (id == W_SAVE) {
                 /* The mark coming DOWN is the half of the lowering a
                  * backend that only ever sets the flag never reaches. */
-                KayaTx tx = {buf, 0};
+                KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("saved"));
                 window_bool(&tx, 0, KAYA_WPROP_DIRTY, 0);
                 kaya_submit(tx.buf, tx.len);
@@ -153,7 +153,7 @@ static void *app(void *arg) {
                 continue;
             alerts += 1;
             live = alerts;
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             /* One record for the whole dialog: window, id, HOW MANY of
              * the two action slots are real, and five Str values.
              * `actions` is 1 here, so action1 rides empty. The cancel
@@ -167,7 +167,7 @@ static void *app(void *arg) {
             if (id != live)
                 continue;
             live = 0;
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             if (choice == KAYA_ALERT_CHOICE_CANCEL) {
                 /* The mark STAYS UP: answering a dialog is not saving.
                  * Touching no prop here is what the last assertion

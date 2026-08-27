@@ -16,7 +16,9 @@ Device: emulator-5554 ONLY. Boot nothing, kill nothing.
 ## 0. What the leg is (read out of tools/android/run-emulator.sh)
 
 - Leg name `editor-go`, lines 1748-1752. APK
+   ```
   `android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk`,
+   ```
   component `dev.kaya.milestone2go/.MainActivity`, `KAYA_SELFTEST editor`.
 - The steps variant is **not** the whole `tools/scenes/editor.steps`: it is
   `scene_script_cut editor close_window expect_dirty` — everything ABOVE the
@@ -72,7 +74,9 @@ leg runs — no more, no less — plus the trailing settle.
 ## 3. Artifacts were verified before anything ran
 
     tools/build-id.sh --verify --component compose \
+   ```
       android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk   rc=0
+   ```
     tools/build-id.sh --verify \
       android/milestone2go/src/main/jniLibs/arm64-v8a/libkaya.so            rc=0
 

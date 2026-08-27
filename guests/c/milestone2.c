@@ -34,7 +34,7 @@
 
 static void build_scene(void) {
     uint8_t buf[2048];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("step 0"));
     kaya_tx_create_signal(&tx, SIG_EXTRAS, kaya_bool(0));
@@ -101,7 +101,7 @@ static void *app(void *arg) {
         if (n_keys == 0 && id == W_STEP) {
             steps += 1;
             uint8_t buf[1024];
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             KayaVal g1 = kaya_str("g1");
             KayaVal g2 = kaya_str("g2");
             if (steps == 1) {
@@ -128,7 +128,7 @@ static void *app(void *arg) {
             kaya_submit(tx.buf, tx.len);
         } else if (n_keys == 2 && id == N_REMOVE) {
             uint8_t buf[512];
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             kaya_tx_collection_remove(&tx, C_ITEMS, &keys[0], 1, keys[1]);
             unsigned *left = &items_in[keys[0].s_len == 2 && keys[0].s[1] == '2'];
             *left -= 1;

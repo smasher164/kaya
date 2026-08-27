@@ -1888,6 +1888,203 @@ wired() {
 }
 wired || status=1
 
+# THE ACCESSIBILITY BUS IS PART OF A LEG'S WIRING, on the one lane that
+# has to supply it. GTK publishes its tree over libdbus, which AUTOLAUNCHES
+# a session bus on X11 and needs no environment variable; the harness READS
+# that tree with the atspi/zbus crate, which finds a session bus ONLY in
+# DBUS_SESSION_BUS_ADDRESS. A plain leg exports none, so publisher and
+# reader land on different busses and every ax read answers "<not in the
+# accessibility tree>" — silently on x11, behind a Gtk-WARNING about
+# autolaunch on wayland. tools/linux/a11y-leg.sh is what reconciles them:
+# `eval $(dbus-launch --sh-syntax)` puts the address in the environment.
+#
+# NOTHING ELSE CAN SEE THIS. The sentence names a missing NODE, so it reads
+# as a scene or lowering bug and sends the reader to the widget; the scene
+# passes on every other platform; and the leg is red from the commit that
+# wired it, so there is no regression to bisect. Measured 2026-08-27 on the
+# canvas leg — the fourteenth ax-asserting scene and the only one wired
+# without a bus (docs/traps.md).
+#
+# The bus-reading METHODS are pinned against gtk.rs rather than listed
+# here alone: a sixth one must name its verb or this gate quietly stops
+# covering the scenes that use it.
+ax_bus() { # [root]
+    python3 - "${1:-.}" <<'PY'
+import pathlib, re, sys
+
+root = pathlib.Path(sys.argv[1])
+# GTK Stage method -> the .steps verb it serves.
+AX_VERB = {
+    "ax": "expect_ax",
+    "ax_hint": "expect_ax_hint",
+    "highlights": "expect_highlights",
+    "selection": "expect_selection",
+    "revealed": "expect_revealed",
+}
+bad = []
+
+gtk = (root / "crates/kaya/src/gtk.rs").read_text().splitlines()
+readers = set()
+for i, line in enumerate(gtk):
+    if "atspi_collect(" not in line and "atspi_range_read(" not in line:
+        continue
+    for j in range(i, -1, -1):
+        m = re.match(r"\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)", gtk[j])
+        if m:
+            readers.add(m.group(1))
+            break
+readers -= {"atspi_collect", "atspi_range_read"}
+# A reader that read nothing agrees with everything.
+if not readers:
+    bad.append("check-steps: no caller of atspi_collect/atspi_range_read found in "
+               "gtk.rs — the bus readers moved and this clause is blind")
+for r in sorted(readers - set(AX_VERB)):
+    bad.append(f'check-steps: gtk.rs method "{r}" reads the accessibility bus but '
+               "AX_VERB does not name its .steps verb — add it, or every scene "
+               "using that verb loses its bus-wiring check")
+
+lines = (root / "tools/linux/run-suites.sh").read_text().splitlines()
+legs = {}
+for i, line in enumerate(lines):
+    m = re.match(r'\s*run\s+"\$proto"\s+([A-Za-z0-9_-]+)', line)
+    if not m:
+        continue
+    chunk, j = line, i
+    while chunk.rstrip().endswith("\\") and j + 1 < len(lines):
+        j += 1
+        chunk += lines[j]
+    legs[m.group(1)] = chunk
+if len(legs) < 100:
+    bad.append(f"check-steps: read only {len(legs)} legs out of run-suites.sh — the "
+               'leg spelling moved away from `run "$proto" <name>` and this clause '
+               "is blind")
+
+scenes = sorted((root / "tools/scenes").glob("*.steps"))
+ax_scenes = []
+for p in scenes:
+    body = p.read_text()
+    verbs = sorted({v for v in AX_VERB.values()
+                    if re.search(r"^\s*" + v + r"\b", body, re.M)})
+    if verbs:
+        ax_scenes.append((p.stem, verbs))
+if not ax_scenes:
+    bad.append("check-steps: no scene asserts any ax-family verb — the verbs were "
+               "renamed and this clause is blind")
+
+for scene, verbs in ax_scenes:
+    mine = {n: c for n, c in legs.items()
+            if n == scene or n.startswith(scene + "-")}
+    if not mine:
+        bad.append(f'check-steps: scene "{scene}" asserts {verbs[0]} but has no '
+                   f'`run "$proto" {scene}-` leg in run-suites.sh')
+        continue
+    for name, cmd in sorted(mine.items()):
+        if "tools/linux/a11y-leg.sh" in cmd:
+            continue
+        bad.append(
+            f'check-steps: linux leg "{name}" runs a scene asserting '
+            f'{", ".join(verbs)} but does NOT go through tools/linux/a11y-leg.sh. '
+            "GTK publishes the tree onto an autolaunched session bus that the "
+            "harness's zbus reader cannot find, so every ax read answers "
+            '"<not in the accessibility tree>" on both protocols '
+            "(the traps entry on the a11y session bus)")
+
+for b in bad:
+    print(b, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+ax_bus || status=1
+
+# Watched negatives. Doctored COPIES of the real files — never the tree —
+# with the substitution count printed, because a perturbation that did not
+# apply is a test that passed vacuously.
+ax_bus_selftest() { # label expect-substring doctor-command
+    local dir rc out label want
+    label="$1"; want="$2"
+    dir="$(mktemp -d)"
+    mkdir -p "$dir/tools/linux" "$dir/crates/kaya/src"
+    cp -R tools/scenes "$dir/tools/scenes"
+    cp tools/linux/run-suites.sh "$dir/tools/linux/run-suites.sh"
+    cp crates/kaya/src/gtk.rs "$dir/crates/kaya/src/gtk.rs"
+    if ! "$3" "$dir"; then
+        echo "check-steps: ax_bus self-test \"$label\" could not doctor its copy" >&2
+        rm -rf "$dir"
+        return 1
+    fi
+    out="$(ax_bus "$dir" 2>&1)"
+    rc=$?
+    rm -rf "$dir"
+    if [ "$rc" -eq 0 ]; then
+        echo "check-steps: ax_bus self-test \"$label\" PASSED a tree it must refuse" >&2
+        return 1
+    fi
+    case "$out" in
+        *"$want"*) return 0 ;;
+    esac
+    echo "check-steps: ax_bus self-test \"$label\" refused, but not for the stated" \
+        "reason (wanted \"$want\"):" >&2
+    printf '%s\n' "$out" >&2
+    return 1
+}
+
+# 1. THE SHIPPED BUG ITSELF: the canvas leg as ee7bc41 wired it, with no
+#    a11y-leg.sh. It must be refused, and it must NAME canvas-rust.
+ax_bus_doctor_canvas() {
+    python3 - "$1" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "tools/linux/run-suites.sh"
+src = p.read_text()
+old = 'run "$proto" canvas-rust env KAYA_SELFTEST=canvas \\\n        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"'
+new = 'run "$proto" canvas-rust env KAYA_SELFTEST=canvas \\\n        "$CARGO_TARGET_DIR/debug/examples/canvas"'
+n = src.count(old)
+print(f"  ax_bus self-test 1: un-wired the canvas leg's bus, {n} substitution(s)")
+if n != 1:
+    sys.exit(1)
+p.write_text(src.replace(old, new))
+PY
+}
+ax_bus_selftest "the canvas leg with no bus" 'leg "canvas-rust"' \
+    ax_bus_doctor_canvas || status=1
+
+# 2. THE SAME DEFECT ON A SCENE NOBODY WOULD SUSPECT: a11y-rust itself.
+ax_bus_doctor_a11y() {
+    python3 - "$1" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1]) / "tools/linux/run-suites.sh"
+src = p.read_text()
+out, n = re.subn(r'(run "\$proto" a11y-rust env KAYA_SELFTEST=a11y \\\n\s*)tools/linux/a11y-leg\.sh ',
+                 r'\1', src)
+print(f"  ax_bus self-test 2: un-wired the a11y-rust leg's bus, {n} substitution(s)")
+if n != 1:
+    sys.exit(1)
+p.write_text(out)
+PY
+}
+ax_bus_selftest "the a11y leg with no bus" 'leg "a11y-rust"' \
+    ax_bus_doctor_a11y || status=1
+
+# 3. A SIXTH BUS READER, unnamed by AX_VERB — the way this gate goes blind.
+ax_bus_doctor_reader() {
+    python3 - "$1" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]) / "crates/kaya/src/gtk.rs"
+src = p.read_text()
+anchor = "fn atspi_collect(want: atspi::Role, index: usize, want_description: bool)"
+n = src.count(anchor)
+print(f"  ax_bus self-test 3: spliced a sixth bus reader, {n} anchor(s)")
+if n != 1:
+    sys.exit(1)
+p.write_text(src.replace(
+    anchor,
+    "fn landmarks(&self, target: crate::harness::Target) -> String {\n"
+    "    atspi_collect(atspi::Role::Landmark, 0, false).unwrap_or_default()\n"
+    "}\n\n" + anchor, 1))
+PY
+}
+ax_bus_selftest "a bus reader AX_VERB does not name" 'method "landmarks"' \
+    ax_bus_doctor_reader || status=1
+
 # THE VERB-FEATURE CROSS-CHECK — the other half of the same predicate.
 # wired() above says when a stub HOLDS legs off a runner; this says when
 # a runner runs legs it must not, i.e. a scene whose verbs demand a

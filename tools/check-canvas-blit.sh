@@ -386,10 +386,49 @@ applied "$hits" "N3c (the Compose density report pinned to 1.0)"
 refuses "$GTK" "$WINUI" "$SWIFTUI" "$T/compose-flat.kt" \
     "no longer reads" "a Compose report that stopped reading the density"
 
+# --- Clause 4: THE INK VERB'S PER-MODE COMPARE, live. ----------------
+# `expect_ink` names both palettes and the HOST picks one, so a mac leg
+# evaluates exactly one of the two arms — which is how a light-only
+# frozen string reached a dark-mode host and reddened a scene nobody had
+# touched (2026-08-27, docs/traps.md). The other arm is reachable only by
+# writing the user's own appearance setting, so both are driven here
+# against the interpreter's real matcher. check-empty-child's shape.
+if [ "$(uname -s)" = "Darwin" ]; then
+    # shellcheck source=tools/lib/swift-toolchain.sh
+    source "$ROOT/tools/lib/swift-toolchain.sh"
+    if [ ! -f target/debug/libkaya.dylib ]; then
+        echo "check-canvas-blit: target/debug/libkaya.dylib is not built — the ink" \
+            "probe links against it. Run tools/gates.sh, which builds what its" \
+            "gates read." >&2
+        exit 1
+    fi
+    # The probe compiles the interpreter's OWN source, so there is no
+    # interpreter artifact in this path to go stale.
+    if ! kaya_swiftc \
+        -import-objc-header crates/kaya/include/kaya.h \
+        "$SWIFTUI" tools/checks/swiftui-ink-modes.swift \
+        -L target/debug -lkaya \
+        -framework AppKit -framework Foundation \
+        -o "$T/swiftui-ink-modes"; then
+        echo "check-canvas-blit: the ink-mode probe did not compile" >&2
+        exit 1
+    fi
+    DYLD_LIBRARY_PATH="$ROOT/target/debug" "$T/swiftui-ink-modes"
+    ink_rc=$?
+    if [ "$ink_rc" -ne 0 ]; then
+        echo "check-canvas-blit: FAIL — the SwiftUI ink-mode probe exited $ink_rc." \
+            "The lines above name each case that did not hold." >&2
+        exit 1
+    fi
+else
+    echo "check-canvas-blit: clause 4 (the SwiftUI ink-mode probe) SKIPPED — it needs" \
+        "macOS. Clauses 1-3 ran."
+fi
+
 if ! offenders="$(check "$GTK" "$WINUI" "$SWIFTUI" "$COMPOSE")"; then
     echo "$offenders"
     echo "check-canvas-blit: FAIL"
     exit 1
 fi
 echo "check-canvas-blit: OK (4 backends: the one rule, the four pixel formats," \
-    "the one swizzle, and the true scale reported)"
+    "the one swizzle, the true scale reported, and both ink modes compared)"

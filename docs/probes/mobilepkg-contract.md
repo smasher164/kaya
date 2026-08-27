@@ -179,7 +179,9 @@ entry; start the core from an Activity via kaya::android_main!"
 
 ### 2.2 What the APK contains — MEASURED
 
+   ```
 `unzip -l android/milestone2/build/outputs/apk/debug/milestone2-debug.apk`
+   ```
 (built 2026-08-07 11:00 by a previous run; not rebuilt here):
 
 ```

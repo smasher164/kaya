@@ -119,6 +119,9 @@ GATES = {
     # appears in a new directory must not be invisible to it, and a key
     # narrower than the walk hands back a stale PASS for exactly that.
     "check-c-ids": ["guests"],
+    # bindings/ for the generated header it reads, tools/checks/ for the
+    # probe it compiles, guests/ for the Makefile flag clause.
+    "check-c-bounds": ["bindings", "guests", "tools/checks"],
     # gradle's :kaya sourceSet reaches ../../bindings/java and nothing
     # else outside android/.
     "check-compose": ["android", "bindings/java"],

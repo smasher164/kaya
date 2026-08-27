@@ -37,7 +37,7 @@
 
 static void build_scene(void) {
     uint8_t buf[2048];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_COLUMN);
 

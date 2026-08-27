@@ -171,7 +171,7 @@ static void drain_posted(void) {
     if (n == 0)
         return;
     uint8_t buf[4096];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
     for (unsigned i = 0; i < n; i++)
         kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(batch[i]));
     kaya_submit(tx.buf, tx.len);
@@ -266,7 +266,7 @@ static int parse_file_dialog_result(const uint8_t *rec, KayaFileResult *out) {
 
 static void build_scene(void) {
     uint8_t buf[1024];
-    KayaTx tx = {buf, 0};
+    KayaTx tx = {buf, 0, sizeof buf};
 
     {
         /* Packed by hand: the generated kaya_tx_set_window_prop closes
@@ -338,7 +338,7 @@ static void *app(void *arg) {
         if (kaya_parse_click(rec, &id, keys, 1, &n_keys)) {
             if (n_keys != 0)
                 continue;
-            KayaTx tx = {buf, 0};
+            KayaTx tx = {buf, 0, sizeof buf};
             if (id == W_OPEN) {
                 /* No filter: the names here carry no extension. */
                 open_dialog = next_dialog++;
@@ -372,7 +372,7 @@ static void *app(void *arg) {
                 if (result.count == 0) {
                     /* The empty answer IS cancel: no platform can
                      * confirm an empty selection. */
-                    KayaTx tx = {buf, 0};
+                    KayaTx tx = {buf, 0, sizeof buf};
                     kaya_tx_write_signal(&tx, SIG_STATUS,
                                          kaya_str("open cancelled"));
                     kaya_submit(tx.buf, tx.len);
@@ -384,7 +384,7 @@ static void *app(void *arg) {
                 if (result.count == 0) {
                     /* Nothing is remembered for a cancel: no
                      * destination, so the next save-as asks again. */
-                    KayaTx tx = {buf, 0};
+                    KayaTx tx = {buf, 0, sizeof buf};
                     kaya_tx_write_signal(&tx, SIG_STATUS,
                                          kaya_str("save cancelled"));
                     kaya_submit(tx.buf, tx.len);

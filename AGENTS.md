@@ -596,6 +596,40 @@ in docs/deferred.md.
    guests/c/reorder.c today: their N_POSTS and N_ITEMS are row COUNTS
    whose numbers collide with real widget ids. An id it cannot fold to
    a number is a finding naming the site, never a skip),
+   `tools/check-c-bounds.sh` (THE C FLOOR REFUSES PAST ITS CAP INSTEAD OF
+   SMASHING PAST IT (ruled 2026-08-26). `KayaTx` was `{buf, len}` — a Go
+   slice header missing its third field — and every packer wrote through
+   the bare pointer, so a long string was an unchecked memcpy into the
+   caller's array. The seven sugar bindings all encode into a growable
+   buffer, so C was the one surface where overflow was undefined
+   behaviour rather than an error (docs/deferred.md's
+   java-record-ceiling entry, which recorded it and left the ruling
+   open). NOTHING ELSE CAN SEE IT: every in-tree guest sizes its buffers
+   correctly, so the wire bytes are identical either way and no scene,
+   lane or capture is any different — the unchecked memcpy shipped from
+   milestone 0 under green lanes. THE PROBE IS WALLED rather than
+   sanitized: tools/checks/c-tx-cap.c mmaps exactly cap writable bytes
+   with the next byte unmapped, so a one-byte overrun is a FAULT and not
+   a redzone heuristic — and AddressSanitizer could not have served
+   anyway, since an -fsanitize=address binary with no error in it hangs
+   before main on this host (docs/traps.md). The negative is the SHIPPED
+   BUG: the same probe built against ee7bc41's pre-cap header, which must
+   die of a signal in both modes where this one prints a sentence. Beside
+   that: a brace-depth parser holding every write through `tx->buf`
+   inside a `kaya_wire_fits()` (a line pattern cannot — kaya_wire_begin's
+   guard is two lines up), the refusal's TWO branches each naming both
+   sizes (the kind is read back out of the record header, so the branch
+   where even those 8 bytes were past cap has no kind to name and says
+   so), and guests/c/Makefile's `-Werror=missing-field-initializers`,
+   which is the wall on the path nobody can avoid: `KayaTx tx = {buf, 0}`
+   still COMPILES against a three-field struct, reads cap 0 and refuses
+   every record at run time, so the build is made to fail naming `cap`.
+   AND NO OUTPUT BYTE MOVED, proven rather than asserted: the probe's
+   repertoire — begin/end, u32, u64, pad, values, variant_schemas and a
+   value of all five tags, which is everything a guest emits — is
+   hexdumped under both headers and compared, 432 bytes identical.
+   Four watched negatives, counts printed, each pointed at the mode its
+   packer actually runs off the end in),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,
