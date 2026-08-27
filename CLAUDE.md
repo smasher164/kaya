@@ -418,6 +418,31 @@ in docs/deferred.md.
    reason that must still match a real site. The watched shadows remove
    each link separately. What no gate holds is whether a PHYSICAL device
    reports the size class the simulator did),
+   `tools/check-canvas-blit.sh` (KAYA RASTERIZES, BACKENDS BLIT — the
+   canvas architecture's one rule (docs/canvas-plan.md §1.1), in the
+   three places NO SCENE CAN FAIL. A backend that interpreted a draw op
+   would draw THE SAME PICTURE, because the hash is taken of the core's
+   raster and expect_ink samples pixels that would still match — so the
+   lowering design the plan killed could reintroduce itself one arm at a
+   time with every lane green. The rule is held statically: the two
+   widget backends may not name the op vocabulary at all, and the two
+   interpreters, which carry private copies of the numbers, may name one
+   only at its definition and in the one list that keeps the compiler
+   from calling them unused. Beside it the PIXEL FORMAT each backend
+   declares, by name — GTK's R8g8b8a8Premultiplied and Android's
+   ARGB_8888 are tiny-skia's layout verbatim, SwiftUI says so with
+   premultipliedLast|byteOrder32Big, and WinUI is the ONE arm that
+   swizzles — because the scene catches a channel swap only at a probe
+   point whose colour is ASYMMETRIC, and a scene sampling greys would
+   pass a red-blue swap on five lanes. And the SCALE: every lane runs at
+   1.0 or at a scale its platform states exactly, so a backend that read
+   the ROUNDED scale, or reported none at all, is invisible to all of
+   them — which is GTK's own trap, since gtk_widget_get_scale_factor
+   "returns the next higher integer value" under fractional scaling.
+   Nine watched negatives on doctored copies, counts printed; two of them
+   caught the gate's own first draft, whose comment-stripping shifted
+   every line number and whose block reader stopped at the first bracket
+   it found rather than the one at the block's indent),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside
@@ -452,7 +477,18 @@ in docs/deferred.md.
    outside every gate — check-symbol-parity is symbol-only and this
    sweep's alternation named neither the prefixes nor the width. It
    refuses a reader that finds fewer than twenty-one, because a census
-   that reads nothing agrees with everything),
+   that reads nothing agrees with everything.
+   AND THE INK TOLERANCE, ruled 2026-08-26: `expect_ink` compares within
+   ±1 PER CHANNEL because a macOS window's backing store carries the
+   DISPLAY's profile and reads the core's D2E3F7 back as D2E2F7 while
+   Android reports the core's own bytes, so no one frozen string can
+   exact-match both (docs/canvas-plan.md §7.2, docs/traps.md). Three
+   harnesses hand-write that number and this PINS ALL THREE AT THE RULED
+   VALUE rather than merely holding them equal — copies drifting APART
+   would eventually redden a lane, while copies drifting TOGETHER makes
+   every ink assertion quieter with nothing anywhere slower or redder.
+   A second clause refuses a tolerance nothing calls. Four watched
+   negatives, counts printed),
    `tools/check-file-modes.sh` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five
@@ -707,7 +743,16 @@ in docs/deferred.md.
    `tools/swift-typecheck.sh` (the guests, the Swift bindings AND the
    SwiftUI interpreter — a gate named after a layer it does not
    compile has burned someone here; docs/traps.md),
-   `tools/java-typecheck.sh`,
+   `tools/java-typecheck.sh` (the binding and every java guest compile —
+   AND, since 2026-08-26, the one clause in that file that is RUN: a
+   record LARGER THAN THE ENCODER'S FIRST BUFFER encodes and reads back.
+   Java's encoder was a fixed `ByteBuffer.allocate(4096)`, which capped
+   EVERY record at 4064 characters of text or 252 wire values — the only
+   binding of the eight that could not grow, and invisible to every gate
+   because the ceiling is a THROW and no scene builds a big record. Its
+   negative removes the growth from a COPY, prints the substitution count
+   and demands BufferOverflowException by name; six refusal branches,
+   all six watched firing, docs/deferred.md's java-record-ceiling entry),
    `tools/check-ambient-tx.sh` (no guest opens a transaction inside a
    handler — the binding already did, and a guest that opens its own is
    CAMOUFLAGE: five of them hid a real Python defect behind green

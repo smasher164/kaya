@@ -1120,6 +1120,10 @@ enum NativeWidget {
     /// `GtkScrolledWindow`, in that order (viewport, control). Both halves
     /// have to be reachable — see `widget` and `control` below.
     Textarea(gtk4::ScrolledWindow, gtk4::TextView),
+    /// The blit's widget: a `GtkPicture` over a `GdkMemoryTexture`, the
+    /// raw-pixel sibling of `Image`'s encoded decode
+    /// (docs/canvas-plan.md §8).
+    Canvas(gtk4::Picture),
 }
 
 impl NativeWidget {
@@ -1141,6 +1145,7 @@ impl NativeWidget {
             NativeWidget::Radio(w) => w.clone().upcast(),
             NativeWidget::Grid(w) => w.clone().upcast(),
             NativeWidget::Textarea(scroller, _) => scroller.clone().upcast(),
+            NativeWidget::Canvas(w) => w.clone().upcast(),
         }
     }
 
@@ -1648,6 +1653,67 @@ fn run_scheduled_report(pending: Rc<std::cell::Cell<bool>>, id: u64) {
     });
 }
 
+/// THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
+/// re-rasters every canvas at them (docs/canvas-plan.md §5, §6). Only
+/// these two numbers cross: no platform colour reaches a drawing.
+///
+/// THE DOUBLE, NEVER THE INTEGER (§5 rule 1). GTK is the one backend
+/// that can hand back a genuine fraction, and
+/// `gtk_widget_get_scale_factor` "returns the next higher integer value"
+/// under fractional scaling — so a 125% display would raster at 2 and
+/// blit a buffer the wrong size. `gdk_surface_get_scale` is the reading.
+///
+/// The appearance is `AdwStyleManager:dark`, which is the SAME reading
+/// the brand accent and `canvas_ink`'s answer take, so the report and
+/// the observation cannot disagree.
+fn presentation_report(core: &mut CoreState) {
+    use gtk4::prelude::{NativeExt, WidgetExt};
+    let scale = core
+        .window
+        .native()
+        .and_then(|native| native.surface())
+        .map_or(crate::canvas::CANONICAL_SCALE, |surface| surface.scale());
+    let mode = if adw::StyleManager::default().is_dark() {
+        crate::canvas::Mode::Dark
+    } else {
+        crate::canvas::Mode::Light
+    };
+    let scene = &mut core.scene;
+    let ops = crate::fault::guard("reporting the window's scale and appearance", || {
+        scene.set_presentation(crate::canvas::Presentation { scale, mode })
+    });
+    for op in ops.unwrap_or_default() {
+        apply(core, op);
+    }
+}
+
+/// `run_scheduled_report`'s try-then-retry, for the same reason: a scale
+/// or appearance notify can arrive in a main-loop turn that already holds
+/// the CORE borrow, and a harness read pumps the context while holding
+/// it. Busy means later, on a TIMEOUT rather than another idle.
+fn schedule_presentation_report() {
+    glib::idle_add_local_once(run_presentation_report);
+}
+
+fn run_presentation_report() {
+    let ran = CORE.with(|slot| match slot.try_borrow_mut() {
+        Ok(mut core) => {
+            if let Some(core) = core.as_mut() {
+                presentation_report(core);
+            }
+            true
+        }
+        Err(_) => false,
+    });
+    if ran {
+        return;
+    }
+    glib::timeout_add_local(std::time::Duration::from_millis(1), || {
+        run_presentation_report();
+        glib::ControlFlow::Break
+    });
+}
+
 /// Re-hang a declared table's header and re-tie its size groups. Runs
 /// after every transaction, because the rows a table is made of arrive
 /// (and move, and leave) in ops of their own: nothing about a stamped
@@ -2020,6 +2086,11 @@ struct CoreState {
     entries: Vec<gtk4::Entry>,
     sliders: Vec<gtk4::Scale>,
     images: Vec<gtk4::Picture>,
+    /// The canvases, and their CORE ids beside them: `canvas_probe` asks
+    /// the core about a widget id, and `kind#index` is the only address
+    /// the harness has (the `column_ids` shape).
+    canvases: Vec<gtk4::Picture>,
+    canvas_ids: Vec<WidgetId>,
     scrolls: Vec<gtk4::ScrolledWindow>,
     progresses: Vec<gtk4::ProgressBar>,
     selects: Vec<gtk4::DropDown>,
@@ -2303,6 +2374,13 @@ fn drain_transactions() {
             for id in tables {
                 reflow_table(core, id);
             }
+            // AND THE PRESENTATION, so the first canvas of the first
+            // transaction rasters at this display's real density
+            // (docs/canvas-plan.md §5). The realize hook and the two
+            // notifies carry every LATER change; this is the belt that
+            // does not depend on which of them ran first. An unchanged
+            // report emits no op.
+            presentation_report(core);
         });
     });
 }
@@ -5040,7 +5118,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Select => core.selects[resolve(t.index, core.selects.len())].clone().upcast(),
         K::Radio => core.radios[resolve(t.index, core.radios.len())].clone().upcast(),
         K::Grid => core.grids[resolve(t.index, core.grids.len())].clone().upcast(),
-        K::Canvas => crate::depth_stub("canvas"),
+        K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
         K::Entry | K::Textarea => {
@@ -5902,6 +5980,46 @@ fn read_stream_to_end(
     );
 }
 
+/// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into
+/// a `GdkMemoryTexture`, shown at the LOGICAL size the raster's own scale
+/// names.
+///
+/// `R8g8b8a8Premultiplied` IS tiny-skia's `Pixmap` layout — R at byte 0,
+/// A at byte 3 — so this arm swizzles nothing. `expect_ink` is what fails
+/// if that ever stops being true.
+///
+/// THE SNAPSHOT IS WHERE THE SCALE GOES (§5 rule 2). A `GdkTexture`
+/// carries none, and `GtkPicture`'s natural size is the texture's PIXEL
+/// size, so a 2x raster would ask layout for twice the viewbox and every
+/// container above it would inherit that. `gtk_snapshot_to_paintable`
+/// takes the intrinsic size as an argument, which is the one place a
+/// logical size can be stated.
+///
+/// A drawing that will not decode is PRESENT AND EMPTY, never absent —
+/// the image arm's rule verbatim (tools/check-empty-child.sh): the
+/// GtkPicture stays in the tree with its paintable cleared.
+fn set_drawing(picture: &gtk4::Picture, width: u32, height: u32, scale: f64, pixels: &[u8]) {
+    let stride = width as usize * 4;
+    let want = stride * height as usize;
+    if width == 0 || height == 0 || !scale.is_finite() || scale <= 0.0 || pixels.len() < want {
+        picture.set_paintable(gtk4::gdk::Paintable::NONE);
+        return;
+    }
+    let bytes = glib::Bytes::from(&pixels[..want]);
+    let texture = gtk4::gdk::MemoryTexture::new(
+        width as i32,
+        height as i32,
+        gtk4::gdk::MemoryFormat::R8g8b8a8Premultiplied,
+        &bytes,
+        stride,
+    );
+    let (lw, lh) = (f64::from(width) / scale, f64::from(height) / scale);
+    let snapshot = gtk4::Snapshot::new();
+    gtk4::prelude::PaintableExt::snapshot(&texture, &snapshot, lw, lh);
+    let sized = snapshot.to_paintable(Some(&gtk4::graphene::Size::new(lw as f32, lh as f32)));
+    picture.set_paintable(sized.as_ref());
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) {
     match op {
         ApplyOp::Create { id, kind, tag } => {
@@ -6172,10 +6290,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
-                // The raw-pixel sibling of the arm above — a GdkMemoryTexture
-                // in a GtkPicture — is the breadth phase
-                // (docs/canvas-plan.md §8, §11 phase 3).
-                WidgetKind::Canvas => crate::depth_stub("canvas"),
+                WidgetKind::Canvas => {
+                    // The raw-pixel sibling of the arm above: a
+                    // GdkMemoryTexture in a GtkPicture, filled by the
+                    // SetDrawing arm (docs/canvas-plan.md §8).
+                    //
+                    // FILL, NEVER CONTAIN: §3.2 rule 2 is stretch to
+                    // fill rather than fit with letterboxing, and
+                    // GtkPicture's default is Contain.
+                    let picture = gtk4::Picture::new();
+                    picture.set_content_fit(gtk4::ContentFit::Fill);
+                    core.canvases.push(picture.clone());
+                    core.canvas_ids.push(id);
+                    NativeWidget::Canvas(picture)
+                }
             };
             {
                 // THE CONTROL: focus resolution picks the DEEPEST registered
@@ -6896,7 +7024,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // `selection_bounds()` normalizes; the marks keep the direction.
             buffer.select_range(&stop, &start);
         }
-        ApplyOp::SetDrawing { .. } => crate::depth_stub("canvas"),
+        ApplyOp::SetDrawing { id, width, height, scale, pixels } => {
+            if let Some(NativeWidget::Canvas(picture)) = core.widgets.get(&id) {
+                set_drawing(&picture.clone(), width, height, scale, &pixels.0);
+            }
+        }
         ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {
             // kaya's own header row over the For's stamped children
             // (docs/tables-plan.md decision 6). The whole bar is ONE
@@ -8276,6 +8408,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                         &error,
                     );
                 }
+                // The appearance bit is the ONE thing a platform gives a
+                // drawing (docs/canvas-plan.md §6), and the core
+                // re-rasters on it exactly as it does on a scale change.
+                schedule_presentation_report();
             });
         }
         let primary_chrome = {
@@ -8283,6 +8419,25 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             install_nav_chrome(window.upcast_ref::<gtk4::Window>(), 0)
         };
         window.present();
+        // THE SCALE, once the surface exists to be asked (§5): a window
+        // has no GdkSurface before it is realized, and a canvas declared
+        // in the first transaction must already be rastering at the right
+        // density. The notify keeps it true across a monitor move, which
+        // is the transition every core-buffer framework gets wrong.
+        {
+            use gtk4::prelude::{IsA, NativeExt, WidgetExt};
+            fn watch_presentation(widget: &impl IsA<gtk4::Widget>) {
+                if let Some(surface) = widget.as_ref().native().and_then(|n| n.surface()) {
+                    surface.connect_scale_notify(|_| schedule_presentation_report());
+                }
+                schedule_presentation_report();
+            }
+            if window.is_realized() {
+                watch_presentation(&window);
+            } else {
+                window.connect_realize(watch_presentation);
+            }
+        }
 
         #[cfg(feature = "harness")]
         if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
@@ -8428,6 +8583,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 entries: Vec::new(),
                 sliders: Vec::new(),
                 images: Vec::new(),
+                canvases: Vec::new(),
+                canvas_ids: Vec::new(),
                 scrolls: Vec::new(),
                 progresses: Vec::new(),
                 selects: Vec::new(),
@@ -10305,7 +10462,7 @@ impl crate::harness::Stage for GtkStage {
                 K::Radio => core.radios.iter().map(|w| w.clone().upcast()).collect(),
                 K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
                 K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
-                K::Canvas => crate::depth_stub("canvas"),
+                K::Canvas => core.canvases.iter().map(|w| w.clone().upcast()).collect(),
             };
             find(widgets, &id)
         })
@@ -11286,14 +11443,106 @@ impl crate::harness::Stage for GtkStage {
         read_app_icon(&probe)
     }
 
-    /// The GdkMemoryTexture blit is the breadth phase (docs/canvas-plan.md
-    /// §8, §11 phase 3).
-    fn canvas_probe(&self, _target: crate::harness::Target) -> String {
-        crate::depth_stub("canvas")
+    /// The canonical raster, asked of the CORE (docs/canvas-plan.md §7.1)
+    /// — every backend answers the same way, because the point is that
+    /// five platforms' libkaya drew the same picture.
+    fn canvas_probe(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(target.index, core.canvas_ids.len()) else {
+                return format!("<this window holds {} canvases>", core.canvas_ids.len());
+            };
+            core.scene
+                .canvas_probe(core.canvas_ids[i])
+                .unwrap_or_else(|| "<the core holds no drawing for this canvas>".to_owned())
+        })
     }
 
-    fn canvas_ink(&self, _target: crate::harness::Target, _points: &str) -> String {
-        crate::depth_stub("canvas")
+    /// THE BLIT, sampled off the window's OWN RENDERED PIXELS through the
+    /// toplevel's real GSK renderer (§7.2) — the mac's `cacheDisplay`
+    /// move, in this platform's spelling, and the only canvas read that
+    /// fails when the buffer never reached the GtkPicture.
+    ///
+    /// Every angle-bracketed answer says what it MEASURED (invariant 3),
+    /// never a guess about which layer lost the picture.
+    fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
+        let points = points.to_owned();
+        Self::on_main(move |core| {
+            use gtk4::prelude::{NativeExt, PaintableExt, WidgetExt};
+            // THE APPEARANCE RIDES THE ANSWER (§6): the display raster
+            // uses the platform's mode and kaya's palette has two, so a
+            // bare colour string would be a frozen expectation quietly
+            // depending on the host's appearance setting. THE SAME
+            // READING the presentation report sends, so the report and
+            // the answer cannot disagree.
+            let mode = if adw::StyleManager::default().is_dark() { "dark" } else { "light" };
+            let wanted = crate::harness::probe_points(&points);
+            if wanted.is_empty() {
+                return format!("<no probe points in {points:?}>");
+            }
+            let Some(i) = crate::harness::try_resolve(target.index, core.canvases.len()) else {
+                return format!("<this window holds {} canvases>", core.canvases.len());
+            };
+            let picture = core.canvases[i].clone();
+            while glib::MainContext::default().iteration(false) {}
+            let Some(native) = picture.native() else {
+                return "<the canvas is in no toplevel: nothing has been mounted>".to_owned();
+            };
+            let root = native.clone().upcast::<gtk4::Widget>();
+            let Some(bounds) = picture.compute_bounds(&root) else {
+                return "<the canvas has no bounds inside its toplevel>".to_owned();
+            };
+            if bounds.width() < 1.0 || bounds.height() < 1.0 {
+                return format!(
+                    "<the canvas laid out at {}x{} inside its toplevel>",
+                    bounds.width(),
+                    bounds.height()
+                );
+            }
+            let Some(renderer) = native.renderer() else {
+                return "<this toplevel has no GSK renderer, so nothing is drawn yet>".to_owned();
+            };
+            let paintable = gtk4::WidgetPaintable::new(Some(&root));
+            let snapshot = gtk4::Snapshot::new();
+            let (rw, rh) = (f64::from(root.width()), f64::from(root.height()));
+            paintable.snapshot(&snapshot, rw, rh);
+            let Some(node) = snapshot.to_node() else {
+                return format!("<the toplevel snapshotted to nothing at {rw}x{rh}>");
+            };
+            let shot = renderer.render_texture(&node, None);
+            // THE RATIO IS MEASURED, NOT ASSUMED: the texture's pixel
+            // size over the toplevel's logical size is whatever this
+            // display's scale turned out to be, and reading it here means
+            // the sampling cannot be wrong about a number nobody checked.
+            let (tw, th) = (shot.width(), shot.height());
+            if tw < 1 || th < 1 || rw < 1.0 || rh < 1.0 {
+                return format!("<the toplevel rendered to {tw}x{th} pixels for {rw}x{rh}>");
+            }
+            let (sx, sy) = (f64::from(tw) / rw, f64::from(th) / rh);
+            let stride = tw as usize * 4;
+            let mut buf = vec![0u8; stride * th as usize];
+            gtk4::gdk::prelude::TextureExtManual::download(&shot, &mut buf, stride);
+            let samples = wanted
+                .iter()
+                .map(|(px, py)| {
+                    let x = ((f64::from(bounds.x()) + f64::from(bounds.width()) * px / 100.0) * sx)
+                        as i32;
+                    let y = ((f64::from(bounds.y()) + f64::from(bounds.height()) * py / 100.0) * sy)
+                        as i32;
+                    let x = x.clamp(0, tw - 1) as usize;
+                    let y = y.clamp(0, th - 1) as usize;
+                    let at = y * stride + x * 4;
+                    // gdk_texture_download hands back A8R8G8B8 in NATIVE
+                    // byte order (the format cairo calls ARGB32), and it
+                    // is PREMULTIPLIED — which is the same number the
+                    // mac's sampler reports, since compositing a
+                    // premultiplied pixel over black is the identity.
+                    let px = u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
+                    format!("{:02X}{:02X}{:02X}", (px >> 16) & 0xff, (px >> 8) & 0xff, px & 0xff)
+                })
+                .collect::<Vec<_>>()
+                .join("/");
+            format!("{mode} {samples}")
+        })
     }
 
     fn inset(&self) -> String {
@@ -11634,7 +11883,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Scroll => nth!(core.scrolls),
         K::Row => nth!(core.rows),
         K::Column => nth!(core.columns),
-        K::Canvas => crate::depth_stub("canvas"),
+        K::Canvas => nth!(core.canvases),
     }
 }
 

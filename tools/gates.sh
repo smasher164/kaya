@@ -122,6 +122,13 @@ GATES = [
     # device can name the one that drew it (docs/traps.md). The rule is a
     # pure function, driven here through its whole truth table.
     ("check-table-tier", ["tools/check-table-tier.sh"], True, ""),
+    # KAYA RASTERIZES, BACKENDS BLIT (docs/canvas-plan.md §1.1): a
+    # backend that interpreted an op would draw the same picture, a wrong
+    # pixel format survives a symmetric probe point, and a rounded scale
+    # is invisible on every lane this project runs.
+    ("check-canvas-blit", ["tools/check-canvas-blit.sh"], False,
+     "no input set is declared for it in build-id.sh's GATES; same shape as "
+     "check-tx-liveness below"),
     ("check-wheel", ["tools/check-wheel.sh"], True, ""),
     ("check-abort", ["tools/check-abort.sh"], True, ""),
     ("check-tx-liveness", ["tools/check-tx-liveness.sh"], False,

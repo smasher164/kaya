@@ -15,6 +15,18 @@ row 11, §6's two-mode chart palette. He ruled the architecture (rows
 researched recommendation he took, and it is written where he can veto
 it without disturbing anything else.
 
+AMENDED 2026-08-26, AFTER THE DEPTH SLICE (base e3db8fe), with five
+more rulings — rows 12-16. They answer what the depth slice and the
+animation research round turned up, rather than revising rows 1-11, and
+only one of them supersedes ratified text: row 12's size policy strikes
+§3.2's rules 2 and 3, §3.3's antialiasing exclusion loosens under row
+14, and §12 loses its rejection of a resize occurrence. Everything a
+ruling touches is amended IN PLACE and marked with the date, and the two
+sections they need are APPENDED as §15 and §16 rather than inserted,
+because docs/deferred.md cites this file by section number (§1.4, §3.2
+rule 3, §7.1, §8, §11, §12) and renumbering would silently re-point
+every one of them at the wrong text.
+
 Canvas is the last of the three features the portfolio dashboard exists
 to force (docs/portfolio-plan.md §0, ratified 2026-08-21, order ruled
 2026-08-22: TABLES -> VIRTUALIZATION -> CANVAS). Both predecessors are
@@ -42,6 +54,11 @@ came out of the second research round and reshaped everything above it.
 | 9 | **No Win2D, and no new Windows dependency at all** (menu Q5 DELETED — under the buffer there is nothing for it to do). The pinning-gate work that question uncovered stays landed (c98e4c6). | RULED 2026-08-26 |
 | 10 | **A drawing is not undoable** (menu Q6), on `set_column_headers`' reasoning: a drawing renders app state, it is not state. | RULED 2026-08-26 |
 | 11 | kaya owns a two-mode (light/dark) chart palette resolved in the core: semantic paint roles, uniform across platforms per mode, only the mode bit crosses. | ADOPTED RECOMMENDATION 2026-08-26 — §6 |
+| 12 | **A drawing is a FUNCTION OF SIZE, and `scale`/`fixed` are DECLARATIONS THAT THE FUNCTION IS CONSTANT.** One primitive: the core hands a canvas the size it was given and takes back an op list, delivered as a REDRAW OCCURRENCE with latest-wins mailbox semantics and frame dropping. Declaring `scale` or `fixed` says the drawing does not depend on the size, which licenses the core to answer a size change by RE-RASTERIZING under a transform with no round trip — uniform-fit letterbox for `scale`, never-adapt letterbox for `fixed`. Default is `scale`. | RULED 2026-08-26 (post-depth) — §3.2.1 |
+| 13 | **Literal RGBA is the paint FLOOR; the semantic roles are mode-aware sugar over kaya's palette.** A literal quadruple is trivially byte-identical, so admitting it costs the primary observable nothing; the roles keep the job only they can do, which is being legible in both appearances. And the palette's VALUES are tweakable pixels — a colour edit is never again a ruling. | RULED 2026-08-26 (post-depth) — §3.4 |
+| 14 | **Animation is IN SCOPE of the canvas**, games and simulations included. The display list is not the ceiling — a full-list resubmit measured 0.019ms, 0.1% of a frame — RASTER is, and the levers are ordered: band tiling, a per-canvas aliasing knob, damage tracking, `vello_cpu` as a standing evaluation, a GPU display path reserved and not planned. | RULED 2026-08-26 (post-depth) — §15 |
+| 15 | **That 0.019ms is a RUST number.** Python and Java get measured before breadth hardens, and the PACKED ENCODING LANE (§3.1's named escalation) triggers PER BINDING on measured need, with its layout GENERATOR-EMITTED rather than hand-copied into eight files. | RULED 2026-08-26 (post-depth) — §3.1 |
+| 16 | **The zero-copy arm was never a second canvas.** It is the IMAGE widget learning a high-rate update path for content kaya did not draw — video, an external engine. The canvas/image pair is the whole surface. | RULED 2026-08-26 (post-depth) — §16 |
 
 **What the 2026-07-22 ruling keeps and what it loses.** docs/deferred.md's
 Canvas entry (Akhil, 2026-07-22) said: display list rather than
@@ -247,6 +264,18 @@ and none of the registry-versus-declaration split every other
 interactive surface needs. The eight-language cost is a constructor and
 a drawing scope, and nothing else.
 
+**AMENDED 2026-08-26 (post-depth, ruling 12): one occurrence, and it is
+not an input.** The size policy's `redraw` mode IS a handler — the core
+calls the guest with a size — so the paragraph above holds for the two
+constant modes and not for the third. What does not change: POINTER
+events stay deferred, so the canvas still has no input surface, and the
+DEFAULT mode (`scale`) still needs no handler at all, which is why the
+depth slice's guests and the scene keep working untouched. What the
+redraw mode costs is the ordinary handler machinery every other
+interactive surface already pays for, scoped the way this tree scopes
+handlers — to the entity that creates it, at the canvas, beside its
+drawing scope, never an app-global callback taking a widget id.
+
 ### §2.2 The spellings
 
 Each is the language's own idiom for a scope, taken from the guest that
@@ -401,6 +430,34 @@ bytes are the named escalation, admitted on an artifact where the
 encoding cost is MEASURED: a hundred-thousand-point scientific plot,
 not a chart.)
 
+**AMENDED 2026-08-26 (post-depth, ruling 15): what is measured, and what
+the escalation is allowed to look like.** §15's animation measurement
+retired the worry that the tagged stream is too slow to animate — a
+2886-op list decodes in 0.019ms, 0.1% of a frame — but it retired it FOR
+ONE BINDING. Three clauses follow, and the third is the one with teeth:
+
+- **The number is Rust's.** It was measured on a stream the Rust binding
+  builds and the core decodes; the other seven marshal tagged values
+  through their own runtimes, and none of them is measured. PYTHON AND
+  JAVA GET MEASURED BEFORE BREADTH HARDENS — Python because it is the
+  forcing artifact's own language (guests/python/portfolio.py) and the
+  slowest plausible marshal in the set, Java because its boxing crosses
+  a JNI boundary per value. Measuring after phase 3 would mean measuring
+  eight surfaces that are already frozen in place.
+- **The escalation triggers PER BINDING, on that binding's own measured
+  need.** The packed lane is a second carrier for the same record, not a
+  wire migration: a binding that measures a marshal it cannot afford
+  opts into it while the rest keep the tagged stream, and the core
+  decodes both. Nothing about the op vocabulary moves, which is what
+  keeps this a lane rather than a redesign.
+- **The layout is GENERATOR-EMITTED, never hand-copied.** A binary
+  layout hand-written into eight bindings is the file-modes trap exactly
+  (`tools/check-file-modes.sh`: five hand-written sites decoding one
+  spec number, and a renumber that empties the user's file with no error
+  anywhere). The offsets and widths come out of crates/kaya/src/spec.rs
+  through the generators like every other wire surface, or the lane does
+  not open.
+
 ### §3.2 Coordinates: the viewbox
 
 **This is the decision that makes a byte-shared canvas scene possible at
@@ -427,17 +484,121 @@ Three rules make the mapping well defined:
    whose content size is app-decided, and the viewbox supplies it
    without inventing a size property that fourteen other kinds would
    then have to answer for.
-2. **Stretch to fill, not fit with letterboxing.** Evenly spaced things
-   stay evenly spaced.
-3. **Positions scale; stroke widths and text sizes do not.** A width and
-   a font size are in device-independent points and are applied after
-   the transform, so a 1pt gridline is 1pt at every size, an 11pt label
-   is 11pt at every size, and a non-uniform stretch never produces an
-   elliptical pen or a squashed glyph.
+2. ~~**Stretch to fill, not fit with letterboxing.** Evenly spaced
+   things stay evenly spaced.~~ SUPERSEDED 2026-08-26 by §3.2.1: no mode
+   stretches non-uniformly any more.
+3. ~~**Positions scale; stroke widths and text sizes do not.** A width
+   and a font size are in device-independent points and are applied
+   after the transform, so a 1pt gridline is 1pt at every size, an 11pt
+   label is 11pt at every size, and a non-uniform stretch never produces
+   an elliptical pen or a squashed glyph.~~ SUPERSEDED 2026-08-26 by
+   §3.2.1. Rule 3 was a MITIGATION for rule 2's hazard, and it goes with
+   the hazard: under a uniform fit there is no elliptical pen to
+   prevent, and holding the pen at 1pt while positions grew would make
+   `scale` a third thing that is neither the same drawing nor a redrawn
+   one.
 
-A pleasant consequence: the canvas never needs to know its own size, so
-it needs no resize occurrence, which is why deferring pointer and
-geometry events costs nothing here.
+~~A pleasant consequence: the canvas never needs to know its own size,
+so it needs no resize occurrence, which is why deferring pointer and
+geometry events costs nothing here.~~ SUPERSEDED 2026-08-26: the round
+trip is now the primitive and the constant modes are the ones that avoid
+it (§3.2.1). Deferring POINTER events still costs nothing here.
+
+### §3.2.1 The size policy: one primitive, two declarations that it is constant
+
+**RULED 2026-08-26 (post-depth, ruling 12).** This is the framing the
+maintainer imposed on what had been three unrelated-looking questions —
+what a canvas does when layout gives it more room, how a chart learns
+its width, and how a canvas refuses to be stretched. They are one
+question with one answer.
+
+**The one primitive: a drawing is a FUNCTION OF SIZE.** The core hands a
+canvas the size it was assigned and takes back the op list drawn for
+that size. That is delivered as a REDRAW OCCURRENCE, with two
+properties named in the ruling because they are what make a callback on
+the layout path safe:
+
+- **Latest-wins mailbox semantics.** The pending redraw request is a
+  single entry that a newer size REPLACES rather than queues behind. A
+  drag-resize storm collapses to the newest size, and a guest slower
+  than the resize can never stuff a queue.
+- **Frame dropping.** Sizes the guest never caught up with are dropped,
+  not drawn late. The alternative is the buffer-stuffing defect
+  Android's frame pacing library exists to name (§15).
+
+Mailbox is Vulkan's word for exactly this — one entry, replaced rather
+than queued, with the images of the prior entry released for reuse — and
+§15 carries the caution that came with it: mailbox belongs at the
+HANDOFF, not as a free-running producer's clock.
+
+**`scale` and `fixed` are DECLARATIONS ABOUT THAT FUNCTION, not two more
+mechanisms.** A guest that declares either has said the function is
+CONSTANT — this drawing does not depend on the size it is given — and a
+constant function needs no round trip. That licenses the core to answer
+a size change entirely by itself, re-rasterizing the op list it already
+holds under a transform:
+
+| mode | what the core does with a size change | what it is for |
+| --- | --- | --- |
+| `scale` (default) | UNIFORM-FIT LETTERBOX: fit the viewbox into the assigned track at one scale factor for both axes, centred, leftover as margin — and RE-RASTERIZE at that factor rather than blit the old pixels bigger | a drawing that is the same drawing at any size. Charts that do not re-tick, diagrams, sparklines, marks |
+| `fixed` | NEVER-ADAPT LETTERBOX: rasterize at the viewbox and place it in the track without adapting to it at all | REFUSING COERCION from a stretch-aligned parent — the drawing that must be exactly this big whatever the row does with it |
+| `redraw` | ask the guest (the primitive above), and rasterize what comes back at the size that was asked about | charting and games: everything whose CONTENT depends on the width, and everything with a clock |
+
+**Why `scale` is the default: self-sufficiency.** An app that declares
+nothing gets a canvas that is correct at every size, wires no handler,
+and cannot blur — the mode that needs the least from the app is the one
+that must be free. The other two are opt-ins that each buy something
+specific: `redraw` buys size-dependent content at the cost of a
+callback, `fixed` buys refusal at the cost of empty margin. It also has
+to be this way round mechanically: the default is the only mode
+available to a guest that has registered no handler, so a default of
+`redraw` would make the no-handler case undefined rather than simple.
+
+**RE-RASTERIZE, not rescale, and that is the whole point of the
+letterbox rule.** A core-owned buffer scaled up by the platform is a
+blurry drawing, and the web has been teaching this workaround for years:
+MDN, on two separate pages, tells authors "You may find that canvas
+items appear blurry on higher-resolution displays" and hands them the
+`devicePixelRatio` recipe by hand — set `canvas.width` to the CSS size
+times the ratio, then `ctx.scale(dpr, dpr)`. kaya is on the other side
+of that line by construction, because the core owns the rasterizer and
+already re-rasters on a scale change (§5); the size policy just says the
+same thing about the TRACK that §5 says about the SCALE. The web needed
+a whole new measurement box to do it accurately —
+`ResizeObserverEntry.devicePixelContentBoxSize`, which "returns an array
+containing the size in device pixels of the observed element" — and kaya
+has that number already, since the backend reports the scale and layout
+knows the track.
+
+**The web lineage, and where kaya lands in it.** Three of the four
+citations are the same lesson from different directions:
+
+- **An intrinsic size, declared by the element.** The HTML canvas has
+  one: "The `width` attribute defaults to 300, and the `height`
+  attribute defaults to 150" — attribute defaults, in the spec's own
+  framing, not a computed intrinsic size. Rule 1's viewbox is kaya's
+  version, with the improvement that it is REQUIRED rather than
+  defaulted, so no canvas is ever silently 300x150.
+- **The blur footgun** (above) — what an intrinsic size costs when the
+  presented size and the backing store are managed separately by hand.
+- **Chart.js `responsive`, default `true`: "Resizes the chart canvas
+  when its container does."** This is the charting world's answer, and
+  it is `redraw`: the chart re-lays-out for the new width rather than
+  scaling its old pixels. Note what it also carries — `maintainAspectRatio`,
+  default `true`, and a documented requirement that the container be
+  "relatively positioned and dedicated to the chart canvas only". A
+  library that has to reach out and constrain its parent is the shape of
+  the problem `fixed` solves inside a toolkit that owns its own layout.
+
+**What each mode costs the byte-shared scene, stated before anyone
+freezes a hash.** `scale` and `fixed` keep the op stream a pure function
+of the guest's declaration, so §7.1's frozen hash is one string on five
+platforms exactly as ratified. `redraw` does NOT: its op stream is a
+function of the assigned track, and the track legitimately differs per
+platform, so a redraw canvas cannot have a frozen drawing hash at all
+(§7.1's amendment says what a scene may assert about one instead). That
+is not an argument against `redraw` — it is the reason the DEFAULT had
+to be a constant mode.
 
 ### §3.3 The op vocabulary (v1)
 
@@ -482,10 +643,16 @@ should be bought with an artifact.
 | join and cap control | same shape: the miter limit is the SVG ratio in three platform APIs and half the stroke thickness in a fourth |
 | blend modes | a per-primitive blend vocabulary is a large surface with no artifact asking for it |
 | gradients | interpolation colour space is a real decision. If gradients arrive they must be pre-sampled into many stops in ONE nominated space |
-| antialiasing control | the buffer is antialiased, always, by one rasterizer. A switch would be a second raster path to keep byte-identical |
+| antialiasing control | the buffer is antialiased, always, by one rasterizer. A switch would be a second raster path to keep byte-identical — ~~and that is the objection~~ AMENDED 2026-08-26 (ruling 14): the objection does not survive the knob being PER CANVAS and DECLARED, since a declared knob rides the op stream and is therefore the same on every platform, and the buffer stays byte-identical per canvas. Still out of v1; now named as animation lever (ii) rather than refused (§15) |
 | images inside a drawing | the Image widget exists; a canvas that composites blobs is a second asset story |
 
-### §3.4 Paint is a closed vocabulary, not a colour word
+### §3.4 Paint: a role vocabulary over a literal floor
+
+**TITLE AMENDED 2026-08-26 (post-depth, ruling 13.)** This section was
+ratified as "Paint is a closed vocabulary, not a colour word", and
+everything below is still the argument FOR the roles — what changed is
+that literal RGBA is admitted underneath them, so the roles are the
+sugar tier rather than the only tier.
 
 Ops name a **paint role**, not RGB. The roles resolve in the core, per
 appearance mode (§6).
@@ -517,8 +684,51 @@ this tree:
 v1 roles, and they are chart roles because the artifact is a chart:
 `series` (the line), `series_fill` (the area under it), `grid`
 (gridlines), `axis` (axis lines and tick labels), and `ground` (the plot
-background). Literal RGB is the named escalation, admission gated on an
-artifact, exactly as the blob follow-ups in docs/deferred.md are.
+background). ~~Literal RGB is the named escalation, admission gated on
+an artifact, exactly as the blob follow-ups in docs/deferred.md are.~~
+
+**AMENDED 2026-08-26 (post-depth, ruling 13): the literal is the floor,
+not the escalation.** The gate is gone, and the reason it could go is
+the reason it was there. An escalation gate exists to protect something;
+this one was protecting the primary observable, and A LITERAL RGBA DOES
+NOT THREATEN IT — a quadruple of bytes is the same number in eight
+languages on five platforms, so a drawing painted with literals hashes
+identically by construction. What §6 refuses is a PLATFORM colour, whose
+inputs differ per platform; that argument is untouched and is a
+different argument from this one. Four consequences, and the third is
+the one a future session would otherwise get wrong:
+
+- **The roles keep the one job a literal cannot do.** They are
+  MODE-AWARE: `series` is legible in both appearances because the core
+  resolves it per mode. A guest that writes a literal has taken
+  responsibility for both modes itself, which is a reasonable thing to
+  let an app do and a bad thing to make it do.
+- **This is the tier shape the tree already has** (invariant 5): the
+  sugar tier spells intent, the floor spells the machine. `Paint::Series`
+  is to an RGBA quadruple what `tx.canvas(...)` is to
+  `kaya_tx_create_widget(&tx, W_CHART, KAYA_KIND_CANVAS)`.
+- **"Sugar over the palette" does NOT mean the binding expands a role to
+  numbers.** The role stays on the wire and resolves in the core,
+  because the appearance bit is not known when the guest declares — a
+  binding-side expansion would freeze one mode's colours at declaration
+  time and quietly break dark mode. "Sugar" describes the guest surface.
+- **The palette's VALUES are tweakable pixels, never again a ruling.**
+  Editing `0x1C71D8FF` is a colour edit plus a re-frozen hash and a
+  capture round; it is not a re-ratification and nobody needs to reopen
+  §6 to do it. What was adopted in §6 is the two-mode ARCHITECTURE — one
+  bit crosses, the core resolves — and not the specific hexes in
+  crates/kaya/src/canvas.rs's tables.
+
+**What this costs mechanically is named here and NOT ruled here.** The
+paint operand is an `i64` today, validated against `wire::PAINTS` by
+`enum_operand`, and crates/kaya/src/spec.rs's paint enum carries a
+comment reading "PAINT IS A ROLE, NEVER RGB (§3.4) ... Literal RGB is
+the named escalation, gated on an artifact" — that comment is the
+sentence this ruling overturns and the first site to move. HOW a literal
+is spelled in the stream (a second operand form, a tagged value, its own
+op) is an encoding decision for the implementing slice, and whatever it
+picks lands in the same three hand-copied constant tables
+`tools/check-verbs.sh` already censuses at twenty-one canvas numbers.
 
 ### §3.5 The core validates, and refuses before rasterizing
 
@@ -535,6 +745,30 @@ size; an align or baseline outside the enum; a newline inside a text
 string; and a font asset the resolver cannot answer for, which raises
 the resolver's OWN sentence (§4.2) rather than a second vocabulary for
 the same failure.
+
+**AMENDED 2026-08-26 (the raster-time font refusal).** One refusal is
+NOT before rasterizing, and it has to be: a font asset that resolved at
+declaration and does NOT resolve when the run is drawn. `validate`
+cannot speak for the second answer — the raster resolves the name AGAIN
+— and the old behaviour dropped the run, which moves §7.1's frozen hash
+and NOTHING else (docs/traps.md, measured `c4fa15caf170a5ff`). So the
+raster refuses too, with the same surface: the sentence names the asset
+(the reserved name, or the app's asset id) and the run's text, carries
+the resolver's own words, and reaches the leg's verdict through
+`crate::fault::guard` exactly as a §3.5 refusal does. IT REFUSES AT THE
+TEXT OP, not at the `font` op — a face nothing draws with drops nothing,
+and refusing there would refuse a correct picture — and it refuses AS A
+UNIT: the panic precedes the first glyph and the unwind takes the pixmap,
+so no half-drawn buffer reaches a backend. The bytes are parsed in
+`Face::open` for the same reason, since an asset that resolves and is not
+a font dropped the run just as silently.
+
+**AMENDED 2026-08-26 (ruling 13).** "A paint role outside the
+vocabulary" stays a refusal for a ROLE and stops being the whole rule:
+whatever spelling the literal floor takes, the operand admits two
+readable things and the refusal has to say which one it could not read.
+A single sentence covering both is a diagnostic that cannot
+discriminate, which is the shape `tools/check-diagnostics.sh` refuses.
 
 ### §3.6 What it costs
 
@@ -842,6 +1076,15 @@ existing appearance handling already uses (the same signal the styling
 milestone's dark-mode work reads). What does not cross: any platform
 colour, for a canvas.
 
+**AMENDED 2026-08-26 (post-depth, ruling 13): what is adopted here is
+the ARCHITECTURE, not the hexes.** The palette's values are tweakable
+pixels. Changing one is a colour edit, a re-frozen hash and a capture
+round — never a re-ratification, and nobody needs a ruling to do it.
+This is worth writing down because a value that arrived inside an
+ADOPTED RECOMMENDATION reads as ratified to the next session, and phase
+4 is supposed to look at these numbers hardest, in both modes, and
+change the ones that are wrong.
+
 ## §7 — The harness: what a scene may assert about a drawing
 
 This section is the one the architecture ruling rebuilt. Under lowering
@@ -877,6 +1120,23 @@ backstop rather than the whole story.
 **What it does NOT prove, said plainly: that anything reached the
 screen.** The hash reads the raster, not the window. §7.2 is what fails
 when the blit dropped.
+
+**AMENDED 2026-08-26 (post-depth, ruling 12): the size mode is a sixth
+input, and one of its values forfeits this observable.** The table above
+stays true for `scale` and `fixed`, whose op streams are pure functions
+of the guest's declaration — which is why the depth slice's frozen hash
+is unaffected and why the default had to be a constant mode. A `redraw`
+canvas is different in kind: its op stream is a function of the ASSIGNED
+TRACK, the platforms legitimately assign different tracks, and no amount
+of care makes a track-dependent stream hash to one string. So a redraw
+canvas HAS NO FROZEN DRAWING HASH, and what a scene asserts about one is
+§7.2's pair — the normalized ink bounds, which are fractions of the
+canvas's own box and therefore survive a per-platform track, and the ink
+probes, which sample flat interiors. Say this out loud in the scene:
+the canvas scene's test figure stays a constant-mode canvas so the hash
+keeps doing its work, and any scene that opts a canvas into `redraw`
+trades the primary observable for the secondary ones deliberately,
+rather than discovering on five lanes that its string will not freeze.
 
 **Two disciplines it inherits.**
 
@@ -965,12 +1225,77 @@ item is a rule about the scene's test figure, not about the app:
   be off by one somewhere and look like a rasterizer bug.
 
 Every backend has a route to its own pixels: `NSView.cacheDisplay` or
-SwiftUI's `ImageRenderer` on Apple, `RenderTargetBitmap` on WinUI, a
-`GdkTexture` download on GTK, `PixelCopy` or a bitmap draw on Compose.
-Each has caveats (WinUI's cannot render content outside the visual tree;
-a re-render into a bitmap is not literally a read of the screen), which
+SwiftUI's `ImageRenderer` on Apple, `PrintWindow` with
+`PW_RENDERFULLCONTENT` on WinUI, a `GdkTexture` download on GTK,
+`PixelCopy` or a bitmap draw on Compose. Each has caveats (a re-render
+into a bitmap is not literally a read of the screen), which
 is why this verb samples a handful of points rather than hashing — the
 hash's job is done one layer up.
+
+**AMENDED 2026-08-26: WinUI's route is DWM's, not XAML's.** It was
+`RenderTargetBitmap` — the API for this — and on the windows VM that
+renders (Completed, at the right size) and then hands back a NULL buffer
+under S_OK, for every element tried, because the adapter is display-only
+(docs/traps.md). `PrintWindow` prints the window's composited content
+instead, addressed by HWND, which also makes the read immune to where
+the lane's tiling happens to put the window — slots 4 and 5 sit off the
+bottom of that desktop, where a copy of the SCREEN measured pure black.
+
+**AMENDED 2026-08-26 (ruling: THE INK COMPARE IS ±1 PER CHANNEL, and the
+frozen string is the CORE's bytes).** The discipline above is necessary
+and was not sufficient. A sixth thing sits between the core's buffer and
+the sampler, and no scene rule reaches it: **the window's own colour
+space**. On macOS a window's backing store is not sRGB — it is the
+display's profile — so the core's pixel is converted in when the
+compositor draws it and back out when the sampler reads it, and the
+8-bit intermediate costs a unit. Measured on the canvas scene, one run,
+all four numbers in docs/traps.md ("A canvas ink read crosses the
+display's colour space"):
+
+| where | the second probe point |
+| --- | --- |
+| the core's own buffer | `D2E3F7` |
+| the core's CGImage, sampled directly | `D2E3F7` |
+| the window's backing store, in its OWN space | `D5E2F5` |
+| that window, converted back to sRGB | `D2E2F7` |
+| Android's `PixelCopy` | `D2E3F7` |
+
+So the mac reads one unit of green less than the core wrote, Android
+reads exactly what the core wrote, and **no single frozen string can
+exact-match both**. That is not a bug in either backend; it is what a
+colour-managed window read is.
+
+**The rule.** `expect_ink` compares the appearance EXACTLY and each
+channel within ±1. The scene freezes the CORE's bytes — derived from
+`crates/kaya/src/canvas.rs`'s
+`the_scene_probe_points_are_opaque_and_pinned`, never retyped from a
+platform's read, because a byte read off a window encodes the monitor
+profile of the machine that froze it and is not portable to the next
+Mac. The tolerance is a number in three harnesses (harness.rs's
+`INK_TOLERANCE`, KayaSwiftUI.swift's `kayaInkTolerance`,
+KayaCompose.kt's `INK_TOLERANCE`) and `tools/check-verbs.sh` pins all
+three at the ruled value — pinned rather than merely held equal, because
+three copies drifting APART would eventually redden a lane while three
+drifting TOGETHER just makes every ink assertion quieter, with nothing
+anywhere slower or redder.
+
+**What this does NOT weaken.** §7.1's hash stays byte-exact and is where
+the exactness lives: it reads the core's raster, which crosses no colour
+space, so it is the same string on five platforms whatever monitor is
+attached. And ±1 still catches everything this verb was built for — a
+dropped blit, a channel swizzle, an upside-down or wrongly-sized blit
+each move a channel by far more than one unit. What ±1 buys is that the
+verb stops asserting a fact about the display profile of one machine.
+
+**The precedent, and the road not taken.** Snapshot suites that compare
+rendered pixels all end up here: swift-snapshot-testing carries a
+per-assertion `precision` knob for exactly this reason (its issue #313 is
+the colour-management version of this failure). The alternative is to pin
+the surface to sRGB — the fix GLFW discusses in #2748 and servo in #35683
+— and it is deliberately NOT taken here: kaya's apps are meant to keep
+their wide-gamut rendering, and pinning the window's colour space to make
+one test verb exact would change what every real app looks like to buy a
+frozen byte.
 
 ### §7.3 What none of it proves
 
@@ -1205,6 +1530,14 @@ supposed to stay red while half the work is outstanding.
    remaining seven bindings and the C floor in both construction zones.
    Each lane green on the byte-shared scene. check-sugar-surface goes
    green when the sixteenth constructor lands, not before.
+   LANDED 2026-08-26. No backend declares `depth_stub("canvas")` any
+   more and the scene is wired on all five lanes, iOS included (over a
+   new guests/swift/canvas.swift — the iOS lane's guest tiers are Swift
+   and Go, so wiring it is what makes the `Image(uiImage:)` arm and the
+   `ImageRenderer` ink read run at all). The pixel format came out
+   differently on each: GTK's `R8g8b8a8Premultiplied` and Android's
+   `ARGB_8888` are both tiny-skia's layout verbatim, so only WinUI
+   swizzles.
 4. **The chart.** The portfolio app grows its canvas, the scene grows
    its assertions, and the captures are taken on all five platforms and
    reviewed. This is where the looks get ruled on and where any second
@@ -1222,11 +1555,40 @@ an assumption:
 | # | what | when |
 | --- | --- | --- |
 | 1 | ~~cross-ISA byte-identity of the raster (§7.1) — all five lanes are aarch64 today~~ MEASURED 2026-08-26, identical: docs/measurements/canvas-cross-isa-2026-08-26.txt | phase 1, BEFORE the first frozen hash |
-| 2 | WinUI `WriteableBitmap` pixel format and whether the swizzle is needed (§8) | phase 3 |
+| 2 | ~~WinUI `WriteableBitmap` pixel format and whether the swizzle is needed (§8)~~ MEASURED 2026-08-26 on the VM, the swizzle is right: `canvas_rust`'s `expect_ink` reads the window's own pixels (`PrintWindow`, after RenderTargetBitmap turned out to answer with no buffer at all — docs/traps.md) and gets `FFFFFF/D2E3F7`, the core's own bytes; a swizzle error would read `F7E3D2` | phase 3 written, phase 5 measures |
 | 3 | does `\.displayScale` update on a cross-display move? (§5, inferred) | phase 2, on a two-display mac |
-| 4 | does GDK set the cairo device scale, and what does `gdk_surface_get_scale` return at fractional scales? (§5, inferred) | phase 3 |
+| 4 | does GDK set the cairo device scale, and what does `gdk_surface_get_scale` return at fractional scales? (§5, inferred) — moot for cairo (the GTK arm is a GdkMemoryTexture in a GtkPicture, no cairo context anywhere) and the double is now read; what the container returns is still unmeasured, since it runs Xvfb at scale 1 | phase 3 written, needs a fractional display |
 | 5 | re-raster + blit cost at the portfolio's real canvas size, per tick (§1.3) | phase 4 |
 | 6 | shaping cost for a chart's label set, and whether shaped runs need caching | phase 4 |
+| 7 | the marshal cost of a 2886-op stream in PYTHON and in JAVA, against Rust's measured 0.019ms (§15, ruling 15) | phase 3, before breadth hardens |
+| 8 | band tiling on a phone-class core — §15's 3.4x is an M5 Pro number and the phone lane is the one over budget (ruling 14, lever i) | when a lever is taken |
+
+**AMENDED 2026-08-26 (post-depth): where the five new rulings land, and
+the one thing phase 3 must not get wrong.**
+
+- **Ruling 12 (the size policy) is not phase 3's work, but it constrains
+  phase 3.** Phase 3 writes three more blit arms, and a blit arm is
+  exactly where a size policy gets implemented or accidentally
+  hard-coded. What the mac arm does today is the SUPERSEDED rule 2 — the
+  core rasters at viewbox-times-scale and the backend stretches that
+  image into whatever track it was given (docs/deferred.md's canvas
+  stretch entry) — and copying it into GTK, WinUI and Compose would
+  turn a one-file correction into a four-file one. RECOMMENDATION, not a
+  ruling: a phase-3 arm should blit at the natural size and report its
+  track, which is `fixed`'s geometry and is exactly what the depth
+  scene's canvas already exercises, leaving all fit arithmetic in the
+  core where §1.1 says drawing decisions live.
+- **Ruling 13 (the paint floor) moves the spec hash**, as would any
+  packed lane under ruling 15, so both are cheapest before eight
+  bindings have spelled paint and dearest after. Same regeneration
+  workflow phase 1 used (invariant 7).
+- **Ruling 14 (animation) schedules nothing.** It is a scope statement
+  plus an ordered lever list (§15); a lever is taken when an artifact
+  asks for it, and the first one costs no API change at all.
+- **Ruling 15's Python and Java measurement is a phase-3 item**, row 7
+  above.
+- **Ruling 16 is a re-filing**, and its work belongs to the Image widget
+  whenever the pixel-handoff feature is picked up (§16).
 
 ### §11.1 One mechanical trap, worth knowing before phase 2
 
@@ -1299,9 +1661,31 @@ the chart already written.
   size.** Rejected in favour of the viewbox, which supplies the natural
   size as a side effect and does not oblige fourteen other kinds to
   answer for a property they do not want.
-- **A resize occurrence so the guest can redraw at the true size.**
+- ~~**A resize occurrence so the guest can redraw at the true size.**
   Unnecessary under §3.2, and it would make the op stream
-  platform-dependent, which is the one thing invariant 6 cannot survive.
+  platform-dependent, which is the one thing invariant 6 cannot
+  survive.~~ **OVERRULED 2026-08-26 (ruling 12), and the second half was
+  the mistake.** The first half was true only of a canvas whose drawing
+  cannot depend on its size, which turned out to be a SPECIAL CASE
+  (`scale`, `fixed`) rather than the rule — a chart that re-ticks and a
+  simulation that fills its viewport both need the size, and Chart.js's
+  `responsive` default is the charting world saying so. The second half
+  confused "this scene cannot freeze a hash" with "invariant 6 cannot
+  survive it": a platform-dependent op stream forfeits §7.1 FOR THAT
+  CANVAS and leaves §7.2's normalized checks working, which is a cost
+  paid per canvas by the app that opts in, not a breach of a shared
+  scene. The default stays a constant mode precisely so that nothing
+  pays it by accident (§3.2.1, §7.1).
+- **A canvas that does not letterbox — stretch-to-fill as the only
+  behaviour.** Ratified in §3.2 rule 2 and overruled 2026-08-26 with it.
+  A non-uniform stretch distorts a drawing the app cannot see distorted,
+  and the mitigation it forced (rule 3, a pen that refuses to scale with
+  its own drawing) was a second rule buying back part of the first one's
+  damage.
+- **A second widget kind for pixels kaya did not draw.** Rejected
+  2026-08-26 (ruling 16): that is the IMAGE widget with a high-rate
+  update path, not a canvas, and the two-widget split is what Flutter
+  already ships (§16).
 - **Building a semantics tree from the drawing.** kaya's whole
   accessibility dividend comes from native widgets being the tree. A
   canvas is where an app opts out, and the honest contract is an image
@@ -1317,13 +1701,15 @@ the chart already written.
 
 ## §13 — Sources
 
-Researched 2026-08-26 in three rounds: the wire-format round (Vello,
+Researched 2026-08-26 in four rounds: the wire-format round (Vello,
 Win2D, the four platform drawing APIs), the architecture round
-(lowering versus a core-owned buffer, scale, palette, exposure), and
-the dependency round that corrected §4.1's text stack against the
+(lowering versus a core-owned buffer, scale, palette, exposure), the
+dependency round that corrected §4.1's text stack against the
 archived-crate wave — same day, and the reason no crate here is cited
-from memory. Every claim above about a platform or another framework,
-rather than about this tree, traces to one of these. The crates named
+from memory — and, after the depth slice, the animation round that
+priced the display list against the raster and produced rulings 12-16.
+Every claim in this file about a platform or another framework, rather
+than about this tree, traces to one of these. The crates named
 are the STACK, verified maintained on 2026-08-26; the versions pin in
 phase 1.
 
@@ -1386,6 +1772,40 @@ phase 1.
 - https://github.com/microsoft/Win2D/blob/winappsdk/main/CHANGELOG.md — the WinAppSDK 1.8 dependency, and the only release record
 - https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/release-notes/windows-app-sdk-2-0 — silent on Win2D
 
+**Round four — the size policy (§3.2.1).** Every quote below was read on
+2026-08-26; two of them corrected the wording this file was going to
+use, which is the same discipline §4.1's near-miss left behind.
+- https://html.spec.whatwg.org/multipage/canvas.html — "The `width` attribute defaults to 300, and the `height` attribute defaults to 150". THE SPEC CALLS THESE ATTRIBUTE DEFAULTS, applied when the attribute is missing or fails to parse; "intrinsic default size" is this file's phrase, not the spec's
+- https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas — "You may find that canvas items appear blurry on higher-resolution displays", and the by-hand `devicePixelRatio` recipe under "Scaling for high resolution displays"
+- https://developer.mozilla.org/en-US/docs/Web/API/ResizeObserverEntry/devicePixelContentBoxSize — "the size in device pixels of the observed element". That this is what a backing store needs is this file's reading, not MDN's sentence
+- https://www.chartjs.org/docs/latest/configuration/responsive.html — `responsive`, default `true`: "Resizes the chart canvas when its container does"; `maintainAspectRatio`, default `true`; and the requirement that the container be "relatively positioned and dedicated to the chart canvas only"
+
+**Round four — animation, games and simulations (§15).**
+- https://github.com/flutter/engine/blob/main/impeller/docs/faq.md and https://github.com/flutter/engine/pull/26928 — Impeller behind an unchanged DisplayList interface, over a flat op buffer
+- https://api.flutter.dev/flutter/rendering/PaintingContext/repaintCompositedChild.html — Flutter re-records DIRTY SUBTREES, not the whole tree: the correction to the existence proof
+- https://docs.flame-engine.org/latest/flame/game.html and https://github.com/flame-engine/flame/issues/268 — real games on the widget-level canvas, with draw-call count as the honest ceiling
+- https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html — the animation frame callbacks are DRAINED: latest-wins is the web's native tick semantics
+- https://registry.khronos.org/VulkanSC/specs/1.0-extensions/man/html/VkPresentModeKHR.html — MAILBOX: "the new request replaces the existing entry"
+- https://docs.rs/wgpu/latest/wgpu/enum.PresentMode.html — and Mailbox is the least portable present mode
+- https://developer.android.com/games/sdk/frame-pacing — buffer stuffing, fixed by sync-fence waits rather than frame-dropping
+- https://chromium.googlesource.com/chromium/src/+/HEAD/docs/life_of_a_frame.md — BeginImplFrame waits to a deadline
+- https://developer.apple.com/documentation/quartzcore/cadisplaylink — `targetTimestamp`: the tick carries a platform-supplied time
+- https://laurenzv.github.io/vello_chart/ and https://linebender.org/blog/tmil-19/ — vello_cpu at 5.3-17.8x tiny-skia single-threaded, multithreaded and SIMD; the 512x600 L2 caveat is theirs
+- https://gasiulis.name/parallel-rasterization-on-cpu/ — the only published full-frame numbers at real resolutions: parallel CPU raster 1.2ms where Skia software takes 16ms
+- https://docs.rs/egui/latest/egui/ and https://docs.rs/imgui/latest/imgui/struct.DrawData.html — both canonical immediate-mode UIs emit a full display list per frame
+- https://gafferongames.com/post/fix_your_timestep/ — the accumulator, and the spiral of death that forces a clamp
+- https://developer.mozilla.org/en-US/docs/Web/API/PointerEvent/getCoalescedEvents — coalesced and predicted input as per-tick batches
+- https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/imageSmoothingEnabled — default `true`; "useful for games and other apps that use pixel art ... Set this property to `false` to retain the pixels' sharpness". MDN does NOT say nearest-neighbour, and this knob is about IMAGE scaling, not path antialiasing (§15 lever ii says what kaya's would differ in)
+- https://developer.chrome.com/blog/taking-advantage-of-gpu-acceleration-in-the-2d-canvas — the 2D canvas got a GPU backend with no API change
+- https://chromium.googlesource.com/chromium/src/+/lkgr/docs/how_cc_works.md — one `cc::PaintRecord`, software or GPU raster chosen at runtime
+- https://chromium.googlesource.com/chromium/src.git/+/master/docs/gpu/gpu_pixel_testing_with_gold.md and https://api.flutter.dev/flutter/flutter_test/matchesGoldenFile.html — both giants keep PER-CONFIG baselines; neither achieves cross-platform pixel identity
+- https://docs.flutter.dev/ui/design/graphics/fragment-shaders — a shader rides as another paint, which is why the op class kaya cannot answer is the shader one
+- https://github.com/Shirajuki/js-game-rendering-benchmark — at 10,000 sprites even GPU engines fall under 60fps, so the ceiling is not a display-list property
+
+**Round four — the pixel handoff (§16).**
+- https://api.flutter.dev/flutter/widgets/Texture-class.html — "A rectangle upon which a backend texture is mapped"; backend textures are "created, managed, and updated using a platform-specific texture registry"; "repainted autonomously as dictated by the backend (e.g. on arrival of a video frame)"
+- https://api.flutter.dev/flutter/dart-ui/Canvas-class.html — "An interface for recording graphical operations". THE CONTRAST BETWEEN THESE TWO IS THIS FILE'S, asserted in kaya's voice: the two pages are independent and Flutter nowhere sets them against each other
+
 ## §14 — The ledger
 
 Struck on ratification day, in docs/deferred.md:
@@ -1408,3 +1828,259 @@ Nothing else closes here. Pointer events on a canvas, gradients, curves,
 dashes, joins, blends, images-inside-a-drawing, packed op encoding, text
 beyond one line, and per-element accessibility descriptions all remain
 deferred, each admission-gated on an artifact.
+
+**AMENDED 2026-08-26 (post-depth).** Rulings 12-16 close nothing either
+— no headline is struck by them — but four ledger entries would have
+gone on saying superseded things, so the sweep touched them:
+
+- The **Canvas widget** entry gains the five post-depth rulings under
+  its ratification block, and its `KEY:` line grows the nouns a closing
+  sweep will now have to find (`redraw`, `scale`, `fixed`, letterbox,
+  rgba, animation, mailbox).
+- The **canvas-stretches-its-buffer** entry is RE-FRAMED rather than
+  closed. It named the right defect and pointed at the rule that has
+  since been superseded, so it now names the size policy as the fix, and
+  names the two sites that still encode the old rule — canvas.rs's
+  `a_stretch_does_not_thicken_the_pen` and the `rasterize` signature
+  that takes a target and stretches positions into it.
+- The **Vello scene-encoding subset** entry takes ruling 16: the
+  zero-copy arm is the IMAGE widget's high-rate update path, so the
+  re-filing has a widget as well as a feature.
+- The **ink-names-the-appearance** entry gains a third way to close,
+  which only ruling 13 makes possible: a test figure painted in LITERAL
+  RGBA has no appearance dependence to pin, so the mode-sensitivity that
+  entry describes can be designed out of the figure instead of pinned in
+  the harness.
+
+## §15 — Animation, games and simulations
+
+**RULED 2026-08-26 (post-depth, ruling 14): animation is IN SCOPE of the
+canvas**, games and simulations included. This section is the basis for
+that ruling and the ordered list of what to do about it. Nothing here is
+scheduled; §11 says so explicitly.
+
+### §15.1 The measurement that decided it
+
+The worry the ruling answers was that a RETAINED display list resubmitted
+every frame is the wrong shape for animation — that re-recording is what
+you pay for interactivity. It was measured on 2026-08-26 rather than
+argued, in a standalone project that mirrors crates/kaya/src/canvas.rs's
+`validate` and `rasterize` op-for-op (same per-path `PathBuilder`, same
+`Paint::default()` with `anti_alias = true`), on an Apple M5 Pro,
+macOS 26.5.2, aarch64, release with `lto` and `codegen-units = 1`,
+tiny-skia 0.12.0, single-threaded except where the table says otherwise.
+`-C target-cpu=native` changed nothing (13.93 vs 13.62ms), so none of it
+is a missed-SIMD artifact, and a re-run reproduces within 2%.
+
+The scene is a particle simulation over an 800x600 viewbox re-emitted
+every frame: one full-viewbox background fill, 40 stroked 1pt gridlines,
+180 filled octagons, 120 stroked 7-point polylines at 1.5pt — **341
+paths, 2886 ops, 8296 wire values.**
+
+> **The whole-list resubmit costs 0.019ms — 0.1% of a 16.6ms frame, and
+> about 370x cheaper than that frame's raster.** Stream build 0.014ms,
+> validate and decode 0.005ms.
+
+The premise the worry rested on is false here by three orders of
+magnitude, and it is false for the reason §12's rejection of
+callback-per-frame already suspected: a tagged op stream is data, and
+decoding data is not what a frame costs. It is also the local
+confirmation of what Flutter's history says from the other side —
+Impeller replaced Skia entirely UNDER an unchanged DisplayList
+interface, and Chromium picks software or GPU raster from one
+`cc::PaintRecord` at runtime.
+
+**Two honest corrections to that comfort, both recorded because they
+bound the claim:**
+
+- **Flutter re-records only DIRTY SUBTREES**, not the whole tree, so
+  whole-list resubmit is strictly weaker than the existence proof it
+  cites. Worth 0.019ms today; it grows with the list.
+- **The number is Rust's** (ruling 15, §3.1): seven other bindings
+  marshal tagged values through their own runtimes and none is measured.
+
+### §15.2 Raster is the ceiling, and it is worse than expected
+
+| the same frame, kaya's shape today | device px | med ms | % of 16.6ms |
+| --- | --- | --- | --- |
+| 800x600 @2x | 1600x1200 | **14.21** | 86% |
+| 400x800 @3x (phone) | 1200x2400 | **30.30** | 183% |
+| 1920x1080 @1x | 1920x1080 | 14.93 | 90% |
+| 1920x1080 @2x | 3840x2160 | 29.94 | 180% |
+
+**An M5 Pro performance core is the fastest thing kaya targets**, so
+every number is a best case and the phone lane is worse than the phone
+row suggests. Charts are not at risk — 60 chart-class paths cost 1.19ms,
+7% of a frame, and 24 text runs at 14pt cost 2.00ms — but "animation
+works" is not yet true on phone-class buffers.
+
+**The cause is specific, which is what makes it fixable.** Splitting the
+1600x1200 frame by phase: background fill 0.23ms, 40 gridline strokes
+1.62, 180 octagon fills 1.56, **120 long strokes 10.29**. The long
+strokes are 75% of the frame, and it is not the stroker:
+
+| 120 long strokes @1600x1200 | med ms |
+| --- | --- |
+| `stroke_path` (kaya today) | 10.24 |
+| the stroker alone (`Path::stroke`, no raster) | **0.048** |
+| antialiased fill of the pre-stroked outlines | 10.19 |
+| **the same outlines, `anti_alias = false`** | **0.59** |
+
+**tiny-skia's antialiased path fill is 11-17x its aliased fill**, and
+that one property is the whole ceiling — 17x on the strokes, 12x on 180
+octagons, 11x on 180 circles. tiny-skia's own README says it is
+single-threaded and "100-300% slower than Skia on ARM", and Linebender's
+harness puts vello_cpu at 5.3-17.8x tiny-skia single-threaded. The
+destination exists: the only published full-frame numbers at real
+resolutions have a parallel CPU rasterizer drawing 1412x1264 with 1695
+layers in 1.2ms where Skia software takes 16ms.
+
+**Headroom, in units an app can reason about** (1600x1200, one thread):
+about **2000 moderate antialiased path fills** or **7500 32x32 sprite
+rects** per frame, roughly 4x that with tiling below.
+
+### §15.3 The levers, in order
+
+They are ordered by cost-to-take, and the first one is free at the API.
+
+1. **Multithreaded band tiling — MEASURED 3.4x, zero API change.** The
+   same display list rasterized into N horizontal bands on N threads,
+   one `Pixmap` each with a translate; tiny-skia clips to pixmap bounds,
+   so no new op is needed.
+
+   | threads | 1600x1200 | phone 1200x2400 |
+   | --- | --- | --- |
+   | 1 | 13.75ms (83%) | 28.39ms (171%) |
+   | 2 | 7.51 (45%) | 16.01 (96%) |
+   | 4 | **4.06 (24%)** | **9.21 (55%)** |
+   | 8 | 2.98 (18%) | 5.71 (34%) |
+
+   Four-way tiling moves the failing phone frame from 1.7x over budget
+   to just over half of it. Measured on the M5 Pro; measure it on a
+   phone-class core before believing the ratio there (§11 row 8).
+2. **A per-canvas aliasing knob.** The other multiplier, and independent
+   of the first: aliased fill is 11-17x cheaper, and some drawings want
+   it for looks rather than speed. The web precedent is
+   `imageSmoothingEnabled`, default `true`, which MDN recommends turning
+   off for "games and other apps that use pixel art" so enlargement
+   keeps "the pixels' sharpness". Two honest differences from that
+   precedent: the web knob controls IMAGE scaling and kaya's would
+   control PATH antialiasing, and kaya's is a DECLARED per-canvas
+   property rather than a context mode — which is exactly what dissolves
+   §3.3's original objection, since a declared knob rides the op stream
+   and every platform therefore rasterizes the same way.
+3. **Damage tracking.** Re-raster only the changed region. This is the
+   first lever that needs the core to compare two op lists, so it is the
+   first with a real design cost.
+4. **`vello_cpu` as a STANDING EVALUATION.** §1.4 named it revisitable
+   when it stabilizes; ruling 14 makes that a recurring check rather
+   than a someday note, because it is the lever that moves the AA number
+   itself and it is a one-crate swap with zero binding churn. Its
+   observable cost is that §7.1's hashes move — a scene edit and a
+   capture round, not a protocol change.
+5. **A GPU display path: RESERVED, NOT PLANNED.** §1.4 refuses GPU
+   rendering for THIS buffer on principle, and that refusal stands for
+   the canonical raster. What ruling 14 reserves is a display path — the
+   platform drawing what the user sees while the core's CPU raster stays
+   the thing kaya reasons about.
+
+   **The harness already tolerates that, which is the part worth
+   knowing before anyone assumes it does not.** `expect_drawing_hash` is
+   CPU-BY-DEFINITION: it rasterizes at the canonical scale with the
+   canonical palette and hashes the CORE's buffer, so it is unaffected
+   by what draws the screen. `expect_ink` samples the backend's own
+   rendered surface, but only at centres of flat-filled regions
+   (§7.2's inherited discipline), and a flat fill's interior is where
+   two rasterizers agree even when their antialiasing does not.
+
+   **And the honest cost, stated rather than discovered later.** Under a
+   GPU display path the hash observes a different thing from what the
+   user sees, and kaya takes that horn deliberately rather than the
+   other one: Flutter Gold and Chromium Gold both keep per-config
+   baselines because neither giant achieves cross-platform pixel
+   identity, and invariant 6 survives here only because the frozen
+   artifact is the core's CPU raster. Per-config goldens arrive only
+   with OPS THAT HAVE NO CPU REFERENCE — the shader class, which
+   tiny-skia cannot execute at all — and that, not the display path, is
+   the thing that would break the one-canonical-rasterizer story.
+
+### §15.4 What is additive, and what the tick must carry
+
+The evidence says everything a game needs beyond throughput is additive
+to this architecture, and one constraint on the tick is cheaper to get
+right now than later.
+
+- **A vsync-clocked tick, with latest-wins at the HANDOFF.** The
+  research argued both sides and the reading that survives is narrow:
+  the web's own frame callbacks are drained latest-wins, but Android's
+  frame pacing library and Chromium both chose throttle-and-deadline
+  over frame-dropping for the PRODUCER, and Mailbox is wgpu's least
+  portable present mode. So mailbox semantics belong where §3.2.1 puts
+  them — on the redraw request, so a slow guest never stuffs a queue —
+  and not as a free-running producer's clock.
+- **THE TICK MUST HAND THE GUEST A PLATFORM-SUPPLIED TIME.** Android
+  documents that `Choreographer.doFrame`'s frame time "should be used
+  instead of uptimeMillis() or nanoTime()" because it is fixed at
+  schedule time, and CADisplayLink exposes `targetTimestamp`. A guest
+  that reads its own clock re-imports exactly the jitter both platforms
+  removed. This constrains an occurrence's SIGNATURE, which is why it is
+  written down before the occurrence exists.
+- **Fixed-timestep simulation is entirely guest code** — an accumulator
+  plus an interpolation factor — provided the tick carries a time and
+  the guest clamps it before accumulating (the spiral of death).
+- **Pointer input is an additive API** when the deferral lifts:
+  per-tick batches of timestamped samples, coalesced and predicted, not
+  a canvas change.
+- **A batched or atlas op** is the one op-vocabulary addition the
+  evidence actually predicts, and it is bought by sprite count, not by
+  animation: Flame's honest ceiling on the same architecture is
+  draw-call count, and at 10,000 sprites even GPU engines fall under
+  60fps.
+- **Immediate versus retained is not the axis.** egui and Dear ImGui,
+  the two canonical immediate-mode UIs, both emit a full display list
+  per frame. "Immediate mode" names the guest's programming model, not
+  the transport — which is the same finding §12 already recorded from
+  GTK4's and React Native Skia's migrations.
+
+## §16 — The pixel handoff is the Image widget, not a second canvas
+
+**RULED 2026-08-26 (post-depth, ruling 16), as a correction to how this
+tree had been describing its own deferral.** The zero-copy arm was never
+a second canvas. It is the IMAGE widget learning a high-rate update path
+for content KAYA DID NOT DRAW: video frames, a camera, an external
+engine's output, anything whose pixels arrive from somewhere else on
+somebody else's schedule.
+
+**The canvas/image pair is the whole surface**, and the split is by
+WHERE THE PIXELS COME FROM:
+
+- **Canvas** — the app declares ops, the core rasterizes, the backend
+  blits. kaya knows what was drawn, can validate it, can hash it, and
+  can answer for it on five platforms.
+- **Image** — someone else produced the pixels and kaya presents them.
+  kaya knows nothing about their content and does not pretend to. The
+  blob channel is the byte-copy arm of this today; the high-rate path
+  (platform surface handles — IOSurface, DXGI shared handles, dmabuf) is
+  the zero-copy arm and is still deferred.
+
+**Flutter already ships this split**, and it is the precedent the ruling
+names. Its `Texture` widget is "A rectangle upon which a backend texture
+is mapped", where backend textures are "created, managed, and updated
+using a platform-specific texture registry" and the widget is
+"repainted autonomously as dictated by the backend (e.g. on arrival of a
+video frame)" — pixels Flutter never drew, arriving on the producer's
+clock, with no Dart executing per frame. Its `Canvas` is the other
+thing entirely: "An interface for recording graphical operations". THE
+CONTRAST IS ASSERTED HERE IN KAYA'S VOICE — the two Flutter pages are
+independent and Flutter nowhere sets them against each other — but the
+two mechanisms are exactly the two this ruling separates.
+
+**What this corrects in the record.** DESIGN.md's "Custom drawing"
+passage and its open question #3 were re-filed on ratification day
+against "the pixel-handoff feature"; ruling 16 gives that feature a
+widget, so the Vello scene-encoding subset arrives with THE IMAGE
+WIDGET'S high-rate path rather than with an unnamed future surface. The
+canvas widget does not use it, will not grow it, and nothing in §15's
+lever list changes that: a GPU DISPLAY path (lever v) is the core
+choosing how to put its OWN raster on screen, which is a different
+question from an app handing kaya frames it produced.

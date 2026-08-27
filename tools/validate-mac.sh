@@ -1130,10 +1130,9 @@ run typeface-rust-swiftui env KAYA_SELFTEST=typeface "$RUST_GUESTS"/typeface
 drain
 
 # The canvas scene: the core rasterizes and this backend blits
-# (docs/canvas-plan.md). A DEPTH slice — rust only, mac only — with the
-# other three backends declaring depth_stub("canvas"), which is what
-# holds their legs off (check-stubs and check-steps state that one rule
-# from both sides).
+# (docs/canvas-plan.md). RUST ONLY on this lane, like windowed: the
+# drawing is declared in viewbox units, so one guest's op stream is
+# every platform's and the frozen hash is the same string on all five.
 KAYA_SELFTEST_SCRIPT="$(scene_script canvas)"
 export KAYA_SELFTEST_SCRIPT
 run canvas-rust-swiftui env KAYA_SELFTEST=canvas "$RUST_GUESTS"/canvas

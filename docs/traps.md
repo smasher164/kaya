@@ -5063,3 +5063,214 @@ root view again (`KayaTableDriver.represent`) — nothing else makes
 SwiftUI decide over, and NO observable can see it, because the
 difference is ink. `tools/check-table-tier.sh` holds the call statically
 for that reason.
+
+## A canvas ink read crosses the display's colour space, and the frozen
+## byte belongs to the machine that froze it (2026-08-26)
+
+`expect_ink` samples the WINDOW's own rendered pixels, and on macOS that
+window's backing store is not sRGB — it is the display's profile. The
+core's sRGB pixel is converted INTO that space when the compositor draws
+it and converted BACK when the sampler reads it, and the 8-bit
+intermediate costs a unit. Instrumented inside `kayaCanvasInk` on the
+canvas scene, all four numbers from one run:
+
+    buffer 300x120 cs=kCGColorSpaceSRGB  direct=FFFFFF/D2E3F7
+    rawbytes                                     FFFFFFFF/D2E3F7FF
+    windowcg 600x240 cs=nil (the display's)  sampled=FFFFFF/D2E2F7
+    nativecs — the same window pixels, read in the window's OWN space:
+                                                 FFFFFF/D5E2F5
+
+So the core wrote `D2E3F7`, the window holds `D5E2F5` in display-space
+bytes, and converting those back to sRGB lands on `D2E2F7` — which was
+the string tools/scenes/canvas.steps first froze. The core's raster is
+`crates/kaya/src/canvas.rs`'s
+`the_scene_probe_points_are_opaque_and_pinned`, which pins `D2E3F7`.
+
+RULED 2026-08-26: the scene freezes the CORE's bytes and `expect_ink`
+compares within ±1 per channel — docs/canvas-plan.md §7.2's amendment
+carries the rule and why pinning the window to sRGB was not the answer.
+The measurement below stands whatever the compare does with it.
+
+## RenderTargetBitmap renders and hands back NO PIXELS on the windows
+## VM (2026-08-26; the ink read is `PrintWindow` now — RESOLVED below)
+
+The WinUI canvas ink read used to ask XAML to photograph the canvas —
+`RenderTargetBitmap::RenderAsync` then `GetPixelsAsync` — and on
+akhil@192.168.64.2 the second half returns nothing, for EVERY element
+tried. Measured with the leg instrumented, four ways:
+
+    render-completed  status=AsyncStatus(1)   size 300x120
+    getpixels-ok      status=AsyncStatus(0)   (Started)
+    collect           status=AsyncStatus(1)   (Completed)
+    GetResults        Err(HRESULT(0x00000000), "The operation completed
+                      successfully")
+
+That HRESULT is `windows_core::Error::empty()` — the projection's answer
+for a NULL out-param under S_OK, i.e. the operation completed and
+produced no buffer. It is the shape Microsoft documents for a
+`RenderTargetBitmap` that was never rendered: "GetPixelsAsync will
+return an empty buffer stream, and no error will occur (async Status is
+Completed, so you can't use that as an indicator)". Here RenderAsync DID
+run and DID report Completed with the right size.
+
+WHAT WAS RULED OUT, each measured rather than argued:
+
+* re-entrancy — starting the pixel read inside RenderAsync's own
+  completion handler, and from a fresh UI-thread hop, both give null;
+* operation lifetime — holding the `IAsyncOperation` across polls and
+  calling GetResults from the poll gives null;
+* the completion-handler style — handler and status-polling both null;
+* the element — the WINDOW ROOT renders (300x147) and yields null too,
+  so it is not the canvas's Image;
+* the binding — the object's runtime class name really is
+  `Windows.Foundation.IAsyncOperation`1<Windows.Storage.Streams.IBuffer>`,
+  QI to it succeeds, `IRenderTargetBitmap_Vtbl`'s slot order matches the
+  interface, and IBuffer's IID is the canonical one;
+* the overload — `RenderToSizeAsync(element, 300, 120)` behaves
+  identically.
+
+THE LIKELY CAUSE IS THE VM'S GPU. Its display adapter is a **Red Hat
+VirtIO GPU DOD controller** — a DISPLAY-ONLY device, no D3D render
+path — with the session logged in at `console/Active`. RenderTargetBitmap
+reads back composed content, and a display-only adapter is exactly the
+configuration where that read has nothing to give while the render still
+reports success.
+
+The frozen string is not the problem, and neither is the ±1 tolerance
+(both were measured innocent — with the pre-tolerance exact compare AND
+the pre-tolerance `D2E2F7` string the leg fails with the same sentence).
+
+AND THE READ SWALLOWED ITS OWN FAILURE, which is why this cost a session:
+`photograph_canvas` discarded the completion's `Result` (`let _ =`) and
+every step inside it exited through `?`, so a null buffer printed NOTHING
+anywhere and the verb reported only what it was waiting for.
+
+RESOLVED 2026-08-26: **the read is `PrintWindow`, and XAML is not asked
+to render anything.** `PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)` into
+a top-down 32-bit DIB gives this window's composited content, the canvas
+element's box is cut out of it (XAML's `TransformToVisual` to the window
+root, times `RasterizationScale`, plus client-to-screen minus the outer
+rect), and the two declared points are sampled there. It is SYNCHRONOUS,
+so the swallowed `Result` and the ~200 outstanding renders are gone by
+construction rather than by patching: one grab per step attempt, on the
+UI thread the read already runs on, nothing left outstanding.
+
+Measured on the VM, `canvas_rust` PASS:
+
+    ink-probe #0 screen-bitblt sample=957969/D3B283  (the WALLPAPER)
+    ink-probe #0 printwindow   sample=FFFFFF/D2E3F7  (the drawing)
+
+The print carries the CORE'S OWN BYTES exactly — `FFFFFF/D2E3F7` against
+the scene's frozen `FFFFFF/D2E3F7`, zero deviation per channel. Windows
+converts no colour on this path; the ±1 the mac needs is not needed here.
+
+TWO THINGS THE COMPARISON TAUGHT, both worth keeping:
+
+* **A copy of the SCREEN would have shipped a coin flip.** BitBlt off
+  `GetDC(NULL)` also works on this adapter — the null buffer is
+  RenderTargetBitmap's problem, not the machine's — but it reads a
+  POSITION. The lane tiles six legs at `KAYA_WIN_SLOT` (winui/mod.rs's
+  `setup`): 556x378 at `(6+(n%2)*568, 6+(n/2)*390)`, so slots 4 and 5
+  start at y=786 on a desktop that is 800 tall. Run at slot 5 the canvas
+  sits at screen 598,860, entirely off the bottom, and the screen copy
+  answers PURE BLACK while `PrintWindow` still passes the leg. A
+  single-leg proof at slot 0 would have been green with the matrix
+  failing two slots in six. `PrintWindow` is addressed by HWND:
+  occlusion-proof, position-proof, and it needs neither a desktop-bounds
+  refusal nor a who-owns-this-pixel check.
+* **`WindowFromPoint` is NOT a guard against a not-yet-composited
+  window.** It answered "ours" for both probe points while the screen
+  still showed wallpaper there — the HWND covers the position before DWM
+  has drawn the content onto it.
+
+tools/guest/record-win/Program.cs's header says GDI-family capture
+(gdigrab, PrintWindow with PW_RENDERFULLCONTENT, BitBlt) returns a blank
+client area for WinUI's DirectComposition content. On this adapter, for
+this window, it does not — that note is about window-DC capture and
+should not stop anyone measuring. What IS true: the FIRST print after
+the window appears can come back uniformly white, before the content is
+rendered into it, so a scene whose probe points are all white could pass
+against a blank window. `expect_ink`'s bounded retry covers the race;
+the canvas scene's two points (`FFFFFF` and `D2E3F7`) cannot both match
+a blank one.
+
+## A canvas text run whose font will not resolve WAS DROPPED SILENTLY,
+## and the only symptom was a changed hash (2026-08-26, now refused)
+
+`validate()` resolves every `draw_font` asset and refuses the drawing if
+one is missing. THE RASTER RESOLVES IT AGAIN — `Face::open` in
+crates/kaya/src/canvas.rs — and answered `None` on failure, which dropped
+that text run from the picture. Nothing logged, nothing refused; the
+drawing was simply missing a line of text, and the only thing that moved
+was §7.1's frozen hash.
+
+MEASURED. The canvas scene's pin test failed 8 runs out of 8 against one
+build with `c4fa15caf170a5ff` where it freezes `e5ac8a2c0b240633`, and
+hashing the same op stream with each text run dropped in turn identifies
+that value exactly:
+
+    whole            e5ac8a2c0b240633  (41 ops)
+    no Q3            c4fa15caf170a5ff  (40 ops)   <- what the build produced
+    no ticks         ea023dbac3b619ef  (38 ops)
+    no text at all   065e5c5a05bb265f  (35 ops)
+
+`Q3` is the scene's ONE run drawn with a font resolved FROM DISK
+(`fonts/sora-wght.ttf`); the three tick labels use the reserved default,
+which is embedded in libkaya and cannot fail. So the drop is an asset
+resolution that succeeded in `validate` and failed in the raster.
+
+The trigger for that particular build was never identified — every later
+build passes, and re-running the mac build, the android `cargo ndk`
+build and the gradle assemble does not bring it back. WHAT IS PROVEN is
+the shape: a frozen canvas hash can move for a reason that prints
+nothing anywhere.
+
+RESOLVED 2026-08-26 (maintainer's ruling): **the raster refuses.** A
+text run whose font does not resolve at raster time panics with a
+sentence naming the asset — the reserved name or the app's asset id —
+and the run's text, carrying the resolver's own words, and reaches the
+leg's verdict through `crate::fault::guard` exactly as a §3.5 refusal
+does (docs/canvas-plan.md §3.5's amendment). It refuses AT THE TEXT OP,
+so a selected face nothing draws with refuses nothing, and AS A UNIT:
+the panic precedes the first glyph and the unwind takes the pixmap, so
+no half-drawn buffer reaches a backend. `Face::open` parses the bytes
+too, because an asset that resolves and is NOT a font dropped the run
+just as quietly one layer down. Both branches are watched printing in
+`canvas::tests::a_vanished_font_refuses_the_run_rather_than_dropping_it`,
+which doctors the resolver BETWEEN validate and raster — the state no
+scene can reach. The pin test's resolution assert stays as the EARLIER
+wall: it names the asset before the frozen hash is compared, which is
+the difference between "the font is gone" and "the picture changed".
+The four hashes above stand as the measurement of what a dropped run
+costs.
+
+RELATED, and fixed: `assets::tests` move the process-wide
+`KAYA_ASSET_DIR`, so EVERY test in the crate that resolves an asset now
+takes `crate::assets::serially()` — see that function. Before it, the
+same pin test failed with the resolver's own sentence rather than a
+hash.
+
+THREE THINGS THIS MEANS.
+
+*The blend hypothesis is wrong and cost a session to falsify.* The
+obvious reading of the divergence — a transparent canvas ground plus a
+semi-transparent area fill, blended per-platform — is false HERE: the
+guest's own `Paint::Ground` rect covers the plot, so both probe points
+are alpha 255 in the core buffer before any compositor sees them. The
+area fill was composited over white BY THE CORE. Flattening the raster
+onto an opaque ground changes neither pixel. Measure the buffer before
+believing any story about blending.
+
+*Android is the faithful one.* `PixelCopy` hands back the surface bytes
+with no colour round trip, so Compose reports `D2E3F7` — the core's
+actual output — and fails against a string frozen from the mac's read.
+The lane that looks wrong is the lane that agrees with the core.
+
+*The frozen byte is not portable across Macs.* It encodes the monitor
+profile of the machine that froze it. A colour that is not extremal
+(white survives; a pale blend does not) cannot be frozen byte-for-byte
+through a colour-managed window read. docs/canvas-plan.md §7.2 already
+names this defect class one layer up — an 8-bit sampling context that
+"quantizes twice and reported `1D71D8` for a declared `1C71D8`" — and
+this is the same class one layer further out, in a context nobody
+chose.

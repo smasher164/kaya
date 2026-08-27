@@ -6866,7 +6866,11 @@ private func kayaRunScript(_ script: String) {
                     }
                     return kayaCanvasInk(node, inkPoints)
                 }
-                if gotInk == wantInk {
+                // THE OBSERVATION IS THE WANTED TEXT, not what was read:
+                // inside the tolerance the platforms legitimately answer
+                // different bytes, and the verdict is byte-compared
+                // across all of them.
+                if kayaInkMatches(gotInk, wantInk) {
                     observed.append("ink \(wantInk)")
                 } else {
                     failures.append("ink \(gotInk) at \(inkPoints), wanted \(wantInk)")
@@ -10487,6 +10491,48 @@ private struct KayaCanvasReader: View {
                 .onChange(of: frame) { _, f in kayaCanvasFrames[id] = f }
         }
     }
+}
+
+/// `expect_ink` compares WITHIN ±1 PER CHANNEL (ruled 2026-08-26,
+/// docs/canvas-plan.md §7.2). THIS is the platform the tolerance exists
+/// for: a macOS window's backing store carries the DISPLAY's profile,
+/// not sRGB, so the core's D2E3F7 is sampled back as D2E2F7 here while
+/// Android reports the core's own bytes (measured, docs/traps.md).
+/// `expect_drawing_hash` keeps the byte-exact assertion.
+///
+/// harness.rs and KayaCompose.kt carry their own copies of this number;
+/// tools/check-verbs.sh holds the three equal and pinned at the ruled 1.
+let kayaInkTolerance = 1
+
+/// The appearance exactly, every channel within `kayaInkTolerance`. An
+/// answer that does not parse — every `<...>` diagnostic below — never
+/// matches, so it reaches the failure text whole.
+func kayaInkMatches(_ got: String, _ want: String) -> Bool {
+    func channels(_ hex: Substring) -> [Int]? {
+        guard hex.count == 6 else { return nil }
+        var out: [Int] = []
+        var i = hex.startIndex
+        while i < hex.endIndex {
+            let j = hex.index(i, offsetBy: 2)
+            guard let v = Int(hex[i ..< j], radix: 16) else { return nil }
+            out.append(v)
+            i = j
+        }
+        return out
+    }
+    let gotParts = got.split(separator: " ", maxSplits: 1)
+    let wantParts = want.split(separator: " ", maxSplits: 1)
+    guard gotParts.count == 2, wantParts.count == 2, gotParts[0] == wantParts[0] else {
+        return false
+    }
+    let gotInk = gotParts[1].split(separator: "/")
+    let wantInk = wantParts[1].split(separator: "/")
+    guard gotInk.count == wantInk.count else { return false }
+    for (g, w) in zip(gotInk, wantInk) {
+        guard let g = channels(g), let w = channels(w) else { return false }
+        for (a, b) in zip(g, w) where abs(a - b) > kayaInkTolerance { return false }
+    }
+    return true
 }
 
 /// Sample `points` — `x,y` pairs in hundredths of the canvas's own box —

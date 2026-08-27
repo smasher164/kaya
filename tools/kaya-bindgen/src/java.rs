@@ -92,23 +92,74 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        }");
     c.line("    }");
     c.line("");
-    c.line("    private static ByteBuffer begin(short kind) {");
-    c.line("        ByteBuffer b = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);");
+    // THE RECORD BUFFER GROWS, and every write on the encode path goes
+    // through this type so it cannot come back one site at a time. The
+    // fixed ByteBuffer it replaces capped EVERY java record at 4096
+    // bytes; the measured ceilings and why a wrapper rather than an
+    // ensure() per site are in docs/deferred.md's java-record-ceiling
+    // entry. tools/java-typecheck.sh runs the negative.
+    c.line("    private static final class Enc {");
+    c.line("        private ByteBuffer b;");
+    c.line("");
+    c.line("        Enc(int hint) {");
+    c.line("            b = ByteBuffer.allocate(hint).order(ByteOrder.LITTLE_ENDIAN);");
+    c.line("        }");
+    c.line("");
+    c.line("        private ByteBuffer at(int extra) {");
+    c.line("            if (b.remaining() >= extra) return b;");
+    c.line("            int need = b.position() + extra;");
+    c.line("            if (need < 0) {");
+    c.line("                throw new IllegalArgumentException(");
+    c.line("                        \"kaya: record exceeds the wire's 2 GiB size field\");");
+    c.line("            }");
+    c.line("            int cap = b.capacity();");
+    c.line("            while (cap < need && cap <= Integer.MAX_VALUE / 2) cap *= 2;");
+    c.line("            if (cap < need) cap = need;");
+    c.line("            ByteBuffer grown = ByteBuffer.allocate(cap).order(ByteOrder.LITTLE_ENDIAN);");
+    c.line("            grown.put(b.array(), 0, b.position());");
+    c.line("            b = grown;");
+    c.line("            return b;");
+    c.line("        }");
+    c.line("");
+    c.line("        Enc put(byte v) { at(1).put(v); return this; }");
+    c.line("");
+    c.line("        Enc put(byte[] v) { at(v.length).put(v); return this; }");
+    c.line("");
+    c.line("        Enc putShort(short v) { at(2).putShort(v); return this; }");
+    c.line("");
+    c.line("        Enc putInt(int v) { at(4).putInt(v); return this; }");
+    c.line("");
+    c.line("        /** Absolute: the size field, already inside the header. */");
+    c.line("        Enc putInt(int index, int v) { b.putInt(index, v); return this; }");
+    c.line("");
+    c.line("        Enc putLong(long v) { at(8).putLong(v); return this; }");
+    c.line("");
+    c.line("        Enc putDouble(double v) { at(8).putDouble(v); return this; }");
+    c.line("");
+    c.line("        int position() { return b.position(); }");
+    c.line("");
+    c.line("        byte[] bytes() {");
+    c.line("            byte[] out = new byte[b.position()];");
+    c.line("            b.flip();");
+    c.line("            b.get(out);");
+    c.line("            return out;");
+    c.line("        }");
+    c.line("    }");
+    c.line("");
+    c.line("    private static Enc begin(short kind) {");
+    c.line("        Enc b = new Enc(4096);");
     c.line("        b.putInt(0).putShort(kind).putShort((short) 0);");
     c.line("        return b;");
     c.line("    }");
     c.line("");
-    c.line("    private static byte[] finish(ByteBuffer b) {");
+    c.line("    private static byte[] finish(Enc b) {");
     c.line("        while (b.position() % 8 != 0) b.put((byte) 0);");
     c.line("        b.putInt(0, b.position());");
-    c.line("        byte[] out = new byte[b.position()];");
-    c.line("        b.flip();");
-    c.line("        b.get(out);");
-    c.line("        return out;");
+    c.line("        return b.bytes();");
     c.line("    }");
     c.line("");
     c.line("    // Values self-pad to 8: they concatenate inside record bodies.");
-    c.line("    private static void encodeValue(ByteBuffer b, Object v) {");
+    c.line("    private static void encodeValue(Enc b, Object v) {");
     c.line("        if (v instanceof Boolean) {");
     c.line("            b.putInt(VALUE_BOOL).putInt(1).put((byte) (((Boolean) v) ? 1 : 0));");
     c.line("        } else if (v instanceof Integer) {");
@@ -131,7 +182,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("    // A counted value sequence — a key path or a record:");
     c.line("    // {u32 count, u32 reserved, count values}.");
-    c.line("    private static void encodeValues(ByteBuffer b, Object[] vals) {");
+    c.line("    private static void encodeValues(Enc b, Object[] vals) {");
     c.line("        int n = vals == null ? 0 : vals.length;");
     c.line("        b.putInt(n).putInt(0);");
     c.line("        for (int i = 0; i < n; i++) encodeValue(b, vals[i]);");
@@ -139,7 +190,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("    // A collection schema: {u32 count, u32 reserved, count VALUE_* tags},");
     c.line("    // padded to 8.");
-    c.line("    private static void encodeVariantSchemas(ByteBuffer b, int[][] variants) {");
+    c.line("    private static void encodeVariantSchemas(Enc b, int[][] variants) {");
     c.line("        b.putInt(variants.length).putInt(0);");
     c.line("        for (int[] schema : variants) {");
     c.line("            b.putInt(schema.length);");
@@ -178,7 +229,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_property with a constant {prop} value. */"));
         c.line(&format!("    public static byte[] txSet{pc}(long widgetId, {ty} {p}) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
+        c.line("        Enc b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
         c.line("        return finish(b);");
@@ -186,14 +237,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_property with a signal-bound {prop} value. */"));
         c.line(&format!("    public static byte[] txBind{pc}(long widgetId, long signalId) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
+        c.line("        Enc b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
         c.line("");
         c.line("    /** set_property bound to one field of the element of the enclosing For. */");
         c.line(&format!("    public static byte[] txBind{pc}Element(long widgetId, int level, int field) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
+        c.line("        Enc b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_ELEMENT)"));
         c.line("                .putInt(level).putInt(field);");
         c.line("        return finish(b);");
@@ -219,7 +270,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_window_prop with a constant {prop} value (window 0, the primary surface). */"));
         c.line(&format!("    public static byte[] txSetWindow{pc}(long window, {ty} {p}) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_WINDOW_PROP);");
         c.line(&format!("        b.putLong(window).putInt(WPROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
         c.line("        return finish(b);");
@@ -227,7 +278,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_window_prop with a signal-bound {prop} value (window 0, the primary surface). */"));
         c.line(&format!("    public static byte[] txBindWindow{pc}(long window, long signalId) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_WINDOW_PROP);");
         c.line(&format!("        b.putLong(window).putInt(WPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
@@ -246,7 +297,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_entry_prop with a constant {prop} value. */"));
         c.line(&format!("    public static byte[] txSetEntry{pc}(long entry, {ty} {p}) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_ENTRY_PROP);");
         c.line(&format!("        b.putLong(entry).putInt(EPROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
         c.line("        return finish(b);");
@@ -254,7 +305,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_entry_prop with a signal-bound {prop} value. */"));
         c.line(&format!("    public static byte[] txBindEntry{pc}(long entry, long signalId) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_ENTRY_PROP);");
         c.line(&format!("        b.putLong(entry).putInt(EPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
@@ -282,7 +333,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_section_prop with a constant {prop} value. */"));
         c.line(&format!("    public static byte[] txSetSection{pc}(long section, {ty} {p}) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_SECTION_PROP);");
         c.line(&format!("        b.putLong(section).putInt(SPROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
         c.line("        return finish(b);");
@@ -290,7 +341,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /** set_section_prop with a signal-bound {prop} value. */"));
         c.line(&format!("    public static byte[] txBindSection{pc}(long section, long signalId) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_SECTION_PROP);");
         c.line(&format!("        b.putLong(section).putInt(SPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
@@ -401,7 +452,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line(&format!("    /** set_menu_prop with a constant {prop} value. */"));
         }
         c.line(&format!("    public static byte[] txSetMenu{pc}(long item, {ty} {p}) {{"));
-        c.line("        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);");
+        c.line("        Enc b = begin(TX_KIND_SET_MENU_PROP);");
         c.line(&format!("        b.putLong(item).putInt(MPROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
         c.line("        return finish(b);");
@@ -410,7 +461,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line("");
             c.line(&format!("    /** set_menu_prop with a signal-bound {prop} value. */"));
             c.line(&format!("    public static byte[] txBindMenu{pc}(long item, long signalId) {{"));
-            c.line("        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);");
+            c.line("        Enc b = begin(TX_KIND_SET_MENU_PROP);");
             c.line(&format!("        b.putLong(item).putInt(MPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
             c.line("        return finish(b);");
             c.line("    }");
@@ -853,7 +904,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
         sig.join(", ")
     ));
     c.line(&format!(
-        "        ByteBuffer b = begin(TX_KIND_{});",
+        "        Enc b = begin(TX_KIND_{});",
         r.name.to_uppercase()
     ));
     for f in r.fields {

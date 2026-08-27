@@ -270,23 +270,68 @@ public final class KayaWire {
         }
     }
 
-    private static ByteBuffer begin(short kind) {
-        ByteBuffer b = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
+    private static final class Enc {
+        private ByteBuffer b;
+
+        Enc(int hint) {
+            b = ByteBuffer.allocate(hint).order(ByteOrder.LITTLE_ENDIAN);
+        }
+
+        private ByteBuffer at(int extra) {
+            if (b.remaining() >= extra) return b;
+            int need = b.position() + extra;
+            if (need < 0) {
+                throw new IllegalArgumentException(
+                        "kaya: record exceeds the wire's 2 GiB size field");
+            }
+            int cap = b.capacity();
+            while (cap < need && cap <= Integer.MAX_VALUE / 2) cap *= 2;
+            if (cap < need) cap = need;
+            ByteBuffer grown = ByteBuffer.allocate(cap).order(ByteOrder.LITTLE_ENDIAN);
+            grown.put(b.array(), 0, b.position());
+            b = grown;
+            return b;
+        }
+
+        Enc put(byte v) { at(1).put(v); return this; }
+
+        Enc put(byte[] v) { at(v.length).put(v); return this; }
+
+        Enc putShort(short v) { at(2).putShort(v); return this; }
+
+        Enc putInt(int v) { at(4).putInt(v); return this; }
+
+        /** Absolute: the size field, already inside the header. */
+        Enc putInt(int index, int v) { b.putInt(index, v); return this; }
+
+        Enc putLong(long v) { at(8).putLong(v); return this; }
+
+        Enc putDouble(double v) { at(8).putDouble(v); return this; }
+
+        int position() { return b.position(); }
+
+        byte[] bytes() {
+            byte[] out = new byte[b.position()];
+            b.flip();
+            b.get(out);
+            return out;
+        }
+    }
+
+    private static Enc begin(short kind) {
+        Enc b = new Enc(4096);
         b.putInt(0).putShort(kind).putShort((short) 0);
         return b;
     }
 
-    private static byte[] finish(ByteBuffer b) {
+    private static byte[] finish(Enc b) {
         while (b.position() % 8 != 0) b.put((byte) 0);
         b.putInt(0, b.position());
-        byte[] out = new byte[b.position()];
-        b.flip();
-        b.get(out);
-        return out;
+        return b.bytes();
     }
 
     // Values self-pad to 8: they concatenate inside record bodies.
-    private static void encodeValue(ByteBuffer b, Object v) {
+    private static void encodeValue(Enc b, Object v) {
         if (v instanceof Boolean) {
             b.putInt(VALUE_BOOL).putInt(1).put((byte) (((Boolean) v) ? 1 : 0));
         } else if (v instanceof Integer) {
@@ -309,7 +354,7 @@ public final class KayaWire {
 
     // A counted value sequence — a key path or a record:
     // {u32 count, u32 reserved, count values}.
-    private static void encodeValues(ByteBuffer b, Object[] vals) {
+    private static void encodeValues(Enc b, Object[] vals) {
         int n = vals == null ? 0 : vals.length;
         b.putInt(n).putInt(0);
         for (int i = 0; i < n; i++) encodeValue(b, vals[i]);
@@ -317,7 +362,7 @@ public final class KayaWire {
 
     // A collection schema: {u32 count, u32 reserved, count VALUE_* tags},
     // padded to 8.
-    private static void encodeVariantSchemas(ByteBuffer b, int[][] variants) {
+    private static void encodeVariantSchemas(Enc b, int[][] variants) {
         b.putInt(variants.length).putInt(0);
         for (int[] schema : variants) {
             b.putInt(schema.length);
@@ -328,7 +373,7 @@ public final class KayaWire {
 
     /** Create a signal holding `initial`. */
     public static byte[] txCreateSignal(long signalId, Object initial) {
-        ByteBuffer b = begin(TX_KIND_CREATE_SIGNAL);
+        Enc b = begin(TX_KIND_CREATE_SIGNAL);
         b.putLong(signalId);
         encodeValue(b, initial);
         return finish(b);
@@ -336,7 +381,7 @@ public final class KayaWire {
 
     /** Replace a signal's value; keep-latest per batch. */
     public static byte[] txWriteSignal(long signalId, Object value) {
-        ByteBuffer b = begin(TX_KIND_WRITE_SIGNAL);
+        Enc b = begin(TX_KIND_WRITE_SIGNAL);
         b.putLong(signalId);
         encodeValue(b, value);
         return finish(b);
@@ -344,7 +389,7 @@ public final class KayaWire {
 
     /** Create a live widget, or declare a template node inside a scope. */
     public static byte[] txCreateWidget(long widgetId, int kind) {
-        ByteBuffer b = begin(TX_KIND_CREATE_WIDGET);
+        Enc b = begin(TX_KIND_CREATE_WIDGET);
         b.putLong(widgetId);
         b.putInt(kind);
         b.putInt(0);
@@ -353,7 +398,7 @@ public final class KayaWire {
 
     /** Append `child` to `parent` (same zone only). */
     public static byte[] txAddChild(long parent, long child) {
-        ByteBuffer b = begin(TX_KIND_ADD_CHILD);
+        Enc b = begin(TX_KIND_ADD_CHILD);
         b.putLong(parent);
         b.putLong(child);
         return finish(b);
@@ -361,7 +406,7 @@ public final class KayaWire {
 
     /** Mount a root into a window (0 = the default window). */
     public static byte[] txMount(long window, long root) {
-        ByteBuffer b = begin(TX_KIND_MOUNT);
+        Enc b = begin(TX_KIND_MOUNT);
         b.putLong(window);
         b.putLong(root);
         return finish(b);
@@ -369,7 +414,7 @@ public final class KayaWire {
 
     /** Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template. */
     public static byte[] txCreateCollection(long collectionId, int[][] variants) {
-        ByteBuffer b = begin(TX_KIND_CREATE_COLLECTION);
+        Enc b = begin(TX_KIND_CREATE_COLLECTION);
         b.putLong(collectionId);
         encodeVariantSchemas(b, variants);
         return finish(b);
@@ -377,7 +422,7 @@ public final class KayaWire {
 
     /** Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case. */
     public static byte[] txCollectionInsert(long collectionId, Object[] path, Object key, int variant, Object[] fields) {
-        ByteBuffer b = begin(TX_KIND_COLLECTION_INSERT);
+        Enc b = begin(TX_KIND_COLLECTION_INSERT);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
@@ -389,7 +434,7 @@ public final class KayaWire {
 
     /** Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place. */
     public static byte[] txCollectionUpdate(long collectionId, Object[] path, Object key, int variant, Object[] fields) {
-        ByteBuffer b = begin(TX_KIND_COLLECTION_UPDATE);
+        Enc b = begin(TX_KIND_COLLECTION_UPDATE);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
@@ -401,7 +446,7 @@ public final class KayaWire {
 
     /** Remove an entry; its stamped copy tears down. */
     public static byte[] txCollectionRemove(long collectionId, Object[] path, Object key) {
-        ByteBuffer b = begin(TX_KIND_COLLECTION_REMOVE);
+        Enc b = begin(TX_KIND_COLLECTION_REMOVE);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
@@ -410,7 +455,7 @@ public final class KayaWire {
 
     /** A For over a collection; opens a template scope until template_end. */
     public static byte[] txCreateFor(long id, long collectionId) {
-        ByteBuffer b = begin(TX_KIND_CREATE_FOR);
+        Enc b = begin(TX_KIND_CREATE_FOR);
         b.putLong(id);
         b.putLong(collectionId);
         return finish(b);
@@ -418,7 +463,7 @@ public final class KayaWire {
 
     /** A When over a Bool signal; opens a template scope until template_end. */
     public static byte[] txCreateWhen(long id, long signalId) {
-        ByteBuffer b = begin(TX_KIND_CREATE_WHEN);
+        Enc b = begin(TX_KIND_CREATE_WHEN);
         b.putLong(id);
         b.putLong(signalId);
         return finish(b);
@@ -426,13 +471,13 @@ public final class KayaWire {
 
     /** Close the innermost template scope. */
     public static byte[] txTemplateEnd() {
-        ByteBuffer b = begin(TX_KIND_TEMPLATE_END);
+        Enc b = begin(TX_KIND_TEMPLATE_END);
         return finish(b);
     }
 
     /** Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them. */
     public static byte[] txCollectionMove(long collectionId, Object[] path, Object key, Object[] before) {
-        ByteBuffer b = begin(TX_KIND_COLLECTION_MOVE);
+        Enc b = begin(TX_KIND_COLLECTION_MOVE);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
@@ -442,7 +487,7 @@ public final class KayaWire {
 
     /** Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does). */
     public static byte[] txCollectionUpdateField(long collectionId, Object[] path, Object key, int field, int variant, Object value) {
-        ByteBuffer b = begin(TX_KIND_COLLECTION_UPDATE_FIELD);
+        Enc b = begin(TX_KIND_COLLECTION_UPDATE_FIELD);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
@@ -454,7 +499,7 @@ public final class KayaWire {
 
     /** Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly. */
     public static byte[] txVariantCase(int variant) {
-        ByteBuffer b = begin(TX_KIND_VARIANT_CASE);
+        Enc b = begin(TX_KIND_VARIANT_CASE);
         b.putInt(variant);
         b.putInt(0);
         return finish(b);
@@ -462,7 +507,7 @@ public final class KayaWire {
 
     /** A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy. */
     public static byte[] txWidgetCommand(long widgetId, int command) {
-        ByteBuffer b = begin(TX_KIND_WIDGET_COMMAND);
+        Enc b = begin(TX_KIND_WIDGET_COMMAND);
         b.putLong(widgetId);
         b.putInt(command);
         b.putInt(0);
@@ -471,21 +516,21 @@ public final class KayaWire {
 
     /** Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists. */
     public static byte[] txCreateWindow(long windowId) {
-        ByteBuffer b = begin(TX_KIND_CREATE_WINDOW);
+        Enc b = begin(TX_KIND_CREATE_WINDOW);
         b.putLong(windowId);
         return finish(b);
     }
 
     /** Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it. */
     public static byte[] txDestroyWindow(long windowId) {
-        ByteBuffer b = begin(TX_KIND_DESTROY_WINDOW);
+        Enc b = begin(TX_KIND_DESTROY_WINDOW);
         b.putLong(windowId);
         return finish(b);
     }
 
     /** Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires. */
     public static byte[] txShowAlert(long window, long alert, int actions, Object title, Object message, Object action0, Object action1, Object cancel) {
-        ByteBuffer b = begin(TX_KIND_SHOW_ALERT);
+        Enc b = begin(TX_KIND_SHOW_ALERT);
         b.putLong(window);
         b.putLong(alert);
         b.putInt(actions);
@@ -500,7 +545,7 @@ public final class KayaWire {
 
     /** Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation). */
     public static byte[] txPushEntry(long window, long entry) {
-        ByteBuffer b = begin(TX_KIND_PUSH_ENTRY);
+        Enc b = begin(TX_KIND_PUSH_ENTRY);
         b.putLong(window);
         b.putLong(entry);
         return finish(b);
@@ -508,14 +553,14 @@ public final class KayaWire {
 
     /** Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch. */
     public static byte[] txPopEntry(long window) {
-        ByteBuffer b = begin(TX_KIND_POP_ENTRY);
+        Enc b = begin(TX_KIND_POP_ENTRY);
         b.putLong(window);
         return finish(b);
     }
 
     /** Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements. */
     public static byte[] txSetEntryProp(long entry, int prop, int source) {
-        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        Enc b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry);
         b.putInt(prop);
         b.putInt(source);
@@ -524,7 +569,7 @@ public final class KayaWire {
 
     /** Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections). */
     public static byte[] txAddSection(long window, long section) {
-        ByteBuffer b = begin(TX_KIND_ADD_SECTION);
+        Enc b = begin(TX_KIND_ADD_SECTION);
         b.putLong(window);
         b.putLong(section);
         return finish(b);
@@ -532,7 +577,7 @@ public final class KayaWire {
 
     /** Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive. */
     public static byte[] txSelectSection(long window, long section) {
-        ByteBuffer b = begin(TX_KIND_SELECT_SECTION);
+        Enc b = begin(TX_KIND_SELECT_SECTION);
         b.putLong(window);
         b.putLong(section);
         return finish(b);
@@ -540,7 +585,7 @@ public final class KayaWire {
 
     /** Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements. */
     public static byte[] txSetSectionProp(long section, int prop, int source) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section);
         b.putInt(prop);
         b.putInt(source);
@@ -549,7 +594,7 @@ public final class KayaWire {
 
     /** Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus). */
     public static byte[] txMenuItemCreate(long item, int kind) {
-        ByteBuffer b = begin(TX_KIND_MENU_ITEM_CREATE);
+        Enc b = begin(TX_KIND_MENU_ITEM_CREATE);
         b.putLong(item);
         b.putInt(kind);
         b.putInt(0);
@@ -558,7 +603,7 @@ public final class KayaWire {
 
     /** Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root. */
     public static byte[] txMenuItemAppend(long parent, long child) {
-        ByteBuffer b = begin(TX_KIND_MENU_ITEM_APPEND);
+        Enc b = begin(TX_KIND_MENU_ITEM_APPEND);
         b.putLong(parent);
         b.putLong(child);
         return finish(b);
@@ -566,7 +611,7 @@ public final class KayaWire {
 
     /** Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error. */
     public static byte[] txMenubarAppend(long window, long item) {
-        ByteBuffer b = begin(TX_KIND_MENUBAR_APPEND);
+        Enc b = begin(TX_KIND_MENUBAR_APPEND);
         b.putLong(window);
         b.putLong(item);
         return finish(b);
@@ -574,7 +619,7 @@ public final class KayaWire {
 
     /** Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home). */
     public static byte[] txContextAttach(long widget, long item) {
-        ByteBuffer b = begin(TX_KIND_CONTEXT_ATTACH);
+        Enc b = begin(TX_KIND_CONTEXT_ATTACH);
         b.putLong(widget);
         b.putLong(item);
         return finish(b);
@@ -582,7 +627,7 @@ public final class KayaWire {
 
     /** Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach. */
     public static byte[] txContextAttachNode(long node, long item) {
-        ByteBuffer b = begin(TX_KIND_CONTEXT_ATTACH_NODE);
+        Enc b = begin(TX_KIND_CONTEXT_ATTACH_NODE);
         b.putLong(node);
         b.putLong(item);
         return finish(b);
@@ -590,7 +635,7 @@ public final class KayaWire {
 
     /** Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier. */
     public static byte[] txSetMenuProp(long item, int prop, int source) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item);
         b.putInt(prop);
         b.putInt(source);
@@ -599,7 +644,7 @@ public final class KayaWire {
 
     /** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
     public static byte[] txShowFileDialog(long window, long dialog, int multiple, Object[] filters) {
-        ByteBuffer b = begin(TX_KIND_SHOW_FILE_DIALOG);
+        Enc b = begin(TX_KIND_SHOW_FILE_DIALOG);
         b.putLong(window);
         b.putLong(dialog);
         b.putInt(multiple);
@@ -610,7 +655,7 @@ public final class KayaWire {
 
     /** Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya. */
     public static byte[] txCopy(int present, int fileCount, int customCount, Object[] reps) {
-        ByteBuffer b = begin(TX_KIND_COPY);
+        Enc b = begin(TX_KIND_COPY);
         b.putInt(present);
         b.putInt(fileCount);
         b.putInt(customCount);
@@ -621,7 +666,7 @@ public final class KayaWire {
 
     /** Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
     public static byte[] txReadClipboard(long request, Object accepting) {
-        ByteBuffer b = begin(TX_KIND_READ_CLIPBOARD);
+        Enc b = begin(TX_KIND_READ_CLIPBOARD);
         b.putLong(request);
         encodeValue(b, accepting);
         return finish(b);
@@ -629,7 +674,7 @@ public final class KayaWire {
 
     /** Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary. */
     public static byte[] txUndoGroup(long window, Object label) {
-        ByteBuffer b = begin(TX_KIND_UNDO_GROUP);
+        Enc b = begin(TX_KIND_UNDO_GROUP);
         b.putLong(window);
         encodeValue(b, label);
         return finish(b);
@@ -637,7 +682,7 @@ public final class KayaWire {
 
     /** DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (docs/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document. */
     public static byte[] txHighlightRanges(long widgetId, int count, Object[] ranges) {
-        ByteBuffer b = begin(TX_KIND_HIGHLIGHT_RANGES);
+        Enc b = begin(TX_KIND_HIGHLIGHT_RANGES);
         b.putLong(widgetId);
         b.putInt(count);
         b.putInt(0);
@@ -647,7 +692,7 @@ public final class KayaWire {
 
     /** Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe). */
     public static byte[] txSelectRange(long widgetId, long start, long stop) {
-        ByteBuffer b = begin(TX_KIND_SELECT_RANGE);
+        Enc b = begin(TX_KIND_SELECT_RANGE);
         b.putLong(widgetId);
         b.putLong(start);
         b.putLong(stop);
@@ -656,7 +701,7 @@ public final class KayaWire {
 
     /** Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on. */
     public static byte[] txRevealRange(long widgetId, long start, long stop) {
-        ByteBuffer b = begin(TX_KIND_REVEAL_RANGE);
+        Enc b = begin(TX_KIND_REVEAL_RANGE);
         b.putLong(widgetId);
         b.putLong(start);
         b.putLong(stop);
@@ -665,7 +710,7 @@ public final class KayaWire {
 
     /** Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened. */
     public static byte[] txShowSaveDialog(long window, long dialog, Object suggestedName, Object[] filters) {
-        ByteBuffer b = begin(TX_KIND_SHOW_SAVE_DIALOG);
+        Enc b = begin(TX_KIND_SHOW_SAVE_DIALOG);
         b.putLong(window);
         b.putLong(dialog);
         encodeValue(b, suggestedName);
@@ -675,7 +720,7 @@ public final class KayaWire {
 
     /** REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists. */
     public static byte[] txSetBrandAccent(int seed, int mask, int light, int dark) {
-        ByteBuffer b = begin(TX_KIND_SET_BRAND_ACCENT);
+        Enc b = begin(TX_KIND_SET_BRAND_ACCENT);
         b.putInt(seed);
         b.putInt(mask);
         b.putInt(light);
@@ -685,7 +730,7 @@ public final class KayaWire {
 
     /** REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request. */
     public static byte[] txSetBrandTypeface(int mask, Object family, Object[] platforms, Object font) {
-        ByteBuffer b = begin(TX_KIND_SET_BRAND_TYPEFACE);
+        Enc b = begin(TX_KIND_SET_BRAND_TYPEFACE);
         b.putInt(mask);
         b.putInt(0);
         encodeValue(b, family);
@@ -696,7 +741,7 @@ public final class KayaWire {
 
     /** DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied. */
     public static byte[] txSetAppIdentity(int mask, Object name, Object icon) {
-        ByteBuffer b = begin(TX_KIND_SET_APP_IDENTITY);
+        Enc b = begin(TX_KIND_SET_APP_IDENTITY);
         b.putInt(mask);
         b.putInt(0);
         encodeValue(b, name);
@@ -706,7 +751,7 @@ public final class KayaWire {
 
     /** DECLARE the column header bar on a For's container, replacing whatever was declared before (docs/tables-plan.md). `titles` holds `count` Str values, one per column in visual order; `sorted` is the 0-based index of the column showing the sort indicator, or u32::MAX for none (alert_choice's cancel-sentinel precedent); `direction` is 0 ascending, 1 descending, read only when `sorted` names a column.  ONE RECORD FOR THE WHOLE BAR, titles and indicator together, because the header's state is one declaration: a sort flip re-sends a handful of short strings and buys atomicity — no window where new titles show a stale indicator. A dedicated record and not a prop because a prop carries ONE Value and titles are many, with spaces (`accepts`' space-separated trick is out); the carrier is highlight_ranges' count-plus-Values shape.  THE TARGET IS THE FOR'S CONTAINER — there is no List widget; a For materializes as a Column and this record is what turns that container into a table where the size class and the platform have the idiom (DESIGN.md's column-props ruling). The root refuses a target that is not a For container, a `count` of 0, an empty title, a `sorted` outside 0..count that is not the sentinel, and a `direction` past 1.  PATH ADDRESSING (dynamic tables, docs/tables-plan.md): the Values carry `path_len` KEY values FIRST, then the `count` titles — sort_requested's identity convention pointed the other way. path_len 0 with a live For's container id is the flat case above; path_len 0 with a nested For's TEMPLATE NODE id declares the bar for EVERY copy (stored on the site, applied at each stamp); path_len > 0 with the template node id and keys outermost-first re-declares ONE stamped copy's bar — the per-copy sort indicator. A keyed target that names no stamped copy is refused loudly.  ROWS MUST FIT THE COLUMNS: with N columns declared, every stamped row's template root must be a Row with exactly N children, checked at stamp time in the core so every backend inherits the wall — a mismatched template dies naming the row and both counts instead of rendering N-1 cells under N headers on some platforms and not others.  THE INDICATOR IS THE GUEST'S: a header click emits sort_requested and changes nothing; the guest reorders its collection by key and re-declares this record with the new indicator. Configuration, not an occurrence source — the echo doctrine. Not undoable: the header bar is not state, and the order underneath it already rides collection_move's undo run. */
     public static byte[] txSetColumnHeaders(long widgetId, int sorted, int direction, int count, int pathLen, Object[] titles) {
-        ByteBuffer b = begin(TX_KIND_SET_COLUMN_HEADERS);
+        Enc b = begin(TX_KIND_SET_COLUMN_HEADERS);
         b.putLong(widgetId);
         b.putInt(sorted);
         b.putInt(direction);
@@ -718,7 +763,7 @@ public final class KayaWire {
 
     /** DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws. */
     public static byte[] txSetDrawing(long widgetId, Object vbW, Object vbH, int count, int pathLen, Object[] ops) {
-        ByteBuffer b = begin(TX_KIND_SET_DRAWING);
+        Enc b = begin(TX_KIND_SET_DRAWING);
         b.putLong(widgetId);
         encodeValue(b, vbW);
         encodeValue(b, vbH);
@@ -730,7 +775,7 @@ public final class KayaWire {
 
     /** set_property with a constant text value. */
     public static byte[] txSetText(long widgetId, String text) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_CONST);
         encodeValue(b, text);
         return finish(b);
@@ -738,14 +783,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound text value. */
     public static byte[] txBindText(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindTextElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -753,7 +798,7 @@ public final class KayaWire {
 
     /** set_property with a constant checked value. */
     public static byte[] txSetChecked(long widgetId, boolean checked) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_CONST);
         encodeValue(b, checked);
         return finish(b);
@@ -761,14 +806,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound checked value. */
     public static byte[] txBindChecked(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindCheckedElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -776,7 +821,7 @@ public final class KayaWire {
 
     /** set_property with a constant value value. */
     public static byte[] txSetValue(long widgetId, double value) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_VALUE).putInt(SOURCE_CONST);
         encodeValue(b, value);
         return finish(b);
@@ -784,14 +829,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound value value. */
     public static byte[] txBindValue(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_VALUE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindValueElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_VALUE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -799,7 +844,7 @@ public final class KayaWire {
 
     /** set_property with a constant min value. */
     public static byte[] txSetMin(long widgetId, double min) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MIN).putInt(SOURCE_CONST);
         encodeValue(b, min);
         return finish(b);
@@ -807,14 +852,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound min value. */
     public static byte[] txBindMin(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MIN).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindMinElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MIN).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -822,7 +867,7 @@ public final class KayaWire {
 
     /** set_property with a constant max value. */
     public static byte[] txSetMax(long widgetId, double max) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MAX).putInt(SOURCE_CONST);
         encodeValue(b, max);
         return finish(b);
@@ -830,14 +875,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound max value. */
     public static byte[] txBindMax(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MAX).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindMaxElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MAX).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -845,7 +890,7 @@ public final class KayaWire {
 
     /** set_property with a constant source value. */
     public static byte[] txSetSource(long widgetId, long handle) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SOURCE).putInt(SOURCE_CONST);
         encodeValue(b, new BlobHandle(handle));
         return finish(b);
@@ -853,14 +898,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound source value. */
     public static byte[] txBindSource(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SOURCE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindSourceElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SOURCE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -868,7 +913,7 @@ public final class KayaWire {
 
     /** set_property with a constant grow value. */
     public static byte[] txSetGrow(long widgetId, double grow) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_GROW).putInt(SOURCE_CONST);
         encodeValue(b, grow);
         return finish(b);
@@ -876,14 +921,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound grow value. */
     public static byte[] txBindGrow(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_GROW).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindGrowElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_GROW).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -891,7 +936,7 @@ public final class KayaWire {
 
     /** set_property with a constant spacing value. */
     public static byte[] txSetSpacing(long widgetId, double spacing) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SPACING).putInt(SOURCE_CONST);
         encodeValue(b, spacing);
         return finish(b);
@@ -899,14 +944,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound spacing value. */
     public static byte[] txBindSpacing(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SPACING).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindSpacingElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_SPACING).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -914,7 +959,7 @@ public final class KayaWire {
 
     /** set_property with a constant align value. */
     public static byte[] txSetAlign(long widgetId, long align) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ALIGN).putInt(SOURCE_CONST);
         encodeValue(b, align);
         return finish(b);
@@ -922,14 +967,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound align value. */
     public static byte[] txBindAlign(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ALIGN).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindAlignElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ALIGN).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -937,7 +982,7 @@ public final class KayaWire {
 
     /** set_property with a constant indeterminate value. */
     public static byte[] txSetIndeterminate(long widgetId, boolean indeterminate) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_CONST);
         encodeValue(b, indeterminate);
         return finish(b);
@@ -945,14 +990,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound indeterminate value. */
     public static byte[] txBindIndeterminate(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindIndeterminateElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -960,7 +1005,7 @@ public final class KayaWire {
 
     /** set_property with a constant columns value. */
     public static byte[] txSetColumns(long widgetId, double columns) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_CONST);
         encodeValue(b, columns);
         return finish(b);
@@ -968,14 +1013,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound columns value. */
     public static byte[] txBindColumns(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindColumnsElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -983,7 +1028,7 @@ public final class KayaWire {
 
     /** set_property with a constant a11y_id value. */
     public static byte[] txSetA11yId(long widgetId, String a11yId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_ID).putInt(SOURCE_CONST);
         encodeValue(b, a11yId);
         return finish(b);
@@ -991,14 +1036,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound a11y_id value. */
     public static byte[] txBindA11yId(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_ID).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindA11yIdElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_ID).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -1006,7 +1051,7 @@ public final class KayaWire {
 
     /** set_property with a constant a11y_label value. */
     public static byte[] txSetA11yLabel(long widgetId, String a11yLabel) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_CONST);
         encodeValue(b, a11yLabel);
         return finish(b);
@@ -1014,14 +1059,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound a11y_label value. */
     public static byte[] txBindA11yLabel(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindA11yLabelElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -1029,7 +1074,7 @@ public final class KayaWire {
 
     /** set_property with a constant a11y_hint value. */
     public static byte[] txSetA11yHint(long widgetId, String a11yHint) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_HINT).putInt(SOURCE_CONST);
         encodeValue(b, a11yHint);
         return finish(b);
@@ -1037,14 +1082,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound a11y_hint value. */
     public static byte[] txBindA11yHint(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_HINT).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindA11yHintElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_HINT).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -1052,7 +1097,7 @@ public final class KayaWire {
 
     /** set_property with a constant accepts value. */
     public static byte[] txSetAccepts(long widgetId, String accepts) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ACCEPTS).putInt(SOURCE_CONST);
         encodeValue(b, accepts);
         return finish(b);
@@ -1060,14 +1105,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound accepts value. */
     public static byte[] txBindAccepts(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ACCEPTS).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindAcceptsElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ACCEPTS).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -1075,7 +1120,7 @@ public final class KayaWire {
 
     /** set_property with a constant role value. */
     public static byte[] txSetRole(long widgetId, long role) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ROLE).putInt(SOURCE_CONST);
         encodeValue(b, role);
         return finish(b);
@@ -1083,14 +1128,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound role value. */
     public static byte[] txBindRole(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ROLE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindRoleElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ROLE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -1098,7 +1143,7 @@ public final class KayaWire {
 
     /** set_property with a constant inset value. */
     public static byte[] txSetInset(long widgetId, double inset) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INSET).putInt(SOURCE_CONST);
         encodeValue(b, inset);
         return finish(b);
@@ -1106,14 +1151,14 @@ public final class KayaWire {
 
     /** set_property with a signal-bound inset value. */
     public static byte[] txBindInset(long widgetId, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INSET).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_property bound to one field of the element of the enclosing For. */
     public static byte[] txBindInsetElement(long widgetId, int level, int field) {
-        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INSET).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
@@ -1121,7 +1166,7 @@ public final class KayaWire {
 
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_TITLE).putInt(SOURCE_CONST);
         encodeValue(b, title);
         return finish(b);
@@ -1129,14 +1174,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound title value (window 0, the primary surface). */
     public static byte[] txBindWindowTitle(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant width value (window 0, the primary surface). */
     public static byte[] txSetWindowWidth(long window, double width) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_WIDTH).putInt(SOURCE_CONST);
         encodeValue(b, width);
         return finish(b);
@@ -1144,14 +1189,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound width value (window 0, the primary surface). */
     public static byte[] txBindWindowWidth(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_WIDTH).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant height value (window 0, the primary surface). */
     public static byte[] txSetWindowHeight(long window, double height) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_HEIGHT).putInt(SOURCE_CONST);
         encodeValue(b, height);
         return finish(b);
@@ -1159,14 +1204,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound height value (window 0, the primary surface). */
     public static byte[] txBindWindowHeight(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_HEIGHT).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant veto_close value (window 0, the primary surface). */
     public static byte[] txSetWindowVetoClose(long window, boolean vetoClose) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_VETO_CLOSE).putInt(SOURCE_CONST);
         encodeValue(b, vetoClose);
         return finish(b);
@@ -1174,14 +1219,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound veto_close value (window 0, the primary surface). */
     public static byte[] txBindWindowVetoClose(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_VETO_CLOSE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant sections_presentation value (window 0, the primary surface). */
     public static byte[] txSetWindowSectionsPresentation(long window, long sectionsPresentation) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_SECTIONS_PRESENTATION).putInt(SOURCE_CONST);
         encodeValue(b, sectionsPresentation);
         return finish(b);
@@ -1189,14 +1234,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface). */
     public static byte[] txBindWindowSectionsPresentation(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_SECTIONS_PRESENTATION).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant panes value (window 0, the primary surface). */
     public static byte[] txSetWindowPanes(long window, long panes) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_PANES).putInt(SOURCE_CONST);
         encodeValue(b, panes);
         return finish(b);
@@ -1204,14 +1249,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound panes value (window 0, the primary surface). */
     public static byte[] txBindWindowPanes(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_PANES).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant dirty value (window 0, the primary surface). */
     public static byte[] txSetWindowDirty(long window, boolean dirty) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_DIRTY).putInt(SOURCE_CONST);
         encodeValue(b, dirty);
         return finish(b);
@@ -1219,14 +1264,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound dirty value (window 0, the primary surface). */
     public static byte[] txBindWindowDirty(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_DIRTY).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant inset value (window 0, the primary surface). */
     public static byte[] txSetWindowInset(long window, double inset) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_INSET).putInt(SOURCE_CONST);
         encodeValue(b, inset);
         return finish(b);
@@ -1234,14 +1279,14 @@ public final class KayaWire {
 
     /** set_window_prop with a signal-bound inset value (window 0, the primary surface). */
     public static byte[] txBindWindowInset(long window, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_INSET).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_entry_prop with a constant title value. */
     public static byte[] txSetEntryTitle(long entry, String title) {
-        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        Enc b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry).putInt(EPROP_TITLE).putInt(SOURCE_CONST);
         encodeValue(b, title);
         return finish(b);
@@ -1249,14 +1294,14 @@ public final class KayaWire {
 
     /** set_entry_prop with a signal-bound title value. */
     public static byte[] txBindEntryTitle(long entry, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        Enc b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry).putInt(EPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_entry_prop with a constant intercept_back value. */
     public static byte[] txSetEntryInterceptBack(long entry, boolean interceptBack) {
-        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        Enc b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry).putInt(EPROP_INTERCEPT_BACK).putInt(SOURCE_CONST);
         encodeValue(b, interceptBack);
         return finish(b);
@@ -1264,14 +1309,14 @@ public final class KayaWire {
 
     /** set_entry_prop with a signal-bound intercept_back value. */
     public static byte[] txBindEntryInterceptBack(long entry, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        Enc b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry).putInt(EPROP_INTERCEPT_BACK).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_section_prop with a constant title value. */
     public static byte[] txSetSectionTitle(long section, String title) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_TITLE).putInt(SOURCE_CONST);
         encodeValue(b, title);
         return finish(b);
@@ -1279,14 +1324,14 @@ public final class KayaWire {
 
     /** set_section_prop with a signal-bound title value. */
     public static byte[] txBindSectionTitle(long section, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_section_prop with a constant icon value. */
     public static byte[] txSetSectionIcon(long section, long handle) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_ICON).putInt(SOURCE_CONST);
         encodeValue(b, new BlobHandle(handle));
         return finish(b);
@@ -1294,14 +1339,14 @@ public final class KayaWire {
 
     /** set_section_prop with a signal-bound icon value. */
     public static byte[] txBindSectionIcon(long section, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_ICON).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_section_prop with a constant symbol value. */
     public static byte[] txSetSectionSymbol(long section, long symbol) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_SYMBOL).putInt(SOURCE_CONST);
         encodeValue(b, symbol);
         return finish(b);
@@ -1309,7 +1354,7 @@ public final class KayaWire {
 
     /** set_section_prop with a signal-bound symbol value. */
     public static byte[] txBindSectionSymbol(long section, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_SYMBOL).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
@@ -1376,7 +1421,7 @@ public final class KayaWire {
 
     /** set_menu_prop with a constant label value. */
     public static byte[] txSetMenuLabel(long item, String label) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_LABEL).putInt(SOURCE_CONST);
         encodeValue(b, label);
         return finish(b);
@@ -1384,14 +1429,14 @@ public final class KayaWire {
 
     /** set_menu_prop with a signal-bound label value. */
     public static byte[] txBindMenuLabel(long item, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_LABEL).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_menu_prop with a constant enabled value. */
     public static byte[] txSetMenuEnabled(long item, boolean enabled) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_ENABLED).putInt(SOURCE_CONST);
         encodeValue(b, enabled);
         return finish(b);
@@ -1399,14 +1444,14 @@ public final class KayaWire {
 
     /** set_menu_prop with a signal-bound enabled value. */
     public static byte[] txBindMenuEnabled(long item, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_ENABLED).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_menu_prop with a constant checked value. */
     public static byte[] txSetMenuChecked(long item, boolean checked) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_CHECKED).putInt(SOURCE_CONST);
         encodeValue(b, checked);
         return finish(b);
@@ -1414,14 +1459,14 @@ public final class KayaWire {
 
     /** set_menu_prop with a signal-bound checked value. */
     public static byte[] txBindMenuChecked(long item, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_CHECKED).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_menu_prop with a constant value value. */
     public static byte[] txSetMenuValue(long item, double value) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_VALUE).putInt(SOURCE_CONST);
         encodeValue(b, value);
         return finish(b);
@@ -1429,14 +1474,14 @@ public final class KayaWire {
 
     /** set_menu_prop with a signal-bound value value. */
     public static byte[] txBindMenuValue(long item, long signalId) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_VALUE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_menu_prop with a constant icon value. */
     public static byte[] txSetMenuIcon(long item, long handle) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_ICON).putInt(SOURCE_CONST);
         encodeValue(b, new BlobHandle(handle));
         return finish(b);
@@ -1444,7 +1489,7 @@ public final class KayaWire {
 
     /** set_menu_prop with a constant primary value. */
     public static byte[] txSetMenuPrimary(long item, boolean primary) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_PRIMARY).putInt(SOURCE_CONST);
         encodeValue(b, primary);
         return finish(b);
@@ -1453,7 +1498,7 @@ public final class KayaWire {
     /** set_menu_prop with a constant shortcut value, canonicalized here
      * (the one binding-tier shortcut parser — no call site bypasses it). */
     public static byte[] txSetMenuShortcut(long item, String shortcut) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_SHORTCUT).putInt(SOURCE_CONST);
         encodeValue(b, canonicalizeShortcut(shortcut));
         return finish(b);
@@ -1461,7 +1506,7 @@ public final class KayaWire {
 
     /** set_menu_prop with a constant role value. */
     public static byte[] txSetMenuRole(long item, String role) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_ROLE).putInt(SOURCE_CONST);
         encodeValue(b, role);
         return finish(b);
@@ -1469,7 +1514,7 @@ public final class KayaWire {
 
     /** set_menu_prop with a constant symbol value. */
     public static byte[] txSetMenuSymbol(long item, long symbol) {
-        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_SYMBOL).putInt(SOURCE_CONST);
         encodeValue(b, symbol);
         return finish(b);

@@ -1,0 +1,424 @@
+WHAT ONE CANVAS FRAME COSTS A GUEST — PYTHON AND JAVA AGAINST RUST
+measured 2026-08-26, the day after the canvas depth slice landed (e3db8fe)
+the obligation: the canvas animation research closed with "the 0.019ms
+resubmit is the Rust binding only. The other 7 marshal tagged values
+differently, and that number decides whether a Python or Java game can
+hit 60fps at all."
+
+THE QUESTION
+------------
+`set_drawing` declares the WHOLE drawing every time (spec kind 46, ONE
+record, never a patch), so an animation re-submits its entire display
+list per frame. The op stream travels as ordinary tagged values —
+docs/canvas-plan.md decision 5, "Packed bytes stay a measured-need
+escalation" — and §3.1 names the trigger for admitting packed bytes:
+"an artifact where the encoding cost is MEASURED: a hundred-thousand-
+point scientific plot, not a chart."
+
+This is that measurement, for the two bindings most likely to fail it.
+
+THE ANSWER, ONE LINE PER LANGUAGE
+---------------------------------
+One 2886-op frame, built and submitted through the real binding, median
+of three runs, release core:
+
+    rust     0.015 ms     0.1% of a 16.6 ms frame     1100x headroom
+    java     0.122 ms     0.7%                         136x
+    python   1.429 ms     8.6%                        11.6x
+
+ALL THREE FIT, and none of them is close to the edge. For scale, the
+SAME scene's raster costs 14.21 ms on this machine at 800x600 @2x
+(the canvas animation research, §4). The marshal is a tenth of the
+raster in the slowest binding and a thousandth in the fastest.
+
+THE MACHINE
+-----------
+Apple M5 Pro, 18 cores, 64 GB, macOS 26.5.2 (25F84), aarch64.
+CPython 3.14.7 (Clang 21.1.8); Zulu OpenJDK 17.0.19 (G1, -Xmx8g);
+rustc from the dev shell, release profile.
+Core: libkaya built `--release --locked` from a CLEAN tree at e3db8fe.
+Load average 3.5 for the reported runs: the android emulator pool and
+the iOS simulator pool were live, as they always are on this host. See
+CAVEATS — one earlier run that was NOT at 3.5 is excluded and says so.
+
+THE SCENE
+---------
+One frame of the particle animation the canvas research measured, ported
+op for op into all three languages:
+
+      1 background fill   full-viewbox rect, 4 point ops + close + fill
+     40 gridlines         stroked, 1pt
+    180 particles         filled octagons, radius 6-18pt
+    120 trails            stroked 7-point polylines, 1.5pt
+    ------------------------------------------------------------------
+    341 paths      2886 ops      8296 wire values      132,800 bytes
+
+The viewbox is 800x600. The byte count is the encoder's own answer for
+one `set_drawing` record, printed by both guests on every run.
+
+ONE DEPARTURE FROM THE RESEARCH'S SCENE, and it changes no cost: that
+scene pushed raw palette indices 0..7 as paint operands, which the real
+core REFUSES — `wire::PAINTS` has five roles. The guests cycle the five.
+Op count, value count and value types are identical.
+
+WHAT "THROUGH THE BINDING" MEANS, PER LANGUAGE — READ THIS FIRST
+----------------------------------------------------------------
+The three paths are not the same shape, and the headline table is
+meaningless without knowing how:
+
+  RUST pays NO encode and NO FFI. `Tx::draw` pushes `TxOp::SetDrawing`
+  with the `Vec<Value>` MOVED in (crates/kaya/src/app.rs), and `commit`
+  sends the `Vec<TxOp>` over an in-process channel. Rust is the core's
+  own language; there is no wire on this path at all. Its 0.015 ms is
+  the op-list build and nothing else.
+
+  PYTHON and JAVA both build a language-side op list, encode it into
+  one framed record, and hand the bytes to `kaya_submit`, which decodes
+  the whole 132,800 bytes back into `Value`s ON THE CALLING THREAD
+  before queueing the transaction.
+
+AND A CORRECTION TO THE 0.019 ms THIS FILE IS COMPARED AGAINST. That
+number came from a STANDALONE cargo project that mirrors canvas.rs — an
+in-process `Vec<Value>` handed to a local copy of `validate()`. It
+crossed no FFI and entered no transaction, and it decomposes as 0.014 ms
+stream build + 0.005 ms validate. The real Rust binding measures 0.015 ms
+for the build, so the two agree; but 0.019 was never a binding number in
+the sense the two below are, and quoting it as one flatters Rust by
+0.005 ms and flatters nothing else.
+
+THE PHASE SPLIT — 2886 OPS, RELEASE CORE
+----------------------------------------
+Medians. `build` is language-side object work; `encode` is the record
+encoder; `submit` is the FFI hop plus the CORE's decode_transaction.
+
+    phase                    rust        java      python
+    ---------------------------------------------------------
+    build                   0.015       0.059       0.440
+    encode                    ---       0.018       0.949
+    submit                 0.0001       0.049       0.039
+    ---------------------------------------------------------
+    FRAME (measured)        0.015       0.122       1.429
+
+THE SPLIT IS THE ANSWER TO "WOULD PACKED HELP":
+
+  python spends 97% of its frame on PYTHON OBJECTS — 0.44 ms appending
+  8296 items to a list through the Draw recorder, 0.95 ms of struct.pack
+  per value. The FFI hop and the core's decode of 132 KB are 0.039 ms,
+  2.7% of the frame. A packed encoding removes almost exactly the 1.39 ms
+  that is expensive here.
+
+  java spends 0.059 ms boxing doubles into an ArrayList and 0.018 ms
+  filling a ByteBuffer. Its submit (0.049 ms) is 40% of the frame and the
+  second largest leg, and packed bytes would not shrink it — the JNI
+  byte[] copy and the core's decode are what a packed encoding still has
+  to do. At 16x it is the LARGEST leg (0.683 of 1.598 ms), so the leg
+  packed bytes cannot remove is the one that grows.
+
+  rust has nothing for packed bytes to remove.
+
+GROWTH — THREE SIZES, 16x APART
+-------------------------------
+The scene repeated N times in one drawing, which changes the size and
+not the op mix. `us/op` flat means the marshal path is linear; this is
+the shape bindings/python/kaya_app_checks.py's Bulk clause uses, and it
+is the clause that would have caught a quadratic in the accumulation.
+
+    ms/frame   1x=2886     4x=11544    16x=46176    growth 1x->16x
+    ----------------------------------------------------------------
+    rust        0.015        0.058          ---        1.00x (1->4)
+    java        0.122        0.424        1.598        0.83x
+    python      1.429        5.781       23.380        1.02x
+
+    us/op       1x           4x          16x
+    ----------------------------------------------------------------
+    rust        0.005        0.005          ---
+    java        0.042        0.037        0.035
+    python      0.495        0.501        0.506
+
+NONE OF THE THREE IS WORSE THAN LINEAR. Python is flat to 2%; java gets CHEAPER
+per op as the record grows, which is fixed per-call cost amortising and
+the JIT settling, not a different algorithm. Nothing in any of these
+three marshal paths is quadratic, which is the failure this measurement
+could most usefully have found and did not.
+
+WHERE EACH BINDING SPENDS A WHOLE FRAME BUDGET ON MARSHAL ALONE,
+extrapolated from a us/op that held flat over a 16x range:
+
+    python   ~33,000 ops    (measured: 46,176 ops costs 23.4 ms, 141%)
+    java    ~400,000 ops    (at 1x's rate; ~470,000 at 16x's)
+    rust  ~3,300,000 ops
+
+THE JAVA CEILING — A DEFECT THE BENCH FOUND BEFORE IT COULD MEASURE
+-------------------------------------------------------------------
+THE JAVA NUMBERS ABOVE ARE NOT WHAT THE TREE DOES TODAY. Run unpatched,
+the java guest never reaches a timing loop:
+
+    CEILING: txSetDrawing REFUSED the full scene —
+             java.nio.BufferOverflowException
+      the biggest drawing this binding CAN encode:   252 wire values
+      the longest text txSetText CAN encode:        4064 chars
+
+Both numbers are bisected BY THE ENCODER ITSELF in the guest, not
+computed from the layout. The cause is one line: KayaWire's `begin`
+allocates a FIXED `ByteBuffer.allocate(4096)` with no growth, so every
+record whose body exceeds 4088 bytes throws.
+
+  - It is not a canvas bug. It caps EVERY record kind. A Java guest
+    cannot set a label or a textarea longer than 4064 characters
+    either, and that is the same wall.
+  - 252 wire values is about 84 ops, about 10 paths. The canvas depth
+    scene fits; nothing a chart would plot past a few dozen points does.
+  - NO OTHER BINDING HAS IT, and that was read rather than assumed:
+    every other encoder writes into a container that grows — go appends
+    to a slice, C# writes a MemoryStream, OCaml a Buffer, Haskell a
+    Builder, Swift a Data, Python struct.pack into a b"".join. Java's
+    ByteBuffer is the only fixed-capacity one in the eight.
+  - The generator site is tools/kaya-bindgen/src/java.rs:96. The
+    generated file is never hand-edited (invariant 7).
+
+The numbers in this report were taken with a SCRATCH COPY of
+KayaWire.java whose `begin` takes the value count and sizes the buffer
+from it. Nothing in the tree was changed. That patch is a bench
+expedient, not a proposed fix: a real fix has to hold for a record whose
+size the caller cannot compute in advance (a long string), which means
+growth, which means `encodeValue` returning the buffer and every call
+site in the generator moving with it.
+
+THE DEBUG-CORE CAVEAT — 11-13x ON THE DECODE
+-----------------------------------------
+Every number above uses a RELEASE libkaya. The lanes run
+`target/debug/libkaya.dylib`. The same guests against a debug core:
+
+    phase                     java              python
+    --------------------------------------------------------
+    submit    release        0.049              0.039
+              debug          0.550              0.524     (11-13x)
+    FRAME     release        0.122              1.429
+              debug          0.622              1.926
+
+The decode is 11-13x more expensive unoptimized, and it is 40% of Java's
+release frame, so Java's frame inflates 5.1x while Python's inflates
+1.35x. ANYONE WHO MEASURES CANVAS ANIMATION ON A LANE IS MEASURING THAT,
+not the product. The verdict below is about the release core.
+
+CAVEATS
+-------
+- HOST CONTENTION, and it was watched. The android emulator pool and the
+  iOS simulator pool were live for every run — that is this host's
+  standing state, and docs/measurements/README.md names it as the reason
+  the 2026-08-24 numbers carry +/- 50%. The reported numbers are the
+  medians of three consecutive runs at load average 3.5, and they
+  reproduce within 1%: python's 1x frame read 1.426 / 1.429 / 1.437 ms
+  and java's 0.120 / 0.124 / 0.122 ms.
+  ONE EARLIER RUN WAS 30% HIGH ACROSS THE BOARD. Under invariant 8 the
+  cause was found rather than theorised, at the time: a
+  Virtualization.framework VM had started 44 seconds before and was at
+  98% of a core. That run is not in any number here, and the episode is
+  the reason every figure above is a median of three rather than of one.
+- NOTHING WAS DRAINED, in python and java. `kaya_run` is never called,
+  so every submitted transaction sits DECODED in the core's channel
+  forever. Sampled at the two-size shape, peak process RSS was 396 MB
+  (python) and 1.6-2.3 GB (java), purely that queue; the three-size runs
+  reported above go higher and were given -Xmx8g for it. It is an
+  artifact of benching without a UI thread and says nothing about a real
+  app, but it is what caps how many frames a run may time — which is why
+  the 16x sizes have 30 and 60 samples where 1x has 150 and 300. The
+  rust harness DOES drain (it holds the channel's receiving end), which
+  is the one asymmetry between the three guests.
+- THE CORE'S canvas `validate()` — the op stream folded into a Drawing —
+  IS NOT IN ANY NUMBER HERE. It happens on the UI thread when the
+  transaction is applied, it is the same code for every language, and
+  the research measured it at 0.005 ms for this scene. Add it once to
+  any row.
+- ONE MACHINE, ONE ISA. An M5 Pro performance core is the fastest thing
+  kaya targets. A phone core is several times slower and the CPython on
+  a phone is not this CPython. Every number is a best case.
+- The phase legs do not sum exactly to the measured frame (python's sum
+  runs ~3% low, java's ~3% high). The isolated phases each pay their own
+  allocation churn where the fused frame reuses one buffer, and
+  `toArray()` is counted once in the frame and once in the encode leg.
+  The FRAME row is the one to quote; the split is for attribution.
+
+VERDICT
+-------
+WHICH BINDINGS FIT A 16.6 ms FRAME:
+
+    rust     0.015 ms marshal    fits with 1100x headroom
+    java     0.122 ms            fits with 136x headroom
+    python   1.429 ms            fits with 11.6x headroom
+
+All three fit, and the ranking does not change the design. Put the
+marshal next to the raster the same frame needs, and the point is plain:
+
+    800x600 @2x    raster 14.21  + python 1.43  = 15.64 ms   (94%)
+                                 + java   0.12  = 14.33 ms   (86%)
+                                 + rust   0.02  = 14.23 ms   (86%)
+    phone @3x      raster 30.30  + anything     = over budget already
+
+THE RASTER IS THE CEILING IN EVERY LANGUAGE. The marshal never decides
+whether a frame lands; in the worst binding it is a tenth of what the
+rasterizer already spends, and the phone case fails on raster before any
+binding has done anything.
+
+IS THE PACKED LANE'S TRIGGER CONDITION MET? Under §3.1's own words —
+"an artifact where the encoding cost is MEASURED: a hundred-thousand-
+point scientific plot, not a chart":
+
+  JAVA: NO, not even at the named artifact. A 100,000-point polyline is
+  ~100,000 ops and ~300,000 wire values; at 0.035-0.042 us/op that is
+  3.5-4.2 ms, a quarter of a frame budget, and it fits at 60fps.
+
+  PYTHON: NOT for animation of the kind this measurement is about — a
+  341-path scene at 60fps costs 8.6% of the budget. But YES at the
+  artifact §3.1 names: the same 100,000-point plot extrapolates to
+  ~50 ms of marshal per submission, 3x over a frame budget if animated
+  and a visible hitch even declared once. Python is the binding that
+  reaches the trigger first, it reaches it about 11x past the scene
+  measured here, and it reaches it on ENCODE (0.95 of its 1.43 ms is
+  struct.pack per value), which is the leg packed bytes remove.
+
+SO: DO NOT BUILD THE PACKED LANE FOR ANIMATION. Build it, if ever, for
+the large-plot artifact, and build it for Python first — the language
+whose cost is 97% per-value object work and whose FFI hop is already
+2.7% of a frame. Java would gain almost nothing: its expensive leg is
+the JNI copy and the core's decode, which packed bytes still pay.
+
+WHAT TO FIX INSTEAD, IN ORDER:
+  1. Java's 4096-byte record ceiling. It is not a performance question —
+     it makes a whole class of records unsendable, canvas and text
+     alike, and no gate sees it.
+  2. Nothing else. Both remaining bindings are linear and both fit.
+
+HOW TO RE-RUN
+-------------
+The two guests are kept beside this file, on the
+choke-ios-guest-2026-08-24.swift precedent — they ARE the method:
+
+    docs/measurements/canvas-marshal-guest-2026-08-26.py
+    docs/measurements/canvas-marshal-guest-2026-08-26.java
+
+    cargo build --release --locked -p kaya
+
+    KAYA_ROOT=$PWD KAYA_LIB=<...>/libkaya.dylib \
+        python3 docs/measurements/canvas-marshal-guest-2026-08-26.py
+
+    # javac insists a public class sit in a file of its own name, and
+    # this directory's files carry their date instead, so the guest is
+    # copied to its class name first. It is the only step that differs
+    # from the python recipe.
+    T=$(mktemp -d)
+    cp docs/measurements/canvas-marshal-guest-2026-08-26.java \
+       "$T/CanvasMarshalBench.java"
+    javac -encoding UTF-8 -d "$T/classes" \
+        bindings/java-desktop/dev/kaya/KayaRing.java \
+        bindings/java/dev/kaya/*.java \
+        "$T/CanvasMarshalBench.java"
+    KAYA_LIB=<...>/libkaya.dylib java -Xmx6g -cp "$T/classes" \
+        dev.kaya.CanvasMarshalBench
+
+The java guest is in package dev.kaya on purpose: it reaches the Draw
+recorder's package-private constructor and op list, which is what lets
+the phases be split. Run against the tree's own KayaWire it prints the
+ceiling and stops — that is the watched negative, and it should stay
+watchable until the ceiling is fixed. To get past it, swap
+bindings/java/dev/kaya/KayaWire.java for a copy whose `begin` sizes the
+buffer from the value count and compile that copy in its place.
+
+THE RUST HARNESS is not a standalone program: it is a `#[test]` that has
+to sit inside crates/kaya/src/app.rs's own `mod tests`, because AppCtx's
+constructor is `pub(crate)` and nothing outside the crate can make one.
+It was pasted in, run, and removed; the tree it was measured on was
+verified byte-identical afterwards. To repeat it, paste this into that
+module and run
+`cargo test --release --locked -p kaya bench_canvas_marshal -- --nocapture --ignored`:
+
+    #[test]
+    #[ignore]
+    fn bench_canvas_marshal() {
+        use super::{Draw, FillRule, Paint, Viewbox};
+        use std::time::Instant;
+
+        const ROLES: [Paint; 5] =
+            [Paint::Series, Paint::SeriesFill, Paint::Grid, Paint::Axis, Paint::Ground];
+
+        // emit() is the python guest's emit(), line for line.
+        fn emit(d: &mut Draw, t: f64, copies: usize) {
+            for c in 0..copies {
+                let t = t + c as f64 * 0.3;
+                d.move_to(0.0, 0.0)
+                    .line_to(800.0, 0.0)
+                    .line_to(800.0, 600.0)
+                    .line_to(0.0, 600.0)
+                    .close()
+                    .fill(Paint::Ground, FillRule::Nonzero);
+                for i in 0..40 {
+                    let x = i as f64 * 20.0;
+                    d.move_to(x, 0.0).line_to(x, 600.0).stroke(Paint::Grid, 1.0);
+                }
+                for i in 0..180 {
+                    let a = i as f64 * 0.7 + t;
+                    let cx = 400.0 + 340.0 * (a * 0.9).sin();
+                    let cy = 300.0 + 250.0 * (a * 1.3).cos();
+                    let r = 6.0 + 12.0 * ((a * 2.1).sin() * 0.5 + 0.5);
+                    for k in 0..8 {
+                        let th = k as f64 * std::f64::consts::TAU / 8.0 + a;
+                        let (x, y) = (cx + r * th.cos(), cy + r * th.sin());
+                        if k == 0 { d.move_to(x, y); } else { d.line_to(x, y); }
+                    }
+                    d.close().fill(ROLES[i % 5], FillRule::Nonzero);
+                }
+                for i in 0..120 {
+                    let a = i as f64 * 0.51 + t * 1.7;
+                    for k in 0..7 {
+                        let u = a + k as f64 * 0.25;
+                        let (x, y) = (
+                            400.0 + 360.0 * (u * 0.8).sin(),
+                            300.0 + 260.0 * (u * 1.1).cos(),
+                        );
+                        if k == 0 { d.move_to(x, y); } else { d.line_to(x, y); }
+                    }
+                    d.stroke(ROLES[i % 5], 1.5);
+                }
+            }
+        }
+
+        fn med(mut v: Vec<f64>) -> (f64, f64, f64) {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            (v[0], v[v.len() / 2], v[(v.len() * 95) / 100])
+        }
+
+        let (ctx, _poster, tx_rx) = posting_ctx();
+        let chart = ctx.apply(|tx| tx.canvas(Viewbox(800.0, 600.0)).id());
+        while tx_rx.try_recv().is_ok() {}
+
+        for (copies, reps) in [(1usize, 400usize), (4, 200)] {
+            let ops = 2886 * copies;
+            let mut build = Vec::new();
+            let mut frame = Vec::new();
+            for i in 0..(reps + 40) {
+                let t = i as f64 * 0.037;
+                let outer = Instant::now();
+                // The build is timed INSIDE the transaction, so the
+                // difference from the outer clock is commit/send alone.
+                let inner = ctx.apply(|tx| {
+                    let s = Instant::now();
+                    tx.draw(chart, |d| emit(d, t, copies));
+                    s.elapsed().as_secs_f64() * 1000.0
+                });
+                let whole = outer.elapsed().as_secs_f64() * 1000.0;
+                if i >= 40 {
+                    build.push(inner);
+                    frame.push(whole);
+                }
+                // Drained, unlike the python and java guests, which have
+                // no drain available to them.
+                while tx_rx.try_recv().is_ok() {}
+            }
+            let (bl, bm, bp) = med(build);
+            let (fl, fm, fp) = med(frame);
+            println!("== rust, {copies}x: {ops} ops, {reps} timed frames ==");
+            println!("  build  min {bl:8.3}  med {bm:8.3}  p95 {bp:8.3} ms");
+            println!("  FRAME  min {fl:8.3}  med {fm:8.3}  p95 {fp:8.3} ms");
+            println!("  commit/send alone: {:.4} ms", fm - bm);
+        }
+    }

@@ -249,6 +249,24 @@ object KayaPresent {
      *  kaya_row_extent's JNI spelling. */
     @JvmStatic external fun rowExtent(container: Long, index: Long): Double
 
+    /**
+     * The window's scale and appearance; the core re-rasters every canvas
+     * at them (docs/canvas-plan.md §5, §6). Only these two numbers cross
+     * — no platform colour reaches a drawing — and a report that changes
+     * nothing emits nothing. kaya_presentation's JNI spelling.
+     */
+    @JvmStatic external fun presentation(scale: Double, dark: Boolean)
+
+    /**
+     * One canvas's CANONICAL raster, read back out of the core:
+     * `"<16 hex> <ops>/<l>,<t>,<r>,<b>"`, or `""` when the id names no
+     * canvas that has been drawn (docs/canvas-plan.md §7.1). Canonical
+     * means scale 1.0 and the light palette, pinned by the core rather
+     * than read from this device — which is what lets ONE frozen string
+     * hold on five platforms. kaya_canvas_probe's JNI spelling.
+     */
+    @JvmStatic external fun canvasProbe(widget: Long): String
+
     /** [scrollToRow]'s no-answer: KAYA_ROW_NOT_FOUND (u64::MAX) as the
      *  jlong it crosses as. */
     const val ROW_NOT_FOUND = -1L

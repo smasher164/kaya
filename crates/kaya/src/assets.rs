@@ -345,20 +345,30 @@ pub(crate) fn font_bytes(name: &str) -> Result<std::sync::Arc<[u8]>, String> {
     read(name).map(std::sync::Arc::from)
 }
 
+/// EVERY TEST THAT RESOLVES AN ASSET TAKES THIS LOCK — in this module
+/// and in any other. The tests below set and clear the process-wide
+/// `KAYA_ASSET_DIR` and cargo runs tests on threads, so a resolution
+/// that lands inside one of those windows reads a root nobody chose.
+///
+/// MEASURED 2026-08-26: canvas's pin test resolves
+/// `fonts/sora-wght.ttf`, took no lock, and failed once in a full suite
+/// with `the scene's stream validates: "kaya: no asset named
+/// \"fonts/sora-wght.ttf\" ... chosen by KAYA_ASSET_DIR"` — then passed
+/// 33 consecutive runs. Pointing the variable at an empty directory
+/// reproduces that panic exactly (docs/traps.md).
+#[cfg(test)]
+static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn serially() -> std::sync::MutexGuard<'static, ()> {
+    // A poisoned lock means a sibling test panicked; take the guard
+    // rather than cascading the failure.
+    ENV.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Every test in this module takes this lock: they set, clear and
-    /// read the same process-wide `KAYA_ASSET_DIR`, and cargo runs
-    /// tests on threads.
-    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn serially() -> std::sync::MutexGuard<'static, ()> {
-        // A poisoned lock means a sibling test panicked; take the guard
-        // rather than cascading the failure.
-        ENV.lock().unwrap_or_else(|e| e.into_inner())
-    }
 
     /// Every branch of the diagnostic made to print (invariant 3).
     /// `cargo test -- --nocapture` shows the sentences a reader gets.

@@ -224,6 +224,41 @@ fn main() {
         "Microsoft.UI.Xaml.Media.ImageSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapImage".to_string(),
+        // THE CANVAS BLIT (docs/canvas-plan.md §8). The raw-pixel
+        // sibling of the encoded path above: the core hands over device
+        // pixels, so nothing here decodes. `IBuffer` is named because
+        // `WriteableBitmap.PixelBuffer` returns one and the filter never
+        // pulls referenced types transitively (the trap this file
+        // documents four times over) — without it PixelBuffer is a
+        // vtable pad and the blit has nowhere to write.
+        //
+        // RenderTargetBitmap IS FILTERED IN AND NOTHING USES IT. It was
+        // `expect_ink`'s camera until 2026-08-26, when it turned out to
+        // render and hand back a NULL buffer under S_OK on the VM's
+        // display-only adapter (docs/traps.md); the ink read is a GDI
+        // copy of the composited desktop now. Kept because a machine
+        // with a rendering adapter can use it again and the entry costs
+        // one filtered type — NOT because anything calls it.
+        "Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap".to_string(),
+        "Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap".to_string(),
+        "Windows.Storage.Streams.IBuffer".to_string(),
+        // `Image.Stretch`, the same transitivity trap: unfiltered, the
+        // enum leaves `SetStretch` a vtable pad. A canvas STRETCHES TO
+        // FILL its track rather than letterboxing inside it (§3.2 rule
+        // 2), and Image's default is Uniform.
+        "Microsoft.UI.Xaml.Media.Stretch".to_string(),
+        // THE SCALE CHANNEL (§5): `XamlRoot.RasterizationScale` already
+        // reached the file, but its `Changed` event did not — the
+        // add-handler's argument type was unfiltered, so only
+        // `RemoveChanged` was emitted. Windows delivers a DPI change per
+        // top-level window and the core has to re-raster on it.
+        "Microsoft.UI.Xaml.XamlRootChangedEventArgs".to_string(),
+        // THE APPEARANCE BIT (§6), and the same trap once more:
+        // `ActualThemeChanged` was already emitted but the GETTER beside
+        // it was a vtable pad, because its return enum was unfiltered —
+        // so this backend could be told the theme moved and had no way
+        // to ask what it moved to.
+        "Microsoft.UI.Xaml.ElementTheme".to_string(),
         // THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). The
         // transitivity trap in its usual disguise: `FontFamily` appeared
         // nine times in the generated file before this line and every one

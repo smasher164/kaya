@@ -115,6 +115,10 @@ for arg in "$@"; do
         # a python guest that stops at the desktops, as does the
         # portfolio whose transactions view carries the uniform 15k rows.
         windowed_rust) SUITE="$arg" ;;
+        # THE CANVAS (docs/canvas-plan.md): compiled and rust-only for
+        # windowed's reason — the drawing is declared in viewbox units,
+        # so one guest's op stream is every platform's.
+        canvas_rust) SUITE="$arg" ;;
         varied_python) SUITE="$arg" ;;
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
         stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
@@ -333,7 +337,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # conformance scene is COMPILED and rust-only by design
 # (docs/virtualization-plan.md §6.3): it is the one windowing scene the
 # mobile lanes can also run, where the portfolio and varied are python.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-windowed}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-windowed canvas}"
 # GO-ONLY SCENES: a guest that exists in Go and only Go BY DESIGN
 # rather than by sequencing — an editor written in Rust would be kaya
 # testing itself (docs/editor-plan.md). Such a scene can join neither
@@ -1837,6 +1841,12 @@ case "$SUITE" in
         # `scroll_to_row`, which the tier drives through its own
         # ScrollViewer.
         run_suite windowed_rust
+        # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
+        # this backend blits into a WriteableBitmap. The hash is the SAME
+        # frozen string every other lane asserts, so a leg that disagrees
+        # here is a finding about the blit — the BGRA swizzle first — and
+        # never about the drawing.
+        run_suite canvas_rust
         run_suite portfolio_python
         run_suite varied_python
         run_suite a11yrows_rust

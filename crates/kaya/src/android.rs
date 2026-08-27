@@ -407,6 +407,17 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JJ)D".into(),
                 fn_ptr: present_row_extent as *mut _,
             },
+            // The canvas channels (docs/canvas-plan.md §5, §6, §7.1).
+            NativeMethod {
+                name: "presentation".into(),
+                sig: "(DZ)V".into(),
+                fn_ptr: present_presentation as *mut _,
+            },
+            NativeMethod {
+                name: "canvasProbe".into(),
+                sig: "(J)Ljava/lang/String;".into(),
+                fn_ptr: present_canvas_probe as *mut _,
+            },
             // The undo tier (docs/undo-plan.md D6/§3).
             NativeMethod {
                 name: "undoRoute".into(),
@@ -731,6 +742,36 @@ extern "system" fn present_row_extent(
     index: jlong,
 ) -> jni::sys::jdouble {
     crate::capi::kaya_row_extent(container as u64, index.max(0) as u64)
+}
+
+/// KayaPresent.presentation: the window's scale and appearance, which
+/// the core re-rasters every canvas at (docs/canvas-plan.md §5, §6).
+extern "system" fn present_presentation(
+    _env: JNIEnv,
+    _class: JClass,
+    scale: jni::sys::jdouble,
+    dark: jni::sys::jboolean,
+) {
+    crate::capi::kaya_presentation(scale, dark != 0);
+}
+
+/// KayaPresent.canvasProbe: one canvas's canonical raster, as the ASCII
+/// line the harness compares (docs/canvas-plan.md §7.1). An id that names
+/// no drawn canvas answers with the empty string, which is what the
+/// interpreter reports as `<no canvas …>`.
+extern "system" fn present_canvas_probe<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+) -> jni::sys::jstring {
+    let mut buf = [0u8; 128];
+    let wrote = unsafe {
+        crate::capi::kaya_canvas_probe(widget as u64, buf.as_mut_ptr(), buf.len())
+    };
+    let answer = std::str::from_utf8(&buf[..wrote]).unwrap_or("");
+    env.new_string(answer)
+        .expect("kaya: handing the canvas probe back to the JVM failed")
+        .into_raw()
 }
 
 extern "system" fn present_emit_value_changed(

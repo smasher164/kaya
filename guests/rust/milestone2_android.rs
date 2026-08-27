@@ -105,6 +105,9 @@ mod identity;
 #[path = "assets.rs"]
 mod assets;
 
+#[path = "canvas.rs"]
+mod canvas;
+
 /// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
 /// hold that.
@@ -153,6 +156,11 @@ fn app(ctx: kaya::AppCtx) {
         // expect_window and scroll_to_row to the phones at all —
         // ledger and varied are Python and stop at the desktops.
         Ok("windowed") => windowed::app(ctx),
+        // The canvas scene (docs/canvas-plan.md): the core rasterizes
+        // and Compose blits. The op stream is written in VIEWBOX units,
+        // so this guest is byte-for-byte the one the mac runs and the
+        // frozen hash is the same string here.
+        Ok("canvas") => canvas::app(ctx),
         // The typeface scene asks for the vendored font BY ASSET NAME
         // and does not read a path or an environment variable at all
         // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE

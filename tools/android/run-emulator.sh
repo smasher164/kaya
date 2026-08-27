@@ -1674,6 +1674,15 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity windowed \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script windowed)'"
+    # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
+    # this backend blits. The hash is the SAME frozen string every other
+    # lane asserts — the op stream is in viewbox units and the raster
+    # comes out of this device's own libkaya — so a leg that disagrees
+    # here is a finding about the blit, never about the drawing.
+    run_apk canvas-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity canvas \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script canvas)'"
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \

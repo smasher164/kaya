@@ -141,6 +141,14 @@ windows = { version = "0.62", features = [
     # showing (sample_folder_view) — the read that replaced UI
     # Automation, which cannot be used against this dialog at all.
     "Win32_System_Ole",
+    # IBufferByteAccess, the ONE way to reach a WinRT IBuffer's bytes
+    # (docs/canvas-plan.md §8): `WriteableBitmap.PixelBuffer` hands back
+    # an IBuffer, and the interface that turns one into a `*mut u8` is a
+    # classic COM interface out of robuffer.h rather than anything in the
+    # WinUI metadata — so it comes from here and not from
+    # tools/winui-bindgen. Both the canvas blit and its ink read-back go
+    # through it.
+    "Win32_System_WinRT",
 ] }
 windows-numerics = "0.3"
 windows-collections = "0.3"
@@ -173,7 +181,15 @@ atspi = { version = "0.30", optional = true, features = ["zbus"] }
 # v4_10 gates gtk::AlertDialog (the alert vocabulary's 1:1 dialog;
 # 4.10+) and covers v4_6's gdk::Texture::from_bytes; the validation
 # image ships GTK 4.18.
-gtk4 = { version = "0.11.4", features = ["v4_10"] }
+#
+# v4_12 IS THE CANVAS'S SCALE (docs/canvas-plan.md §5 rule 1): the core
+# rasterizes at the TRUE scale, and `gdk_surface_get_scale`'s double is
+# the only reading that carries a fraction —
+# `gtk_widget_get_scale_factor` is an integer and GTK's own docs say it
+# "returns the next higher integer value" under fractional scaling, so
+# a 1.25 display would raster at 2 and blit a stale-size buffer. The
+# feature adds gdk/v4_12 and nothing else.
+gtk4 = { version = "0.11.4", features = ["v4_12"] }
 # Pango, named DIRECTLY (gtk4 already pulls it in) for one feature and
 # one call: `v1_56` gates `PangoFontMap::add_font_file`, which is how a
 # brand typeface's FONT BYTES reach the text system on this platform

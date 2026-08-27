@@ -76,7 +76,13 @@ use bindings::Microsoft::UI::Xaml::Media::FontFamily;
 // itself: a shipped app carries no scene interpreter.
 #[cfg(feature = "harness")]
 use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
-use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
+use bindings::Microsoft::UI::Xaml::Media::Imaging::{BitmapImage, WriteableBitmap};
+use bindings::Microsoft::UI::Xaml::ElementTheme;
+// The canvas's two: a stretch mode (a drawing fills its track rather than
+// letterboxing inside it, docs/canvas-plan.md §3.2 rule 2) and the
+// interface that turns a WinRT IBuffer into bytes.
+use bindings::Microsoft::UI::Xaml::Media::{ImageSource, Stretch};
+use windows::Win32::System::WinRT::IBufferByteAccess;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
@@ -115,6 +121,11 @@ enum NativeWidget {
     /// at all; every rich opinion the RichEdit engine carries is pinned
     /// off in `pin_plain_text`.
     Textarea(RichEditBox),
+    /// The blit's widget: the same `Image` control, over a
+    /// `WriteableBitmap` the core's pixels are written straight into —
+    /// the raw-pixel sibling of `Image`'s encoded decode
+    /// (docs/canvas-plan.md §8).
+    Canvas(Image),
 }
 
 impl NativeWidget {
@@ -135,6 +146,7 @@ impl NativeWidget {
             NativeWidget::Radio(group) => group.cast(),
             NativeWidget::Grid2D(grid) => grid.cast(),
             NativeWidget::Textarea(field) => field.cast(),
+            NativeWidget::Canvas(image) => image.cast(),
         }
     }
 
@@ -393,6 +405,11 @@ struct CoreState {
     entry_tags: HashMap<u64, Vec<u8>>,
     sliders: Vec<Slider>,
     images: Vec<Image>,
+    /// The canvases, and their CORE ids beside them: `canvas_probe` asks
+    /// the core about a widget id and `kind#index` is the only address
+    /// the harness has.
+    canvases: Vec<Image>,
+    canvas_ids: Vec<u64>,
     scrolls: Vec<ScrollViewer>,
     progresses: Vec<ProgressBar>,
     selects: Vec<ComboBox>,
@@ -1163,6 +1180,9 @@ impl Drop for CoreState {
 
 thread_local! {
     static CORE: RefCell<Option<CoreState>> = const { RefCell::new(None) };
+    /// Whether the two presentation edges are wired yet
+    /// (`presentation_report`). UI thread only, like CORE.
+    static PRESENTATION_WATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The UI thread's dispatcher, for waking it from other threads.
@@ -1240,6 +1260,77 @@ fn defer_role_refresh() {
     }
 }
 
+/// THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
+/// re-rasters every canvas at them (docs/canvas-plan.md §5, §6). Only
+/// these two numbers cross: no platform colour reaches a drawing.
+///
+/// `XamlRoot.RasterizationScale` is this platform's reading — the XAML
+/// island's own density, which is what `WM_DPICHANGED` moves — and
+/// `ActualTheme` is the appearance, the SAME reading `canvas_ink`'s
+/// answer names, so the report and the observation cannot disagree.
+fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
+    let Ok(root) = core.window.Content() else { return Ok(()) };
+    let element: FrameworkElement = windows_core::Interface::cast(&root)?;
+    // THE TWO EDGES, wired the first time there is a XamlRoot to wire one
+    // of them to. Windows delivers a DPI change per top-level window and
+    // a theme change per element; without these a display move or an
+    // appearance flip would leave every canvas rastered for the old one
+    // until the next transaction happened to arrive.
+    //
+    // THE FLAG FOLLOWS THE XamlRoot, not the content: an element can be
+    // set as Content before it is in a live tree, and a run that took the
+    // flag on that pass would never wire the DPI edge at all. Every drain
+    // calls this, so trying again next time costs nothing.
+    if !PRESENTATION_WATCHED.get() {
+        if let Ok(xaml_root) = root.XamlRoot() {
+            PRESENTATION_WATCHED.set(true);
+            let _ = xaml_root.Changed(&TypedEventHandler::new(|_, _| {
+                report_presentation_now();
+                Ok(())
+            }));
+            let _ = element.ActualThemeChanged(&TypedEventHandler::new(|_, _| {
+                report_presentation_now();
+                Ok(())
+            }));
+        }
+    }
+    let scale = root
+        .XamlRoot()
+        .and_then(|xaml_root| xaml_root.RasterizationScale())
+        .unwrap_or(crate::canvas::CANONICAL_SCALE);
+    let mode = if element.ActualTheme()? == ElementTheme::Dark {
+        crate::canvas::Mode::Dark
+    } else {
+        crate::canvas::Mode::Light
+    };
+    let ops = crate::fault::guard("reporting the window's scale and appearance", || {
+        core.scene.set_presentation(crate::canvas::Presentation { scale, mode })
+    })
+    .unwrap_or_default();
+    for op in ops {
+        let what = op_head(&op);
+        if let Err(e) = apply(core, op) {
+            crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+/// The report, from a XAML event handler: those run on the UI thread but
+/// can land in a turn that already holds the CORE borrow, so this takes
+/// it only if it is free and lets the next event carry it otherwise.
+/// Every drain reports too, which is what makes a missed edge harmless.
+fn report_presentation_now() {
+    CORE.with(|slot| {
+        let Ok(mut core) = slot.try_borrow_mut() else { return };
+        let Some(core) = core.as_mut() else { return };
+        if let Err(e) = presentation_report(core) {
+            crate::fault::report(format!("kaya: reporting the presentation failed: {e}"));
+        }
+    });
+}
+
 fn drain_transactions() {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
@@ -1300,6 +1391,15 @@ fn drain_transactions() {
             // have moved, and the column tracks are computed from all
             // three.
             sync_tables(core);
+            // AND THE PRESENTATION, last: a window has no XamlRoot until
+            // something is mounted, so the first drain is where the
+            // scale and the appearance become askable at all
+            // (docs/canvas-plan.md §5, §6). Re-asking every drain costs
+            // nothing — an unchanged report emits no op — and it is what
+            // wires the two edges the first time round.
+            if let Err(e) = presentation_report(core) {
+                crate::fault::report(format!("kaya: reporting the presentation failed: {e}"));
+            }
         });
     });
 }
@@ -10391,6 +10491,267 @@ impl windows::Win32::Graphics::DirectWrite::IDWriteTextAnalysisSource_Impl for T
     }
 }
 
+/// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into
+/// a `WriteableBitmap`'s own pixel buffer, shown at the LOGICAL size the
+/// raster's scale names.
+///
+/// THIS IS THE ONE ARM THAT SWIZZLES. `WriteableBitmap.PixelBuffer` is
+/// premultiplied BGRA8 by Microsoft's documented contract, and the core
+/// hands over premultiplied RGBA8 (tiny-skia's `Pixmap` layout), so the
+/// two colour channels trade places here and nowhere else. That contract
+/// is DOCUMENTED and not measured, which is why `expect_ink` photographs
+/// the element through XAML's own renderer rather than reading this
+/// buffer back: a read-back would invert whatever order this loop chose
+/// and agree with itself either way (§11's measure-at-implementation #2).
+///
+/// A drawing that will not decode is PRESENT AND EMPTY, never absent: the
+/// Image control stays in the tree with no Source
+/// (tools/check-empty-child.sh).
+fn set_drawing(
+    image: &Image,
+    width: u32,
+    height: u32,
+    scale: f64,
+    pixels: &[u8],
+) -> windows_core::Result<()> {
+    let count = width as usize * height as usize;
+    if width == 0 || height == 0 || !scale.is_finite() || scale <= 0.0 || pixels.len() < count * 4 {
+        image.SetSource(None::<&ImageSource>)?;
+        return Ok(());
+    }
+    let bitmap = WriteableBitmap::CreateInstanceWithDimensions(width as i32, height as i32)?;
+    let buffer = bitmap.PixelBuffer()?;
+    if (buffer.Capacity()? as usize) < count * 4 {
+        // The platform gave a smaller buffer than the dimensions it was
+        // asked for: say what was measured rather than writing past it.
+        eprintln!(
+            "kaya: winui canvas: a {width}x{height} WriteableBitmap answered with a \
+             {}-byte pixel buffer",
+            buffer.Capacity()?
+        );
+        image.SetSource(None::<&ImageSource>)?;
+        return Ok(());
+    }
+    let access: IBufferByteAccess = windows_core::Interface::cast(&buffer)?;
+    // SAFETY: `Buffer` hands back the bitmap's own pixel store, and the
+    // capacity was just checked against what is about to be written.
+    unsafe {
+        let dst = access.Buffer()?;
+        for i in 0..count {
+            let at = i * 4;
+            *dst.add(at) = pixels[at + 2];
+            *dst.add(at + 1) = pixels[at + 1];
+            *dst.add(at + 2) = pixels[at];
+            *dst.add(at + 3) = pixels[at + 3];
+        }
+    }
+    bitmap.Invalidate()?;
+    image.SetSource(&bitmap)?;
+    // A WriteableBitmap's pixels are DEVICE pixels and an Image measures
+    // in DIPs, so the logical size is stated here — the same division
+    // every backend does, in this platform's units (§5 rule 2).
+    let element: FrameworkElement = windows_core::Interface::cast(image)?;
+    element.SetWidth(f64::from(width) / scale)?;
+    element.SetHeight(f64::from(height) / scale)?;
+    Ok(())
+}
+
+/// One grab of a canvas's own pixels, BGRA8 top-down.
+///
+/// NOT A XAML PHOTOGRAPH. `RenderTargetBitmap` renders and hands back a
+/// NULL buffer under S_OK on the VM's display-only adapter — every dead
+/// end measured in docs/traps.md — so the ink read asks DWM to print the
+/// WINDOW instead.
+#[cfg(feature = "harness")]
+struct Grab {
+    width: i32,
+    height: i32,
+    pixels: Vec<u8>,
+}
+
+/// A `w`x`h` 32-bit top-down DIB, whatever `draw` puts in it.
+///
+/// Every failure says which call failed and what it returned: this runs
+/// on a machine whose GPU already answered one capture API with success
+/// and no pixels, and a camera that can fail silently is the defect
+/// docs/traps.md records.
+#[cfg(feature = "harness")]
+fn capture(
+    w: i32,
+    h: i32,
+    draw: impl FnOnce(isize) -> Result<(), String>,
+) -> Result<Grab, String> {
+    if w < 1 || h < 1 {
+        return Err(format!("a {w}x{h} grab was asked for"));
+    }
+    unsafe {
+        let screen = GetDC(0);
+        if screen == 0 {
+            return Err("GetDC(NULL) answered 0, so there is no DC to build a bitmap on".to_owned());
+        }
+        let mem = CreateCompatibleDC(screen);
+        if mem == 0 {
+            ReleaseDC(0, screen);
+            return Err("CreateCompatibleDC answered 0".to_owned());
+        }
+        let info = BitmapInfo {
+            // The SIZE is the header's alone — the colour table is not
+            // part of what BITMAPINFOHEADER.biSize declares.
+            size: 40,
+            width: w,
+            // NEGATIVE, which is what makes the DIB top-down: row 0 is
+            // the top one, so `sample_grab` indexes without flipping.
+            height: -h,
+            planes: 1,
+            bit_count: 32,
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let dib = CreateDIBSection(mem, &info, 0, &mut bits, 0, 0);
+        if dib == 0 || bits.is_null() {
+            DeleteDC(mem);
+            ReleaseDC(0, screen);
+            return Err(format!("CreateDIBSection answered {dib} with a {bits:?} pixel pointer"));
+        }
+        let old = SelectObject(mem, dib);
+        let drawn = draw(mem);
+        // THE BITS ARE NOT THERE UNTIL THE BATCH IS: GDI queues drawing
+        // into a DIB section, and reading `bits` without this returns
+        // whatever the allocation happened to hold.
+        GdiFlush();
+        let out = drawn.map(|()| {
+            let len = (w as usize) * (h as usize) * 4;
+            // SAFETY: CreateDIBSection just answered with a w*h 32bpp
+            // surface at `bits`, which is exactly `len` bytes.
+            Grab { width: w, height: h, pixels: std::slice::from_raw_parts(bits as *const u8, len).to_vec() }
+        });
+        SelectObject(mem, old);
+        DeleteObject(dib);
+        DeleteDC(mem);
+        ReleaseDC(0, screen);
+        out
+    }
+}
+
+/// The canvas's box, cut out of a print of the WHOLE WINDOW.
+///
+/// `PrintWindow` with `PW_RENDERFULLCONTENT` asks DWM for the window's
+/// composited content — the same pixels the user is looking at, but
+/// addressed by HWND rather than by screen position, so an occluded or
+/// PARTLY OFF-SCREEN window still answers. That is not a nicety here:
+/// the lane tiles six legs at KAYA_WIN_SLOT (see `setup`) and slots 4
+/// and 5 sit below the bottom of an 800-tall desktop, where a copy of
+/// the screen has nothing to copy (measured 2026-08-26, docs/traps.md).
+#[cfg(feature = "harness")]
+fn grab_canvas(at: &Placement) -> Result<Grab, String> {
+    const PW_RENDERFULLCONTENT: u32 = 2;
+    let window = capture(at.win_w, at.win_h, |mem| {
+        // SAFETY: a live HWND and the DIB's own DC.
+        if unsafe { PrintWindow(at.hwnd, mem, PW_RENDERFULLCONTENT) } == 0 {
+            return Err(format!(
+                "PrintWindow(PW_RENDERFULLCONTENT) of the {}x{} window {:#x} answered 0",
+                at.win_w, at.win_h, at.hwnd
+            ));
+        }
+        Ok(())
+    })?;
+    crop(&window, at)
+}
+
+/// The canvas's own box out of the window's print.
+#[cfg(feature = "harness")]
+fn crop(window: &Grab, at: &Placement) -> Result<Grab, String> {
+    if at.ox < 0 || at.oy < 0 || at.ox + at.w > window.width || at.oy + at.h > window.height {
+        return Err(format!(
+            "the canvas sits at {},{} {}x{} inside a {}x{} window, which does not contain it",
+            at.ox, at.oy, at.w, at.h, window.width, window.height
+        ));
+    }
+    let mut pixels = Vec::with_capacity((at.w as usize) * (at.h as usize) * 4);
+    for row in 0..at.h {
+        let start = ((at.oy + row) as usize * window.width as usize + at.ox as usize) * 4;
+        pixels.extend_from_slice(&window.pixels[start..start + (at.w as usize) * 4]);
+    }
+    Ok(Grab { width: at.w, height: at.h, pixels })
+}
+
+/// The declared probe points off a grab, as `RRGGBB/RRGGBB/...`.
+///
+/// A GDI DIB is BGRA8 with an ignored alpha, and this platform hands
+/// back the CORE'S OWN BYTES — measured `FFFFFF/D2E3F7` against the
+/// scene's frozen `FFFFFF/D2E3F7`, no colour conversion anywhere on the
+/// path, unlike the mac's display-profile round trip (§7.2, traps).
+#[cfg(feature = "harness")]
+fn sample_grab(grab: &Grab, points: &[(f64, f64)]) -> String {
+    let (w, h) = (grab.width, grab.height);
+    if w < 1 || h < 1 || grab.pixels.len() < (w as usize) * (h as usize) * 4 {
+        return format!("<a {w}x{h} grab carrying {} bytes>", grab.pixels.len());
+    }
+    points
+        .iter()
+        .map(|(px, py)| {
+            let x = ((f64::from(w) * px / 100.0) as i32).clamp(0, w - 1) as usize;
+            let y = ((f64::from(h) * py / 100.0) as i32).clamp(0, h - 1) as usize;
+            let at = (y * w as usize + x) * 4;
+            let p = &grab.pixels[at..at + 4];
+            format!("{:02X}{:02X}{:02X}", p[2], p[1], p[0])
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Where a canvas's pixels are INSIDE THE WINDOW's outer rect, which is
+/// the frame of reference `PrintWindow` answers in — and the numbers
+/// that put them there, every one of which the ink read's refusals name,
+/// because a wrong mapping and a dead camera answer with the same bytes.
+#[cfg(feature = "harness")]
+struct Placement {
+    ox: i32,
+    oy: i32,
+    w: i32,
+    h: i32,
+    win_w: i32,
+    win_h: i32,
+    scale: f64,
+    hwnd: isize,
+}
+
+/// The canvas element's box in the WINDOW's own pixels: XAML's own
+/// transform to the window root, scaled by the island's density, moved
+/// by where the client area sits inside the window's outer rect.
+#[cfg(feature = "harness")]
+fn placement(core: &CoreState, image: &Image) -> windows_core::Result<Placement> {
+    let root = core.window.Content()?;
+    let element: FrameworkElement = windows_core::Interface::cast(image)?;
+    // THE SAME SCALE THE CORE RASTERED AT — `presentation_report` sends
+    // `RasterizationScale` and the drawing's pixels are laid out at
+    // ActualWidth * that, so any other reading of the DPI would sample
+    // the right picture at the wrong place.
+    let scale = root.XamlRoot()?.RasterizationScale()?;
+    let origin = windows_core::Interface::cast::<UIElement>(image)?
+        .TransformToVisual(&root)?
+        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+    let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+    let hwnd = native.window_handle()?;
+    let mut client = Point32 { x: 0, y: 0 };
+    let mut outer = Rect::default();
+    // SAFETY: a live HWND with a stack POINT and a stack RECT.
+    unsafe {
+        ClientToScreen(hwnd, &mut client);
+        GetWindowRect(hwnd, &mut outer);
+    }
+    Ok(Placement {
+        ox: client.x - outer.left + (f64::from(origin.X) * scale).round() as i32,
+        oy: client.y - outer.top + (f64::from(origin.Y) * scale).round() as i32,
+        w: (element.ActualWidth()? * scale).round() as i32,
+        h: (element.ActualHeight()? * scale).round() as i32,
+        win_w: outer.right - outer.left,
+        win_h: outer.bottom - outer.top,
+        scale,
+        hwnd,
+    })
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -10802,11 +11163,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image(image)
                 }
-                // The raw-pixel sibling of the arm above — a
-                // WriteableBitmap, and the premultiplied-BGRA8 swizzle
-                // §11's measure-at-implementation list holds open — is the
-                // breadth phase (docs/canvas-plan.md §8, §11 phase 3).
-                WidgetKind::Canvas => crate::depth_stub("canvas"),
+                WidgetKind::Canvas => {
+                    // The raw-pixel sibling of the arm above: the same
+                    // Image control, filled by the SetDrawing arm from a
+                    // WriteableBitmap (docs/canvas-plan.md §8).
+                    //
+                    // STRETCH TO FILL, never letterbox (§3.2 rule 2);
+                    // Image's default Stretch is Uniform.
+                    let image = Image::new()?;
+                    image.SetStretch(Stretch::Fill)?;
+                    core.canvases.push(image.clone());
+                    core.canvas_ids.push(id.0);
+                    NativeWidget::Canvas(image)
+                }
             };
             core.widgets.insert(id, native);
         }
@@ -10860,6 +11229,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Textarea(field) => {
                         windows_core::Interface::cast(field).expect("textarea is a UIElement")
+                    }
+                    NativeWidget::Canvas(image) => {
+                        windows_core::Interface::cast(image).expect("canvas is a UIElement")
                     }
                 }
             };
@@ -11408,7 +11780,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         } => {
             declare_table(core, id, sorted, direction, titles, tag)?;
         }
-        ApplyOp::SetDrawing { .. } => crate::depth_stub("canvas"),
+        ApplyOp::SetDrawing { id, width, height, scale, pixels } => {
+            if let Some(NativeWidget::Canvas(image)) = core.widgets.get(&id) {
+                set_drawing(&image.clone(), width, height, scale, &pixels.0)?;
+            }
+        }
         ApplyOp::SetAppIdentity(identity) => {
             // TWO SINKS FROM ONE DECLARATION, which is this platform's
             // whole shape (docs/app-identity-plan.md I3): the WINDOW's
@@ -12013,6 +12389,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Radio(group) => children.Append(group)?,
                 NativeWidget::Grid2D(grid) => children.Append(grid)?,
                 NativeWidget::Textarea(field) => children.Append(field)?,
+                NativeWidget::Canvas(image) => children.Append(image)?,
             }
             core.parents.insert(child, panel);
             // A new child means a new track and a shifted set of indices —
@@ -12552,6 +12929,20 @@ unsafe extern "system" {
     fn DeleteObject(handle: isize) -> i32;
     fn CreateCompatibleDC(hdc: isize) -> isize;
     fn DeleteDC(hdc: isize) -> i32;
+    /// `canvas_ink`'s camera (see `capture`): a top-down 32-bit surface
+    /// to copy the desktop into, and the copy itself.
+    fn CreateDIBSection(
+        hdc: isize,
+        info: *const BitmapInfo,
+        usage: u32,
+        bits: *mut *mut c_void,
+        section: isize,
+        offset: u32,
+    ) -> isize;
+    fn SelectObject(hdc: isize, object: isize) -> isize;
+    /// GDI batches drawing into a DIB section; without this the bytes
+    /// read back are whatever the allocation held.
+    fn GdiFlush() -> i32;
 }
 
 /// Win32's ICONINFO, laid out to match winuser.h.
@@ -13126,6 +13517,19 @@ unsafe extern "system" {
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
 
+    /// `canvas_ink`'s camera and the numbers that aim it (see `capture`,
+    /// `grab_canvas`, `placement`): a reference DC for the DIB, where
+    /// this window's client area sits inside its frame, and DWM's print
+    /// of the window's composited content.
+    #[cfg(feature = "harness")]
+    fn GetDC(hwnd: isize) -> isize;
+    #[cfg(feature = "harness")]
+    fn ReleaseDC(hwnd: isize, hdc: isize) -> i32;
+    #[cfg(feature = "harness")]
+    fn ClientToScreen(hwnd: isize, point: *mut Point32) -> i32;
+    #[cfg(feature = "harness")]
+    fn PrintWindow(hwnd: isize, hdc: isize, flags: u32) -> i32;
+
     /// The gone-check's three entries, declared here beside the rest
     /// rather than by enabling Win32_UI_WindowsAndMessaging: this file
     /// already names the handful of user32 calls it needs, and the
@@ -13245,6 +13649,15 @@ struct Rect {
     top: i32,
     right: i32,
     bottom: i32,
+}
+
+/// Win32's POINT, for `ClientToScreen` — named apart from WinRT's
+/// `Point`, which this file already uses for XAML's float coordinates.
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct Point32 {
+    x: i32,
+    y: i32,
 }
 
 /// Every window this process is really holding, for the sentence
@@ -13428,6 +13841,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             entry_tags: HashMap::new(),
             sliders: Vec::new(),
             images: Vec::new(),
+            canvases: Vec::new(),
+            canvas_ids: Vec::new(),
             scrolls: Vec::new(),
             progresses: Vec::new(),
             selects: Vec::new(),
@@ -14010,7 +14425,7 @@ fn target_element(
         K::Radio => nth!(core.radios),
         K::Grid => nth!(core.grids),
         K::Scroll => nth!(core.scrolls),
-        K::Canvas => crate::depth_stub("canvas"),
+        K::Canvas => nth!(core.canvases),
         // Buttons live in the registry as CLICK TAGS, not widgets, and
         // the tag is captured in the click closure rather than stored
         // on the Button — so there is no tag->widget link to follow.
@@ -15672,7 +16087,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Radio => find(&core.radios, &id),
                 K::Grid => find(&core.grids, &id),
                 K::Textarea => find(&core.textareas, &id),
-                K::Canvas => crate::depth_stub("canvas"),
+                K::Canvas => find(&core.canvases, &id),
             })
         })
         .ok()
@@ -16901,15 +17316,77 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// The WriteableBitmap blit is the breadth phase (docs/canvas-plan.md
-    /// §8, §11 phase 3) — including the premultiplied-BGRA8 swizzle, which
-    /// §11's measure-at-implementation list holds open.
-    fn canvas_probe(&self, _target: crate::harness::Target) -> String {
-        crate::depth_stub("canvas")
+    /// The canonical raster, asked of the CORE (docs/canvas-plan.md §7.1)
+    /// — every backend answers the same way, because the point is that
+    /// five platforms' libkaya drew the same picture.
+    fn canvas_probe(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(target.index, core.canvas_ids.len()) else {
+                return Ok(format!("<this window holds {} canvases>", core.canvas_ids.len()));
+            };
+            Ok(core
+                .scene
+                .canvas_probe(WidgetId(core.canvas_ids[i]))
+                .unwrap_or_else(|| "<the core holds no drawing for this canvas>".to_owned()))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn canvas_ink(&self, _target: crate::harness::Target, _points: &str) -> String {
-        crate::depth_stub("canvas")
+    /// THE BLIT, out of DWM's print of this window's composited content
+    /// (§7.2) — the mac's window read in this platform's spelling, and
+    /// the only canvas read that fails when the buffer never reached the
+    /// platform's image object OR reached it swizzled.
+    ///
+    /// NOT `RenderTargetBitmap`, which is what this used to be:
+    /// `RenderAsync` completes with the right size and `GetPixelsAsync`
+    /// then hands back a NULL buffer under S_OK on a display-only
+    /// adapter, for every element tried (docs/traps.md). `PrintWindow`
+    /// asks the compositor for what the user can see instead, and it is
+    /// SYNCHRONOUS — no request, no completion handler, no generation to
+    /// key a stale photograph by, and nothing left outstanding when the
+    /// harness's own retry comes round again.
+    ///
+    /// Every angle-bracketed answer says what it MEASURED (invariant 3).
+    fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
+        let points = points.to_owned();
+        Self::on_ui_read(move |core| {
+            // THE APPEARANCE RIDES THE ANSWER (§6): the display raster
+            // uses the platform's mode and kaya's palette has two, so a
+            // bare colour string would be a frozen expectation quietly
+            // depending on the host's appearance setting. THE SAME
+            // READING the presentation report sends.
+            let dark = core
+                .window
+                .Content()
+                .ok()
+                .and_then(|root| windows_core::Interface::cast::<FrameworkElement>(&root).ok())
+                .and_then(|element| element.ActualTheme().ok())
+                .is_some_and(|theme| theme == ElementTheme::Dark);
+            let mode = if dark { "dark" } else { "light" };
+            let wanted = crate::harness::probe_points(&points);
+            if wanted.is_empty() {
+                return Ok(format!("<no probe points in {points:?}>"));
+            }
+            let Some(i) = crate::harness::try_resolve(target.index, core.canvases.len()) else {
+                return Ok(format!("<this window holds {} canvases>", core.canvases.len()));
+            };
+            let image = core.canvases[i].clone();
+            let element: FrameworkElement = windows_core::Interface::cast(&image)?;
+            let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+            if w < 1.0 || h < 1.0 {
+                return Ok(format!("<the canvas laid out at {w}x{h}>"));
+            }
+            let at = placement(core, &image)?;
+            match grab_canvas(&at) {
+                Ok(grab) => Ok(format!("{mode} {}", sample_grab(&grab, &wanted))),
+                Err(why) => Ok(format!(
+                    "<the {}x{} canvas at {},{} inside a {}x{} window (scale {}) could not be \
+                     printed: {why}>",
+                    at.w, at.h, at.ox, at.oy, at.win_w, at.win_h, at.scale
+                )),
+            }
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn inset(&self) -> String {

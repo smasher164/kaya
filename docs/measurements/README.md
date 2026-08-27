@@ -18,6 +18,15 @@ anything.
 | `choke-ios-2026-08-24.txt` | " |
 | `choke-ios-guest-2026-08-24.swift` | The iOS choke guest's source, kept because that rig's guest is Swift and not reconstructible from the report alone. |
 | `tables-guest-2026-08-26.txt` | The first run of the checked-in recipe below. |
+| `canvas-cross-isa-2026-08-26.txt` | Whether one frozen `expect_drawing_hash` can stand for five platforms: the canvas raster's bytes on aarch64 against x86_64. |
+| `canvas-marshal-2026-08-26.txt` | What one animated canvas frame costs a guest to BUILD AND SUBMIT, in python, java and rust — the number that decides whether the reserved packed-encoding lane is needed. Found the Java record encoder's 4096-byte ceiling on the way. |
+| `canvas-marshal-guest-2026-08-26.py` | That report's python guest. |
+| `canvas-marshal-guest-2026-08-26.java` | Its java twin, in package `dev.kaya`. Run against the tree's own `KayaWire` it prints the 4096-byte ceiling and stops, which is the watched negative for that defect. |
+
+`canvas-marshal-2026-08-26.txt` keeps its two guests beside it, on the
+`choke-ios-guest-2026-08-24.swift` precedent, and its own recipe; its
+rust half is a `#[test]` that has to live inside the crate and is
+therefore written out in the report itself.
 
 The 2026-08-24 files were written by hand from one-off scripts that no
 longer exist. `tools/bench-tables.sh` is those scripts turned into

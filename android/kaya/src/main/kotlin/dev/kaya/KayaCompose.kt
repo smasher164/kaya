@@ -162,6 +162,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.boundsInWindow
@@ -324,6 +325,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // ("0x0" before a source lands or after a failed decode).
     var imageBitmap by mutableStateOf<ImageBitmap?>(null)
     var imageSize by mutableStateOf("0x0")
+    // The canvas slot (docs/canvas-plan.md §8): the core's raster as an
+    // ImageBitmap, and the scale it was drawn at — device pixels over
+    // this number is the drawing's size in dp.
+    var drawing by mutableStateOf<ImageBitmap?>(null)
+    var drawingScale by mutableStateOf(1.0)
     // The toolkit's own ScrollState is both the observation source
     // (maxValue > 0 = overflow; value == maxValue = at end) and what
     // scroll_end drives.
@@ -425,6 +431,14 @@ val kayaTextLayouts = HashMap<Long, () -> androidx.compose.ui.text.TextLayoutRes
  * keep (`kayaCrossRects` and friends).
  */
 val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
+
+/**
+ * Where each canvas sits IN THE WINDOW — the rectangle `expect_ink`
+ * photographs (docs/canvas-plan.md §7.2). Same space, and the same
+ * caveat, as [kayaTextBoxes] above: `PixelCopy` wants SURFACE
+ * coordinates, and `kayaPhotograph` is the one place that crosses.
+ */
+val kayaCanvasBoxes = HashMap<Long, android.graphics.Rect>()
 
 /**
  * The selection background each textarea is painted UNDER, ARGB, by
@@ -750,6 +764,14 @@ object KayaSceneModel {
     val radios = ArrayList<KayaNode>()
     val grids = ArrayList<KayaNode>()
     val textareas = ArrayList<KayaNode>()
+    val canvases = ArrayList<KayaNode>()
+    /**
+     * The appearance the core last rastered with — written by the ONE
+     * reading the presentation report sends (KayaRoot), so
+     * `expect_ink`'s answer and the report cannot disagree
+     * (docs/canvas-plan.md §6).
+     */
+    var presentationDark = false
     // Grid cell leading edges by child node id, grid-local (recorded
     // at place time): the expect_grid_columns observation clusters
     // these — geometry, never the model's columns copy.
@@ -920,11 +942,9 @@ object KayaCompose {
 
     /**
      * The raster a canvas's declaration produced (docs/canvas-plan.md
-     * §1.1). NO ARM DECODES IT: the blit is the breadth phase (§8, §11
-     * phase 3) and this backend still declares the canvas depth stub, so
-     * the record cannot reach the pump. The constant stands so a drifted
-     * number fails tools/check-verbs.sh rather than a lane; it is named
-     * in [CANVAS_VOCABULARY].
+     * §1.1): premultiplied RGBA8 device pixels this backend blits into
+     * an ImageBitmap. It is also read by the BLOB PREFETCH, one pass
+     * ahead of the apply, because a handle dies with its batch.
      */
     private const val APPLY_SET_DRAWING = 36
 
@@ -1214,10 +1234,11 @@ object KayaCompose {
     /**
      * THE CANVAS WIRE VOCABULARY THIS BACKEND DOES NOT READ: the core
      * rasterizes and a backend blits (docs/canvas-plan.md §1.1), so no op,
-     * paint, rule, align or baseline is interpreted here. The copies exist
-     * so a drifted number fails a gate rather than a lane, and naming them
-     * once here is what keeps check-detekt's unused-private family off
-     * them. The KayaSwiftUI sibling is `kayaCanvasVocabulary`.
+     * paint, rule, align or baseline is interpreted here — only the
+     * SET_DRAWING record that carries the finished pixels. The copies
+     * exist so a drifted number fails a gate rather than a lane, and
+     * naming them once here is what keeps check-detekt's unused-private
+     * family off them. The KayaSwiftUI sibling is `kayaCanvasVocabulary`.
      */
     val CANVAS_VOCABULARY: List<Long> = listOf(
         APPLY_SET_DRAWING.toLong(),
@@ -1406,6 +1427,20 @@ object KayaCompose {
             //
             // Walked GENERICALLY off the header's slot count. Absolute
             // reads, so the record cursor above is untouched.
+            // SET_DRAWING's pixels are a blob too, and a blob handle
+            // dies with the batch: without this the raster arrives as no
+            // bytes at all, with no error on any side. Body is
+            // { u64 id; u32 width; u32 height; Value scale; Value
+            // pixels }, so the blob's value header sits one 16-byte f64
+            // value past the fixed part. Absolute reads, so the record
+            // cursor is untouched.
+            if (kind == APPLY_SET_DRAWING) {
+                val body = start + 8
+                if (b.getInt(body + 32) == VALUE_BLOB) {
+                    val handle = b.getLong(body + 40)
+                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
+                }
+            }
             if (kind == APPLY_COPY) {
                 val body = start + 8
                 val slots = b.getInt(body + 16)
@@ -1510,6 +1545,7 @@ object KayaCompose {
                         KIND_RADIO -> KayaSceneModel.radios.add(node)
                         KIND_GRID -> KayaSceneModel.grids.add(node)
                         KIND_TEXTAREA -> KayaSceneModel.textareas.add(node)
+                        KIND_CANVAS -> KayaSceneModel.canvases.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -2113,6 +2149,26 @@ object KayaCompose {
                     node.tableSorted = sorted
                     node.tableDirection = direction
                     node.sortTag = tag
+                }
+                APPLY_SET_DRAWING -> {
+                    // THE RASTER, not the ops: { u64 id; u32 width;
+                    // u32 height; Value scale; Value pixels } —
+                    // premultiplied RGBA8 the core produced
+                    // (docs/canvas-plan.md §1.1). This backend
+                    // interprets no draw op and owns no drawing API;
+                    // its arm is the raw-pixel sibling of the image
+                    // arm's decode.
+                    val id = b.long
+                    val width = b.int
+                    val height = b.int
+                    b.int // the scale value's type
+                    b.int // its len
+                    val scale = b.double
+                    val handle = readBlobHandle(b)
+                    val node = KayaSceneModel.nodes[id]
+                        ?: error("kaya: set_drawing targets unknown widget $id")
+                    node.drawingScale = if (scale.isFinite() && scale > 0.0) scale else 1.0
+                    node.drawing = kayaDrawingBitmap(blobs[handle], width, height)
                 }
                 APPLY_SET_TYPEFACE -> {
                     // { u32 mask; u32 platform } then the default
@@ -3961,6 +4017,145 @@ object KayaCompose {
     }
 
     /** The textarea (or entry) a range verb names. */
+    private fun kayaCanvasTarget(spec: String): KayaNode? =
+        target(spec, "canvas", KayaSceneModel.canvases)
+
+    /**
+     * `expect_ink` compares WITHIN ±1 PER CHANNEL (ruled 2026-08-26,
+     * docs/canvas-plan.md §7.2). THIS backend reports the core's own
+     * bytes — PixelCopy crosses no colour space — while a macOS window's
+     * backing store carries the DISPLAY's profile and reads D2E3F7 back
+     * as D2E2F7, so no single frozen string can exact-match both
+     * (measured, docs/traps.md). `expect_drawing_hash` keeps the
+     * byte-exact assertion.
+     *
+     * harness.rs and KayaSwiftUI.swift carry their own copies of this
+     * number; tools/check-verbs.sh holds the three equal and pinned at
+     * the ruled 1.
+     */
+    private const val INK_TOLERANCE = 1
+
+    /**
+     * The appearance exactly, every channel within [INK_TOLERANCE]. An
+     * answer that does not parse — every `<...>` diagnostic below —
+     * never matches, so it reaches the failure text whole.
+     */
+    private fun kayaInkMatches(got: String, want: String): Boolean {
+        fun channels(hex: String): IntArray? {
+            if (hex.length != 6) return null
+            val out = IntArray(3)
+            for (i in out.indices) {
+                out[i] = hex.substring(i * 2, i * 2 + 2).toIntOrNull(16) ?: return null
+            }
+            return out
+        }
+        val gotParts = got.split(" ", limit = 2)
+        val wantParts = want.split(" ", limit = 2)
+        if (gotParts.size != 2 || wantParts.size != 2 || gotParts[0] != wantParts[0]) {
+            return false
+        }
+        val gotInk = gotParts[1].split("/")
+        val wantInk = wantParts[1].split("/")
+        if (gotInk.size != wantInk.size) return false
+        for (i in gotInk.indices) {
+            val g = channels(gotInk[i]) ?: return false
+            val w = channels(wantInk[i]) ?: return false
+            for (c in g.indices) {
+                if (kotlin.math.abs(g[c] - w[c]) > INK_TOLERANCE) return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * THE BLIT, sampled off the WINDOW'S OWN RENDERED PIXELS at the
+     * declared probe points — `x,y` pairs in hundredths of the canvas's
+     * box — as `RRGGBB/RRGGBB/...` (docs/canvas-plan.md §7.2). The mac's
+     * `cacheDisplay` move in this platform's spelling, and the only
+     * canvas read that fails when the buffer never reached the
+     * ImageBitmap.
+     *
+     * THE APPEARANCE RIDES THE ANSWER (§6): the display raster uses the
+     * platform's mode and kaya's palette has two of them, so a bare
+     * colour string would be a frozen expectation quietly depending on
+     * the device's night setting. The bit is the one KayaRoot reported.
+     *
+     * NOT ON THE UI THREAD, for `kayaHighlightRead`'s measured reason:
+     * `PixelCopy` answers on a main-thread callback, so waiting for it
+     * there would deadlock. The geometry is gathered in one UI hop and
+     * the photograph is taken from the harness thread.
+     *
+     * Every angle-bracketed answer says what it MEASURED (invariant 3).
+     */
+    private fun kayaCanvasInk(
+        activity: ComponentActivity,
+        spec: String,
+        points: String,
+    ): String {
+        val mode = if (KayaSceneModel.presentationDark) "dark" else "light"
+        val wanted = points.split(" ").mapNotNull { pair ->
+            val xy = pair.split(",")
+            val x = xy.getOrNull(0)?.trim()?.toDoubleOrNull()
+            val y = xy.getOrNull(1)?.trim()?.toDoubleOrNull()
+            if (xy.size == 2 && x != null && y != null) Pair(x, y) else null
+        }
+        if (wanted.isEmpty()) return "<no probe points in $points>"
+        val gathered = onUi(activity) {
+            val node = kayaCanvasTarget(spec)
+            val decor = activity.window.decorView
+            val loc = IntArray(2)
+            decor.getLocationInWindow(loc)
+            Triple(
+                node?.let { kayaCanvasBoxes[it.id] },
+                android.graphics.Point(loc[0], loc[1]),
+                android.graphics.Point(decor.width, decor.height),
+            )
+        }
+        val box = gathered.first
+            ?: return "<no canvas $spec, or it has not been laid out>"
+        if (box.width() <= 0 || box.height() <= 0) {
+            return "<the canvas laid out at ${box.width()}x${box.height()}>"
+        }
+        val src = android.graphics.Rect(box)
+        src.offset(gathered.second.x, gathered.second.y)
+        if (!src.intersect(0, 0, gathered.third.x, gathered.third.y)) {
+            return "<the canvas sits outside the window's own surface: $src of " +
+                "${gathered.third.x}x${gathered.third.y}>"
+        }
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            src.width(), src.height(), android.graphics.Bitmap.Config.ARGB_8888)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var result = -1
+        android.view.PixelCopy.request(
+            activity.window,
+            src,
+            bitmap,
+            { code ->
+                result = code
+                latch.countDown()
+            },
+            android.os.Handler(android.os.Looper.getMainLooper()),
+        )
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        if (result != android.view.PixelCopy.SUCCESS) {
+            bitmap.recycle()
+            return "<PixelCopy answered $result for $src>"
+        }
+        val samples = wanted.joinToString("/") { (px, py) ->
+            val x = ((bitmap.width * px / 100.0).toInt()).coerceIn(0, bitmap.width - 1)
+            val y = ((bitmap.height * py / 100.0).toInt()).coerceIn(0, bitmap.height - 1)
+            val pixel = bitmap.getPixel(x, y)
+            String.format(
+                "%02X%02X%02X",
+                (pixel shr 16) and 0xFF,
+                (pixel shr 8) and 0xFF,
+                pixel and 0xFF,
+            )
+        }
+        bitmap.recycle()
+        return "$mode $samples"
+    }
+
     private fun kayaTextTarget(spec: String): KayaNode? =
         if (spec.startsWith("textarea")) target(spec, "textarea", KayaSceneModel.textareas)
         else target(spec, "entry", KayaSceneModel.entryWidgets)
@@ -4211,6 +4406,11 @@ object KayaCompose {
             "radio" -> KayaSceneModel.radios
             "grid" -> KayaSceneModel.grids
             "textarea" -> KayaSceneModel.textareas
+            // Every kind is addressable for accessibility — that is what
+            // makes a universal prop universal — so this table is the
+            // core's parse_target_kind list, not the subset of kinds some
+            // verb happens to reach (tools/check-verbs.sh censuses it).
+            "canvas" -> KayaSceneModel.canvases
             else -> return null
         }
         return target(spec, kind, registry)
@@ -6339,12 +6539,58 @@ object KayaCompose {
                             failures.add("app icon $got, wanted $want")
                         }
                     }
-                    // The three canvas reads (docs/canvas-plan.md §7.1,
-                    // §7.2). The blit is the breadth phase, so all three
-                    // refuse where check-stubs and check-steps can see it.
-                    "expect_drawing_hash" -> depthStub("canvas")
-                    "expect_drawing" -> depthStub("canvas")
-                    "expect_ink" -> depthStub("canvas")
+                    // THE CANONICAL RASTER, asked of the CORE
+                    // (docs/canvas-plan.md §7.1): every backend answers
+                    // the same way, because the point is that five
+                    // platforms' libkaya drew the same picture. The
+                    // probe carries the hash AND the two legible facts;
+                    // the hash verb compares the first and prints the
+                    // rest, since a hash on its own tells the next
+                    // reader nothing.
+                    "expect_drawing_hash", "expect_drawing" -> {
+                        val want = quoted(parts.drop(2))
+                        val probe = onUi(activity) {
+                            val node = kayaCanvasTarget(parts[1])
+                            if (node == null) "" else KayaPresent.canvasProbe(node.id)
+                        }
+                        val cut = probe.indexOf(' ')
+                        val hash =
+                            if (cut < 0) "<no canvas ${parts[1]}>" else probe.substring(0, cut)
+                        val measured =
+                            if (cut < 0) "<no canvas ${parts[1]}>" else probe.substring(cut + 1)
+                        if (parts[0] == "expect_drawing_hash") {
+                            if (hash == want) {
+                                observed.add("drawing hash $want")
+                            } else {
+                                failures.add("drawing hash $hash ($measured), wanted $want")
+                            }
+                        } else if (measured == want) {
+                            observed.add("drawing $want")
+                        } else {
+                            failures.add("drawing $measured, wanted $want")
+                        }
+                    }
+                    // THE BLIT, sampled off the window's own rendered
+                    // pixels (§7.2) — the one canvas read that fails
+                    // when the buffer never reached the platform's image
+                    // object, and the reason the hash is not the whole
+                    // story. `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."`.
+                    "expect_ink" -> {
+                        val spec = quoted(parts.drop(2))
+                        val halves = spec.split(" = ")
+                        val points = halves.firstOrNull() ?: ""
+                        val want = if (halves.size == 2) halves[1] else ""
+                        val got = kayaCanvasInk(activity, parts[1], points)
+                        // THE OBSERVATION IS THE WANTED TEXT, not what
+                        // was read: inside the tolerance the platforms
+                        // legitimately answer different bytes, and the
+                        // verdict is byte-compared across all of them.
+                        if (kayaInkMatches(got, want)) {
+                            observed.add("ink $want")
+                        } else {
+                            failures.add("ink $got at $points, wanted $want")
+                        }
+                    }
                     "expect_window_size" -> {
                         // The surface's REAL extent against the advisory
                         // request. Android never honors a size request,
@@ -7174,14 +7420,36 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// A depth stub is a CALL, never a sentence — tools/check-stubs.sh
-// reads it, and its silence is bought by an OPEN entry in
-// docs/deferred.md (tools/lib/stub-ledger.py).
-private fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on android — " +
-            "it is a depth slice; see CLAUDE.md's sequencing",
-    )
+// THIS BACKEND STUBS NOTHING TODAY, so it carries no depthStub: an
+// unused private function fails tools/check-detekt.sh. The next depth
+// slice writes it back in as a CALL, never a sentence —
+// tools/check-stubs.sh reads the call, and its silence is bought by an
+// OPEN entry in docs/deferred.md (tools/lib/stub-ledger.py):
+//
+//     private fun depthStub(scene: String): Nothing =
+//         error("kaya: the $scene scene is not yet materialized on android")
+
+/**
+ * THE BLIT'S BYTES (docs/canvas-plan.md §8): the core's premultiplied
+ * RGBA8 as an ImageBitmap.
+ *
+ * `Bitmap.Config.ARGB_8888` IS RGBA IN MEMORY ORDER on Android — the
+ * platform's own kN32 layout, R at byte 0 — and it is premultiplied by
+ * default, so this arm swizzles nothing. `expect_ink` is what fails if
+ * that ever stops being true.
+ *
+ * null for a zero-sized or short buffer, which is the declared-and-empty
+ * case; the render keeps the node present either way
+ * (tools/check-empty-child.sh).
+ */
+private fun kayaDrawingBitmap(bytes: ByteArray?, width: Int, height: Int): ImageBitmap? {
+    if (bytes == null || width <= 0 || height <= 0) return null
+    val want = width * height * 4
+    if (bytes.size < want) return null
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(bytes, 0, want))
+    return bitmap.asImageBitmap()
+}
 
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
@@ -9065,11 +9333,42 @@ private fun KayaRenderCore(
         KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
         KayaCompose.KIND_CANVAS -> {
-            // The ImageBitmap this arm will fill from the core's buffer is
-            // the breadth phase (docs/canvas-plan.md §8, §11 phase 3); it
-            // threads `a11y` the way KIND_IMAGE's does, a drawing being an
-            // image to the accessibility tree (§9).
-            depthStub("canvas")
+            // THE BLIT (docs/canvas-plan.md §8): the core rasterized, and
+            // this arm puts the bytes on screen. No draw op is
+            // interpreted here and no drawing API is owned here.
+            //
+            // THE INTRINSIC SIZE IS ALREADY THE VIEWBOX. The scale this
+            // backend reports IS the composition's density (§5), so the
+            // raster is viewbox-times-density pixels and Image's default
+            // sizing — the painter's pixel size over the density —
+            // lands on the viewbox in dp with no arithmetic here.
+            // FillBounds is §3.2 rule 2: a grown track stretches the
+            // drawing rather than letterboxing it.
+            //
+            // It threads `a11y` the way KIND_IMAGE's does, a drawing
+            // being an image to the accessibility tree (§9): the name
+            // rides Image's own contentDescription, and null there is
+            // Compose's spelling of "decoration, hide it".
+            //
+            // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
+            // ABSENT — the image arm's rule verbatim, for its reason
+            // (tools/check-empty-child.sh).
+            val drawing = node.drawing
+            val locate = Modifier.onGloballyPositioned {
+                val r = it.boundsInWindow()
+                kayaCanvasBoxes[node.id] = android.graphics.Rect(
+                    r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+            }
+            if (drawing != null) {
+                Image(
+                    bitmap = drawing,
+                    contentDescription = node.a11yLabel.ifEmpty { null },
+                    contentScale = ContentScale.FillBounds,
+                    modifier = boxFill.then(locate).then(a11yTag),
+                )
+            } else {
+                Box(modifier = locate.then(a11yTag))
+            }
         }
     }
 }
@@ -10328,6 +10627,22 @@ fun KayaRoot() {
     // where composition provides one (expect_fills sums it between
     // tracks).
     kayaDensity = LocalDensity.current.density.toDouble()
+    // THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
+    // re-rasters every canvas at them (docs/canvas-plan.md §5, §6). Only
+    // these two numbers cross: no platform colour reaches a drawing.
+    //
+    // COMPOSITION IS THE CHANNEL. Both values are composition locals, so
+    // a display move or a night-mode flip re-runs this for free — which
+    // is Android's own spelling of the get-told-then-re-render mechanism
+    // every platform documents. The density IS the scale kaya reports,
+    // which is what makes the canvas arm's intrinsic sizing land on the
+    // viewbox with no arithmetic.
+    val presentationScale = LocalDensity.current.density.toDouble()
+    val presentationDark = isSystemInDarkTheme()
+    LaunchedEffect(presentationScale, presentationDark) {
+        KayaSceneModel.presentationDark = presentationDark
+        KayaPresent.presentation(presentationScale, presentationDark)
+    }
     // The size class, from the platform's own width in dp against the
     // 600dp boundary — the same boundary androidx's WindowSizeClass
     // draws, taken directly so the interpreter needs no extra artifact.

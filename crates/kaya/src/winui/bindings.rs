@@ -5868,6 +5868,23 @@ pub mod Microsoft {
             unsafe impl Sync for DependencyObject {}
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct ElementTheme(pub i32);
+            impl ElementTheme {
+                pub const Default: Self = Self(0i32);
+                pub const Light: Self = Self(1i32);
+                pub const Dark: Self = Self(2i32);
+            }
+            impl windows_core::TypeKind for ElementTheme {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for ElementTheme {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.ElementTheme;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
             pub struct FocusState(pub i32);
             impl FocusState {
                 pub const Unfocused: Self = Self(0i32);
@@ -6445,11 +6462,43 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn RequestedTheme(&self) -> windows_core::Result<ElementTheme> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RequestedTheme)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetRequestedTheme(&self, value: ElementTheme) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                     let this = self;
                     unsafe {
                         let mut result__ = core::mem::zeroed();
                         (windows_core::Interface::vtable(this).IsLoaded)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ActualTheme(&self) -> windows_core::Result<ElementTheme> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ActualTheme)(
                             windows_core::Interface::as_raw(this),
                             &mut result__,
                         )
@@ -8756,13 +8805,25 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 FlowDirection: usize,
                 SetFlowDirection: usize,
-                RequestedTheme: usize,
-                SetRequestedTheme: usize,
+                pub RequestedTheme: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut ElementTheme,
+                )
+                    -> windows_core::HRESULT,
+                pub SetRequestedTheme: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    ElementTheme,
+                )
+                    -> windows_core::HRESULT,
                 pub IsLoaded: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
                 ) -> windows_core::HRESULT,
-                ActualTheme: usize,
+                pub ActualTheme: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut ElementTheme,
+                )
+                    -> windows_core::HRESULT,
                 pub Loaded: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
@@ -10085,7 +10146,11 @@ pub mod Microsoft {
                     *mut bool,
                 )
                     -> windows_core::HRESULT,
-                Changed: usize,
+                pub Changed: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                ) -> windows_core::HRESULT,
                 pub RemoveChanged:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
             }
@@ -10133,6 +10198,20 @@ pub mod Microsoft {
             pub struct IXamlRoot4_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
                 ContentIsland: usize,
+            }
+            windows_core::imp::define_interface!(
+                IXamlRootChangedEventArgs,
+                IXamlRootChangedEventArgs_Vtbl,
+                0x61d2c719_f8a1_515a_902c_cfa498ba7a7f
+            );
+            impl windows_core::RuntimeType for IXamlRootChangedEventArgs {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IXamlRootChangedEventArgs_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
             }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13025,6 +13104,26 @@ pub mod Microsoft {
                         .map(|| result__)
                     }
                 }
+                pub fn Changed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<
+                        super::super::super::Windows::Foundation::TypedEventHandler<
+                            XamlRoot,
+                            XamlRootChangedEventArgs,
+                        >,
+                    >,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Changed)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemoveChanged(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -13049,6 +13148,29 @@ pub mod Microsoft {
             }
             unsafe impl Send for XamlRoot {}
             unsafe impl Sync for XamlRoot {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct XamlRootChangedEventArgs(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                XamlRootChangedEventArgs,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl XamlRootChangedEventArgs {}
+            impl windows_core::RuntimeType for XamlRootChangedEventArgs {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IXamlRootChangedEventArgs>();
+            }
+            unsafe impl windows_core::Interface for XamlRootChangedEventArgs {
+                type Vtable = <IXamlRootChangedEventArgs as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IXamlRootChangedEventArgs as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for XamlRootChangedEventArgs {
+                const NAME: &'static str = "Microsoft.UI.Xaml.XamlRootChangedEventArgs";
+            }
+            unsafe impl Send for XamlRootChangedEventArgs {}
+            unsafe impl Sync for XamlRootChangedEventArgs {}
             pub mod Automation {
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24729,12 +24851,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -27980,12 +28140,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -31111,12 +31309,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -34209,12 +34445,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -38034,12 +38308,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -41504,12 +41816,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -44853,12 +45203,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -47885,12 +48273,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -51352,12 +51778,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -54424,12 +54888,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -57124,12 +57626,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -59667,12 +60207,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -63983,8 +64561,16 @@ pub mod Microsoft {
                         *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    Stretch: usize,
-                    SetStretch: usize,
+                    pub Stretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::Media::Stretch,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::Media::Stretch,
+                    )
+                        -> windows_core::HRESULT,
                     pub NineGrid: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut super::Thickness,
@@ -69481,12 +70067,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -72127,12 +72751,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -72437,6 +73099,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetSource)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Stretch(&self) -> windows_core::Result<super::Media::Stretch> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Stretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetStretch(
+                        &self,
+                        value: super::Media::Stretch,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -75588,12 +76274,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -78886,12 +79610,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -81873,12 +82635,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -85350,12 +86150,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -88454,12 +89292,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -91397,12 +92273,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -94379,12 +95293,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -97451,12 +98403,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -101370,12 +102360,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -104614,12 +105642,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -107249,12 +108315,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -110263,12 +111367,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -113484,12 +114626,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -116656,12 +117836,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -119847,12 +121065,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -123952,12 +125208,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -128478,12 +129772,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -131563,12 +132895,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -134158,12 +135528,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -137509,12 +138917,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -141757,12 +143203,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -145087,12 +146571,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -148212,12 +149734,50 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn RequestedTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRequestedTheme(
+                        &self,
+                        value: super::ElementTheme,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             let mut result__ = core::mem::zeroed();
                             (windows_core::Interface::vtable(this).IsLoaded)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ActualTheme(&self) -> windows_core::Result<super::ElementTheme> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ActualTheme)(
                                 windows_core::Interface::as_raw(this),
                                 &mut result__,
                             )
@@ -152311,6 +153871,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn RequestedTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRequestedTheme(
+                            &self,
+                            value: super::super::ElementTheme,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElement,
@@ -152318,6 +153909,22 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).IsLoaded)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ActualTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ActualTheme)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -156646,6 +158253,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn RequestedTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRequestedTheme(
+                            &self,
+                            value: super::super::ElementTheme,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElement,
@@ -156653,6 +158291,22 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).IsLoaded)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ActualTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ActualTheme)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -160172,6 +161826,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn RequestedTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRequestedTheme(
+                            &self,
+                            value: super::super::ElementTheme,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElement,
@@ -160179,6 +161864,22 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).IsLoaded)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ActualTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ActualTheme)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -163853,6 +165554,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn RequestedTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRequestedTheme(
+                            &self,
+                            value: super::super::ElementTheme,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElement,
@@ -163860,6 +165592,22 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).IsLoaded)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ActualTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ActualTheme)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -167708,6 +169456,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn RequestedTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRequestedTheme(
+                            &self,
+                            value: super::super::ElementTheme,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElement,
@@ -167715,6 +169494,22 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).IsLoaded)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ActualTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ActualTheme)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -171164,6 +172959,37 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn RequestedTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRequestedTheme(
+                            &self,
+                            value: super::super::ElementTheme,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRequestedTheme)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsLoaded(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElement,
@@ -171171,6 +172997,22 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).IsLoaded)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ActualTheme(
+                            &self,
+                        ) -> windows_core::Result<super::super::ElementTheme>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ActualTheme)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -176148,6 +177990,24 @@ pub mod Microsoft {
                 unsafe impl Send for SolidColorBrush {}
                 unsafe impl Sync for SolidColorBrush {}
                 #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct Stretch(pub i32);
+                impl Stretch {
+                    pub const None: Self = Self(0i32);
+                    pub const Fill: Self = Self(1i32);
+                    pub const Uniform: Self = Self(2i32);
+                    pub const UniformToFill: Self = Self(3i32);
+                }
+                impl windows_core::TypeKind for Stretch {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for Stretch {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Microsoft.UI.Xaml.Media.Stretch;i4)",
+                        );
+                }
+                #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct VisualTreeHelper(windows_core::IUnknown);
                 windows_core::imp::interface_hierarchy!(
@@ -176963,6 +178823,390 @@ pub mod Microsoft {
                         PixelWidthProperty: usize,
                         PixelHeightProperty: usize,
                     }
+                    windows_core::imp::define_interface!(
+                        IRenderTargetBitmap,
+                        IRenderTargetBitmap_Vtbl,
+                        0xcf10407d_fa8b_57a3_9574_710529ae0b04
+                    );
+                    impl windows_core::RuntimeType for IRenderTargetBitmap {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IRenderTargetBitmap_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub PixelWidth: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut i32,
+                        )
+                            -> windows_core::HRESULT,
+                        pub PixelHeight: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut i32,
+                        )
+                            -> windows_core::HRESULT,
+                        pub RenderAsync: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub RenderToSizeAsync: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            i32,
+                            i32,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub GetPixelsAsync: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
+                        IRenderTargetBitmapStatics,
+                        IRenderTargetBitmapStatics_Vtbl,
+                        0x83e822e4_9f84_5986_93b0_e4f7019c367d
+                    );
+                    impl windows_core::RuntimeType for IRenderTargetBitmapStatics {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IRenderTargetBitmapStatics_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        PixelWidthProperty: usize,
+                        PixelHeightProperty: usize,
+                    }
+                    windows_core::imp::define_interface!(
+                        IWriteableBitmap,
+                        IWriteableBitmap_Vtbl,
+                        0x78c824a9_0e43_5f1e_93bc_d046cca82b7e
+                    );
+                    impl windows_core::RuntimeType for IWriteableBitmap {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IWriteableBitmap_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub PixelBuffer: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub Invalidate: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
+                        IWriteableBitmapFactory,
+                        IWriteableBitmapFactory_Vtbl,
+                        0x26e861d9_b080_512b_96c4_80050e7e08d1
+                    );
+                    impl windows_core::RuntimeType for IWriteableBitmapFactory {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct IWriteableBitmapFactory_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub CreateInstanceWithDimensions:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                i32,
+                                i32,
+                                *mut *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                    }
+                    #[repr(transparent)]
+                    #[derive(Clone, Debug, Eq, PartialEq)]
+                    pub struct RenderTargetBitmap(windows_core::IUnknown);
+                    windows_core::imp::interface_hierarchy!(
+                        RenderTargetBitmap,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    windows_core::imp::required_hierarchy!(
+                        RenderTargetBitmap,
+                        super::ImageSource,
+                        super::super::DependencyObject
+                    );
+                    impl RenderTargetBitmap {
+                        pub fn new() -> windows_core::Result<Self> {
+                            Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                        }
+                        fn IActivationFactory<
+                            R,
+                            F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                        >(
+                            callback: F,
+                        ) -> windows_core::Result<R> {
+                            static SHARED: windows_core::imp::FactoryCache<
+                                RenderTargetBitmap,
+                                windows_core::imp::IGenericFactory,
+                            > = windows_core::imp::FactoryCache::new();
+                            SHARED.call(callback)
+                        }
+                        pub fn DispatcherQueue(
+                            &self,
+                        ) -> windows_core::Result<super::super::super::Dispatching::DispatcherQueue>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IDependencyObject,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn PixelWidth(&self) -> windows_core::Result<i32> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PixelWidth)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn PixelHeight(&self) -> windows_core::Result<i32> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PixelHeight)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn RenderAsync<P0>(
+                            &self,
+                            element: P0,
+                        ) -> windows_core::Result<windows_future::IAsyncAction>
+                        where
+                            P0: windows_core::Param<super::super::UIElement>,
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderAsync)(
+                                    windows_core::Interface::as_raw(this),
+                                    element.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn RenderToSizeAsync<P0>(
+                            &self,
+                            element: P0,
+                            scaledwidth: i32,
+                            scaledheight: i32,
+                        ) -> windows_core::Result<windows_future::IAsyncAction>
+                        where
+                            P0: windows_core::Param<super::super::UIElement>,
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderToSizeAsync)(
+                                    windows_core::Interface::as_raw(this),
+                                    element.param().abi(),
+                                    scaledwidth,
+                                    scaledheight,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }                        pub fn GetPixelsAsync < > ( & self , ) -> windows_core::Result < windows_future:: IAsyncOperation < super::super::super::super::super::Windows::Storage::Streams:: IBuffer > >{
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPixelsAsync)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        fn IRenderTargetBitmapStatics<
+                            R,
+                            F: FnOnce(&IRenderTargetBitmapStatics) -> windows_core::Result<R>,
+                        >(
+                            callback: F,
+                        ) -> windows_core::Result<R> {
+                            static SHARED: windows_core::imp::FactoryCache<
+                                RenderTargetBitmap,
+                                IRenderTargetBitmapStatics,
+                            > = windows_core::imp::FactoryCache::new();
+                            SHARED.call(callback)
+                        }
+                    }
+                    impl windows_core::RuntimeType for RenderTargetBitmap {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_class::<Self, IRenderTargetBitmap>(
+                            );
+                    }
+                    unsafe impl windows_core::Interface for RenderTargetBitmap {
+                        type Vtable = <IRenderTargetBitmap as windows_core::Interface>::Vtable;
+                        const IID: windows_core::GUID =
+                            <IRenderTargetBitmap as windows_core::Interface>::IID;
+                    }
+                    impl windows_core::RuntimeName for RenderTargetBitmap {
+                        const NAME: &'static str =
+                            "Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap";
+                    }
+                    unsafe impl Send for RenderTargetBitmap {}
+                    unsafe impl Sync for RenderTargetBitmap {}
+                    #[repr(transparent)]
+                    #[derive(Clone, Debug, Eq, PartialEq)]
+                    pub struct WriteableBitmap(windows_core::IUnknown);
+                    windows_core::imp::interface_hierarchy!(
+                        WriteableBitmap,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    windows_core::imp::required_hierarchy!(
+                        WriteableBitmap,
+                        BitmapSource,
+                        super::ImageSource,
+                        super::super::DependencyObject
+                    );
+                    impl WriteableBitmap {
+                        pub fn PixelWidth(&self) -> windows_core::Result<i32> {
+                            let this = &windows_core::Interface::cast::<IBitmapSource>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PixelWidth)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn PixelHeight(&self) -> windows_core::Result<i32> {
+                            let this = &windows_core::Interface::cast::<IBitmapSource>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PixelHeight)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }                        pub fn SetSource < P0 , > ( & self , streamsource : P0 , ) -> windows_core::Result < ( ) > where P0 :windows_core::Param < super::super::super::super::super::Windows::Storage::Streams:: IRandomAccessStream > ,{
+                            let this = &windows_core::Interface::cast::<IBitmapSource>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetSource)(
+                                    windows_core::Interface::as_raw(this),
+                                    streamsource.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }                        pub fn SetSourceAsync < P0 , > ( & self , streamsource : P0 , ) -> windows_core::Result < windows_future:: IAsyncAction > where P0 :windows_core::Param < super::super::super::super::super::Windows::Storage::Streams:: IRandomAccessStream > ,{
+                            let this = &windows_core::Interface::cast::<IBitmapSource>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).SetSourceAsync)(
+                                    windows_core::Interface::as_raw(this),
+                                    streamsource.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn DispatcherQueue(
+                            &self,
+                        ) -> windows_core::Result<super::super::super::Dispatching::DispatcherQueue>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IDependencyObject,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn PixelBuffer(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Storage::Streams::IBuffer,
+                        > {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PixelBuffer)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn Invalidate(&self) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Invalidate)(
+                                    windows_core::Interface::as_raw(this),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn CreateInstanceWithDimensions(
+                            pixelwidth: i32,
+                            pixelheight: i32,
+                        ) -> windows_core::Result<WriteableBitmap> {
+                            Self::IWriteableBitmapFactory(|this| unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . CreateInstanceWithDimensions ) ( windows_core::Interface::as_raw ( this ) , pixelwidth , pixelheight , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
+                            })
+                        }
+                        fn IWriteableBitmapFactory<
+                            R,
+                            F: FnOnce(&IWriteableBitmapFactory) -> windows_core::Result<R>,
+                        >(
+                            callback: F,
+                        ) -> windows_core::Result<R> {
+                            static SHARED: windows_core::imp::FactoryCache<
+                                WriteableBitmap,
+                                IWriteableBitmapFactory,
+                            > = windows_core::imp::FactoryCache::new();
+                            SHARED.call(callback)
+                        }
+                    }
+                    impl windows_core::RuntimeType for WriteableBitmap {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_class::<Self, IWriteableBitmap>();
+                    }
+                    unsafe impl windows_core::Interface for WriteableBitmap {
+                        type Vtable = <IWriteableBitmap as windows_core::Interface>::Vtable;
+                        const IID: windows_core::GUID =
+                            <IWriteableBitmap as windows_core::Interface>::IID;
+                    }
+                    impl windows_core::RuntimeName for WriteableBitmap {
+                        const NAME: &'static str =
+                            "Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap";
+                    }
+                    unsafe impl Send for WriteableBitmap {}
+                    unsafe impl Sync for WriteableBitmap {}
                 }
             }
             pub mod XamlTypeInfo {
@@ -180529,6 +182773,39 @@ pub mod Windows {
                         .ok()
                     }
                 }
+                pub fn WriteBuffer<P0>(&self, buffer: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).WriteBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn WriteBufferRange<P0>(
+                    &self,
+                    buffer: P0,
+                    start: u32,
+                    count: u32,
+                ) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).WriteBufferRange)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                            start,
+                            count,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn WriteBoolean(&self, value: bool) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -180677,6 +182954,17 @@ pub mod Windows {
                     unsafe {
                         let mut result__ = core::mem::zeroed();
                         (windows_core::Interface::vtable(this).FlushAsync)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DetachBuffer(&self) -> windows_core::Result<IBuffer> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DetachBuffer)(
                             windows_core::Interface::as_raw(this),
                             &mut result__,
                         )
@@ -180734,6 +183022,141 @@ pub mod Windows {
             unsafe impl Sync for DataWriter {}
             pub type DataWriterStoreOperation = windows_future::IAsyncOperation<u32>;
             windows_core::imp::define_interface!(
+                IBuffer,
+                IBuffer_Vtbl,
+                0x905a0fe0_bc53_11df_8c49_001e4fc686da
+            );
+            impl windows_core::RuntimeType for IBuffer {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            windows_core::imp::interface_hierarchy!(
+                IBuffer,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl IBuffer {
+                pub fn Capacity(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Capacity)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn Length(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Length)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetLength(&self, value: u32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetLength)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+            }
+            impl windows_core::RuntimeName for IBuffer {
+                const NAME: &'static str = "Windows.Storage.Streams.IBuffer";
+            }
+            pub trait IBuffer_Impl: windows_core::IUnknownImpl {
+                fn Capacity(&self) -> windows_core::Result<u32>;
+                fn Length(&self) -> windows_core::Result<u32>;
+                fn SetLength(&self, value: u32) -> windows_core::Result<()>;
+            }
+            impl IBuffer_Vtbl {
+                pub const fn new<Identity: IBuffer_Impl, const OFFSET: isize>() -> Self {
+                    unsafe extern "system" fn Capacity<
+                        Identity: IBuffer_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IBuffer_Impl::Capacity(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn Length<
+                        Identity: IBuffer_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IBuffer_Impl::Length(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetLength<
+                        Identity: IBuffer_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: u32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IBuffer_Impl::SetLength(this, value).into()
+                        }
+                    }
+                    Self {
+                        base__: windows_core::IInspectable_Vtbl::new::<Identity, IBuffer, OFFSET>(),
+                        Capacity: Capacity::<Identity, OFFSET>,
+                        Length: Length::<Identity, OFFSET>,
+                        SetLength: SetLength::<Identity, OFFSET>,
+                    }
+                }
+                pub fn matches(iid: &windows_core::GUID) -> bool {
+                    iid == &<IBuffer as windows_core::Interface>::IID
+                }
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IBuffer_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Capacity: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u32,
+                ) -> windows_core::HRESULT,
+                pub Length: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u32,
+                ) -> windows_core::HRESULT,
+                pub SetLength:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, u32) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
                 IDataWriter,
                 IDataWriter_Vtbl,
                 0x64b89265_d341_4922_b38a_dd4af8808c4e
@@ -180776,6 +183199,39 @@ pub mod Windows {
                             windows_core::Interface::as_raw(this),
                             value.len().try_into().unwrap(),
                             value.as_ptr(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn WriteBuffer<P0>(&self, buffer: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).WriteBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn WriteBufferRange<P0>(
+                    &self,
+                    buffer: P0,
+                    start: u32,
+                    count: u32,
+                ) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).WriteBufferRange)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                            start,
+                            count,
                         )
                         .ok()
                     }
@@ -180934,6 +183390,17 @@ pub mod Windows {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn DetachBuffer(&self) -> windows_core::Result<IBuffer> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DetachBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn DetachStream(&self) -> windows_core::Result<IOutputStream> {
                     let this = self;
                     unsafe {
@@ -180953,6 +183420,16 @@ pub mod Windows {
                 fn UnstoredBufferLength(&self) -> windows_core::Result<u32>;
                 fn WriteByte(&self, value: u8) -> windows_core::Result<()>;
                 fn WriteBytes(&self, value: &[u8]) -> windows_core::Result<()>;
+                fn WriteBuffer(
+                    &self,
+                    buffer: windows_core::Ref<'_, IBuffer>,
+                ) -> windows_core::Result<()>;
+                fn WriteBufferRange(
+                    &self,
+                    buffer: windows_core::Ref<'_, IBuffer>,
+                    start: u32,
+                    count: u32,
+                ) -> windows_core::Result<()>;
                 fn WriteBoolean(&self, value: bool) -> windows_core::Result<()>;
                 fn WriteGuid(&self, value: &windows_core::GUID) -> windows_core::Result<()>;
                 fn WriteInt16(&self, value: i16) -> windows_core::Result<()>;
@@ -180969,6 +183446,7 @@ pub mod Windows {
                 fn StoreAsync(&self) -> windows_core::Result<DataWriterStoreOperation>;
                 fn FlushAsync(&self)
                     -> windows_core::Result<windows_future::IAsyncOperation<bool>>;
+                fn DetachBuffer(&self) -> windows_core::Result<IBuffer>;
                 fn DetachStream(&self) -> windows_core::Result<IOutputStream>;
             }
             impl IDataWriter_Vtbl {
@@ -181022,6 +183500,41 @@ pub mod Windows {
                                     core::mem::transmute_copy(&value),
                                     value_array_size as usize,
                                 ),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn WriteBuffer<
+                        Identity: IDataWriter_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        buffer: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IDataWriter_Impl::WriteBuffer(this, core::mem::transmute_copy(&buffer))
+                                .into()
+                        }
+                    }
+                    unsafe extern "system" fn WriteBufferRange<
+                        Identity: IDataWriter_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        buffer: *mut core::ffi::c_void,
+                        start: u32,
+                        count: u32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IDataWriter_Impl::WriteBufferRange(
+                                this,
+                                core::mem::transmute_copy(&buffer),
+                                start,
+                                count,
                             )
                             .into()
                         }
@@ -181240,6 +183753,26 @@ pub mod Windows {
                             }
                         }
                     }
+                    unsafe extern "system" fn DetachBuffer<
+                        Identity: IDataWriter_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataWriter_Impl::DetachBuffer(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
                     unsafe extern "system" fn DetachStream<
                         Identity: IDataWriter_Impl,
                         const OFFSET: isize,
@@ -181270,8 +183803,8 @@ pub mod Windows {
                         SetByteOrder: 0,
                         WriteByte: WriteByte::<Identity, OFFSET>,
                         WriteBytes: WriteBytes::<Identity, OFFSET>,
-                        WriteBuffer: 0,
-                        WriteBufferRange: 0,
+                        WriteBuffer: WriteBuffer::<Identity, OFFSET>,
+                        WriteBufferRange: WriteBufferRange::<Identity, OFFSET>,
                         WriteBoolean: WriteBoolean::<Identity, OFFSET>,
                         WriteGuid: WriteGuid::<Identity, OFFSET>,
                         WriteInt16: WriteInt16::<Identity, OFFSET>,
@@ -181288,7 +183821,7 @@ pub mod Windows {
                         MeasureString: MeasureString::<Identity, OFFSET>,
                         StoreAsync: StoreAsync::<Identity, OFFSET>,
                         FlushAsync: FlushAsync::<Identity, OFFSET>,
-                        DetachBuffer: 0,
+                        DetachBuffer: DetachBuffer::<Identity, OFFSET>,
                         DetachStream: DetachStream::<Identity, OFFSET>,
                     }
                 }
@@ -181316,8 +183849,18 @@ pub mod Windows {
                     u32,
                     *const u8,
                 ) -> windows_core::HRESULT,
-                WriteBuffer: usize,
-                WriteBufferRange: usize,
+                pub WriteBuffer: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub WriteBufferRange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    u32,
+                    u32,
+                )
+                    -> windows_core::HRESULT,
                 pub WriteBoolean: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     bool,
@@ -181365,7 +183908,11 @@ pub mod Windows {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                DetachBuffer: usize,
+                pub DetachBuffer: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub DetachStream: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
@@ -181467,6 +184014,24 @@ pub mod Windows {
                 super::super::Foundation::IClosable
             );
             impl IOutputStream {
+                pub fn WriteAsync<P0>(
+                    &self,
+                    buffer: P0,
+                ) -> windows_core::Result<windows_future::IAsyncOperationWithProgress<u32, u32>>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).WriteAsync)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn FlushAsync(
                     &self,
                 ) -> windows_core::Result<windows_future::IAsyncOperation<bool>> {
@@ -181496,11 +184061,39 @@ pub mod Windows {
                 const NAME: &'static str = "Windows.Storage.Streams.IOutputStream";
             }
             pub trait IOutputStream_Impl: super::super::Foundation::IClosable_Impl {
+                fn WriteAsync(
+                    &self,
+                    buffer: windows_core::Ref<'_, IBuffer>,
+                ) -> windows_core::Result<windows_future::IAsyncOperationWithProgress<u32, u32>>;
                 fn FlushAsync(&self)
                     -> windows_core::Result<windows_future::IAsyncOperation<bool>>;
             }
             impl IOutputStream_Vtbl {
                 pub const fn new<Identity: IOutputStream_Impl, const OFFSET: isize>() -> Self {
+                    unsafe extern "system" fn WriteAsync<
+                        Identity: IOutputStream_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        buffer: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IOutputStream_Impl::WriteAsync(
+                                this,
+                                core::mem::transmute_copy(&buffer),
+                            ) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
                     unsafe extern "system" fn FlushAsync<
                         Identity: IOutputStream_Impl,
                         const OFFSET: isize,
@@ -181527,7 +184120,7 @@ pub mod Windows {
                             IOutputStream,
                             OFFSET,
                         >(),
-                        WriteAsync: 0,
+                        WriteAsync: WriteAsync::<Identity, OFFSET>,
                         FlushAsync: FlushAsync::<Identity, OFFSET>,
                     }
                 }
@@ -181539,7 +184132,11 @@ pub mod Windows {
             #[doc(hidden)]
             pub struct IOutputStream_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                WriteAsync: usize,
+                pub WriteAsync: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
                 pub FlushAsync: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
@@ -181680,6 +184277,24 @@ pub mod Windows {
                             windows_core::Interface::as_raw(this),
                         )
                         .ok()
+                    }
+                }
+                pub fn WriteAsync<P0>(
+                    &self,
+                    buffer: P0,
+                ) -> windows_core::Result<windows_future::IAsyncOperationWithProgress<u32, u32>>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = &windows_core::Interface::cast::<IOutputStream>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).WriteAsync)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
                 pub fn FlushAsync(
@@ -181984,6 +184599,24 @@ pub mod Windows {
                             windows_core::Interface::as_raw(this),
                         )
                         .ok()
+                    }
+                }
+                pub fn WriteAsync<P0>(
+                    &self,
+                    buffer: P0,
+                ) -> windows_core::Result<windows_future::IAsyncOperationWithProgress<u32, u32>>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    let this = &windows_core::Interface::cast::<IOutputStream>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).WriteAsync)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
                 pub fn FlushAsync(

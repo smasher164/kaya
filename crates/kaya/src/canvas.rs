@@ -425,7 +425,10 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
     let sx = t_w / vb_w * p.scale;
     let sy = t_h / vb_h * p.scale;
     let mut builder = tiny_skia::PathBuilder::new();
-    let mut face: Option<Face> = None;
+    // The SELECTED face or the sentence saying why there is none. Held
+    // rather than refused at the `font` op, so a face nothing draws with
+    // refuses nothing: the measured failure is a RUN that vanishes.
+    let mut face: Option<Result<Face, String>> = None;
 
     for op in &drawing.ops {
         match op {
@@ -475,24 +478,39 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
                 }
             }
             Op::Font { asset, size, weight } => {
-                face = Face::open(asset, size * p.scale, *weight);
+                face = Some(Face::open(asset, size * p.scale, *weight));
             }
             Op::Text { x, y, paint, align, baseline, text } => {
-                if let Some(face) = &face {
-                    if let Some(path) =
-                        face.outline(text, x * sx, y * sy, *align, *baseline)
-                    {
-                        let mut style = tiny_skia::Paint::default();
-                        style.set_color(resolve(*paint, p.mode));
-                        style.anti_alias = true;
-                        pixmap.fill_path(
-                            &path,
-                            &style,
-                            tiny_skia::FillRule::Winding,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
+                // THE RASTER RESOLVES THE FONT AGAIN and validation
+                // cannot speak for the second answer, so the refusal is
+                // repeated here (docs/canvas-plan.md §3.5, ruled
+                // 2026-08-26). It fires before anything of this run
+                // reaches the pixmap, and the unwind takes the buffer
+                // with it: no half-drawn picture leaves this function.
+                let face = match &face {
+                    Some(Ok(face)) => face,
+                    Some(Err(why)) => panic!(
+                        "kaya: the canvas text run {text:?} cannot be drawn — {why}. \
+                         A run dropped for want of its face leaves a picture that is \
+                         wrong with nothing anywhere to say so — only §7.1's frozen \
+                         hash moves — so the raster refuses as a unit instead \
+                         (docs/canvas-plan.md §3.5, docs/traps.md)"
+                    ),
+                    // validate() refuses a `text` with no `font` before
+                    // it, so a face has always been selected here (§3.5).
+                    None => unreachable!("a canvas text op with no font reached the raster"),
+                };
+                if let Some(path) = face.outline(text, x * sx, y * sy, *align, *baseline) {
+                    let mut style = tiny_skia::Paint::default();
+                    style.set_color(resolve(*paint, p.mode));
+                    style.anti_alias = true;
+                    pixmap.fill_path(
+                        &path,
+                        &style,
+                        tiny_skia::FillRule::Winding,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
                 }
             }
         }
@@ -590,11 +608,28 @@ struct Face {
 }
 
 impl Face {
-    fn open(asset: &str, px: f64, weight: f64) -> Option<Face> {
-        // Validation already resolved this name; a failure here would be
-        // an asset that vanished between the declaration and the raster.
-        let bytes = crate::assets::font_bytes(asset).ok()?;
-        Some(Face { bytes, px, weight })
+    /// The bytes, or the sentence saying which asset could not become a
+    /// face. Validation already resolved this name (§3.5), so an `Err`
+    /// here is an asset that vanished — or stopped being a font —
+    /// between the declaration and the raster.
+    fn open(asset: &str, px: f64, weight: f64) -> Result<Face, String> {
+        // An unspecified name means the reserved default, and a refusal
+        // may only name what it measured.
+        let named = if asset.is_empty() { crate::assets::DEFAULT_FONT } else { asset };
+        let bytes = crate::assets::font_bytes(asset).map_err(|why| {
+            format!("the font asset {named:?} does not resolve at raster time: {why}")
+        })?;
+        // PARSED HERE, so bytes that resolve and are not a font are the
+        // same refusal rather than the same silent drop one layer down;
+        // `outline` reads these same bytes and therefore cannot fail.
+        FontRef::new(&bytes).map_err(|e| {
+            format!(
+                "the font asset {named:?} resolves to {} bytes that are not a font \
+                 kaya can read: {e}",
+                bytes.len()
+            )
+        })?;
+        Ok(Face { bytes, px, weight })
     }
 
     /// The whole line as ONE path in device space, already anchored.
@@ -609,7 +644,11 @@ impl Face {
         align: i64,
         baseline: i64,
     ) -> Option<tiny_skia::Path> {
-        let font = FontRef::new(&self.bytes).ok()?;
+        // `Face::open` parsed these same bytes, so this cannot fail —
+        // and says so LOUDLY rather than dropping the run, which is the
+        // shape this file exists to refuse (docs/canvas-plan.md §3.5).
+        let font = FontRef::new(&self.bytes)
+            .expect("Face::open parsed these bytes; the raster reads the same buffer");
         let location = font.axes().location([("wght", self.weight as f32)]);
         let size = Size::new(self.px as f32);
         let metrics = font.metrics(size, &location);
@@ -744,6 +783,145 @@ mod tests {
             op(wire::DRAW_TEXT), n(50.0), n(40.0), op(wire::PAINT_AXIS),
             op(wire::TEXT_ALIGN_MIDDLE), op(wire::TEXT_BASELINE_ALPHABETIC), s("$40k"),
         ]
+    }
+
+    /// THE SCENE'S OWN OP STREAM, byte for byte what guests/rust/canvas.rs
+    /// declares (tools/scenes/canvas.steps). Written out here rather than
+    /// derived, so the core's tests can sample the pixels the five lanes
+    /// argue about without a guest process.
+    fn scene_chart() -> Vec<Value> {
+        const PLOT: (f64, f64, f64, f64) = (40.0, 10.0, 290.0, 100.0);
+        const SERIES: [(f64, f64); 7] = [
+            (40.0, 88.0),
+            (81.0, 74.0),
+            (123.0, 80.0),
+            (165.0, 51.0),
+            (206.0, 57.0),
+            (248.0, 30.0),
+            (290.0, 20.0),
+        ];
+        const TICKS: [(f64, &str); 3] = [(32.0, "$60k"), (55.0, "$40k"), (78.0, "$20k")];
+        let (l, t, r, b) = PLOT;
+        let mut v = Vec::new();
+        let move_to = |v: &mut Vec<Value>, x: f64, y: f64| {
+            v.extend([op(wire::DRAW_MOVE_TO), n(x), n(y)]);
+        };
+        move_to(&mut v, l, t);
+        for (x, y) in [(r, t), (r, b), (l, b)] {
+            v.extend([op(wire::DRAW_LINE_TO), n(x), n(y)]);
+        }
+        v.push(op(wire::DRAW_CLOSE));
+        v.extend([op(wire::DRAW_FILL), op(wire::PAINT_GROUND), op(wire::FILL_NONZERO)]);
+        for (y, _) in TICKS {
+            move_to(&mut v, l, y);
+            v.extend([op(wire::DRAW_LINE_TO), n(r), n(y)]);
+        }
+        v.extend([op(wire::DRAW_STROKE), op(wire::PAINT_GRID), n(1.0)]);
+        let polyline = |v: &mut Vec<Value>| {
+            for (i, (x, y)) in SERIES.iter().enumerate() {
+                let code = if i == 0 { wire::DRAW_MOVE_TO } else { wire::DRAW_LINE_TO };
+                v.extend([op(code), n(*x), n(*y)]);
+            }
+        };
+        polyline(&mut v);
+        v.extend([op(wire::DRAW_LINE_TO), n(r), n(b)]);
+        v.extend([op(wire::DRAW_LINE_TO), n(l), n(b)]);
+        v.push(op(wire::DRAW_CLOSE));
+        v.extend([op(wire::DRAW_FILL), op(wire::PAINT_SERIES_FILL), op(wire::FILL_NONZERO)]);
+        polyline(&mut v);
+        v.extend([op(wire::DRAW_STROKE), op(wire::PAINT_SERIES), n(2.0)]);
+        move_to(&mut v, l, t);
+        v.extend([op(wire::DRAW_LINE_TO), n(l), n(b)]);
+        v.extend([op(wire::DRAW_STROKE), op(wire::PAINT_AXIS), n(1.0)]);
+        v.extend([op(wire::DRAW_FONT), s(""), n(11.0), op(400)]);
+        for (y, text) in TICKS {
+            v.extend([
+                op(wire::DRAW_TEXT), n(l - 4.0), n(y), op(wire::PAINT_AXIS),
+                op(wire::TEXT_ALIGN_END), op(wire::TEXT_BASELINE_MIDDLE), s(text),
+            ]);
+        }
+        v.extend([op(wire::DRAW_FONT), s("fonts/sora-wght.ttf"), n(13.0), op(700)]);
+        v.extend([
+            op(wire::DRAW_TEXT), n(l + 8.0), n(t + 3.0), op(wire::PAINT_SERIES),
+            op(wire::TEXT_ALIGN_START), op(wire::TEXT_BASELINE_TOP), s("Q3"),
+        ]);
+        v
+    }
+
+    /// WHAT THE CORE PUTS AT THE SCENE'S TWO PROBE POINTS, pinned here
+    /// so a figure or palette edit reddens in this suite in a second
+    /// rather than on five lanes in ten minutes.
+    ///
+    /// BOTH POINTS ARE OPAQUE IN THE CORE, and `expect_ink` rests on
+    /// that: the sampling backends drop the alpha byte and report RGB
+    /// straight (crates/kaya/src/winui/mod.rs's `sample_shot`,
+    /// gtk.rs's `canvas_ink`), so a probe point whose alpha fell below
+    /// 255 would read darkened toward the compositor's ground with no
+    /// diagnostic saying why, while the hash stayed green.
+    ///
+    /// THE SCENE FREEZES THESE BYTES, and `expect_ink` compares them
+    /// within ±1 per channel: the mac reads D2E2F7 back off its own
+    /// window where the core wrote D2E3F7, because that window's backing
+    /// store carries the display's profile (docs/traps.md, "a canvas ink
+    /// read crosses the display's colour space"; ruled 2026-08-26,
+    /// docs/canvas-plan.md §7.2). So a probe colour whose channels move
+    /// by MORE than one here is a re-freeze, not a rounding.
+    #[test]
+    fn the_scene_probe_points_are_opaque_and_pinned() {
+        // This stream NAMES A FONT ASSET, and assets::tests move
+        // KAYA_ASSET_DIR out from under the whole process — see
+        // crate::assets::serially.
+        let _serial = crate::assets::serially();
+        let d = validate((300.0, 120.0), &scene_chart()).expect("the scene's stream validates");
+        assert_eq!(d.op_count(), 41, "tools/scenes/canvas.steps freezes 41 ops");
+        let p = probe(&d);
+        // THE EARLIER WALL. The raster now REFUSES a run whose font will
+        // not resolve (ruled 2026-08-26, see
+        // a_vanished_font_refuses_the_run_rather_than_dropping_it), so
+        // the hash can no longer move for this reason in silence — but
+        // this assert reaches it FIRST and names the asset before the
+        // frozen hash is compared, which is the difference between
+        // "the font is gone" and "the picture changed". Measured
+        // 2026-08-26: this test failed 8/8 against one build with
+        // c4fa15caf170a5ff, which is EXACTLY this scene with its one
+        // disk-resolved run (`Q3`, fonts/sora-wght.ttf) missing — the
+        // three tick labels use the embedded default and were fine
+        // (docs/traps.md).
+        assert!(
+            crate::assets::font_bytes("fonts/sora-wght.ttf").is_ok(),
+            "the scene's disk-resolved font did not resolve, so its `Q3` run is about \
+             to be dropped from the raster with no other symptom: {}",
+            crate::assets::asset_why_not("fonts/sora-wght.ttf")
+        );
+        assert_eq!(
+            format!("{:016x}", p.hash),
+            "e5ac8a2c0b240633",
+            "tools/scenes/canvas.steps freezes this hash (c4fa15caf170a5ff was this \
+             scene with the `Q3` run dropped for want of its font, which the raster \
+             refuses now rather than draws)"
+        );
+        assert_eq!(drawing_observation(&p), "41/2,8,97,83");
+        let r = rasterize(&d, d.viewbox, Presentation { scale: 1.0, mode: Mode::Light });
+        let at = |px: f64, py: f64| -> [u8; 4] {
+            let x = ((r.width as f64) * px / 100.0) as usize;
+            let y = ((r.height as f64) * py / 100.0) as usize;
+            let i = (y * r.width as usize + x) * 4;
+            [r.pixels[i], r.pixels[i + 1], r.pixels[i + 2], r.pixels[i + 3]]
+        };
+        let ground = at(15.0, 20.0);
+        let filled = at(70.0, 63.0);
+        println!("core at 15,20 = {ground:02X?}; core at 70,63 = {filled:02X?}");
+        assert_eq!(ground[3], 255, "15,20 must be opaque: {ground:02X?}");
+        assert_eq!(filled[3], 255, "70,63 must be opaque: {filled:02X?}");
+        let ink = format!(
+            "light {:02X}{:02X}{:02X}/{:02X}{:02X}{:02X}",
+            ground[0], ground[1], ground[2], filled[0], filled[1], filled[2]
+        );
+        assert_eq!(
+            ink, "light FFFFFF/D2E3F7",
+            "tools/scenes/canvas.steps freezes exactly this string, and expect_ink \
+             allows each channel ±1 around it"
+        );
     }
 
     #[test]
@@ -929,6 +1107,89 @@ mod tests {
             ],
         );
         assert!(e.contains("carries a line break"), "{e}");
+    }
+
+    /// THE RASTER-TIME FONT REFUSAL, both branches made to print
+    /// (invariant 3; ruled 2026-08-26). Validation resolves every
+    /// `draw_font` asset and the raster resolves it AGAIN — so an asset
+    /// that vanishes in between used to drop the run, leaving §7.1's
+    /// frozen hash as the only symptom (docs/traps.md). The resolver is
+    /// doctored HERE, between the two, which is the state no scene can
+    /// reach.
+    #[test]
+    fn a_vanished_font_refuses_the_run_rather_than_dropping_it() {
+        // The doctoring is the process-wide asset root: every test in
+        // the crate that resolves an asset takes this lock
+        // (crate::assets::serially).
+        let _serial = crate::assets::serially();
+
+        let stream = |asset: &str| {
+            vec![
+                op(wire::DRAW_FONT), s(asset), n(13.0), op(700),
+                op(wire::DRAW_TEXT), n(10.0), n(30.0), op(wire::PAINT_SERIES),
+                op(wire::TEXT_ALIGN_START), op(wire::TEXT_BASELINE_TOP), s("Q3"),
+            ]
+        };
+        // VALIDATION PASSES FIRST, against the real root: the window this
+        // refusal closes opens only after a drawing has been accepted.
+        let d = validate((100.0, 50.0), &stream("fonts/sora-wght.ttf"))
+            .expect("the disk-resolved font validates against the real asset root");
+        let whole = probe(&d).hash;
+
+        let refusal = |d: &Drawing| -> String {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                rasterize(d, (100.0, 50.0), Presentation::default())
+            }));
+            // Not `expect_err`: a Raster is pixels and does not print.
+            let Err(payload) = caught else {
+                panic!("the raster must refuse a run whose font is gone, not draw it");
+            };
+            let said = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&'static str>().map(|s| (*s).to_owned()))
+                .expect("the refusal carries its sentence");
+            println!("canvas raster refusal: {said}");
+            said
+        };
+
+        // BRANCH 1: the asset vanishes between validate and raster.
+        let nowhere =
+            std::env::temp_dir().join(format!("kaya-canvas-nofont-{}", std::process::id()));
+        std::fs::create_dir_all(&nowhere).unwrap();
+        // SAFETY: single-threaded test section under `serially()`.
+        unsafe { std::env::set_var(crate::assets::ENV_VAR, &nowhere) };
+        let gone = refusal(&d);
+        // The RUN and the ASSET, both named, plus the resolver's own words.
+        assert!(gone.contains("\"Q3\""), "the run is named: {gone}");
+        assert!(gone.contains("\"fonts/sora-wght.ttf\""), "the asset is named: {gone}");
+        assert!(gone.contains("does not resolve at raster time"), "{gone}");
+        assert!(gone.contains("no asset named"), "the resolver's own sentence: {gone}");
+
+        // BRANCH 2: the name resolves and the bytes are not a font.
+        std::fs::create_dir_all(nowhere.join("fonts")).unwrap();
+        std::fs::write(nowhere.join("fonts/sora-wght.ttf"), b"not a font at all").unwrap();
+        let unreadable = refusal(&d);
+        assert!(unreadable.contains("\"Q3\""), "{unreadable}");
+        assert!(unreadable.contains("are not a font kaya can read"), "{unreadable}");
+        assert!(unreadable.contains("17 bytes"), "it counted what it read: {unreadable}");
+
+        unsafe { std::env::remove_var(crate::assets::ENV_VAR) };
+        let _ = std::fs::remove_dir_all(&nowhere);
+
+        // AND THE RESTORE IS WATCHED: with the real root back, the same
+        // drawing rasters again and hashes what it hashed before, so the
+        // two reds above were the doctoring and not a broken raster.
+        assert_eq!(probe(&d).hash, whole, "the real root draws the run again");
+
+        // The RESERVED default cannot vanish — it is compiled in — and
+        // that is the half the embedding buys: with no asset root at all,
+        // a canvas still draws text.
+        let embedded = validate((100.0, 50.0), &stream("")).expect("the reserved default");
+        unsafe { std::env::set_var(crate::assets::ENV_VAR, &nowhere) };
+        let drawn = rasterize(&embedded, (100.0, 50.0), Presentation::default());
+        unsafe { std::env::remove_var(crate::assets::ENV_VAR) };
+        assert!(ink(&drawn).is_some(), "the embedded face still put ink on the raster");
     }
 
     /// Text reaches the raster: the same figure with and without its

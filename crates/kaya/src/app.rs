@@ -6029,6 +6029,8 @@ mod tests {
     /// `Deref`, and the owned reader.
     #[test]
     fn an_asset_reads_the_file_the_build_shipped() {
+        // Resolves a real asset — see crate::assets::serially.
+        let _serial = crate::assets::serially();
         use std::io::Read;
 
         let ctx = asset_ctx();
@@ -6059,6 +6061,8 @@ mod tests {
     /// contents is exactly what a copy would also produce.
     #[test]
     fn an_asset_reaches_a_blob_consumer_without_a_copy() {
+        // Resolves a real asset — see crate::assets::serially.
+        let _serial = crate::assets::serially();
         use crate::protocol::TxOp;
 
         let ctx = asset_ctx();
@@ -6103,6 +6107,8 @@ mod tests {
     /// one scene can freeze them (docs/assets-plan.md, invariant 1).
     #[test]
     fn a_missing_asset_panics_with_the_cores_sentence_verbatim() {
+        // Resolves a real asset — see crate::assets::serially.
+        let _serial = crate::assets::serially();
         let ctx = asset_ctx();
         let tx = ctx.begin();
 

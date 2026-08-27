@@ -990,7 +990,9 @@ pub trait Stage: Send + 'static {
     ///
     /// Its job is to prove the BLIT — that the buffer reached the
     /// platform's image object, in the right pixel format, the right way
-    /// up, at the right size, unswizzled.
+    /// up, at the right size, unswizzled. The appearance rides the
+    /// answer (`"<mode> RRGGBB/..."`), and the compare is tolerant by
+    /// exactly ±1 per channel — see [`INK_TOLERANCE`].
     fn canvas_ink(&self, target: Target, points: &str) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
@@ -2660,6 +2662,53 @@ fn record_linger() {
     }
 }
 
+/// `expect_ink` compares WITHIN ±1 PER CHANNEL (ruled 2026-08-26,
+/// docs/canvas-plan.md §7.2). A macOS window's backing store carries the
+/// DISPLAY's profile, so the core's D2E3F7 is read back as D2E2F7 there
+/// while Android's PixelCopy reports the core's own bytes — no single
+/// frozen string can exact-match both (docs/traps.md). The byte-exact
+/// assertion is `expect_drawing_hash`, which is profile-free by
+/// construction; this verb's job is liveness and approximate colour.
+///
+/// Both interpreters carry their own copy of this number, and
+/// tools/check-verbs.sh holds the three equal AND pinned at the ruled 1.
+const INK_TOLERANCE: i32 = 1;
+
+/// The appearance exactly, every channel within [`INK_TOLERANCE`].
+///
+/// An answer that does not parse never matches — every `<...>`
+/// diagnostic the backends return says what it measured, and reaches
+/// the failure text whole.
+fn ink_matches(got: &str, want: &str) -> bool {
+    fn channels(hex: &str) -> Option<[i32; 3]> {
+        if hex.len() != 6 || !hex.is_ascii() {
+            return None;
+        }
+        let mut out = [0i32; 3];
+        for (i, c) in out.iter_mut().enumerate() {
+            *c = i32::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+        }
+        Some(out)
+    }
+    let (Some((got_mode, got_ink)), Some((want_mode, want_ink))) =
+        (got.split_once(' '), want.split_once(' '))
+    else {
+        return false;
+    };
+    if got_mode != want_mode {
+        return false;
+    }
+    let got_ink: Vec<&str> = got_ink.split('/').collect();
+    let want_ink: Vec<&str> = want_ink.split('/').collect();
+    got_ink.len() == want_ink.len()
+        && got_ink.iter().zip(&want_ink).all(|(g, w)| match (channels(g), channels(w)) {
+            (Some(g), Some(w)) => {
+                g.iter().zip(&w).all(|(a, b)| (a - b).abs() <= INK_TOLERANCE)
+            }
+            _ => false,
+        })
+}
+
 /// Returns the verdict's exit code, which the harness thread needs
 /// after `finish` in order to leave under its own verdict when nothing
 /// else can end the process (see spawn).
@@ -3342,7 +3391,11 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             })),
             Step::ExpectInk(target, points, want) => Some(poll(|| {
                 let got = stage.canvas_ink(*target, points);
-                if got == *want {
+                // THE OBSERVATION IS THE WANTED TEXT, not what was read:
+                // inside the tolerance the platforms legitimately answer
+                // different bytes, and the verdict is byte-compared
+                // across all of them (invariant 6).
+                if ink_matches(&got, want) {
                     Ok(format!("ink {want}"))
                 } else {
                     // WHAT THE SURFACE IS HOLDING IS THE DIAGNOSIS, the
@@ -4237,6 +4290,21 @@ fn poll(mut eval: impl FnMut() -> Result<String, String>) -> Result<String, Stri
 /// yet). Actions keep the panicking `resolve`: they run only after
 /// an expect proved their target's scene state, so a miss there IS a
 /// bug.
+/// `expect_ink`'s probe points: `x,y` pairs in hundredths of the
+/// canvas's own box (docs/canvas-plan.md §7.2). The BACKENDS parse this
+/// rather than the runner, because each one samples in its own surface's
+/// coordinates — so the split lives here once instead of in each of
+/// them. An unparseable pair is dropped, and an empty answer is what the
+/// backend reports as "no probe points".
+pub fn probe_points(spec: &str) -> Vec<(f64, f64)> {
+    spec.split_whitespace()
+        .filter_map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+        })
+        .collect()
+}
+
 pub fn try_resolve(index: isize, len: usize) -> Option<usize> {
     if index < 0 {
         len.checked_sub(index.unsigned_abs())
@@ -4712,8 +4780,15 @@ mod tests {
         fn canvas_probe(&self, _target: Target) -> String {
             "<mock stage rasterizes nothing>".into()
         }
+        /// The mock blits nothing and says so in a sentence, UNLESS a
+        /// test staged an answer — the ±1 compare's negatives need this
+        /// stage to hand the verb bytes it chose (INK_ANSWER).
         fn canvas_ink(&self, _target: Target, _points: &str) -> String {
-            "<mock stage blits nothing>".into()
+            INK_ANSWER
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| "<mock stage blits nothing>".to_owned())
         }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
@@ -4834,6 +4909,11 @@ mod tests {
     static NORMALIZED_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static WEDGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static WEDGE_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    /// What MockStage::canvas_ink answers, staged by the ink tolerance
+    /// tests. Held for the whole of the one test that writes it, so two
+    /// tests in the same binary cannot read each other's answer.
+    static INK_ANSWER: Mutex<Option<String>> = Mutex::new(None);
+    static INK_SERIAL: Mutex<()> = Mutex::new(());
 
     /// A WEDGED STEP ENDS THE RUN LEGIBLY. Before the step ceiling a
     /// step that never returned printed NOTHING — no verdict, no
@@ -4964,6 +5044,86 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("no expects"), "{verdict}");
+    }
+
+    /// THE INK COMPARE IS ±1 PER CHANNEL AND NOT ±2 (ruled 2026-08-26,
+    /// docs/canvas-plan.md §7.2). One unit is the macOS display-profile
+    /// round trip and is the whole reason the tolerance exists; two is a
+    /// different colour, and every failure the verb was built for — a
+    /// dropped blit, a swizzle, an upside-down or wrongly-sized blit —
+    /// moves a channel by far more than either.
+    #[test]
+    fn ink_tolerates_one_channel_unit_and_no_more() {
+        let want = "light FFFFFF/D2E3F7";
+        // THE ONE MEASURED CASE FIRST: what the mac actually reads back
+        // off its own window for the bytes the core wrote.
+        assert!(ink_matches("light FFFFFF/D2E2F7", want));
+        assert!(ink_matches(want, want));
+        // Every channel of every colour, both directions, at the edge.
+        for got in [
+            "light FEFFFF/D2E3F7", "light FFFEFF/D2E3F7", "light FFFFFE/D2E3F7",
+            "light FFFFFF/D1E3F7", "light FFFFFF/D2E2F7", "light FFFFFF/D2E3F6",
+            "light FFFFFF/D3E4F8",
+        ] {
+            assert!(ink_matches(got, want), "{got} is one unit away and must pass");
+        }
+        // And one past it, on each side of the pair.
+        for got in [
+            "light FDFFFF/D2E3F7", "light FFFFFF/D0E3F7", "light FFFFFF/D2E5F7",
+            "light FFFFFF/D2E3F9",
+        ] {
+            assert!(!ink_matches(got, want), "{got} is two units away and must fail");
+        }
+        // THE APPEARANCE IS NOT TOLERANT — the palette has two modes and
+        // a dark-mode host must fail with a sentence that says so.
+        assert!(!ink_matches("dark FFFFFF/D2E3F7", want));
+        // Neither is the SHAPE: a diagnostic answer, a missing colour,
+        // an extra one and a value that is not six hex digits are all
+        // non-matches, so they reach the failure text whole.
+        for got in [
+            "<mock stage blits nothing>",
+            "light FFFFFF",
+            "light FFFFFF/D2E3F7/D2E3F7",
+            "light FFFFFF/D2E3F",
+            "light FFFFFF/D2E3FZ",
+            "",
+        ] {
+            assert!(!ink_matches(got, want), "{got:?} must not match {want:?}");
+        }
+    }
+
+    /// AND THE REAL VERB SAYS BOTH VALUES when it refuses. The
+    /// tolerance's whole risk is a scene going quietly green against a
+    /// colour nobody meant, so the pass is driven through the same arm
+    /// as the failure — one unit passes, two fails, and the failing
+    /// verdict names what was read AND what was wanted.
+    #[test]
+    fn the_ink_verb_passes_at_one_unit_and_names_both_colours_at_two() {
+        let _serial = INK_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let script = "expect_ink canvas@chart \"15,20 70,63 = light FFFFFF/D2E3F7\"";
+        let drive = |answer: &str| -> (i32, String) {
+            *INK_ANSWER.lock().unwrap() = Some(answer.to_owned());
+            let (tx, rx) = std::sync::mpsc::channel();
+            run(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx });
+            *INK_ANSWER.lock().unwrap() = None;
+            rx.recv().unwrap()
+        };
+        // The mac's own reading, which is the case the ruling is for.
+        let (code, verdict) = drive("light FFFFFF/D2E2F7");
+        assert_eq!(code, 0, "{verdict}");
+        // THE OBSERVATION IS THE FROZEN TEXT, never the sampled bytes:
+        // the verdict is byte-compared across every platform, and the
+        // platforms legitimately sample different values (invariant 6).
+        assert!(verdict.contains("ink light FFFFFF/D2E3F7"), "{verdict}");
+        assert!(!verdict.contains("D2E2F7"), "the verdict leaked the sampled bytes: {verdict}");
+
+        let (code, verdict) = drive("light FFFFFF/D2E5F7");
+        assert_eq!(code, 1, "two units must not pass: {verdict}");
+        assert!(
+            verdict.contains("ink light FFFFFF/D2E5F7 at 15,20 70,63, \
+                              wanted light FFFFFF/D2E3F7"),
+            "the refusal must name what was read AND what was wanted: {verdict}"
+        );
     }
 
     /// expect_order parses like expect, counts as an expect for the

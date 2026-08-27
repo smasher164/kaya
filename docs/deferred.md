@@ -9,6 +9,16 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## GAP — Compose quotes the ax observation SwiftUI leaves bare (found 2026-08-26, by the ink-tolerance round)
+KEY: ax observation quoting, image/Portfolio value, byte-compared verdict, canvas ax
+
+Compose records `ax "image/Portfolio value"` where SwiftUI records the
+same observation unquoted, so nothing byte-compares that verdict
+across platforms today — the byte-compared-verdict rule holds only
+when both spell it one way. One of the two spellings is the rule;
+check-verbs' observation clauses are where the wall belongs once the
+spelling is picked. Found, not fixed, by the ink-tolerance agent.
+
 ## Next milestones (in rough priority order)
 
 THE NAMED FORCING ARTIFACT IS A **TEXT EDITOR** (Akhil, 2026-07-24).
@@ -1339,6 +1349,24 @@ own the state (see the undo note in this file).
   transport (pixel surfaces as IOSurface/DXGI/dmabuf handles; the blob
   channel is the byte-copy arm, the pixel-handoff feature is the
   zero-copy arm).
+  AND THE ZERO-COPY ARM HAS A WIDGET, corrected 2026-08-26 (ruling 16,
+  docs/canvas-plan.md §16): it was never a second canvas. It is the
+  IMAGE widget learning a HIGH-RATE UPDATE PATH for content kaya did
+  not draw — video frames, a camera, an external engine's output —
+  which is why "re-filed against the pixel-handoff feature" above
+  should be read as re-filed against the image widget's high-rate path.
+  The split is by where the pixels come from: the canvas is pixels the
+  core rasterized from a declaration it can validate and hash, the
+  image is pixels somebody else produced and kaya presents. Flutter
+  ships the same split as Canvas versus Texture, the latter "repainted
+  autonomously as dictated by the backend (e.g. on arrival of a video
+  frame)" — the contrast is kaya's own reading, since those two Flutter
+  pages never mention each other. Nothing in the canvas's animation
+  scope (ruling 14) reaches this: a GPU DISPLAY path is the core
+  choosing how to present its own raster, not an app handing kaya
+  frames.
+  KEY: Vello, scene encoding, pixel handoff, zero-copy, surface handle,
+  IOSurface, dmabuf, image widget, Texture
 - Blob follow-ups: dedup on repeated registration (needs an artifact);
   kaya_blob_from_file/mmap escalation (needs an artifact showing the
   register copy matters — decode dominates by an order of magnitude).
@@ -2260,7 +2288,8 @@ count, so the saving is measured rather than assumed.
   Pointer-event occurrences on the canvas are a further deferral
   inside this one.
   KEY: canvas, drawing, display list, viewbox, paint role, raster,
-  tiny-skia, Win2D, set_drawing
+  tiny-skia, Win2D, set_drawing, redraw, scale mode, fixed, letterbox,
+  rgba, animation, mailbox
   ARCHITECTURE RATIFIED 2026-08-26 (Akhil, after two research rounds
   — docs/canvas-plan.md, which is no longer a draft): THE CORE
   RASTERIZES ITS OWN COMMAND LIST INTO A PIXEL BUFFER AND BACKENDS
@@ -2291,24 +2320,122 @@ count, so the saving is measured rather than assumed.
   crates/kaya/src/canvas.rs validates, shapes and rasterizes; the
   SwiftUI backend blits and reports its scale and appearance; the
   three verbs and tools/scenes/canvas.steps are green on the mac lane
-  (`canvas-rust-swiftui`). The headline stays open: the other three
-  backends declare `depth_stub("canvas")`, only the Rust guest draws,
-  and the five-lane matrix has not run.
-- **DEPTH STUB: canvas on gtk** — the blit is the breadth phase
+  (`canvas-rust-swiftui`).
+  BREADTH LANDED 2026-08-26 (phase 3): GTK, WinUI and Compose blit —
+  no backend declares `depth_stub("canvas")` any more, and each reports
+  its own scale and appearance through the two channels the mac added.
+  The canvas scene is wired on all five lanes (`canvas-rust` on linux,
+  `canvas_rust` on windows, `canvas-compose` on android,
+  `canvas-rust-swiftui` on mac, and `canvas` from the iOS swift suite
+  over the new guests/swift/canvas.swift). The headline stays open for
+  what is left: PHASE 4, the portfolio chart and the captures on five
+  platforms, and PHASE 5, the matrix — which is also the only thing
+  that can answer §11's measure-at-implementation #2 (the WinUI BGRA
+  swizzle) and #4 (what GDK's scale returns at a fraction), since both
+  are readings no host that types `cargo check` performs.
+  POST-DEPTH RULINGS 2026-08-26 (Akhil, after the animation research
+  round — docs/canvas-plan.md §0 rows 12-16, where each is recorded
+  with its reasoning). Five, and one supersedes ratified text.
+  (12) SIZE POLICY, the unified framing: a drawing is a FUNCTION OF
+  SIZE, delivered as a REDRAW OCCURRENCE with latest-wins mailbox
+  semantics and frame dropping; `scale` and `fixed` are DECLARATIONS
+  THAT THE FUNCTION IS CONSTANT, which licenses the core to answer a
+  size change by re-rasterizing under a transform with no round trip —
+  uniform-fit letterbox for `scale`, never-adapt letterbox for
+  `fixed`. Default is `scale` on a self-sufficiency argument (it is the
+  only mode available to a guest that wired no handler); `redraw` is
+  the charting and game mode; `fixed` is how a drawing refuses coercion
+  from a stretch-aligned parent. This STRIKES docs/canvas-plan.md §3.2's rules
+  2 and 3 and §12's rejection of a resize occurrence, and it is why the
+  stretch entry below is re-framed rather than closed (§3.2.1).
+  (13) PAINT: literal RGBA is the FLOOR, since a quadruple of bytes is
+  trivially byte-identical and therefore costs the frozen hash nothing
+  — the escalation gate was protecting an observable a literal cannot
+  threaten. The semantic roles stay, as MODE-AWARE sugar over kaya's
+  palette, resolved IN THE CORE because the appearance bit is not known
+  when the guest declares. And the palette's VALUES are tweakable
+  pixels, never again a ruling. First site to move: the paint enum
+  comment in crates/kaya/src/spec.rs, which reads "PAINT IS A ROLE,
+  NEVER RGB (§3.4) ... Literal RGB is the named escalation".
+  (14) ANIMATION IS IN SCOPE of the canvas, games and simulations
+  included, on a measured basis: the whole-list resubmit is 0.019ms,
+  0.1% of a frame and ~370x cheaper than that frame's raster, so the
+  display list is not the ceiling — RASTER is (14.2ms desktop-class,
+  30.3ms phone-class on an M5 Pro; tiny-skia's antialiased path fill is
+  11-17x its aliased fill, which is the whole ceiling). Levers in
+  order: multithreaded band tiling (measured 3.4x, zero API change), a
+  per-canvas aliasing knob, damage tracking, vello_cpu as a standing
+  evaluation, and a GPU DISPLAY path reserved-not-planned — the harness
+  already tolerates that one, since the canonical hash is CPU by
+  definition and expect_ink samples flat-fill interiors (docs/canvas-plan.md
+  §15).
+  (15) That 0.019ms is a RUST number. Python and Java get measured
+  before breadth hardens, and the PACKED ENCODING LANE triggers PER
+  BINDING on measured need, with its layout GENERATOR-EMITTED rather
+  than hand-copied into eight files (the file-modes trap).
+  (16) The zero-copy arm was never a second canvas — it is the IMAGE
+  widget's high-rate update path; see the Vello entry, re-worded the
+  same day (docs/canvas-plan.md §16).
+- ~~**DEPTH STUB: canvas on gtk** — the blit is the breadth phase
   (docs/canvas-plan.md §8, §11 phase 3): a GdkMemoryTexture over the
   core's premultiplied RGBA8 buffer in a GtkPicture, the raw-pixel
   sibling of the encoded `gdk::Texture::from_bytes` arm already there,
   plus the GdkTexture download that answers expect_ink. Closed when
   tools/linux/run-suites.sh wires the canvas legs and they pass.
-  KEY: canvas, set_drawing, canvas_probe, canvas_ink, GdkMemoryTexture
-- **DEPTH STUB: canvas on winui** — the blit is the breadth phase
+  KEY: canvas, set_drawing, canvas_probe, canvas_ink, GdkMemoryTexture~~
+  LANDED 2026-08-26 (breadth): `gdk::MemoryTexture` with
+  `R8g8b8a8Premultiplied` — tiny-skia's own layout, no swizzle — behind
+  `Snapshot::to_paintable`, which is where the LOGICAL size goes since a
+  GdkTexture carries no scale and GtkPicture's natural size is the
+  texture's pixels. `canvas_ink` renders the toplevel's WidgetPaintable
+  through the real GSK renderer and downloads it, measuring the
+  pixel-per-logical ratio off the returned texture rather than assuming
+  it. Scale is `gdk_surface_get_scale`'s DOUBLE (§5 rule 1) and the
+  appearance is `AdwStyleManager:dark`, the reading the brand accent
+  already takes. `canvas-rust` is wired in tools/linux/run-suites.sh.
+- ~~**DEPTH STUB: canvas on winui** — the blit is the breadth phase
   (docs/canvas-plan.md §8, §11 phase 3): a WriteableBitmap whose pixel
   buffer receives the core's premultiplied RGBA8, plus the
   premultiplied-BGRA8 swizzle §11's measure-at-implementation list
   holds open, and RenderTargetBitmap for expect_ink. Closed when
   tools/deploy-win.sh wires the canvas legs and they pass.
-  KEY: canvas, set_drawing, canvas_probe, canvas_ink, WriteableBitmap
-- **DEPTH STUB: canvas on compose** — the blit is the breadth phase
+  KEY: canvas, set_drawing, canvas_probe, canvas_ink, WriteableBitmap~~
+  LANDED 2026-08-26 (breadth): `WriteableBitmap.PixelBuffer` through
+  `IBufferByteAccess`, with the RGBA->BGRA swizzle in the one arm that
+  has it. The bindings gained WriteableBitmap, RenderTargetBitmap,
+  IBuffer, Stretch, ElementTheme and XamlRootChangedEventArgs — four of
+  those were vtable PADS whose methods did not exist until their
+  argument types were filtered. Scale is
+  `XamlRoot.RasterizationScale`, appearance `FrameworkElement.ActualTheme`.
+  `canvas_rust` is wired in tools/deploy-win.sh with its launcher.
+  THE INK READ WAS RenderTargetBitmap AND IS `PrintWindow` NOW
+  (2026-08-26, same day): that API renders (Completed, 300x120) and then
+  `GetPixelsAsync` yields NO BUFFER on this VM — for the window root as
+  well as the canvas, under both RenderAsync overloads, from a completion
+  handler and from a polled operation alike — because the adapter is a
+  Red Hat VirtIO GPU DOD, display-only, with no D3D read back
+  (docs/traps.md, "RenderTargetBitmap renders and hands back NO PIXELS",
+  which carries every dead end and the resolution).
+  `canvas_ink` now asks DWM to print the WINDOW —
+  `PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)` into a top-down 32-bit
+  DIB — and cuts the canvas's box out of it, mapped by XAML's
+  `TransformToVisual` to the window root times `RasterizationScale`,
+  plus client-to-screen minus the outer rect. Synchronous, so the
+  swallowed completion `Result` and the ~200 outstanding renders the old
+  shape left behind are gone by construction: ONE grab per step attempt,
+  on the UI thread the read already runs on. NOT a copy of the screen,
+  which also works on this adapter but reads a POSITION: the lane tiles
+  six legs at KAYA_WIN_SLOT and slots 4 and 5 sit off the bottom of an
+  800-tall desktop, where the screen copy measured PURE BLACK while the
+  window print passed the leg.
+  AND THAT ANSWERS §11's measure-at-implementation #2, the BGRA contract
+  on a real VM: the read samples the window's own pixels, so a swizzle
+  error would show `F7E3D2` where the scene wants `D2E3F7`. Measured
+  `FFFFFF/D2E3F7`, the core's own bytes to the digit — this platform
+  converts no colour on the path, so the ±1 the mac needs is slack here.
+  KEY: expect_ink, canvas_ink, RenderTargetBitmap, GetPixelsAsync,
+  PrintWindow, PW_RENDERFULLCONTENT, VirtIO GPU DOD
+- ~~**DEPTH STUB: canvas on compose** — the blit is the breadth phase
   (docs/canvas-plan.md §8, §11 phase 3): an ImageBitmap filled from the
   core's buffer in the KIND_CANVAS render arm, plus PixelCopy or a
   bitmap draw for expect_ink. The wire constants and the three verb
@@ -2316,7 +2443,19 @@ count, so the saving is measured rather than assumed.
   outstanding. Closed when tools/android/run-emulator.sh wires the
   canvas legs and they pass.
   KEY: canvas, set_drawing, KIND_CANVAS, CANVAS_VOCABULARY,
-  expect_drawing_hash
+  expect_drawing_hash~~
+  LANDED 2026-08-26 (breadth): `Bitmap.Config.ARGB_8888` is RGBA in
+  memory order on Android and premultiplied by default, so
+  `copyPixelsFromBuffer` takes the core's buffer with no swizzle. The
+  reported scale IS the composition density, which is what makes
+  Image's own intrinsic sizing land on the viewbox in dp. `expect_ink`
+  is PixelCopy of the real window surface, aimed through the
+  window-to-surface offset kayaTextBoxes documents. Two new natives —
+  `KayaPresent.presentation` and `KayaPresent.canvasProbe` — registered
+  in crates/kaya/src/android.rs. `canvas-compose` is wired in
+  tools/android/run-emulator.sh. KayaCompose.kt now stubs NOTHING, so
+  its `depthStub` helper is gone (an unused private function fails
+  check-detekt); a comment holds the shape for the next depth slice.
 - The canvas's ink assertion NAMES THE APPEARANCE, and that is a
   limitation rather than a design (found 2026-08-26, while freezing
   tools/scenes/canvas.steps). `expect_drawing_hash` pins the scale and
@@ -2325,26 +2464,59 @@ count, so the saving is measured rather than assumed.
   uses the platform's own light/dark bit, and kaya's chart palette has
   two modes — so the frozen colours would quietly depend on the
   machine's appearance setting. The verb therefore reports the mode it
-  sampled (`light FFFFFF/D2E2F7`) and a dark-mode host fails with a
+  sampled (`light FFFFFF/D2E3F7`) and a dark-mode host fails with a
   sentence that says why instead of a bare colour mismatch. What would
   close it: either the harness pins the appearance for a leg the way it
   pins the scale, or the scene carries both modes' strings. Phase 4 is
   where the palette gets looked at hardest in both modes anyway.
-  KEY: expect_ink, canvas_ink, kayaCanvasAppearance, appearance, palette
+  THE APPEARANCE HALF IS STILL OPEN, and a SECOND, unrelated dependence
+  on the host was ruled out from under it 2026-08-26: the ink compare is
+  now ±1 per channel and the scene freezes the CORE's bytes, because a
+  macOS window's backing store carries the DISPLAY's profile and reads
+  D2E3F7 back as D2E2F7 while Android reports the core's own bytes
+  (docs/canvas-plan.md §7.2's amendment, docs/traps.md's measurement).
+  That ruling settles the COLOUR SPACE, not the light/dark mode; the two
+  are separate axes and this entry is the second one. Note for whoever
+  closes it: the tolerance is exactly ±1 and is NOT the place to absorb
+  a mode difference — a dark palette is a different colour, not a
+  rounding, and tools/check-verbs.sh pins all three harnesses' constants
+  at the ruled value for that reason.
+  A THIRD ROUTE OPENED 2026-08-26 with the paint floor (ruling 13,
+  docs/canvas-plan.md §3.4): a test figure painted in LITERAL RGBA has
+  no appearance dependence to pin, so the mode-sensitivity can be
+  designed out of the FIGURE rather than pinned in the harness — which
+  also matches expect_ink's inherited discipline of flat, unmistakable
+  colours. The roles then keep being what the PORTFOLIO chart is
+  painted with, where two-mode legibility is the point.
+  KEY: expect_ink, canvas_ink, kayaCanvasAppearance, appearance, palette,
+  rgba
 - A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
-  assigned track (docs/canvas-plan.md §3.2 rule 3, found while landing
-  the depth slice 2026-08-26). The core rasters at the VIEWBOX times
-  the reported scale, and the backend blits that image into whatever
-  track layout gives it — so a canvas at its natural size is
-  pixel-exact, and one given more space stretches the pen and the
-  glyphs with it, which rule 3 says must not happen. `rasterize` already
-  takes the target size and applies the viewbox stretch to POSITIONS
-  alone (its unit test `a_stretch_does_not_thicken_the_pen` proves the
-  arithmetic); what is missing is the backend report that would tell the
-  core what the track is, beside the scale report `kaya_presentation`
-  already carries. Not reachable by the depth scene, whose canvas sits
-  at its natural size. KEY: viewbox, stretch, emit_drawing, presentation,
-  rasterize
+  assigned track (found while landing the depth slice 2026-08-26). The
+  core rasters at the VIEWBOX times the reported scale, and the backend
+  blits that image into whatever track layout gives it — so a canvas at
+  its natural size is pixel-exact, and one given more space has its pen
+  and its glyphs stretched with it. What is missing either way is the
+  backend report that would tell the core what the track is, beside the
+  scale report `kaya_presentation` already carries. Not reachable by the
+  depth scene, whose canvas sits at its natural size.
+  RE-FRAMED 2026-08-26 BY THE SIZE POLICY (ruling 12, docs/canvas-plan.md
+  §3.2.1), and the re-framing is the reason this entry cannot just be
+  implemented as written: it used to cite §3.2 RULE 3 as the rule being
+  broken, and rule 3 is now superseded along with rule 2. The defect is
+  the same — a stretched blit — but the fix is no longer "apply the
+  stretch to positions alone". It is the three modes: `scale`
+  re-rasterizes under a UNIFORM fit with a letterbox (the pen scales
+  with everything else, because it is the same drawing at a new size),
+  `fixed` never adapts, `redraw` asks the guest. TWO SITES STILL ENCODE
+  THE SUPERSEDED RULE and are where the correction starts:
+  `rasterize`'s signature in crates/kaya/src/canvas.rs, which takes a
+  target and stretches positions into it, and its unit test
+  `a_stretch_does_not_thicken_the_pen`, which proves arithmetic the
+  ruling replaced. AND ONE THING NOT TO DO MEANWHILE: do not copy the
+  mac arm's stretch into the three phase-3 blits, since that turns a
+  one-file correction into a four-file one (docs/canvas-plan.md §11).
+  KEY: viewbox, stretch, emit_drawing, presentation, rasterize, redraw,
+  scale mode, fixed, letterbox
 - ~~CROSS-ISA byte-identity of the canvas raster is UNMEASURED~~ —
   CLOSED 2026-08-26: measured before the first hash went into a .steps file,
   and the two agree: aarch64 and x86_64 both rasterize the canvas
@@ -2360,6 +2532,36 @@ count, so the saving is measured rather than assumed.
   day kaya adds a NATIVE x86_64 lane, re-run the probe before trusting
   the frozen hash there. KEY: cross-ISA, aarch64, x86_64, drawing hash,
   tiny-skia
+- ~~**DEFECT — a canvas text run whose font will not resolve AT RASTER
+  TIME is dropped silently.**~~ Found 2026-08-26 while re-freezing
+  tools/scenes/canvas.steps, and filed here with its resolution because
+  the fix and the finding are the same day's work.
+  `validate()` resolves every `draw_font` asset and refuses the drawing
+  if one is missing — and THE RASTER RESOLVES IT AGAIN, where
+  `Face::open` answered `None` and the run was simply not drawn. Nothing
+  logged and nothing refused: the only thing that moved was §7.1's frozen
+  hash, which is the silent-wrongness class this project exists to kill.
+  Measured: the pin test failed 8/8 against one build with
+  `c4fa15caf170a5ff`, exactly this scene minus its one disk-resolved run
+  (docs/traps.md carries the four hashes and the mechanism).
+  RULED AND CLOSED 2026-08-26 (maintainer): the raster REFUSES. The
+  sentence names the asset — the reserved name or the app's asset id —
+  and the run's text, carries the resolver's own words, and reaches the
+  leg's verdict through `crate::fault::guard` exactly as a §3.5 refusal
+  does. It refuses at the TEXT op, so a selected face nothing draws with
+  refuses nothing, and AS A UNIT: the panic precedes the first glyph and
+  the unwind takes the pixmap, so no half-drawn buffer reaches a backend
+  (which would be the empty-child class one layer down). `Face::open`
+  parses the bytes too, since an asset that resolves and is not a font
+  dropped the run just as quietly. Both branches are watched printing in
+  `canvas::tests::a_vanished_font_refuses_the_run_rather_than_dropping_it`,
+  which doctors the resolver BETWEEN validate and raster under
+  `crate::assets::serially()` — the state no scene can reach, which is
+  why this is a unit guard and not a gate. The pin test's resolution
+  assert stays as the EARLIER wall (docs/canvas-plan.md §3.5's amendment,
+  docs/traps.md).
+  KEY: Face::open, font_bytes, draw_font, rasterize, c4fa15caf170a5ff,
+  raster time, dropped run
 - Webview widget (Akhil, 2026-07-22; deferred furthest — the
   framework inside it is the entire web platform): minimal uniform
   surface is load-URL/load-HTML plus a navigation-requested veto
@@ -5275,6 +5477,13 @@ matrix at 627s contended): the known sentences, the at-fail dumps
 kept as designed (android-save-compose-* in validate-failures), the
 lane green standalone minutes later. Logged, not chased.
 
+AND TWICE ON WINDOWS THE SAME NIGHT, a different leg each time
+(2026-08-26: filedialog_rust's swallowed press at 477s contended,
+then ranges_rust reading "0 matches" where 3 stood at 516s
+contended — an input never delivered, the same family in a search
+field's costume): each lane green standalone minutes later. Logged,
+not chased; the family's windows face now has two sightings.
+
 THE HUNT'S FIRST CATCH WAS A DIFFERENT GHOST WEARING THE SAME MASK
 (2026-08-20, filedialog-jvm, full buffers + an at-fail dumpsys in
 hand): the OPEN picker was up with its list unreadable (DocumentsUI's
@@ -7252,3 +7461,62 @@ copy-path lookup for every kind that has an id vector, and give WinUI's
 buttons registry the controls it needs to answer at all. Three
 implementations, one rule, and check-verbs' target census is where it
 would be pinned.
+
+## ~~BUG — every Java wire record was capped at 4096 bytes (found 2026-08-26, by the canvas marshal bench)~~
+KEY: java-record-ceiling, ByteBuffer.allocate(4096), BufferOverflowException, KayaWire begin, Enc.at grow, LargeRecordCheck exerciser
+
+FIXED 2026-08-26 in the GENERATOR — tools/kaya-bindgen/src/java.rs emits
+a private `Enc` (a ByteBuffer behind an `at(int extra)` that reallocates
+by doubling) and every encode-path write goes through it. The measured
+ceilings, which are what this entry exists to keep: **4064 characters in
+ANY text prop** and **252 wire values in a set_drawing** — one past
+either threw java.nio.BufferOverflowException. The canvas frame that
+found it (341 paths, 8296 wire values) is a 132 KB record; Java refused
+it outright while python encoded it in 0.93 ms.
+
+Java was the ONLY one of the eight bindings that could not grow, so this
+was an invariant-1 divergence hidden in a generator: python joins bytes,
+go appends to a slice, C# writes a no-arg MemoryStream, swift a Data,
+ocaml a Buffer, haskell a Builder, and Rust never encodes at all (the
+core's own language — it pushes TxOp into a Vec in process). All seven
+re-read line by line when this was fixed, not taken on the bench's word.
+
+WHY IT SURVIVED EVERY LANE: nothing in the tree ever built a big record.
+The longest line in any shared scene is 359 characters, so no scene, no
+example and no doc ever promised — or exercised — long text through Java.
+The user-visible face was real all the same:
+guests/java/dev/kaya/milestone2kt/FileDialog.java reads a picked file
+whole and writes it into a signal, so a Java guest opening any file over
+~4 KB threw on the app thread. The scene picks a small fixture, so it
+never did.
+
+WHY A WRAPPER TYPE AND NOT AN `ensure()` BEFORE EACH WRITE: the three
+encode helpers take the buffer as a PARAMETER, and a ByteBuffer
+reallocated inside `encodeValue` cannot propagate back to its caller. The
+wrapper is also the stronger guard (invariant 3, types over generation) —
+a future generator edit that emits one more `b.putX(...)` grows by
+construction, with no per-site ensure() to forget. Initial capacity stays
+4096, so every record the tree produces today takes the same no-realloc
+path the bench measured.
+
+THE GUARD is in tools/java-typecheck.sh, which gains the only clause in
+that file that is RUN rather than compiled: an exerciser that encodes and
+reads back a 100,000-character text prop and a 20,000-value drawing (a
+320,064-byte record), plus the exact boundary — 4064 characters and 4065.
+A compile check is blind to this by construction, because the ceiling is
+a throw; that is why the gate was green for the whole life of the defect.
+Its watched negative removes the growth from a COPY of KayaWire.java,
+prints the substitution count, and requires BufferOverflowException
+specifically. Six refusal branches, all six watched firing.
+
+WHAT THIS DID NOT TOUCH, and is a maintainer call rather than mine: the
+C floor has a ceiling too, and a worse one. bindings/c/kaya_wire.h's
+`KayaTx` is `{uint8_t *buf; size_t len;}` with no capacity field and no
+bounds check anywhere on the encode path, so a long string is an
+unchecked memcpy into the caller's array — a stack smash, not an
+exception. In-tree callers declare 256 to 8192 bytes. That is DECLARED
+policy, not a hidden ceiling: the header says so at its top ("overflow is
+the caller's to size against") and guests/c/todos.c repeats it, which is
+consistent with the C tier being the deliberately explicit floor
+(invariant 5). Closing it would change KayaTx's public contract. Recorded
+here so the next reader finds it named rather than re-derives it.

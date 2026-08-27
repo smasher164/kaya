@@ -65,7 +65,17 @@ expect_drawing_hash canvas@chart "e5ac8a2c0b240633"
 # with a sentence that says why. Making the ink assertion
 # appearance-independent is phase 4's business, where the palette gets
 # looked at hardest in both modes (docs/deferred.md).
-expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E2F7"
+#
+# THESE ARE THE CORE'S OWN BYTES, and this verb alone compares them
+# WITHIN ±1 PER CHANNEL (ruled 2026-08-26, §7.2). A macOS window's
+# backing store carries the DISPLAY's profile, so the mac samples D2E2F7
+# back off its own window where the core wrote D2E3F7 and Android's
+# PixelCopy reports D2E3F7 — no one frozen string can exact-match both,
+# and the byte-exact assertion is the hash above, which crosses no
+# colour space. Freeze from the core (crates/kaya/src/canvas.rs's
+# the_scene_probe_points_are_opaque_and_pinned prints both pixels), never
+# from a platform's read.
+expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7"
 # AND THE CANVAS IS A WIDGET, with a widget's universal props: a drawing
 # is an IMAGE to every platform's accessibility tree and the app authors
 # the spoken name (§9). Nothing here builds a semantics tree out of the

@@ -37,7 +37,11 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # (docs/virtualization-plan.md §6.3): it is the compiled windowing scene
 # every lane can run, where ledger and varied are python and stop at the
 # desktops.
-DEPTH_SCENES="windowed"
+# `canvas` is rust-only for the same reason `windowed` is: it is the
+# compiled conformance scene every lane runs, and the drawing it declares
+# is in viewbox units, so one guest's op stream is every platform's
+# (docs/canvas-plan.md §3.2).
+DEPTH_SCENES="windowed canvas"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1022,6 +1026,13 @@ for proto in x11 wayland; do
     # windowing scene the mobile lanes can run too.
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
+    # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
+    # this backend blits a GdkMemoryTexture. The hash is the SAME frozen
+    # string every other lane asserts — the raster comes out of this
+    # container's own libkaya — so a leg that disagrees here is a finding
+    # about the blit, never about the drawing.
+    run "$proto" canvas-rust env KAYA_SELFTEST=canvas \
+        "$CARGO_TARGET_DIR/debug/examples/canvas"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

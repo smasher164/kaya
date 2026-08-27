@@ -96,6 +96,88 @@ sys.exit(1 if bad else 0)
 ' "$@"
 }
 
+# --- THE INK TOLERANCE: one ruled number, three hand-written copies. --
+#
+# `expect_ink` compares within ±1 PER CHANNEL (ruled 2026-08-26,
+# docs/canvas-plan.md §7.2). The reason is measured: a macOS window's
+# backing store carries the DISPLAY's profile, so the core's D2E3F7 is
+# sampled back as D2E2F7 there while Android's PixelCopy reports the
+# core's own bytes, and no one frozen string can exact-match both
+# (docs/traps.md).
+#
+# THREE HARNESSES SPELL THAT NUMBER, and nothing compiles them against
+# each other — check-file-modes' trap one surface over. The danger is
+# not that they drift apart, which a lane would eventually show; it is
+# that they drift TOGETHER, because widening the tolerance makes every
+# ink assertion quieter and no test anywhere gets slower or redder. So
+# the number is pinned at the RULED value, not merely held equal:
+# moving it is the maintainer's call, and this gate is where that
+# conversation starts.
+INK_HARNESS="crates/kaya/src/harness.rs"
+INK_SWIFT="swift/KayaSwiftUI.swift"
+INK_KOTLIN="android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+ink_tolerance() { # [harness swift kotlin]; any path may be "-" for stdin
+    python3 -c '
+import re
+import sys
+
+HARNESS = "crates/kaya/src/harness.rs"
+SWIFT = "swift/KayaSwiftUI.swift"
+KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+# THE RULED NUMBER (2026-08-26). One unit is the macOS display-profile
+# round trip; two is a different colour, and every failure expect_ink
+# exists for — a dropped blit, a swizzle, an upside-down or wrongly
+# sized blit — moves a channel by far more than either.
+RULED = 1
+
+# (label, path, the constant spelled this language s way, the helper)
+MIRRORS = [
+    ("harness.rs", HARNESS,
+     r"const INK_TOLERANCE\s*:\s*\w+\s*=\s*(\d+)\s*;", "ink_matches"),
+    ("KayaSwiftUI.swift", SWIFT,
+     r"let kayaInkTolerance\b[^=\n]*=\s*(\d+)\b", "kayaInkMatches"),
+    ("KayaCompose.kt", KOTLIN,
+     r"\bINK_TOLERANCE\b\s*(?::\s*\w+\s*)?=\s*(\d+)(?![0-9])", "kayaInkMatches"),
+]
+
+srcs = sys.argv[1:] or [m[1] for m in MIRRORS]
+bad = []
+
+for (label, _, pattern, helper), src in zip(MIRRORS, srcs):
+    if src == "-":
+        text = sys.stdin.read()
+    else:
+        try:
+            text = open(src).read()
+        except OSError as exc:
+            bad.append("cannot read " + src + " for " + label + " ("
+                       + str(exc.strerror) + "): the harness this rule pins "
+                       "is not there")
+            continue
+    m = re.search(pattern, text)
+    if not m:
+        bad.append(label + " declares no ink tolerance constant — expect_ink "
+                   "there compares by some other rule than the ruled +/-"
+                   + str(RULED) + " per channel (docs/canvas-plan.md 7.2)")
+        continue
+    if int(m.group(1)) != RULED:
+        bad.append(label + " sets its ink tolerance to " + m.group(1)
+                   + ", not the ruled " + str(RULED)
+                   + " — every expect_ink on that backend goes quieter and no "
+                     "test anywhere reddens; widening it is the maintainers "
+                     "call (docs/canvas-plan.md 7.2)")
+    if len(re.findall(r"\b" + helper + r"\b", text)) < 2:
+        bad.append(label + " names " + helper + " once — the tolerant compare "
+                   "is defined and never called, so that arm still compares "
+                   "the bytes exactly and the constant above is decoration")
+
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
 # --- THE WINDOWED TIER'S LOOP: three links no scene can see. ---------
 #
 # docs/virtualization-plan.md §3/§4. The Compose tier windows its tables
@@ -203,6 +285,13 @@ window_out="$(window_tier)" || {
     window_status=1
 }
 
+ink_status=0
+ink_out="$(ink_tolerance)" || {
+    echo "check-verbs: the expect_ink tolerance does not match the ruling — three harnesses hand-copy that number and nothing compiles them against each other, so a widened copy makes every ink assertion quieter with no lane the wiser (docs/canvas-plan.md §7.2):" >&2
+    echo "$ink_out" >&2
+    ink_status=1
+}
+
 clip_status=0
 clip_out="$(clip_mirrors)" || {
     echo "check-verbs: the CLIP_* mirrors do not match crates/kaya/src/wire.rs — both interpreters carry PRIVATE copies and nothing else pins them, so a drifted value ships a wrong clip kind silently:" >&2
@@ -283,6 +372,62 @@ if [ "$score" != "1/1" ]; then
     exit 1
 fi
 
+# AND THE INK TOLERANCE'S OWN, all THREE harnesses, each widened to 2 on
+# a copy — the drift that matters here is the one that moves every copy
+# the same way, so each is watched being refused on its own.
+ink_negative() { # <source> <regex around the value> <scratch copy> <slot> <expected finding>
+    local hits drift score args
+    hits="$(perturb "$1" "$2" 2 "$3")"
+    if [ "$hits" != 1 ]; then
+        echo "check-verbs: SELF-TEST FAIL (the $4 ink-tolerance perturbation applied $hits times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+        exit 1
+    fi
+    echo "check-verbs: ink-tolerance self-test ($4 widened to 2) applied $hits substitution(s)"
+    case "$4" in
+        harness) args=("-" "$INK_SWIFT" "$INK_KOTLIN") ;;
+        swift) args=("$INK_HARNESS" "-" "$INK_KOTLIN") ;;
+        *) args=("$INK_HARNESS" "$INK_SWIFT" "-") ;;
+    esac
+    drift="$(ink_tolerance "${args[@]}" <"$3")"
+    score="$(introduced "$drift" "$ink_out" "$5")"
+    if [ "$score" != "1/1" ]; then
+        echo "check-verbs: SELF-TEST FAIL (widening $4's ink tolerance to 2 scored $score named/introduced findings, want 1/1)" >&2
+        exit 1
+    fi
+}
+
+ink_negative "$INK_HARNESS" '(const INK_TOLERANCE\s*:\s*\w+\s*=\s*)1\b' \
+    "$T/ink.rs" harness "^harness\.rs sets its ink tolerance to 2, "
+ink_negative "$INK_SWIFT" '(let kayaInkTolerance\b[^=\n]*=\s*)1\b' \
+    "$T/ink.swift" swift "^KayaSwiftUI\.swift sets its ink tolerance to 2, "
+ink_negative "$INK_KOTLIN" '(\bINK_TOLERANCE\b\s*(?::\s*\w+\s*)?=\s*)1(?![0-9])' \
+    "$T/ink.kt" kotlin "^KayaCompose\.kt sets its ink tolerance to 2, "
+
+# AND A TOLERANCE NOTHING CALLS: the constant alone is decoration, and
+# the arm beside it still compares the bytes exactly.
+hits="$(perturb "$INK_KOTLIN" '(if \()kayaInkMatches\(got, want\)' 'got == want' "$T/ink-unused.kt")"
+if [ "$hits" != 1 ]; then
+    echo "check-verbs: SELF-TEST FAIL (the uncalled-helper perturbation applied $hits times, want 1)" >&2
+    exit 1
+fi
+echo "check-verbs: ink-tolerance self-test (the Compose arm put back to an exact compare) applied $hits substitution(s)"
+drift="$(ink_tolerance "$INK_HARNESS" "$INK_SWIFT" - <"$T/ink-unused.kt")"
+score="$(introduced "$drift" "$ink_out" "^KayaCompose\.kt names kayaInkMatches once")"
+if [ "$score" != "1/1" ]; then
+    echo "check-verbs: SELF-TEST FAIL (an uncalled tolerant compare scored $score named/introduced findings, want 1/1)" >&2
+    exit 1
+fi
+
+# An ABSENT harness is a failure that NAMES IT, never a skip.
+gone="$(ink_tolerance "$INK_HARNESS" "$INK_SWIFT" "$T/no-such-harness.kt")"
+case "$gone" in
+    *"cannot read"*"KayaCompose.kt"*) ;;
+    *)
+        echo "check-verbs: SELF-TEST FAIL (an absent Kotlin harness failed the ink clause without naming it): $gone" >&2
+        exit 1
+        ;;
+esac
+
 # An ABSENT mirror is a failure that NAMES IT, never a skip.
 gone="$(clip_mirrors "$CLIP_WIRE" "$CLIP_SWIFT" "$T/no-such-mirror.kt")"
 case "$gone" in
@@ -341,7 +486,8 @@ case "$gone" in
         ;;
 esac
 
-KAYA_CLIP_MIRRORS="$clip_status" KAYA_WINDOW_TIER="$window_status" python3 - <<'EOF'
+KAYA_CLIP_MIRRORS="$clip_status" KAYA_WINDOW_TIER="$window_status" \
+    KAYA_INK_TOLERANCE="$ink_status" python3 - <<'EOF'
 import os
 import pathlib
 import re
@@ -369,6 +515,82 @@ for verb in verbs:
     for name, text in (("KayaSwiftUI.swift", swift), ("KayaCompose.kt", kotlin)):
         if f'"{verb}"' not in text:
             fail(f'verb "{verb}" missing from {name}')
+
+# --- Target kinds: the core's grammar, both interpreters' tables. ----
+# EVERY KIND IS ADDRESSABLE, which is what makes a universal prop
+# universal: expect_ax, expect_ax_hint, expect_inset, expect_fills and
+# context_open all resolve a `kind@id` through ONE per-interpreter
+# table, and a kind missing from that table answers "no such target"
+# for all of them at once. Measured 2026-08-26: the canvas fan-out
+# added KayaSceneModel.canvases and a private kayaCanvasTarget for the
+# canvas verbs, and never added `canvas` to KayaCompose.kt's
+# kayaWidgetTarget — so `expect_ax canvas@chart` could not resolve on
+# that backend at all, and read in the log like a teardown after the
+# step before it failed.
+#
+# READ OUT OF EACH TABLE'S OWN BLOCK, never grepped from the file: both
+# interpreters spell the kind string in their canvas-only target helper
+# too (`target(spec, "canvas", ...)`), so a file-wide pattern is
+# satisfied by the helper and reports a table it never read — the
+# check-sugar-surface trap one gate over.
+def table_body(text, opener, closer, name):
+    at = text.find(opener)
+    if at < 0:
+        fail(f"{name} has no `{opener}` — the target table this gate reads is "
+             f"gone; re-point the clause at whatever replaced it")
+        return None
+    end = text.find(closer, at)
+    if end < 0:
+        fail(f"{name}'s `{opener}` block never closes with {closer!r}")
+        return None
+    return text[at:end]
+
+
+TARGET_TABLES = (
+    ("KayaSwiftUI.swift", swift, "private func kayaAnyTarget(", "\n}\n", 'case "{}"'),
+    ("KayaCompose.kt", kotlin, "private fun kayaWidgetTarget(", "\n    }\n", '"{}" ->'),
+)
+
+kind_body = harness[
+    harness.index("fn parse_target_kind(") : harness.index("fn parse_string(")
+]
+kinds = sorted(set(re.findall(r'"([a-z_]+)" => TargetKind::', kind_body)))
+if len(kinds) < 10:
+    fail(f"only {len(kinds)} target kinds read out of harness.rs parse_target_kind "
+         f"— a census that reads nothing agrees with everything")
+
+
+def missing_kinds(body, spelling):
+    return [k for k in kinds if spelling.format(k) not in body]
+
+
+for name, text, opener, closer, spelling in TARGET_TABLES:
+    body = table_body(text, opener, closer, name)
+    if body is None:
+        continue
+    for kind in missing_kinds(body, spelling):
+        fail(
+            f'target kind "{kind}" is in the core\'s parse_target_kind but not in '
+            f"{name}'s {opener.split('(')[0].split()[-1]} table — every verb that "
+            f'resolves a `kind@id` there answers "no such target {kind}@..." '
+            f"whatever the scene does"
+        )
+    # WATCHED NEGATIVE, on every run: a census nobody has seen refuse is
+    # a guess. The arm is cut out of a COPY of the block and the
+    # substitution count is printed, because a perturbation that did not
+    # apply is a failed test, not a passed one (invariant 3).
+    victim = spelling.format(kinds[0])
+    doctored, hits = re.subn(re.escape(victim), "", body)
+    if hits < 1:
+        fail(f"check-verbs SELF-TEST: the {name} target census could not perturb "
+             f"{victim!r} — the pattern never matched, so the clause above "
+             f"passed vacuously")
+    elif not missing_kinds(doctored, spelling):
+        fail(f"check-verbs SELF-TEST: {name}'s target census passed with "
+             f"{victim!r} cut from the block ({hits} substitution(s))")
+    else:
+        print(f"check-verbs: self-test OK ({name} target census refuses "
+              f"{victim!r} removed, {hits} substitution(s))")
 
 # --- Scene substitutions: the THIRD vocabulary. ----------------------
 # A scene path may carry `$TMP` or `$PID`, and an interpreter that does
@@ -586,5 +808,7 @@ if os.environ["KAYA_CLIP_MIRRORS"] != "0":
     sys.exit(1)
 if os.environ["KAYA_WINDOW_TIER"] != "0":
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the windowed tier's loop + spec hash against 2 interpreters)")
+if os.environ["KAYA_INK_TOLERANCE"] != "0":
+    sys.exit(1)
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the ink tolerance in 3 harnesses + the windowed tier's loop + spec hash against 2 interpreters)")
 EOF
