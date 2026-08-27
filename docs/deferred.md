@@ -95,15 +95,43 @@ gates.sh itself converts, how the self-test/watched-negative idiom and
 EXIT-trap cleanup port, and whether the 47-gate sweep's per-process
 overhead actually moves. Nothing converts until the shape is ruled.
 
-## GAP — Compose quotes the ax observation SwiftUI leaves bare (found 2026-08-26, by the ink-tolerance round)
+## ~~GAP — Compose quotes the ax observation SwiftUI leaves bare (found 2026-08-26, by the ink-tolerance round)~~
 KEY: ax observation quoting, image/Portfolio value, byte-compared verdict, canvas ax
 
-Compose records `ax "image/Portfolio value"` where SwiftUI records the
-same observation unquoted, so nothing byte-compares that verdict
-across platforms today — the byte-compared-verdict rule holds only
-when both spell it one way. One of the two spellings is the rule;
-check-verbs' observation clauses are where the wall belongs once the
-spelling is picked. Found, not fixed, by the ink-tolerance agent.
+CLOSED 2026-08-27, RULED QUOTED. There were THREE spellings to weigh,
+not two: harness.rs — the GTK and WinUI path, and the norm the
+interpreters follow — writes `ax {want:?}`, which is Rust Debug and
+therefore quoted, so the majority and the harness agreed already and
+KayaSwiftUI.swift was the lone minority. The bare form had no measured
+reason behind it: it is the original mac depth slice (b560753) never
+revisited, written in the same commit that gave harness.rs the quoted
+one, and SwiftUI is not bare by convention either — the same file
+quotes `section`, `title`, `alert` and `clipboard`. The quoted form was
+already on the record in recorded lane verdicts
+(docs/styling/typeface-gtk-arm.md:20, typeface-winui-arm.md:353,
+docs/traps.md:3493), and the quotes are what make a placeholder answer
+like `<not in the accessibility tree>` read as a VALUE rather than as
+prose. So SwiftUI moved, on mac AND iOS.
+
+`expect_ax_hint` carried the identical divergence and was swept with it
+— the entry named only `ax`. The failure sentence moved too: it is the
+same value one line over, and a harness whose PASS text quotes and
+whose FAIL text does not is the same defect.
+
+NO LANE COULD HAVE CAUGHT THIS. Every runner only greps the verdict for
+`KAYA_SELFTEST: OK` and never diffs its text (validate-mac.sh:523,
+run-emulator.sh, run-sim.sh, run-suites.sh), so the byte-compared-verdict
+rule is doctrine that only a gate can hold. tools/check-verbs.sh got the
+clause: a census reading each emitter out of its OWN ARM in all three
+harnesses, flattening every interpolation to `<v>` so three languages
+compare as one string, holding both the observation and the `wanted`
+failure sentence at the ruled spelling. An arm it cannot read is a
+finding that names it, never a skip — an earlier draft anchored on
+`Step::ExpectAx(` alone matched harness.rs's PARSER first, found ZERO
+observations there and agreed with everything. Five watched negatives,
+counts printed, each scored against the real check's own findings.
+No `.steps` file re-freezes: all 41 `expect_ax`/`expect_ax_hint` lines
+are argument-side, already quoted by the scene grammar.
 
 ## Next milestones (in rough priority order)
 
@@ -5035,13 +5063,31 @@ remembering. The landing, per backend and surface:
   runtime probe (tools/checks/swiftui-table-tier.swift, the
   pane-ladder shape) driving the whole truth table, self-tested red on
   every run. What remains unheld is only whether a physical device
-  reports the size class the simulator did); and a lane
+  reports the size class the simulator did); and ~~a lane
   run from a NESTED WORKTREE has two bring-up hazards the slice
   agents worked around rather than fixed — deploy-win.sh's SSH mux
   ControlPath under $ROOT/target exceeds the 104-byte AF_UNIX limit
   (fix wants a design choice: key a short path under TMPDIR on a hash
   of $ROOT), and third_party/winappsdk is gitignored so a fresh
-  worktree has no SDK. The kaya-bindgen upward-walk hazard from the
+  worktree has no SDK~~ (BOTH FIXED 2026-08-27. The ControlPath is
+  `${KAYA_SSH_MUX_DIR:-$HOME/.ssh/kaya-mux}/m-<16 hex of $ROOT and the
+  destination>` — ssh_config(5)'s short-directory-plus-hashed-name
+  shape, 52 bytes from a worktree checkout — computed and REFUSED
+  ABOVE the check-targets cross-build, since the measured cost of
+  failing late was a full one. NOT $TMPDIR, which the design first
+  reached for: `nix develop` overwrites it with a per-invocation
+  /tmp/nix-shell.XXXXXX it deletes on exit, so no run could reuse
+  another's master and the refusal would have had no lever. A % TOKEN
+  in the path is refused with its own sentence, because ssh expands
+  %r/%h/%C when it BINDS and the shipped expression measured 97
+  literal while binding 110 — the length clause alone would have
+  passed the very bug it was written for, which is what the watched
+  negative found. third_party/winappsdk needs no fix:
+  tools/fetch-winappsdk.sh runs clean in a worktree, five packages
+  sha256-verified; what actually blocked the SDK's consumer was
+  tools/winui-bindgen sharing kaya-bindgen's upward-walk hazard and
+  not its cure, so its Cargo.toml now carries the same empty
+  [workspace] table.) The kaya-bindgen upward-walk hazard from the
   same runs IS fixed: its Cargo.toml now carries an empty [workspace]
   table.
   KEY: column_edges label asymmetry, LayoutUpdated, ControlPath, winappsdk worktree

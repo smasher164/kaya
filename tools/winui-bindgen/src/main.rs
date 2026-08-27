@@ -231,16 +231,7 @@ fn main() {
         // pulls referenced types transitively (the trap this file
         // documents four times over) — without it PixelBuffer is a
         // vtable pad and the blit has nowhere to write.
-        //
-        // RenderTargetBitmap IS FILTERED IN AND NOTHING USES IT. It was
-        // `expect_ink`'s camera until 2026-08-26, when it turned out to
-        // render and hand back a NULL buffer under S_OK on the VM's
-        // display-only adapter (docs/traps.md); the ink read is a GDI
-        // copy of the composited desktop now. Kept because a machine
-        // with a rendering adapter can use it again and the entry costs
-        // one filtered type — NOT because anything calls it.
         "Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap".to_string(),
-        "Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap".to_string(),
         "Windows.Storage.Streams.IBuffer".to_string(),
         // `Image.Stretch`, the same transitivity trap: unfiltered, the
         // enum leaves `SetStretch` a vtable pad. A canvas STRETCHES TO

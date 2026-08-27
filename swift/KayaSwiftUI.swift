@@ -7355,9 +7355,9 @@ private func kayaRunScript(_ script: String) {
                     gotHint = kayaAxHintRead(ident) ?? "<not in the accessibility tree>"
                 }
                 if gotHint == wantHint {
-                    observed.append("ax hint \(wantHint)")
+                    observed.append("ax hint \"\(wantHint)\"")
                 } else {
-                    failures.append("ax hint \(gotHint), wanted \(wantHint)")
+                    failures.append("ax hint \"\(gotHint)\", wanted \"\(wantHint)\"")
                 }
             case "expect_ax":
                 // target -> node -> its authored identifier -> the REAL
@@ -7386,13 +7386,13 @@ private func kayaRunScript(_ script: String) {
                     gotAx = kayaAxRead(ident) ?? "<not in the accessibility tree>"
                 }
                 if gotAx == wantAx {
-                    observed.append("ax \(wantAx)")
+                    observed.append("ax \"\(wantAx)\"")
                 } else {
                     // The platform's own classification rides the failure:
                     // `unknown/…` is never self-explaining, and the answer is
                     // one platform round-trip away otherwise.
                     let why = identifier.flatMap { $0.isEmpty ? nil : kayaAxWhy($0) } ?? ""
-                    failures.append("ax \(gotAx), wanted \(wantAx)\(why)")
+                    failures.append("ax \"\(gotAx)\", wanted \"\(wantAx)\"\(why)")
                 }
             case "resize_window":
                 // The REAL resize, so the size class actually moves and the

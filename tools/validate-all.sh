@@ -202,9 +202,21 @@ if [ "$MODE" = parallel ]; then
             # 401s in the first quiet contended matrix after — and the
             # two busy-host matrices the same day read 452s and 467s
             # against video decode and a 46% WindowServer, tripping 450
-            # by 2s and 17s with every leg green. 470 keeps the
+            # by 2s and 17s with every leg green. 470 kept the
             # ~1.25x-over-quiet-contended headroom.
-            linux) budget=470 ;;
+            #
+            # 530 since 2026-08-27, raised in the commit that made the
+            # lane bigger, as this block asks: canvas added 2 legs
+            # (584 -> 586), each wrapped in a11y-leg.sh's bus session
+            # (the ax-bus fix), and the disk sweep the same night reset
+            # every cache. The three post-sweep contended matrices read
+            # 796s (cold), 524s, 502s — monotone toward warm — with
+            # every leg green all three times; 502 against the old 470
+            # was the third consecutive trip, which is this block's own
+            # signal to recalibrate rather than re-annotate. 530 covers
+            # the warm-contended 502 with tight margin so a change in
+            # kind still trips it.
+            linux) budget=530 ;;
             # 480 since 2026-08-03, and the ceiling moved in the commit
             # that made the lane slower, as this block asks. Two
             # measured reasons, neither a change in kind: filedialog_java

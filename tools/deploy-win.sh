@@ -45,6 +45,52 @@ fi
 set -euo pipefail
 
 ROOT_FOR_CHECK="$(cd "$(dirname "$0")/.." && pwd)"
+
+# THE SSH MUX SOCKET, COMPUTED AND REFUSED BEFORE ANYTHING IS BUILT.
+# sun_path is 104 bytes INCLUDING the terminator, so 103 is the longest
+# path ssh will bind; the socket used to live at
+# $ROOT/target/.ssh-mux-%r@%h, which from a nested worktree is 104+ and
+# killed the lane at the first run_ssh — after the whole windows
+# cross-build, with nothing in ssh's message naming the checkout
+# (docs/traps.md, "A deep worktree makes deploy-win.sh unreachable").
+# ssh_config(5)'s own advice for staying inside the cap is a short
+# directory not writable by other users plus a hashed name, so the
+# length no longer depends on where this checkout sits. The hash covers
+# $ROOT and the destination — what %C stands in for — and is ours rather
+# than %C's 40 hex characters because the budget is 103.
+# NOT $TMPDIR: `nix develop` overwrites it with a per-invocation
+# /tmp/nix-shell.XXXXXX it deletes on exit (measured 2026-08-27), so
+# ControlPersist would have nothing to persist in and no run could
+# reuse another's master.
+KAYA_SOCK_MAX=103
+KAYA_MUX_DIR="${KAYA_SSH_MUX_DIR:-$HOME/.ssh/kaya-mux}"
+kaya_mux_key="$(printf '%s\n%s\n' "$ROOT_FOR_CHECK" "${1:-}" | shasum -a 256 | cut -c1-16)"
+CONTROL_PATH="${KAYA_MUX_DIR%/}/m-$kaya_mux_key"
+# NO ssh TOKENS, or the measurement below is a lie: ssh expands %r/%h/%C
+# when it binds, so a literal length is only a lower bound. The shipped
+# $ROOT/target/.ssh-mux-%r@%h measured 97 from an agent worktree and
+# bound 110 — it would have walked straight through the length clause
+# (measured 2026-08-27, the watched negative that found it).
+case "$CONTROL_PATH" in
+    *%*)
+        echo "deploy-win: the ssh ControlPath carries a % token, which expands when ssh binds:" >&2
+        echo "  $CONTROL_PATH" >&2
+        echo "  The length clause below reads the literal, so it cannot see the bound path." >&2
+        echo "  Fold the destination into \$kaya_mux_key instead of naming it with a token." >&2
+        exit 1
+        ;;
+esac
+kaya_sock_len="$(printf '%s' "$CONTROL_PATH" | wc -c | tr -d ' ')"
+if [ "$kaya_sock_len" -gt "$KAYA_SOCK_MAX" ]; then
+    echo "deploy-win: the ssh ControlPath is $kaya_sock_len bytes, past the $KAYA_SOCK_MAX-byte unix-socket limit (sun_path is 104 with the terminator):" >&2
+    echo "  $CONTROL_PATH" >&2
+    echo "  Set KAYA_SSH_MUX_DIR to a shorter directory and re-run." >&2
+    echo "  Refusing here rather than at the first ssh, which is after the windows cross-build." >&2
+    exit 1
+fi
+mkdir -p "${KAYA_MUX_DIR%/}"
+chmod 700 "${KAYA_MUX_DIR%/}"
+
 # Phase timing: greppable "TIMING <phase> <n>s" lines.
 KAYA_T0=$SECONDS
 timing() {
@@ -229,7 +275,7 @@ BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-
 
 # Connection multiplexing: ONE master TCP/auth handshake, every
 # subsequent ssh/scp rides it (~1.4s per round trip before). The socket
-# lives in the repo's target/ and persists briefly past the run.
+# is $CONTROL_PATH, computed and length-refused at the top of this file.
 # ConnectTimeout rides every call: when the guest OS wedges mid-run
 # (observed 2026-07-22 — UTM "started", sshd gone), each poll would
 # otherwise hang the full TCP timeout (~75s).
@@ -237,7 +283,7 @@ BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-
 # in one mux channel for up to ~5 minutes, and without keepalives a
 # guest-OS wedge would hang it for the full deadline instead of
 # breaking the master in ~60s.
-SSH_MUX=(-o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ControlMaster=auto -o "ControlPath=$ROOT/target/.ssh-mux-%r@%h" -o ControlPersist=120)
+SSH_MUX=(-o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ControlMaster=auto -o "ControlPath=$CONTROL_PATH" -o ControlPersist=120)
 run_ssh() { ssh -n -o BatchMode=yes "${SSH_MUX[@]}" "$HOST" "$@"; }
 scp() { command scp "${SSH_MUX[@]}" "$@"; }
 

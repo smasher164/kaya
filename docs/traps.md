@@ -4581,7 +4581,7 @@ therefore lives under ignored `target/`, which is outside both the fixture's
 declared inputs and every shipped artifact's source set; `check-keyed` refuses
 any other root before it creates the file.
 
-## A deep worktree makes deploy-win.sh unreachable, and the error names ssh
+## A deep worktree MADE deploy-win.sh unreachable, and the error named ssh
 
 `tools/deploy-win.sh` multiplexes over
 `ControlPath=$ROOT/target/.ssh-mux-%r@%h`, and `$ROOT` comes from `$0`. From
@@ -4591,11 +4591,27 @@ one over the unix-socket limit — and every ssh in the lane refuses with
 `TIMING build`, i.e. after a full cross-compile, having never touched the VM,
 and nothing in the message mentions the worktree.
 
-`$0` decides `$ROOT`, so the fix moves no file: symlink the worktree somewhere
-short and invoke the script through it —
-`ln -s <worktree> /tmp/kw && nix develop -c /tmp/kw/tools/deploy-win.sh …`
-(socket path 42 bytes). `probe=<exe>` confirms the route in seconds.
-Measured 2026-08-21.
+FIXED 2026-08-27 — the socket no longer lives under `$ROOT`. It is
+`${KAYA_SSH_MUX_DIR:-$HOME/.ssh/kaya-mux}/m-<16 hex of $ROOT and the
+destination>`, ssh_config(5)'s short-directory-plus-hashed-name shape, and the
+script computes it and refuses ABOVE the `check-targets` call so the cost of
+being wrong is a second rather than a cross-compile. Two things that draft got
+wrong and had to be measured:
+
+- **`$TMPDIR` is not available as the base.** `nix develop` overwrites `TMPDIR`
+  with a per-invocation `/tmp/nix-shell.XXXXXX` it deletes on exit, and every
+  `tools/` script runs under `nix develop -c`. A socket there is short but no
+  run can reuse another's master, and `TMPDIR=<long> nix develop -c …` never
+  reaches the script, so it cannot be the refusal's lever either. Hence
+  `KAYA_SSH_MUX_DIR`.
+- **A literal length measurement cannot see a `%` token.** ssh expands
+  `%r`/`%h`/`%C` when it BINDS: the shipped `$ROOT/target/.ssh-mux-%r@%h`
+  measures 97 bytes from an agent worktree and binds 110, so a length clause
+  alone passes through the exact bug it was written for. A `%` in the
+  ControlPath is therefore refused outright, with its own sentence.
+
+Both refusal branches have been watched printing. Measured 2026-08-21, fixed
+and re-measured 2026-08-27.
 
 ## GNU grep in a UTF-8 locale cannot read a windows lane log
 

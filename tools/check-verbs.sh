@@ -178,6 +178,194 @@ sys.exit(1 if bad else 0)
 ' "$@"
 }
 
+# --- THE AX OBSERVATION: three harnesses, one spelling. --------------
+#
+# An observation is the byte-compared verdict text (invariant 6), and
+# `expect_ax` was recorded TWO ways: harness.rs and KayaCompose.kt quote
+# the value, KayaSwiftUI.swift left it bare, so the one verdict nothing
+# compares across platforms was the accessibility one
+# (docs/deferred.md). RULED QUOTED 2026-08-27: two of the three already
+# spelled it that way, harness.rs is the norm the interpreters follow,
+# and the bare form has no measured reason — it is just the original mac
+# depth slice (b560753) never revisited. The quotes are also what make a
+# placeholder answer like <not in the accessibility tree> read as a
+# VALUE rather than as prose.
+#
+# NO LANE CAN FAIL THIS. Every runner greps the verdict for
+# `KAYA_SELFTEST: OK` and never diffs its text (validate-mac.sh:523,
+# run-emulator.sh, run-sim.sh, run-suites.sh), so the spellings can
+# disagree forever with every leg green — which is exactly how they did.
+#
+# The census reads each emitter out of its OWN ARM rather than grepping
+# the file: `Step::ExpectAx(` alone matches harness.rs`s PARSER twice
+# before it reaches the step arm, and a reader anchored on the name
+# found ZERO observations there and agreed with everything.
+AX_HARNESS="crates/kaya/src/harness.rs"
+AX_SWIFT="swift/KayaSwiftUI.swift"
+AX_KOTLIN="android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+ax_spelling() { # [harness swift kotlin]; any path may be "-" for stdin
+    python3 -c '
+import re
+import sys
+
+HARNESS = "crates/kaya/src/harness.rs"
+SWIFT = "swift/KayaSwiftUI.swift"
+KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+# The ruled spelling, with every interpolated value flattened to <v> so
+# three languages that spell interpolation three ways compare as one
+# string (check-harness-ceiling`s idiom).
+OBS = {"ax": "ax \"<v>\"", "ax hint": "ax hint \"<v>\""}
+# The failure sentence is the same value one line over. It is compared as
+# a PREFIX because the interpreters append a platform why-not that
+# harness.rs has no equivalent of.
+WANTED = {"ax": "ax \"<v>\", wanted \"<v>\"",
+          "ax hint": "ax hint \"<v>\", wanted \"<v>\""}
+
+# (label, path, language, [(verb, arm opener, arm terminator)], record, refuse)
+HARNESSES = [
+    ("harness.rs", HARNESS, "rust",
+     [("ax", r"Step::ExpectAx\([^()]*\) => Some\(poll\(", "\n            Step::"),
+      ("ax hint", r"Step::ExpectAxHint\([^()]*\) => Some\(poll\(", "\n            Step::")],
+     r"Ok\(format!\(", r"Err\(format!\("),
+    ("KayaSwiftUI.swift", SWIFT, "swift",
+     [("ax", "case \"expect_ax\":", "\n            case "),
+      ("ax hint", "case \"expect_ax_hint\":", "\n            case ")],
+     r"observed\.append\(", r"failures\.append\("),
+    ("KayaCompose.kt", KOTLIN, "kotlin",
+     [("ax", "\"expect_ax\" ->", "\n                    \""),
+      ("ax hint", "\"expect_ax_hint\" ->", "\n                    \"")],
+     r"observed\.add\(", r"failures\.add\("),
+]
+
+
+def arm(text, opener, terminator):
+    m = re.search(opener, text)
+    if not m:
+        return None
+    end = text.find(terminator, m.end())
+    return text[m.start():end if end > 0 else len(text)]
+
+
+def calls(body, opener):
+    """Every <opener>(...) call in the arm, balanced to its closing paren."""
+    out = []
+    for m in re.finditer(opener, body):
+        i, depth = m.end(), 1
+        while i < len(body) and depth:
+            c = body[i]
+            if c == "\"":
+                i += 1
+                while i < len(body) and body[i] != "\"":
+                    i += 2 if body[i] == "\\" else 1
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+            i += 1
+        out.append(body[m.end():i - 1])
+    return out
+
+
+def literals(call):
+    """The string literals of a call in order, escapes preserved. A
+    Kotlin or Swift sentence spliced with + is read as one."""
+    out, i = [], 0
+    while i < len(call):
+        if call[i] == "\"":
+            j, buf = i + 1, []
+            while j < len(call) and call[j] != "\"":
+                if call[j] == "\\":
+                    buf.append(call[j:j + 2])
+                    j += 2
+                else:
+                    buf.append(call[j])
+                    j += 1
+            out.append("".join(buf))
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def flatten(lang, text):
+    if lang == "rust":
+        # Debug ({x:?}) prints a String WITH quotes; Display does not.
+        return re.sub(r"\{([^{}]*)\}",
+                      lambda m: "\"<v>\"" if m.group(1).endswith(":?") else "<v>",
+                      text)
+    if lang == "swift":
+        return re.sub(r"\\\((?:[^()]|\([^()]*\))*\)|\\(.)",
+                      lambda m: "<v>" if m.group(1) is None else m.group(1), text)
+    text = re.sub(r"\\(.)", lambda m: m.group(1), text)
+    return re.sub(r"\$\{[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_.]*", "<v>", text)
+
+
+def spelling(lang, call):
+    return "".join(flatten(lang, lit) for lit in literals(call))
+
+
+srcs = sys.argv[1:] or [h[1] for h in HARNESSES]
+bad = []
+seen = 0
+
+for (label, _, lang, arms, record, refuse), src in zip(HARNESSES, srcs):
+    if src == "-":
+        text = sys.stdin.read()
+    else:
+        try:
+            text = open(src).read()
+        except OSError as exc:
+            bad.append("cannot read " + src + " for " + label + " ("
+                       + str(exc.strerror) + "): the harness this rule "
+                       "holds one spelling across is not there")
+            continue
+    for verb, opener, terminator in arms:
+        body = arm(text, opener, terminator)
+        if body is None:
+            bad.append(label + " has no " + verb + " arm the census can read "
+                       "— the shape this clause anchors on moved; re-point it "
+                       "rather than letting the spelling go unwatched")
+            continue
+        records = calls(body, record)
+        if not records:
+            bad.append(label + " records nothing in its " + verb + " arm — an "
+                       "expect that records nothing passes without verifying "
+                       "anything, and its verdict compares against no one")
+        for call in records:
+            seen += 1
+            got = spelling(lang, call)
+            if got != OBS[verb]:
+                bad.append(label + " records the " + verb + " observation as "
+                           + got + ", not the ruled " + OBS[verb]
+                           + " — the observation IS the byte-compared verdict "
+                           "text, and no lane diffs it, so two spellings sit "
+                           "green forever (docs/deferred.md)")
+        sentences = [s for s in (spelling(lang, c) for c in calls(body, refuse))
+                     if "wanted" in s]
+        if not sentences:
+            bad.append(label + " never refuses a mismatched " + verb + " with "
+                       "a sentence naming what it wanted — the comparison this "
+                       "verb exists for has no failure text")
+        for got in sentences:
+            if not got.startswith(WANTED[verb]):
+                bad.append(label + " refuses a mismatched " + verb + " with "
+                           + got + ", which does not open with the ruled "
+                           + WANTED[verb] + " — the same value, spelled two "
+                           "ways one line apart")
+
+# A census that reads nothing agrees with everything.
+if not bad and seen < 6:
+    bad.append("only " + str(seen) + " ax observations found across three "
+               "harnesses — the reader is matching almost nothing and would "
+               "pass any spelling")
+
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
 # --- THE WINDOWED TIER'S LOOP: three links no scene can see. ---------
 #
 # docs/virtualization-plan.md §3/§4. The Compose tier windows its tables
@@ -290,6 +478,13 @@ ink_out="$(ink_tolerance)" || {
     echo "check-verbs: the expect_ink tolerance does not match the ruling — three harnesses hand-copy that number and nothing compiles them against each other, so a widened copy makes every ink assertion quieter with no lane the wiser (docs/canvas-plan.md §7.2):" >&2
     echo "$ink_out" >&2
     ink_status=1
+}
+
+ax_status=0
+ax_out="$(ax_spelling)" || {
+    echo "check-verbs: the ax observation is spelled more than one way — that text IS the byte-compared verdict and every lane only greps it for PASS, so the spellings can disagree forever with every leg green (docs/deferred.md):" >&2
+    echo "$ax_out" >&2
+    ax_status=1
 }
 
 clip_status=0
@@ -486,7 +681,82 @@ case "$gone" in
         ;;
 esac
 
+# AND THE AX SPELLING'S OWN. The observation and the failure sentence are
+# perturbed SEPARATELY, and on two different harnesses, so neither half
+# can be passing on a hardcoded one — and the bare form each puts back is
+# the one that actually shipped (docs/deferred.md).
+ax_negative() { # <source> <regex around the value> <replacement> <slot> <copy> <label> <expected finding>
+    local hits drift score args
+    hits="$(perturb "$1" "$2" "$3" "$5")"
+    if [ "$hits" != 1 ]; then
+        echo "check-verbs: SELF-TEST FAIL ($6 applied $hits times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+        exit 1
+    fi
+    echo "check-verbs: ax-spelling self-test ($6) applied $hits substitution(s)"
+    case "$4" in
+        harness) args=("-" "$AX_SWIFT" "$AX_KOTLIN") ;;
+        swift) args=("$AX_HARNESS" "-" "$AX_KOTLIN") ;;
+        *) args=("$AX_HARNESS" "$AX_SWIFT" "-") ;;
+    esac
+    drift="$(ax_spelling "${args[@]}" <"$5")"
+    score="$(introduced "$drift" "$ax_out" "$7")"
+    if [ "$score" != "1/1" ]; then
+        echo "check-verbs: SELF-TEST FAIL ($6 scored $score named/introduced findings, want 1/1)" >&2
+        exit 1
+    fi
+}
+
+# The SwiftUI observation put back to the bare form it shipped with.
+ax_negative "$AX_SWIFT" '(observed\.append\("ax )\\"\\\(wantAx\)\\""' '\(wantAx)"' \
+    swift "$T/ax.swift" "the mac ax observation put back to the bare form" \
+    "^KayaSwiftUI\.swift records the ax observation as ax <v>, "
+# The Compose HINT observation unquoted — a different harness and a
+# different verb, so the clause cannot be passing on one hardcoded arm.
+ax_negative "$AX_KOTLIN" '(observed\.add\("ax hint )\\"\$want\\""' '$want"' \
+    kotlin "$T/ax.kt" "the Compose ax-hint observation unquoted" \
+    "^KayaCompose\.kt records the ax hint observation as ax hint <v>, "
+# The FAILURE sentence half, on the third harness: the same value one
+# line over, which a clause reading only the observation would miss.
+ax_negative "$AX_HARNESS" '(Err\(format!\("ax )\{got:\?\}, wanted \{want:\?\}"\)\)' \
+    '{got}, wanted {want}"))' \
+    harness "$T/ax.rs" "the harness ax failure sentence unquoted" \
+    "^harness\.rs refuses a mismatched ax with ax <v>, wanted <v>, "
+# AND AN ARM THAT RECORDS NOTHING: an expect that appends no observation
+# passes while verifying nothing, and its verdict compares against no one.
+ax_negative "$AX_KOTLIN" '(observed\.add\("ax hint )\\"\$want\\""' 'ok"' \
+    kotlin "$T/ax-silent.kt" "the Compose ax-hint observation made a fixed string" \
+    "^KayaCompose\.kt records the ax hint observation as ax hint ok, "
+
+# An ABSENT harness is a failure that NAMES IT, never a skip.
+gone="$(ax_spelling "$AX_HARNESS" "$AX_SWIFT" "$T/no-such-ax.kt")"
+case "$gone" in
+    *"cannot read"*"KayaCompose.kt"*) ;;
+    *)
+        echo "check-verbs: SELF-TEST FAIL (an absent Kotlin harness failed the ax clause without naming it): $gone" >&2
+        exit 1
+        ;;
+esac
+
+# AND AN ARM THE CENSUS CANNOT FIND is a finding too: the shape this
+# clause anchors on is exactly what moved out from under an earlier
+# reader, which found ZERO observations in harness.rs and agreed with
+# everything.
+hits="$(perturb "$AX_HARNESS" '(Step::ExpectAx)\(target, want\) => Some\(poll\(' \
+    '{ .. } => Some(poll(' "$T/ax-gone.rs")"
+if [ "$hits" != 1 ]; then
+    echo "check-verbs: SELF-TEST FAIL (the moved-arm perturbation applied $hits times, want 1)" >&2
+    exit 1
+fi
+echo "check-verbs: ax-spelling self-test (the harness ax arm reshaped out of the census's reach) applied $hits substitution(s)"
+drift="$(ax_spelling - "$AX_SWIFT" "$AX_KOTLIN" <"$T/ax-gone.rs")"
+score="$(introduced "$drift" "$ax_out" "^harness\.rs has no ax arm the census can read")"
+if [ "$score" != "1/1" ]; then
+    echo "check-verbs: SELF-TEST FAIL (an unreadable ax arm scored $score named/introduced findings, want 1/1)" >&2
+    exit 1
+fi
+
 KAYA_CLIP_MIRRORS="$clip_status" KAYA_WINDOW_TIER="$window_status" \
+    KAYA_AX_SPELLING="$ax_status" \
     KAYA_INK_TOLERANCE="$ink_status" python3 - <<'EOF'
 import os
 import pathlib
@@ -810,5 +1080,7 @@ if os.environ["KAYA_WINDOW_TIER"] != "0":
     sys.exit(1)
 if os.environ["KAYA_INK_TOLERANCE"] != "0":
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the ink tolerance in 3 harnesses + the windowed tier's loop + spec hash against 2 interpreters)")
+if os.environ["KAYA_AX_SPELLING"] != "0":
+    sys.exit(1)
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the ink tolerance in 3 harnesses + the ax spelling in 3 harnesses + the windowed tier's loop + spec hash against 2 interpreters)")
 EOF

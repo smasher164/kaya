@@ -488,7 +488,21 @@ in docs/deferred.md.
    would eventually redden a lane, while copies drifting TOGETHER makes
    every ink assertion quieter with nothing anywhere slower or redder.
    A second clause refuses a tolerance nothing calls. Four watched
-   negatives, counts printed),
+   negatives, counts printed.
+   AND THE AX SPELLING, ruled QUOTED 2026-08-27: an observation IS the
+   byte-compared verdict text, and `expect_ax` was recorded two ways —
+   harness.rs (`{want:?}`, Rust Debug) and Compose quoted it, SwiftUI
+   left it bare, so the one verdict nothing compared across platforms
+   was the accessibility one. NO LANE CAN SEE IT: every runner greps the
+   verdict for `KAYA_SELFTEST: OK` and never diffs its text, so the
+   spellings sat green for months. The census reads each emitter out of
+   its OWN ARM in all three harnesses and flattens every interpolation
+   to `<v>`, since three languages spell interpolation three ways; it
+   holds the observation AND the `wanted` failure sentence, and covers
+   `expect_ax_hint`, which carried the identical divergence. An arm it
+   cannot read is a finding that names it, never a skip — anchoring on
+   `Step::ExpectAx(` alone matches harness.rs's PARSER first and finds
+   ZERO observations there. Five watched negatives, counts printed),
    `tools/check-file-modes.sh` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five
