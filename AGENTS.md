@@ -621,14 +621,24 @@ in docs/deferred.md.
    open). NOTHING ELSE CAN SEE IT: every in-tree guest sizes its buffers
    correctly, so the wire bytes are identical either way and no scene,
    lane or capture is any different — the unchecked memcpy shipped from
-   milestone 0 under green lanes. THE PROBE IS WALLED rather than
-   sanitized: tools/checks/c-tx-cap.c mmaps exactly cap writable bytes
-   with the next byte unmapped, so a one-byte overrun is a FAULT and not
-   a redzone heuristic — and AddressSanitizer could not have served
-   anyway, since an -fsanitize=address binary with no error in it hangs
-   before main on this host (docs/traps.md). The negative is the SHIPPED
+   milestone 0 under green lanes. TWO MODES, THE WALL PRIMARY:
+   tools/checks/c-tx-cap.c mmaps exactly cap writable bytes with the next
+   byte unmapped, so a one-byte overrun is a FAULT and not a redzone
+   heuristic, and with no runtime in it the linux lane runs it unchanged.
+   ADDRESSANITIZER IS THE COMPANION SINCE 2026-08-27, on the shape a wall
+   cannot take — a plain malloc, whose next byte is another allocation,
+   which is what a guest's buffer is. It asks for flake.nix's
+   `kaya-asan-clang` BY NAME, because every nixpkgs clang below 22 has an
+   ASan that hangs before main here and the shell's own would spend the
+   whole ceiling saying nothing (docs/traps.md); a host without it runs
+   the primary alone and PRINTS the skip, which self-test N5 cuts out of
+   the gate and makes print on every run. Its build turns the wrapper's
+   hardening OFF: `fortify` preempts ASan, and the same overrun then dies
+   of a mute SIGTRAP or is not seen at all, so a companion wired naively
+   would have been green and blind. The negative is the SHIPPED
    BUG: the same probe built against ee7bc41's pre-cap header, which must
-   die of a signal in both modes where this one prints a sentence. Beside
+   die of a signal in both walled modes where this one prints a sentence,
+   and be a REPORTED heap-buffer-overflow in both heap modes. Beside
    that: a brace-depth parser holding every write through `tx->buf`
    inside a `kaya_wire_fits()` (a line pattern cannot — kaya_wire_begin's
    guard is two lines up), the refusal's TWO branches each naming both

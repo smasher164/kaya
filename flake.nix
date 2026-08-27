@@ -38,6 +38,26 @@
             abiVersions = [ "arm64-v8a" ];
             includeNDK = true;
           }).androidsdk;
+          # THE SANITIZER COMPILER, under a name of its own. Every nixpkgs
+          # llvm below 22 has an ASan that cannot start on this host: an
+          # -fsanitize=address binary hangs before main in a reentrant
+          # malloc inside shadow-memory init, with no report and no flag
+          # that helps (measured across 18/19/20/21; docs/traps.md).
+          # 22.1.8 carries the upstream fixes and is already at the
+          # nixpkgs rev flake.lock pins, so this costs no input bump.
+          #
+          # NOT a second devShell: every gate runs inside the ONE shell
+          # the lanes enter, and a gate that needs a different `nix
+          # develop` is a guard someone has to remember (invariant 3).
+          # NOT a second `clang` on PATH either — whichever won would be a
+          # PATH-ordering accident, and a probe that compiled with 21.1.8
+          # would HANG for its whole ceiling instead of failing. So
+          # `clang` keeps meaning this shell's 21.1.8, nothing kaya ships
+          # moves, and tools/check-c-bounds.sh asks for this name.
+          asanClang = pkgs.runCommand "kaya-asan-clang" { } ''
+            mkdir -p "$out/bin"
+            ln -s ${pkgs.llvmPackages_22.clang}/bin/clang "$out/bin/kaya-asan-clang"
+          '';
         in
         {
         default = pkgs.mkShell {
@@ -105,6 +125,9 @@
             ffmpeg
             # The tools/ scripts are load-bearing validation; lint them.
             shellcheck
+            # AddressSanitizer's compiler (see asanClang above):
+            # tools/check-c-bounds.sh's companion mode, by that name.
+            asanClang
             # The Kotlin layer's dead-code gate (tools/check-detekt.sh).
             # The compiler cannot serve here: K2 moved the UNUSED_*
             # diagnostics into IDE inspections (KT-69698), so a dead

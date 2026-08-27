@@ -6,10 +6,14 @@
  *
  * THE BUFFER IS WALLED: `walled()` hands back exactly `cap` writable bytes
  * whose NEXT byte is an unmapped page, so a write one byte past cap is a
- * fault and not a heuristic. AddressSanitizer would be the obvious tool and
- * cannot serve on this host — an -fsanitize=address binary with no error in
- * it hangs before main (docs/traps.md) — and the wall is the better proof
- * anyway: byte-exact, no runtime, and the linux lane can run it too. */
+ * fault and not a heuristic. That is the PRIMARY proof: byte-exact, no
+ * runtime, and the linux lane can run it too.
+ *
+ * The `heap*` modes are the ASan companion's instead — a plain malloc, where
+ * the byte after cap is another allocation rather than an unmapped page,
+ * which is what a guest's buffer actually is. Only a sanitizer sees that
+ * overrun, and only the compiler flake.nix names has one that runs on this
+ * host (docs/traps.md). check-c-bounds.sh runs them under nothing else. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -149,6 +153,38 @@ int main(int argc, char **argv) {
 #ifndef KAYA_TX_PRE_CAP
         printf("many ok=%d\n", kaya_tx_ok(&tx));
 #endif
+        return 0;
+    }
+
+    /* THE COMPANION'S TWO MODES: `overflow` and `many` again, but on a
+     * plain malloc of exactly cap. The bytes past cap belong to the
+     * allocator, so nothing here attributes the pre-cap header's overrun
+     * except a sanitizer: measured 2026-08-27, unsanitized it exits 0 in
+     * silence, and under the dev shell's hardening it dies of a SIGTRAP
+     * printing zero bytes. Run under ASan only (tools/check-c-bounds.sh,
+     * companion mode). */
+    if (strcmp(mode, "heap") == 0) {
+        uint8_t *heap = malloc(64);
+        KayaTx tx = tx_over(heap, 64);
+        one_big_record(&tx);
+        printf("heap len=%zu\n", tx.len);
+#ifndef KAYA_TX_PRE_CAP
+        printf("heap ok=%d\n", kaya_tx_ok(&tx));
+#endif
+        free(heap);
+        return 0;
+    }
+
+    if (strcmp(mode, "heap-many") == 0) {
+        uint8_t *heap = malloc(24);
+        KayaTx tx = tx_over(heap, 24);
+        for (int i = 0; i < 3; i++)
+            kaya_tx_create_widget(&tx, (uint64_t)i + 1, KAYA_KIND_LABEL);
+        printf("heap-many len=%zu\n", tx.len);
+#ifndef KAYA_TX_PRE_CAP
+        printf("heap-many ok=%d\n", kaya_tx_ok(&tx));
+#endif
+        free(heap);
         return 0;
     }
 

@@ -25,19 +25,20 @@ set -u
 # unchecked memcpy shipped from milestone 0 under green lanes. A gate is
 # the only wall, exactly as for check-c-ids one file over.
 #
-# WHY A GUARD PAGE AND NOT AddressSanitizer, which the ruling asked for:
-# -fsanitize=address does not run on this host at all. A program with no
-# error in it hangs before main at 98% CPU, printing only
-# "AddressSanitizer: libc interceptors initialized" (measured 2026-08-26,
-# clang 21.1.8 on Darwin 25.5; docs/traps.md). mmap + mprotect proves the
-# same claim better anyway: the probe's walled() hands back exactly cap
-# writable bytes whose next byte is unmapped, so a one-byte overrun is a
-# FAULT and not a redzone heuristic — and with no sanitizer runtime in
-# it, the linux lane could run this unchanged.
+# TWO MODES, AND THE GUARD PAGE IS THE PRIMARY ONE: the probe's walled()
+# hands back exactly cap writable bytes whose next byte is unmapped, so a
+# one-byte overrun is a FAULT and not a redzone heuristic, and with no
+# sanitizer runtime in it the linux lane runs it unchanged.
+# AddressSanitizer is the COMPANION beside it, on a plain malloc — the
+# shape the wall cannot take, and what a guest's buffer actually is. It
+# needs the compiler flake.nix names, because every nixpkgs clang below
+# 22 has an ASan that hangs before main on this host (docs/traps.md); a
+# host without that compiler runs the primary alone and SAYS SO.
 #
 # THE NEGATIVE IS THE SHIPPED BUG, not an imitation of it: the probe is
 # built a second time against the PRE-CAP header read out of git, and
-# that build must die of a signal where this one prints a sentence.
+# that build must die of a signal where this one prints a sentence — and
+# must be REPORTED by ASan where this one refuses.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
@@ -52,6 +53,12 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 status=0
+
+# COUNT IN, COUNT OUT (gates.sh's rule, one gate down): the verdict names
+# which modes actually proved the claim. guard-page is not skippable;
+# asan is, on a host without the compiler, and the skip is printed.
+MODES_DECLARED=(guard-page asan)
+modes_ran=()
 
 fail() { # <text>
     echo "check-c-bounds: $1" >&2
@@ -343,6 +350,117 @@ if [ "$((hex / 2))" -lt 400 ]; then
   comparison of nothing agrees with everything"
 fi
 echo "check-c-bounds: $((hex / 2)) bytes of records, byte-identical to $PRE_REV's header"
+modes_ran+=(guard-page)
+
+# --- the ASan companion, beside the guard page -------------------------
+#
+# WHAT IT ADDS: a plain malloc, where the byte after cap belongs to the
+# allocator rather than to an unmapped page. That is the shape a guest's
+# buffer has, and it is the one nothing else here can see — the same
+# pre-cap overrun measured 2026-08-27 exits 0 SILENTLY with no sanitizer
+# and no hardening, and dies of a bare SIGTRAP printing zero bytes with
+# the dev shell's hardening on. ASan names the write, its size and the
+# allocation site. So this mode's negative is also its liveness proof: a
+# sanitizer that is not really instrumenting prints nothing and fails
+# here rather than passing quietly.
+#
+# THE COMPILER IS ASKED FOR BY NAME, never `clang`: the dev shell's own
+# 21.1.8 compiles -fsanitize=address happily and then hangs before main
+# for the whole ceiling, saying nothing (docs/traps.md). flake.nix puts
+# llvm 22.1.8 on PATH under the name below.
+# >>> asan-skip-branch (cut out verbatim by self-test N5, which doctors the
+# name below away; must stand alone, so it reads nothing this file sets)
+ASAN_CC=kaya-asan-clang
+
+asan_cc_path() { # -> prints the sanitizer compiler, or nothing
+    command -v "$ASAN_CC" 2>/dev/null
+}
+
+asan_or_skip() { # -> 0 and prints the compiler line, or 1 and prints why not
+    local cc
+    cc="$(asan_cc_path)"
+    if [ -n "$cc" ]; then
+        echo "check-c-bounds: ASan companion — $cc"
+        return 0
+    fi
+    # ONE LINE PER SENTENCE, not one multi-line string: keyed-inputs reads a
+    # quoted string with a space in it as a message rather than a path, and
+    # that test is per line — a wrapped string puts `docs/traps.md` on a line
+    # with no quote on it and the gate is then asked to declare docs/ as an
+    # input it does not read.
+    echo "check-c-bounds: ASan companion SKIPPED — the guard-page mode above proved the claim without it."
+    echo "  The companion needs $ASAN_CC on PATH, which flake.nix puts there: llvm 22.1.8, because every"
+    echo "  nixpkgs clang below it has an ASan that hangs before main on macOS 26 (see the ASan entry in"
+    echo "  the traps file). Nothing is on this PATH under that name, so either this shell predates that"
+    echo "  flake change (re-enter \`nix develop\`) or the host has no such package. One mode of two ran."
+    return 1
+}
+# <<< asan-skip-branch
+
+asan_build() { # <out> <include dir> [extra cflags...]
+    local out="$1" inc="$2"
+    shift 2
+    # NIX_HARDENING_ENABLE="" BECAUSE FORTIFY PREEMPTS THE SANITIZER,
+    # measured 2026-08-27 (docs/traps.md): with the wrapper's default
+    # `fortify`, this probe's heap-many overrun dies of SIGTRAP with ZERO
+    # bytes of output — __memcpy_chk fires before ASan reports — and a
+    # smaller probe lost the instrumentation outright (no __asan_report*
+    # symbol at all; an out-of-bounds store exited 0). The wrapper appends
+    # its own -D_FORTIFY_SOURCE after the command line, so no -U/-D here
+    # can undo it; only the whitelist can. An ASan that cannot report is a
+    # gate satisfied without exercising the real thing (invariant 4).
+    NIX_HARDENING_ENABLE="" "$ASAN_CC" "$PROBE" \
+        -I"$ROOT/crates/kaya/include" -I"$inc" \
+        -fsanitize=address -fno-omit-frame-pointer -g \
+        -Wall -Wextra -Werror -o "$out" "$@" 2>"$T/asan-build.log"
+}
+
+asan_run() { # <binary> <mode> -> writes $T/out and $T/err, prints the exit code
+    # abort_on_error=0 so a report is an exit code and not a SIGABRT whose
+    # shell noise buries the sentence this clause reads.
+    ASAN_OPTIONS=abort_on_error=0 timeout 30 "$1" "$2" >"$T/out" 2>"$T/err"
+    local rc=$?
+    echo "$rc"
+}
+
+asan_says() { # <fragment> <label>
+    grep -q -- "$1" "$T/err" || fail "$2 did not say '$1'. It said:
+$(head -8 "$T/err")"
+}
+
+if asan_or_skip; then
+    if ! asan_build "$T/probe-asan" "$ROOT/bindings/c"; then
+        cat "$T/asan-build.log" >&2
+        fail "$PROBE does not build under $ASAN_CC's -fsanitize=address"
+    elif ! asan_build "$T/probe-asan-pre" "$T/pre" -DKAYA_TX_PRE_CAP; then
+        cat "$T/asan-build.log" >&2
+        fail "the pre-cap header does not build under -fsanitize=address — the
+  companion's negative cannot run, which is a failed test and not a skipped one"
+    else
+        for mode in heap heap-many; do
+            rc="$(asan_run "$T/probe-asan" "$mode")"
+            [ "$rc" = 0 ] || fail "the sanitized probe exited $rc in '$mode' — a
+  refused record writes nothing, so there is nothing for ASan to report"
+            says "$mode ok=0" "sanitized $mode"
+            if grep -q "AddressSanitizer" "$T/err"; then
+                fail "ASan reported against the CURRENT header in '$mode':
+$(head -4 "$T/err")"
+            fi
+        done
+        echo "check-c-bounds: sanitized, the refusal writes nothing ASan can see"
+
+        for mode in heap heap-many; do
+            rc="$(asan_run "$T/probe-asan-pre" "$mode")"
+            [ "$rc" != 0 ] || fail "the PRE-CAP header exited 0 in sanitized '$mode'
+  with no report. Either the guard came back to a header that must not have it,
+  or the sanitizer is not instrumenting — see the hardening note in asan_build"
+            asan_says "ERROR: AddressSanitizer: heap-buffer-overflow" "pre-cap $mode"
+            asan_says "WRITE of size" "pre-cap $mode"
+            echo "check-c-bounds: the pre-cap header is a heap-buffer-overflow on '$mode'"
+        done
+        modes_ran+=(asan)
+    fi
+fi
 
 # --- the watched negatives, on shadows of the real files ---------------
 applied() { # <count> <label>
@@ -472,8 +590,69 @@ else
   flag is not what refused it)"
 fi
 
+# N5 — THE HONEST SKIP, MADE TO PRINT. The companion's absent-compiler
+# branch is the one no run on a wired host ever takes, and a skip nobody
+# has watched is how a gate quietly stops running a mode. The block is cut
+# out of THIS FILE by its markers and the compiler name doctored away, so
+# what runs is the shipped branch and not a copy of it.
+python3 - "$0" "$T/n5.sh" <<'PY'
+import pathlib
+import sys
+
+src, out = sys.argv[1:3]
+lines = pathlib.Path(src).read_text(encoding="utf-8").splitlines()
+begin = [n for n, s in enumerate(lines) if s.startswith("# >>> asan-skip-branch")]
+end = [n for n, s in enumerate(lines) if s.startswith("# <<< asan-skip-branch")]
+if len(begin) != 1 or len(end) != 1 or end[0] <= begin[0]:
+    sys.exit("check-c-bounds: the asan-skip-branch markers are gone from "
+             f"{src} — N5 cuts the shipped branch out by them, and a cut that "
+             "finds nothing is a self-test that proves nothing")
+block = lines[begin[0] + 1:end[0]]
+if not any(s.startswith("ASAN_CC=") for s in block):
+    sys.exit("check-c-bounds: the cut block no longer sets ASAN_CC, so N5 has "
+             "nothing to doctor away")
+pathlib.Path(out).write_text(
+    "#!/usr/bin/env bash\n"
+    + "\n".join(block)
+    + "\nasan_or_skip\n", encoding="utf-8")
+PY
+if [ ! -s "$T/n5.sh" ]; then
+    fail "SELF-TEST FAIL (N5: the skip branch could not be cut out — see above)"
+else
+    hits="$(doctor "$T/n5.sh" '^ASAN_CC=.*$' 'ASAN_CC=kaya-asan-clang-absent-by-N5')"
+    applied "$hits" "N5 doctored the sanitizer compiler off PATH"
+    bash "$T/n5.sh" >"$T/n5.log" 2>&1
+    rc=$?
+    if [ "$rc" != 1 ]; then
+        cat "$T/n5.log" >&2
+        fail "SELF-TEST FAIL (N5: with no sanitizer compiler the branch returned
+  $rc, not 1 — a companion that cannot tell it was skipped runs one mode and
+  reports two)"
+    elif grep -q "ASan companion SKIPPED" "$T/n5.log"; then
+        echo "check-c-bounds: self-test — N5 the skip branch printed:" \
+            "$(head -1 "$T/n5.log")"
+    else
+        cat "$T/n5.log" >&2
+        fail "SELF-TEST FAIL (N5: the skip was silent. An unprinted skip is a
+  mode that stopped running with nobody told)"
+    fi
+fi
+
 if [ "$status" != 0 ]; then
     echo "check-c-bounds: FINDINGS ABOVE" >&2
     exit 1
 fi
+
+# The guard page is the primary and is not skippable: it is the clause that
+# holds on every host and on the linux lane.
+case " ${modes_ran[*]} " in
+    *" guard-page "*) ;;
+    *)
+        echo "check-c-bounds: the guard-page mode did not run. It is the primary
+  proof, not an option — a verdict from the companion alone is a verdict from
+  the mode that can be skipped." >&2
+        exit 1
+        ;;
+esac
+echo "check-c-bounds: modes declared ${#MODES_DECLARED[@]} (${MODES_DECLARED[*]}), ran ${#modes_ran[@]} (${modes_ran[*]})"
 echo "check-c-bounds: OK (every packer refuses past cap; the pre-cap header smashes where this one refuses; no output byte moved)"

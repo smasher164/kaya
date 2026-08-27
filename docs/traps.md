@@ -5366,7 +5366,7 @@ names this defect class one layer up — an 8-bit sampling context that
 this is the same class one layer further out, in a context nobody
 chose.
 
-## AddressSanitizer does not run on this host: an -fsanitize=address binary hangs before main (2026-08-26)
+## AddressSanitizer hangs before main under every nixpkgs clang below 22 (2026-08-26; RESOLVED 2026-08-27)
 
 Measured while building the C floor's cap probe. `clang -fsanitize=address`
 BUILDS fine and the binary then never reaches `main`: it prints nothing,
@@ -5378,13 +5378,55 @@ same, while the identical source with no sanitizer runs correctly. With
     ==N==AddressSanitizer: libc interceptors initialized
 
 and then silence. `symbolize=0` does not help, because the hang is before
-any report. Measured on clang 21.1.8 (the nix wrapper — `/usr/bin/clang`
-resolves to the same 21.1.8, so Xcode's is shadowed and there is no second
-toolchain to fall back to) on Darwin 25.5, arm64. Three runs: clean
-program `timeout 20` -> rc 124; same source unsanitized -> rc 0, correct
-output; deliberate heap-buffer-overflow -> rc 124 and zero bytes of report.
+any report. Measured on clang 21.1.8 (the nix wrapper) on Darwin 25.5,
+arm64. Three runs: clean program `timeout 20` -> rc 124; same source
+unsanitized -> rc 0, correct output; deliberate heap-buffer-overflow ->
+rc 124 and zero bytes of report.
 
-**Reach for a guard page instead, and prefer it anyway.** `mmap` two
+**THE MECHANISM**, sampled 2026-08-27 (2177 of 2348 samples in the last
+frame): dyld runs `libSystem_initializer` -> `__malloc_init` -> ASan's
+`wrap_malloc_default_zone` -> `AsanInitFromRtl()` takes the init spin lock
+-> `InitializeShadowMemory` -> `MemoryRangeIsAvailable` -> `get_dyld_hdr()`
+-> `dyld_shared_cache_iterate_text_swift` -> `_Block_copy` -> **malloc** ->
+back into `__sanitizer_mz_malloc` -> `AsanInitFromRtl()` RE-ENTERS init ->
+`StaticSpinMutex::LockSlow()` yields forever. The lock is not recursive and
+the thread already holds it, which is the 98% CPU: a spin, never blocked.
+It is an OS-side change (on macOS 26 that dyld path started allocating),
+so **every** pre-2026 compiler-rt hits it — not a regression in one major.
+The same stack is published in llvm/llvm-project#200447 and
+python/cpython#145199, and Apple's Xcode 26.4 release notes carry it as a
+known issue, so Apple's own clang reproduces it too. No `ASAN_OPTIONS`
+toggle helps (fourteen tried, plus `MallocNanoZone=0` and two
+`DYLD_SHARED_*` settings): the flags are parsed well before the deadlock
+and none gates the `InitializeShadowMemory` path. TSan is broken on 21.1.8
+too but *crashes* (SIGSEGV) rather than hanging; UBSan has no shadow-memory
+init and was never affected.
+
+**THE FIX, LANDED 2026-08-27: `kaya-asan-clang`.** The three upstream fixes
+(llvm/llvm-project#167797, #182943 — the `_dyld_get_dyld_header` adoption
+that is exactly this deadlock — and #191039, backported as #192082) are on
+`release/22.x` and on no earlier branch; 21.1.8 was the last 21.x release,
+so nothing was coming. nixpkgs' `llvmPackages_22` (22.1.8) already exists
+at the rev flake.lock pins, so flake.nix wires it in with **no input bump**:
+a `runCommand` symlinks that wrapper's `clang` to the name
+`kaya-asan-clang` and puts it in the ONE dev shell. Deliberately not a
+`devShells.sanitizers` (a gate that needs a different `nix develop` is a
+guard someone has to remember) and deliberately not a second `clang` on
+PATH (whichever won would be a PATH-ordering accident, and a probe that
+compiled with 21.1.8 would hang for its whole ceiling instead of failing).
+`clang` still means 21.1.8, so nothing kaya ships moved.
+
+Correcting this entry's original claim: `/usr/bin/clang` resolves to the
+nix wrapper **inside the dev shell** only. Outside it, `xcrun --find clang`
+gives Apple clang 21.0.0 from CommandLineTools and its ASan works here — so
+there IS a second toolchain, it was simply shadowed. It is not the route
+taken: the same bug reproduces on Apple clang from Xcode 26.3 and older, so
+that route pins the fix to an unpinned host artifact, and the ABI split is
+total (Apple's runtime exports
+`___asan_version_mismatch_check_apple_clang_2100`, nix's exports
+`___asan_version_mismatch_check_v8` — no partial adoption).
+
+**The guard page stays the primary, and prefer it anyway.** `mmap` two
 pages, `mprotect` the second `PROT_NONE`, and place the buffer so that
 `buf + cap` is exactly the boundary: a write one byte past cap is then a
 FAULT rather than a redzone heuristic, the fault is byte-exact rather than
@@ -5392,10 +5434,47 @@ granular, and there is no sanitizer runtime involved, so the same probe
 runs on any POSIX lane. tools/checks/c-tx-cap.c is that shape and
 tools/check-c-bounds.sh reads the child's exit status — 138 (SIGBUS) or
 139 (SIGSEGV) is the smash, 0 with a sentence on stderr is the refusal.
+ASan is the companion beside it (that gate's `heap`/`heap-many` modes), for
+the shape a wall cannot take: a plain malloc whose next byte is another
+allocation.
 
 The cost if you do not know this: half an hour watching a probe that
 "hangs", concluding the probe is wrong, and rewriting a test that was
 already correct.
+
+## A sanitizer build inside the dev shell reports NOTHING unless you turn the wrapper's hardening off (2026-08-27)
+
+Measured the day `kaya-asan-clang` landed, and it is the trap that would
+have made that gate green while proving nothing. The nix cc-wrapper's
+default `NIX_HARDENING_ENABLE` includes `fortify` and `fortify3`, and
+`_FORTIFY_SOURCE`'s `__memcpy_chk`/`__memset_chk` fire BEFORE ASan can
+report. What you see instead of a report:
+
+| build | overrun | result |
+|---|---|---|
+| hardening default, `p[8] = 'x'` | 1-byte store | **rc 0, 8 bytes of output, NO report** |
+| hardening default, `memcpy`/`memset` 1 past | interceptor | **rc 133 SIGTRAP, ZERO bytes of output** |
+| `NIX_HARDENING_ENABLE=""`, either | — | rc 134, `ERROR: AddressSanitizer: heap-buffer-overflow`, source lines |
+
+A leave-one-in bisect over all twelve hardening flags, both shapes: only
+`fortify` and `fortify3` do it; the other ten report normally. On the small
+probe the instrumentation was gone outright — `nm -u` counted **0**
+`__asan_report*` symbols with `fortify` on and 2 with hardening off — while
+on a larger translation unit the symbols were present and one mode still
+died of a silent SIGTRAP. So the blinding is shape-dependent, which is
+worse than total: one clause reports, the next dies mute, and a gate with
+only the first clause goes green.
+
+**You cannot undo it from the command line.** The wrapper appends its own
+`-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=...` AFTER your arguments; `-D_FORTIFY_SOURCE=0`
+and `-U_FORTIFY_SOURCE` were both measured making no difference. The
+whitelist is the only lever: `NIX_HARDENING_ENABLE="" <cc> -fsanitize=address ...`,
+which is what tools/check-c-bounds.sh's `asan_build` does and says.
+
+And the rule the shape argues for: a sanitizer clause's own NEGATIVE is the
+only liveness proof it has. If the pre-cap build does not produce a report,
+the gate must go red rather than shrug — a clean run under a blinded
+sanitizer is indistinguishable from a clean run under a working one.
 
 ## A presentation-side report that arrives before the scene is DROPPED
 

@@ -54,8 +54,51 @@ remains the discussion half.
 Worth discussing alongside: a standing `tools/` cleanup recipe so this
 is a command, not an archaeology session, each time.
 
-## FIX — AddressSanitizer hangs pre-main under the dev shell's clang on this host (found 2026-08-26 by the KayaTx cap round; Akhil: research and fix, 2026-08-27)
+## ~~FIX — AddressSanitizer hangs pre-main under the dev shell's clang on this host (found 2026-08-26 by the KayaTx cap round; Akhil: research and fix, 2026-08-27)~~
 KEY: asan darwin nix, compiler-rt sanitizer runtime, clang 21.1.8 hang, libc interceptors initialized, guard page probe
+
+COMPLETE 2026-08-27, FIXED INSIDE NIX, no carve-out and no input bump.
+Research first, as asked, and it answered every question the entry put:
+nixpkgs' darwin compiler-rt is NOT broken (it builds and ships the
+sanitizer runtimes; the exclusion is `isDarwinStatic`, not `isDarwin`).
+The hang is an upstream compiler-rt self-deadlock against a macOS 26 dyld
+change — ASan's own malloc interceptor re-enters a non-recursive init spin
+lock through `dyld_shared_cache_iterate_text` -> `_Block_copy` -> malloc,
+sampled frame by frame and matching llvm/llvm-project#200447 — so it is an
+OS-side change every pre-2026 compiler-rt hits, Apple's clang included, and
+not a nix-versus-Apple divergence. Measured on this host: llvm 18, 19, 20,
+21.1.7 and 21.1.8 all hang; **22.1.8 works**, and its three fixes (#167797,
+#182943, #191039) are on `release/22.x` and on no earlier branch, with
+21.1.8 the last 21.x release. nixpkgs' `llvmPackages_22` already exists at
+the rev flake.lock pins.
+
+So flake.nix wires that compiler into the ONE dev shell under a name of its
+own, `kaya-asan-clang` — not a second devShell (a gate that needs a
+different `nix develop` is a guard someone has to remember) and not a
+second `clang` on PATH (a PATH-ordering accident, where the loser hangs for
+its whole ceiling instead of failing). `clang` still means 21.1.8 and
+nothing kaya ships moved. The Xcode fallback the entry contemplated is real
+— Apple clang 21.0.0 outside the shell works here — but was NOT taken and
+needs no sign-off: it fixes nothing (the same bug reproduces on Xcode 26.3
+and older, so it pins the fix to an unpinned host artifact) and the ABI
+split between the two runtimes is total.
+
+What it unblocks, live: tools/check-c-bounds.sh has an ASAN COMPANION MODE
+beside the guard page — the same c-tx-cap probe on a plain malloc
+(`heap`/`heap-many`), where the pre-cap header is a reported
+heap-buffer-overflow naming the write and its size and this one writes
+nothing. The guard page stays the PRIMARY (deterministic, byte-exact,
+linux-runnable, and the mode that is not skippable); a host without the
+compiler passes on it alone and PRINTS the skip, with self-test N5 cutting
+that branch out of the gate and making it print on every run.
+
+AND A TRAP THE FIX FOUND (docs/traps.md): a sanitizer build inside this
+dev shell reports NOTHING unless the wrapper's hardening is off. `fortify`
+and `fortify3` preempt ASan — an out-of-bounds store exited 0 with no
+report, a memcpy one died of SIGTRAP with zero bytes, and the wrapper
+appends its own `-D_FORTIFY_SOURCE` after your flags so no command-line
+`-U`/`-D` undoes it. `asan_build` sets `NIX_HARDENING_ENABLE=""` and says
+why. Wired naively, the companion would have been green and blind.
 
 Measured (scratchpad txcap round, three ways): the dev shell's clang
 21.1.8 compiles and links -fsanitize=address, but ANY sanitized
@@ -5640,6 +5683,14 @@ matrix at 627s contended): the known sentences, the at-fail dumps
 kept as designed (android-save-compose-* in validate-failures), the
 lane green standalone minutes later. Logged, not chased.
 
+AND ON iOS THE NEXT NIGHT (2026-08-27, editor-go, the sanitizer-
+wiring matrix at 631s): the picker listed a pid-stamped leftover
+("kaya-editor-70208") where the scene's fixture should stand —
+simdrive counted 34 clean reads and 0 taps, the row genuinely
+absent — cascading into the focus steps; lane green standalone at
+50s. The stale-provider-index shape check-steps' iOS admission
+clause guards, one directory over. Logged, not chased.
+
 AND TWICE ON WINDOWS THE SAME NIGHT, a different leg each time
 (2026-08-26: filedialog_rust's swallowed press at 477s contended,
 then ranges_rust reading "0 matches" where 3 stood at 516s
@@ -7754,5 +7805,9 @@ than sanitized (mmap + mprotect, so a one-byte overrun is a fault and not
 a heuristic), and its negative is the shipped bug itself: the same probe
 built against ee7bc41's header, which dies of SIGBUS in both modes where
 this one prints a sentence. AddressSanitizer, which the ruling asked for,
-could not have served — an `-fsanitize=address` binary with no error in
-it hangs before main on this host (docs/traps.md, measured).
+could not serve THAT DAY — an `-fsanitize=address` binary with no error in
+it hung before main on this host (docs/traps.md, measured). It joined as
+the gate's COMPANION MODE on 2026-08-27, on a plain malloc rather than a
+walled page, once flake.nix put a clang whose ASan starts (22.1.8) in the
+dev shell as `kaya-asan-clang`; the wall remains the primary. See the
+struck ASan entry at the top of this file.
