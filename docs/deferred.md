@@ -3241,6 +3241,11 @@ count, so the saving is measured rather than assumed.
   in the tree exercises a stretched canvas.
   KEY: viewbox, stretch, emit_drawing, presentation, rasterize, redraw,
   scale mode, fixed, letterbox
+  RULED 2026-08-27 (evening): this closes inside the size-policy
+  slice — scale re-rasters the same display list at the assigned
+  track; the source spelling and fixed's forcing artifact (a drawn
+  mark in the portfolio dashboard) are recorded at
+  docs/canvas-plan.md §3.2.1's evening addendum.
 - ~~CROSS-ISA byte-identity of the canvas raster is UNMEASURED~~ —
   CLOSED 2026-08-26: measured before the first hash went into a .steps file,
   and the two agree: aarch64 and x86_64 both rasterize the canvas

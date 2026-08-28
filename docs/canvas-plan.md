@@ -600,6 +600,36 @@ platform, so a redraw canvas cannot have a frozen drawing hash at all
 is not an argument against `redraw` — it is the reason the DEFAULT had
 to be a constant mode.
 
+RULED 2026-08-27 (evening), the three source-level questions the slice
+was waiting on:
+
+1. **Handler presence is the declaration.** `redraw` is spelled by
+   providing the drawing-as-function-of-size — `on_draw(fn(size) ->
+   drawing)` — because that is what redraw MEANS and a separate
+   property would be one more thing to keep consistent with it. `tick`
+   is spelled the same way (`on_tick`), and animation drives frame
+   occurrences through the ring like every other handler. `scale` is
+   spelled by writing nothing: today's `canvas(box)` verbatim. This is
+   the handlers-scope-to-their-creator idiom, and it works unchanged at
+   the C floor, which already registers handlers.
+2. **`fixed` is the one true property**, because it asserts something
+   ABOUT the drawing rather than providing a capability. The guarantee
+   it makes is exactly "the content is not a function of the assigned
+   track": intrinsic size from the viewbox (content-is-the-floor),
+   backend blit strictly 1:1 (a check-canvas-blit clause), and NO
+   promise of raster-once — a display-scale or appearance change
+   re-runs the same display list like every other canvas.
+3. **`fixed`'s forcing artifact is a drawn mark in the portfolio
+   dashboard** — ruled rather than left trigger-gated, so the slice
+   ships all three policies against real scenes: the chart wants scale
+   re-rastered at the track (the stretch defect this closes), redraw
+   and tick get their own scenes, and the portfolio mark is fixed's,
+   with a frozen ink expectation like every canvas assertion.
+
+The tick's determinism under the harness is a verb, never wall clock:
+the harness drives frames explicitly, so a leg's frame count is part of
+the scene, not the machine's load.
+
 ### §3.3 The op vocabulary (v1)
 
 Five geometry ops and two text ops.
