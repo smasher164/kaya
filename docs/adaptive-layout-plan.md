@@ -74,18 +74,17 @@ spellings lower to the record:
   setter list. One construct, both meanings, distinguished by what the
   trace saw.
 
-### D4 — phase 2, researched and not committed: keyed when/otherwise arms
+### D4 — keyed when/otherwise arms: LEDGERED (ruled 2026-08-28)
 
 For narrow layouts that are a DIFFERENT TREE rather than different
-property values (chart pinned atop, buttons relocated): both arms
-traced at declaration, each a complete hierarchy, with SAME-KEY
-children unified into one living widget re-parented at the switch — an
-arm-local key is plain presence, so today's `when` is the degenerate
-case. Declaration-time-checked keyed reconciliation across declared
-alternative worlds is the novel half (React does it at runtime against
-whatever rendered); its costs — the key obligation, duplicate
-constructor arguments needing an equality rule, template-zone overlap —
-are why it waits for a scene a property diff cannot serve.
+property values, the researched design is keyed arms — both traced at
+declaration, SAME-KEY children unified into one living widget
+re-parented at the switch, checkable at declaration where React's
+reconciliation is a runtime gamble. No current scene or app needs it,
+so the maintainer ruled it to the ledger rather than a plan phase:
+docs/deferred.md carries the entry with the design's shape and its
+recorded costs. It returns when a narrow layout a property diff cannot
+serve actually exists.
 
 ### D5 — what is deliberately NOT in the design
 
@@ -112,11 +111,10 @@ are why it waits for a scene a property diff cannot serve.
    day one (axis, grow, visibility are the survey's usual trio).
 3. Day-one scope: sugar alone, or sugar plus the general `when`
    spelling together (one mechanism either way).
-4. Phase-2 timing for D4.
-5. Sequencing: this plan against the packaging milestone's Android
-   step — the lean is Android first (it closes a milestone and is
-   small now the pattern exists), adaptive layout next as its own
-   milestone feeding the portfolio's visual iteration.
+
+Sequencing is RULED (2026-08-28): the packaging milestone's Android
+step first, then this plan as its own milestone feeding the
+portfolio's visual iteration.
 
 ## §2 — validation shape (sketch, firmed at build time)
 

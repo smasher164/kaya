@@ -8598,3 +8598,27 @@ guest wants the other. Both lower to the same wire record, so closing
 this entry is one keyword argument in eight bindings plus its
 check-sugar-surface census row, not a mechanism. Closes when a real
 scene or app asks for the mobile-first spelling.
+
+
+## HOLD — keyed when/otherwise arms await a use-case (ruled 2026-08-28)
+KEY: keyed arms, when otherwise, arrangements, re-parent, keyed unification, different tree
+
+The adaptive-layout design's phase-2 mechanism, ruled to the ledger the
+same day it was designed because no scene or app needs it yet: for a
+narrow layout that is a DIFFERENT TREE rather than different property
+values on one tree (docs/adaptive-layout-plan.md D3 covers the latter),
+`when(narrow)`/`otherwise` arms each trace a complete hierarchy, and
+SAME-KEY children across arms unify into ONE living widget re-parented
+at the switch — an arm-local key is plain presence, making today's
+`when` the degenerate case. The novel half is that both worlds are
+known at declaration, so the unification is CHECKED at build (same key
+= same widget kind, duplicate key in one arm refused) where React's
+keyed reconciliation is a runtime gamble. Recorded costs, from the
+design session: the key obligation on guests, duplicate constructor
+arguments across arms needing an equality rule (which copy wins), and
+overlap with the template zone's machinery. Evidence base:
+docs/probes/adaptive-layout-2026.md (AdwMultiLayoutView and AnyLayout
+are the nearest shipped relatives). Closes when a real narrow layout
+that a property diff cannot express exists — the portfolio's phone
+dashboard is currently believed to need only the axis flip, and if its
+visual iteration proves otherwise this entry is the design to build.
