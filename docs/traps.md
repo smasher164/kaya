@@ -6,9 +6,35 @@ these the hard way.
 
 ## Platform / toolkit
 
-- **A geometry report can arrive in the wrong COORDINATE SPACE, agree
-  with everything that shares its source, and only an independent read
-  can tell.** `KayaCanvasReader` records each canvas's global frame from
+- **macOS 26.6.2 gates the AX hop into the open/save panel service on
+  the Accessibility grant, and the refusal reads exactly like a missing
+  browser arm.** The panel's content has always lived out of process
+  (`openAndSavePanelService`; the panel object's own `contentView` is an
+  `NSRemoteView`, and the modern `NSSavePanel` is service-hosted with no
+  in-process fork — measured by symbol lookup, `beginServicePanel` /
+  `_serviceProxy` / `remoteView`). Until 26.6.2 an UNTRUSTED process
+  could walk from its own sheet across the ViewBridge into the service's
+  file browser; the update closed that hop. The measured signature: the
+  sheet (`id=open-panel`, own-process) publishes ONE child whose every
+  attribute read fails — `role=nil, attrs=[]` — so `kayaPanelBrowser`
+  finds none of ListView/IconView/ColumnView and the old diagnostic
+  blamed a fourth view mode. All 17 dialog legs (8 filedialog, 8 save,
+  editor-go) failed identically the first lane after the update
+  installed at the 2026-08-28 reboot; nothing in the tree had moved.
+  THE FIX IS THE GRANT: Accessibility for the app hosting the lane
+  shells (TCC attributes terminal-spawned guests to the terminal app —
+  measured by ancestry walk, this box's is Terminal.app). Granted, the
+  same leg passes unchanged. tools/probe-env.sh's `panel-trust` check
+  reads `AXIsProcessTrusted` from the lane's own attribution and names
+  the fix; `kayaOpenPanelWhyNot`'s browser branch discriminates on the
+  same measurement, so the next reader is sent at the grant rather than
+  at `KayaPanelShape`. TO RE-WATCH THE UNTRUSTED BRANCH without touching
+  the machine's grant: run the leg via `launchctl submit` — a
+  launchd-spawned process carries its own TCC attribution (the bare nix
+  python3, never granted), so the branch prints on demand; bake the dev
+  shell's PATH/PYTHONPATH into the submitted script, since launchd's
+  environment has neither, and `launchctl remove` the label after (it
+  respawns forever on a crashing script). `KayaCanvasReader` records each canvas's global frame from
   a `GeometryReader` in `.background` and reports it to the core as the
   assigned track. Measured 2026-08-28 on the JVM's `sizepolicy` leg: the
   four canvases reported `y = 16/108/164/256` while the window rendered

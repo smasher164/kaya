@@ -2009,8 +2009,25 @@ func kayaExpandPath(_ path: String) -> String {
         }
         guard let browser = kayaPanelBrowser(sheet) else {
             let ids = Set(kayaPanelIdentifiers(sheet)).sorted()
+            // TWO CAUSES, told apart by a measurement made here: the panel's
+            // content lives in the open/save panel SERVICE, and macOS 26.6.2
+            // refuses the AX hop across that bridge to an untrusted process —
+            // the sheet's one bridged child then answers no attributes at
+            // all, which reads exactly like a browser this arm cannot name
+            // (docs/traps.md; it cost the 2026-08-28 lane 17 legs).
+            if !AXIsProcessTrusted() {
+                return
+                    "the panel's sheet is up but AXIsProcessTrusted=false, and "
+                    + "macOS 26.6.2 gates the AX hop into the open/save panel "
+                    + "service on the Accessibility grant — the sheet publishes "
+                    + "\(ids) and its bridged content answers nothing; grant "
+                    + "Accessibility to the app hosting this process (System "
+                    + "Settings > Privacy & Security > Accessibility) and re-run "
+                    + "(docs/traps.md)"
+            }
             return
-                "the panel's sheet is up but its file browser is none of "
+                "the panel's sheet is up (AXIsProcessTrusted=true) but its file "
+                + "browser is none of "
                 + "\(kayaPanelBrowserIds.joined(separator: "/")) — the sheet publishes "
                 + "\(ids). The view mode is the machine-wide NSGlobalDomain "
                 + "NSNavPanelFileListModeForOpenMode2 (1 columns, 2 list, 3 icons), "

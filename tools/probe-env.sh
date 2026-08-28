@@ -105,6 +105,22 @@ case "$panel_mode" in
     *) report panel-mode CHECK "NSNavPanelFileListModeForOpenMode2 reads \"$panel_mode\", which is none of 1 columns / 2 list / 3 icons — a fourth shape needs a KayaPanelShape arm in swift/KayaSwiftUI.swift before any filedialog leg can read the panel$panel_stamp" ;;
 esac
 
+# --- macOS accessibility trust ----------------------------------------
+# macOS 26.6.2 gates the AX hop into the open/save panel service on the
+# Accessibility grant: untrusted, the sheet's one bridged child answers
+# no attributes and every filedialog/save leg fails the same way
+# (docs/traps.md). The guests inherit this shell's TCC attribution, so
+# this read speaks for the lane.
+ax_trusted=$(python3 -c "
+import ctypes
+f = ctypes.CDLL('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+print('true' if f.AXIsProcessTrusted() else 'false')" 2>/dev/null || echo unreadable)
+case "$ax_trusted" in
+    true) report panel-trust OK "AXIsProcessTrusted=true — the lane shells can read the open/save panel service" ;;
+    false) report panel-trust DOWN "AXIsProcessTrusted=false — macOS 26.6.2+ refuses the AX hop into the open/save panel service, so every filedialog/save leg fails reading an empty sheet; grant Accessibility to the app hosting the lane shells (System Settings > Privacy & Security > Accessibility), then re-run (docs/traps.md)" ;;
+    *) report panel-trust CHECK "AXIsProcessTrusted unreadable from python3 ctypes — the ApplicationServices load failed, which this probe cannot explain; run a filedialog leg to measure the panel read directly" ;;
+esac
+
 # --- iOS simulator ---------------------------------------------------
 # Same fallback run-sim.sh uses: the nix xcrun stub and the
 # CommandLineTools default both lack simctl; only Xcode has it.
