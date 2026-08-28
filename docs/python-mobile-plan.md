@@ -208,8 +208,27 @@ precedent for simulator-only proof).
    `kaya_spec_hash` through the force-loaded archive with the
    binding's exact `wire.SPEC_HASH` answered, threading's
    `main_thread` agreeing the worker IS Python's main thread, clean
-   finalize. What remains of this step is the app-shaped work: the
-   binding's `_find_library`/run() arms, the guest import, the leg.
+   finalize.
+   THE STEP LANDED 2026-08-28, same session: the binding grew its two
+   hosted arms (runtime.py's HOSTED_ENTRY + `_load_library`'s
+   platform dispatch; App.run()'s caller-is-the-app-thread arm), the
+   C host tools/ios/pyhost.c owns the process entry and boots CPython
+   on a signal-free worker, ONE bundle carries every python scene
+   behind tools/ios/pyhost-main.py's KAYA_SELFTEST dispatch (the
+   Android APK pattern), and run-sim.sh's python suite wires
+   `portfolio-python` AND `varied-python` — varied turned out
+   phone-clean from birth, so the iOS half of the fan-out collapsed
+   into this step. Suite green through the real lane: portfolio 11s,
+   varied 3s, 38s with builds. The force_load wall sits in the suite
+   arm as an `nm -gU` refusal on the built binary. ONE SCENE RULING
+   RODE ALONG (the maintainer's, 2026-08-28): `expect_window_size
+   900x600` left portfolio.steps — the scene's contract is the
+   ADAPTIVE behavior, every other assertion is data-shaped and passed
+   unchanged at 375x812, outer geometry is the panes-band shape, and
+   declared-size honoring is window.steps' mechanism proof, once. The
+   edited scene re-proved green on all four platforms it now serves.
+   check-steps' wired() reads IOS_PYTHON_SCENES, the
+   unwire→red→wire→green negative watched both directions.
 2. Android: the JNI shim + gradle asset split, the same leg green on
    the emulator lane.
 3. Fan-out: the portfolio's `IOS_UNWIRED_SCENES`/`ANDROID_UNWIRED_SCENES`

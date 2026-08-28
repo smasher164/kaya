@@ -1744,13 +1744,11 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # chrome no phone has; split drives resize_window, rejected above.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
     IOS_DESKTOP_ONLY_SCENES="window panels split panes"
-    # Scenes whose GUEST cannot run here YET — sequencing, not design:
-    # the portfolio dashboard is Python by design
-    # (docs/portfolio-plan.md), and CPython reaches this platform with
-    # the packaging milestone (official upstream support exists,
-    # PEP 730). The legs wire when it lands.
+    # Scenes whose GUEST cannot run here yet. EMPTY since 2026-08-28:
+    # the packaging milestone's iOS depth slice wired the two python
+    # scenes (the python suite below; docs/python-mobile-plan.md §D6).
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-    IOS_UNWIRED_SCENES="portfolio varied"
+    IOS_UNWIRED_SCENES=""
     # NOT NARROWER any more, except by design: editor runs from the Go
     # suite alone (the plan chose Go so a binding's awkward corners
     # would show; there is no rust or swift editor guest). Everything
@@ -1978,6 +1976,86 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     else
         drain
         timing go-build+legs
+    fi
+fi
+
+# THE PYTHON GUEST SUITE (docs/python-mobile-plan.md): CPython embedded
+# in ONE bundle carrying every python scene — the Android APK's
+# one-artifact-many-scenes pattern — booted by a C host (pyhost.c)
+# whose main thread enters kaya_run exactly as every iOS guest does,
+# while the guest runs on a worker pthread and its app.run() parks as
+# the occurrence consumer (the binding's HOSTED_ENTRY arm). The
+# framework comes off the flake's pin (KAYA_CPYTHON_IOS); the stdlib
+# stages as plain directories, the simulator exemption §D5 records.
+if [ "$SUITE" = python ] || [ "$SUITE" = all ]; then
+    if [ -z "${KAYA_CPYTHON_IOS:-}" ] || [ ! -d "$KAYA_CPYTHON_IOS" ]; then
+        echo "run-sim: KAYA_CPYTHON_IOS is unset or not a directory — the dev" >&2
+        echo "  shell exports it (flake.nix's cpythonIos); re-enter nix develop" >&2
+        exit 1
+    fi
+    PYFW="$KAYA_CPYTHON_IOS/ios-arm64_x86_64-simulator"
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --lib
+    "$ROOT/tools/build-id.sh" --verify \
+        target/aarch64-apple-ios-sim/debug/libkaya.a || exit 1
+    build_swiftui_dylib
+    xcrun -sdk iphonesimulator clang \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        tools/ios/pyhost.c \
+        -I "$PYFW/Python.framework/Headers" -F "$PYFW" -framework Python \
+        -Wl,-rpath,@executable_path/Frameworks \
+        -Wl,-force_load,"$TARGET_DIR/libkaya.a" \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/pyhost-bin" || exit 1
+    # THE FORCE_LOAD WALL (plan §D3, measured both directions): without
+    # it the link keeps only what the host itself calls, and
+    # ctypes.CDLL(None) resolves NOTHING — silently, dlsym answering
+    # NULL with no error anywhere. Checked here, on the path nobody can
+    # avoid, by the export the binding's spec handshake reads first.
+    if ! nm -gU "$BUNDLES/pyhost-bin" | grep -q " _kaya_spec_hash$"; then
+        echo "run-sim: pyhost-bin does not export kaya_spec_hash — libkaya.a" >&2
+        echo "  was linked without -Wl,-force_load, and every ctypes lookup in" >&2
+        echo "  the guest would answer NULL with no error anywhere" >&2
+        exit 1
+    fi
+    "$ROOT/tools/build-id.sh" --verify "$BUNDLES/pyhost-bin" || exit 1
+    # The home, assembled once: the shared pure stdlib minus its test
+    # weight (172 of 233 MB), then the sim slice's arch files over it
+    # (lib-dynload, sysconfigdata). Store paths are read-only; the
+    # bundle copy must be writable for simctl install's copyfile.
+    PYHOME="$BUNDLES/py-home"
+    rm -rf "$PYHOME"
+    mkdir -p "$PYHOME/lib/python3.15"
+    rsync -a --exclude test --exclude idlelib --exclude tkinter \
+        --exclude turtledemo --exclude __pycache__ \
+        "$KAYA_CPYTHON_IOS/lib/python3.15/" "$PYHOME/lib/python3.15/" || exit 1
+    rsync -a "$PYFW/lib-arm64/python3.15/" "$PYHOME/lib/python3.15/" || exit 1
+    chmod -R u+w "$PYHOME"
+    # Machine-read by check-steps' wired(), like IOS_SWIFT_SCENES above.
+    # shellcheck disable=SC2034
+    IOS_PYTHON_SCENES="portfolio varied"
+    APP=$(make_bundle pyhost dev.kaya.pyhost "$BUNDLES/pyhost-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    mkdir -p "$APP/Frameworks" "$APP/app"
+    cp -R "$PYFW/Python.framework" "$APP/Frameworks/Python.framework"
+    chmod -R u+w "$APP/Frameworks"
+    cp -R "$PYHOME" "$APP/python"
+    cp tools/ios/pyhost-main.py "$APP/app/main.py"
+    for entry in $IOS_PYTHON_SCENES; do
+        cp "guests/python/$entry.py" "$APP/app/$entry.py" || exit 1
+    done
+    cp -R bindings/python/kaya "$APP/app/kaya"
+    rm -rf "$APP/app/kaya/__pycache__"
+    for entry in $IOS_PYTHON_SCENES; do
+        queue_leg run_swiftui_on "$entry-python" "$APP" dev.kaya.pyhost \
+            "$entry-python" "$entry" "$entry"
+    done
+    # The swift phase's interleave rule, verbatim.
+    if [ "$SUITE" = all ] && [ -z "${KAYA_RECORD:-}" ]; then
+        timing python-built+queued
+    else
+        drain
+        timing python-build+legs
     fi
 fi
 

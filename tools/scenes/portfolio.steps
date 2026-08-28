@@ -106,7 +106,13 @@ expect_drawing_hash canvas@mark "29abce8483ccc343"
 # the chart's filled region freezes, and necessarily: the same two
 # paints, `series_fill` composited over `ground` (§7.2, ±1 per channel).
 expect_ink canvas@mark "50,50 = light D2E3F7 dark 212A35"
-expect_window_size 900x600
+# NO expect_window_size, ruled 2026-08-28 when the phone legs arrived:
+# the declared 900x600 is a desktop request and a phone's window IS the
+# device, so the outer geometry is the panes-band shape — a value the
+# platforms legitimately answer differently, which no shared scene may
+# sample. The scene's contract is the ADAPTIVE behavior (every
+# assertion below is data-shaped and passed unchanged at 375x812);
+# declared-size honoring is window.steps' mechanism proof, once.
 expect_aligned column@detail "stretch"
 expect_aligned column@accounts "stretch"
 # No expect_fills on column@detail: the breadth rule maximizes this

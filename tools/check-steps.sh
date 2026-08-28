@@ -1793,7 +1793,7 @@ wired() {
     # derived exemption.
     exempt=$'\n'"$exempt"$'\n'
 
-    ios_wired="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_SWIFT_SCENES|IOS_GO_SCENES')"
+    ios_wired="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_SWIFT_SCENES|IOS_GO_SCENES|IOS_PYTHON_SCENES')"
     ios_declared="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_DESKTOP_ONLY_SCENES|IOS_UNWIRED_SCENES')"
     android_declared="$(runner_list_scenes tools/android/run-emulator.sh 'ANDROID_DESKTOP_ONLY_SCENES|ANDROID_UNWIRED_SCENES')"
     # A reader that reads nothing agrees with everything.

@@ -1,9 +1,11 @@
 """kaya runtime for Python guests: loading, the function floor, and the
 occurrence loop. Hand-written; wire.py beside it is generated.
 
-THE PROCESS MAIN THREAD enters run() and becomes the core's UI thread;
-a Python thread is the app thread, draining occurrences with
-next_occurrence() and answering with submit().
+On the desktops THE PROCESS MAIN THREAD enters run() and becomes the
+core's UI thread; a Python thread is the app thread, draining
+occurrences with next_occurrence() and answering with submit(). On the
+HOSTED platforms (HOSTED_ENTRY below) the host app owns the UI thread
+and the thread running the guest is the app thread itself.
 """
 
 import ctypes
@@ -14,6 +16,14 @@ import sys
 from . import wire
 from .wire import OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, parse_occurrence
 from .wire import SPEC_HASH
+
+
+# The host owns the platform loop on these two, and the guest's run()
+# parks as the occurrence consumer instead of entering kaya_run — Go's
+# hostedEntry, spelled in Python (docs/python-mobile-plan.md §D2,
+# inheriting docs/go-mobile-plan.md §D5). sys.platform "ios"/"android"
+# are PEP 730/738's own values.
+HOSTED_ENTRY = sys.platform in ("ios", "android")
 
 
 def _find_library():
@@ -30,7 +40,21 @@ def _find_library():
     raise FileNotFoundError(f"{name} not found; build with cargo or set KAYA_LIB")
 
 
-_lib = ctypes.CDLL(_find_library())
+def _load_library():
+    # The one platform-dispatched step (docs/python-mobile-plan.md §D3).
+    # iOS: the core is a static archive linked into the app executable
+    # with -force_load (without which dlsym answers NULL for every
+    # symbol the host never calls), so the handle is the process
+    # itself. Android: libkaya.so sits in the APK's jniLibs; by soname,
+    # never ctypes.util.find_library, which searches /system alone.
+    if sys.platform == "ios":
+        return ctypes.CDLL(None)
+    if sys.platform == "android":
+        return ctypes.CDLL("libkaya.so")
+    return ctypes.CDLL(_find_library())
+
+
+_lib = _load_library()
 
 # The stale-artifact guard: this binding was generated from one spec
 # revision and the loaded core must speak the same one.

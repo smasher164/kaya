@@ -4242,9 +4242,18 @@ class App:
             self._dispatch(handler, *args)
 
     def run(self):
-        """Enter the core on the calling thread (must be the process
-        main thread), dispatching occurrences on the app thread; returns
-        the exit code."""
+        """Block until the app ends; returns the exit code. On the
+        desktops the calling thread (the process main thread) enters
+        the core and a spawned thread dispatches occurrences; on the
+        hosted platforms the HOST owns the platform loop, the caller
+        IS the app thread, and dispatch happens here until the core
+        shuts down — one call, one meaning, everywhere
+        (docs/python-mobile-plan.md §D2)."""
+        if runtime.HOSTED_ENTRY:
+            # Exit code 0: there is no process to hand a status to
+            # (docs/go-mobile-plan.md §D5's ruling, inherited).
+            self._dispatch_loop()
+            return 0
         app_thread = threading.Thread(target=self._dispatch_loop)
         app_thread.start()
         code = runtime.run()
