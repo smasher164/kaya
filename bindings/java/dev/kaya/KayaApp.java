@@ -238,6 +238,15 @@ public final class KayaApp {
     // Each canvas's declared viewbox, so a redraw in a LATER transaction
     // does not have to repeat it (docs/canvas-plan.md §2.2).
     private final Map<Long, Viewbox> canvasViewboxes = new HashMap<>();
+    // Each canvas's drawing-as-a-function-of-size (docs/canvas-plan.md
+    // §3.2.1), keyed by canvas id. NOT one of the handler tables above:
+    // these answer with a DRAWING rather than an app edit, so loop()
+    // answers the ask itself and the guest never sees an occurrence.
+    // WIDENED AT REGISTRATION, an on_draw's time slot ignored — the
+    // ARITY IS THE REGISTERED POLICY'S, never the record kind's, because
+    // a tick canvas is asked once as a plain draw_requested before its
+    // first frame and would otherwise draw nothing until the clock moved.
+    private final Map<Long, TickHandler> canvasDraws = new HashMap<>();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     // separate from every widget/node table. The node flavors receive
     // the stamped copy's key path.
@@ -338,6 +347,22 @@ public final class KayaApp {
      * keys, then the new 0-based option index. */
     public interface MenuSelectHandler {
         void accept(Tx tx, List<Object> keys, int index);
+    }
+
+    /** A {@code redraw} canvas's drawing, as a function of the size
+     * layout assigned it (docs/canvas-plan.md §3.2.1). NO Tx: a drawing
+     * is not an app edit — the binding submits the one record itself. */
+    public interface DrawHandler {
+        void accept(Draw d, Viewbox size);
+    }
+
+    /** The same on the platform's frame clock, plus that frame's time in
+     * seconds. THE TIME IS THE PLATFORM'S: a guest reading its own clock
+     * re-imports exactly the jitter Choreographer's frame time and
+     * CADisplayLink's targetTimestamp were built to remove
+     * (docs/canvas-plan.md §15.4). */
+    public interface TickHandler {
+        void accept(Draw d, Viewbox size, double time);
     }
 
     /** One signal the undo put back. */
@@ -1879,6 +1904,16 @@ public final class KayaApp {
             this.w = w;
             this.h = h;
         }
+
+        /** Readable because a {@code redraw} handler draws in FRACTIONS
+         * of the box it was handed (docs/canvas-plan.md §3.2.1). */
+        public double w() {
+            return w;
+        }
+
+        public double h() {
+            return h;
+        }
     }
 
     /**
@@ -2175,6 +2210,79 @@ public final class KayaApp {
                     + " — use Tx.setA11yLabel inside a live transaction");
             }
             tx.setA11yLabel(this, label);
+            return this;
+        }
+
+        /**
+         * THIS CANVAS REFUSES COERCION: it draws at its viewbox and is
+         * placed in whatever track layout gives it, never adapting to it
+         * (docs/canvas-plan.md §3.2.1, ruling 2).
+         *
+         * <p>The ONE TRUE PROPERTY of the size policy, because it ASSERTS
+         * something about the drawing rather than providing a capability:
+         * the content is not a function of the assigned track. What that
+         * buys is an intrinsic size from the viewbox, a blit that is
+         * strictly 1:1, and NO promise of raster-once — a display-scale or
+         * appearance change re-runs the same display list like every other
+         * canvas.
+         *
+         * <p>The other two policies are HANDLERS ({@link #onDraw},
+         * {@link #onTick}), and a canvas that declares nothing is
+         * {@code scale}.
+         */
+        public Widget fixed() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: fixed on a widget outside its build transaction"
+                    + " — a canvas's size policy is declared where the canvas is built");
+            }
+            tx.sizePolicy(id, KayaWire.SIZE_POLICY_FIXED);
+            return this;
+        }
+
+        /**
+         * THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core hands
+         * it the size layout assigned and takes back what {@code f} draws
+         * for that size, which becomes its viewbox — so a chart re-lays
+         * out for the width instead of scaling its old pixels
+         * (docs/canvas-plan.md §3.2.1).
+         *
+         * <p>PROVIDING THE HANDLER IS THE DECLARATION, so this registers
+         * {@code f} AND puts the policy on the wire in ONE act: a
+         * registered handler the core would never ask for is unspellable.
+         *
+         * <p>THE BINDING OPENS THE TRANSACTION, not the guest
+         * (tools/check-ambient-tx.sh): the ask is answered inside the
+         * dispatch loop and never surfaces as an occurrence.
+         *
+         * <p>LATEST-WINS: a size the guest never caught up with is dropped
+         * rather than drawn late, so a drag-resize storm cannot queue.
+         */
+        public Widget onDraw(DrawHandler f) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: onDraw on a widget outside its build transaction"
+                    + " — a canvas's drawing handler is declared where the canvas is built");
+            }
+            tx.registerDraw(id, KayaWire.SIZE_POLICY_REDRAW, (d, size, time) -> f.accept(d, size));
+            return this;
+        }
+
+        /**
+         * The same, on the platform's FRAME CLOCK: {@code f} is handed the
+         * assigned size and the frame's time in seconds
+         * (docs/canvas-plan.md §15.4). {@code onTick} is {@link #onDraw}
+         * plus that drive — an animating canvas answers the same
+         * drawing-at-this-size question, once a frame, and answers the
+         * plain draw_requested that precedes its first frame with time 0.
+         */
+        public Widget onTick(TickHandler f) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: onTick on a widget outside its build transaction"
+                    + " — a canvas's drawing handler is declared where the canvas is built");
+            }
+            tx.registerDraw(id, KayaWire.SIZE_POLICY_TICK, f);
             return this;
         }
     }
@@ -3456,6 +3564,31 @@ public final class KayaApp {
             // in a later handler does not repeat it.
             canvasViewboxes.put(w.id, viewbox);
             return w;
+        }
+
+        /**
+         * WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+         * (docs/canvas-plan.md §3.2.1).
+         *
+         * <p>PRIVATE, and that is the whole point: a guest never writes
+         * the policy NUMBER. It declares {@link Widget#fixed}, or a
+         * handler ({@link Widget#onDraw}, {@link Widget#onTick}), on the
+         * canvas itself; a canvas that declares nothing is {@code scale}.
+         */
+        private void sizePolicy(long canvas, int policy) {
+            emit(KayaWire.txSetSizePolicy(canvas, policy));
+        }
+
+        /**
+         * The registration half of {@link Widget#onDraw} and
+         * {@link Widget#onTick}: the policy record goes FIRST, because
+         * {@link #emit} is where a closed or off-thread transaction
+         * throws and a handler registered before it would be one the core
+         * never asks for.
+         */
+        private void registerDraw(long canvas, int policy, TickHandler f) {
+            sizePolicy(canvas, policy);
+            canvasDraws.put(canvas, f);
         }
 
         /**
@@ -4865,6 +4998,12 @@ public final class KayaApp {
          * (docs/canvas-plan.md §3.1). The drawing is declared with the
          * node, so every copy is born with it; {@link Tx#drawAt}
          * re-declares one copy's afterwards.
+         *
+         * <p>NO SIZE POLICY IN THIS ZONE, and the COMPILER is the
+         * refusal: {@link Node} carries no {@code fixed}, {@code onDraw}
+         * or {@code onTick}, so a canvas in a row template is
+         * {@code scale} (docs/deferred.md's template-zone size policy
+         * entry, which the core also refuses by name).
          */
         public Node canvas(Viewbox viewbox, Consumer<Draw> body) {
             Node n = widget(KayaWire.KIND_CANVAS);
@@ -5853,6 +5992,29 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, (int) (double) (Double) occ.payload);
+                    });
+                }
+            } else if ((occ.kind == KayaWire.OCC_KIND_DRAW_REQUESTED
+                    || occ.kind == KayaWire.OCC_KIND_TICK) && occ.keys.isEmpty()) {
+                // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER
+                // HANDED TO THE GUEST (docs/canvas-plan.md §3.2.1): it
+                // registered a drawing-as-a-function-of-size, so this
+                // draws it at the size that arrived and submits the one
+                // record. Keyed asks are the template zone's, which
+                // registers nothing (docs/deferred.md's template-zone
+                // size policy entry).
+                TickHandler handler = canvasDraws.get(occ.id);
+                if (handler != null) {
+                    // The ask's bare tail: width, height, and a tick's
+                    // frame time in seconds.
+                    List<?> ask = (List<?>) occ.payload;
+                    Viewbox box = new Viewbox((Double) ask.get(0), (Double) ask.get(1));
+                    double time = occ.kind == KayaWire.OCC_KIND_TICK ? (Double) ask.get(2) : 0.0;
+                    dispatch(tx -> {
+                        // The assigned size is this canvas's viewbox from
+                        // here on, so a later plain draw uses it too.
+                        canvasViewboxes.put(occ.id, box);
+                        tx.draw(new Widget(occ.id, tx), d -> handler.accept(d, box, time));
                     });
                 }
             }

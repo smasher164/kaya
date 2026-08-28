@@ -317,6 +317,82 @@ else:
             f"`expect_raster` answers \"no track reported\" (docs/canvas-plan.md "
             f"§3.2.1)")
 
+    # THE SAME REPORT, ALL FOUR ARMS (generalized at the 2026-08-28
+    # fan-out merge): a backend that stops reporting leaves the size
+    # policy silently inert behind green legs, and only its own lane's
+    # runtime negative would ever see it.
+    for path, body_, pat, spell in (
+        (compose, strip_comments(read(compose)), r"KayaPresent\.canvasTrack\(", "KayaPresent.canvasTrack"),
+        (gtk, gtk_body, r"\.set_canvas_track\(", "Scene::set_canvas_track"),
+        (winui, strip_comments(winui_text), r"scene\.set_canvas_track\(", "scene.set_canvas_track"),
+    ):
+        if re.search(pat, body_) is None:
+            bad.append(
+                f"{path}: nothing reports a canvas's assigned track ({spell} is "
+                f"gone). The size policy is silently inert — `scale` never "
+                f"re-rasters, `redraw` is never asked, and `expect_raster` "
+                f"answers \"no track reported\" (docs/canvas-plan.md §3.2.1)")
+
+    # WINUI ALONE: the report must come from the PARENT-ASSIGNED slot.
+    # The Image carries an explicit size from the buffer — that is the
+    # 1:1 blit — so a report read off the element's own box returns the
+    # RASTER's size and track==raster by construction: every observable
+    # green, the policy dead. The mac's "the reader has to sit outside
+    # the grow frame", one toolkit over (docs/deferred.md's struck winui
+    # bullet carries the measured wording).
+    if re.search(r"LayoutInformation::GetLayoutSlot\(", strip_comments(winui_text)) is None:
+        bad.append(
+            f"{winui}: the track report no longer reads the parent-assigned "
+            f"layout slot. A report off the element's own box reads the raster "
+            f"back (the Image is explicitly sized from the buffer), so track "
+            f"and raster agree by construction while the policy is dead")
+    if re.search(r"SetWidth\(f64::from\(width\) / scale\)", strip_comments(winui_text)) is None:
+        bad.append(
+            f"{winui}: the blit is no longer sized from the buffer over the "
+            f"scale. Sized from anything else it is a stretch, and no canvas "
+            f"observable can see one (docs/canvas-plan.md §3.2.1)")
+
+# THE 1:1 HALF ON GTK, where the blit is this project's own widget and
+# not the toolkit's. `GtkPicture` cannot express 1:1 — every member of
+# GtkContentFit scales at some size, and GTK never allocates a widget
+# more than its parent assigned, so a squeezed `fixed` canvas meets one
+# of those fits whichever is chosen. KayaCanvas is the answer: its
+# natural size is the blit and its snapshot draws the blit at that size.
+# (The TRACK REPORT half is the SwiftUI clause above, which the canvas
+# milestone generalizes to all four arms in one edit.)
+m = re.search(r"\bContentFit\b", gtk_body)
+if m:
+    n = gtk_body.count("\n", 0, m.start()) + 1
+    bad.append(
+        f"{gtk}:{n} names GtkContentFit. Every member of that vocabulary scales "
+        f"the blit at some size — Fill stretches, Contain and Cover scale up, "
+        f"ScaleDown scales down — and `fixed`'s whole guarantee is that the "
+        f"content does NOT follow the track (docs/canvas-plan.md §3.2.1, "
+        f"ruling 2). The canvas widget draws its own blit at the size the core "
+        f"rastered it for; no scene assertion can see the difference")
+snap = re.search(
+    r"fn snapshot\(&self, snapshot: &gtk4::Snapshot\) \{(.*?)\n        \}",
+    gtk_body, re.S)
+if snap is None:
+    bad.append(
+        f"{gtk}: KayaCanvas's snapshot is not where this gate looks — the canvas "
+        f"blit moved and this clause is blind, which is worse than a failure: it "
+        f"would pass for any arm at all")
+else:
+    body = snap.group(1)
+    for want, why in (
+        (r"let \(pw, ph\) = self\.size\.get\(\);",
+         "the size the CORE rastered this blit for"),
+        (r"PaintableExt::snapshot\(&paintable, snapshot, pw, ph\)",
+         "the paintable drawn at that size"),
+    ):
+        if re.search(want, body) is None:
+            bad.append(
+                f"{gtk}: the canvas snapshot no longer takes {why}. A blit drawn "
+                f"at anything but the buffer's own size is a STRETCH, and no "
+                f"canvas observable can see one — the hash and the ink bounds are "
+                f"both taken at the viewbox (docs/canvas-plan.md §3.2.1, §7.1)")
+
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 PY
@@ -371,8 +447,8 @@ refuses() {
 # N1: A WIDGET BACKEND THAT INTERPRETS AN OP. The shipped defect this
 # rule exists against, in its smallest form — one arm that resolves a
 # paint role for itself.
-hits="$(perturb "$GTK" 'fn set_drawing\(picture: &gtk4::Picture' \
-    'fn kaya_paint_is_series(p: i64) -> bool { p == PAINT_SERIES }\nfn set_drawing(picture: \&gtk4::Picture' \
+hits="$(perturb "$GTK" 'fn set_drawing\(canvas: &KayaCanvas' \
+    'fn kaya_paint_is_series(p: i64) -> bool { p == PAINT_SERIES }\nfn set_drawing(canvas: \&KayaCanvas' \
     "$T/gtk-lowers.rs")"
 applied "$hits" "N1 (a GTK arm that consults a paint role)"
 refuses "$T/gtk-lowers.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
@@ -470,6 +546,56 @@ applied "$hits" "N4c (the SwiftUI canvas track report removed)"
 refuses "$GTK" "$WINUI" "$T/swiftui-notrack.swift" "$COMPOSE" \
     "nothing reports a canvas's assigned track" "a backend that reports no track"
 
+# N4d: THE GTK BLIT DRAWN AT THE ALLOCATION — `ContentFit::Fill` written
+# out by hand, which is what the widget replaced. A `fixed` canvas
+# squeezed by its row is compressed and every assertion stays green.
+hits="$(perturb "$GTK" 'PaintableExt::snapshot\(&paintable, snapshot, pw, ph\)' \
+    'PaintableExt::snapshot(\&paintable, snapshot, w, h)' "$T/gtk-stretch.rs")"
+applied "$hits" "N4d (the GTK blit drawn at the allocation)"
+refuses "$T/gtk-stretch.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
+    "no longer takes the paintable drawn at that size" \
+    "a GTK canvas that stretches its buffer"
+
+# N4e: AND THE TOOLKIT'S OWN VOCABULARY BACK. Every member of it scales,
+# so naming one at all is the stretch returning by another road.
+hits="$(perturb "$GTK" 'let canvas = KayaCanvas::default\(\);' \
+    'let canvas = KayaCanvas::default();\n                    canvas.set_content_fit(gtk4::ContentFit::Fill);' \
+    "$T/gtk-contentfit.rs")"
+applied "$hits" "N4e (a GTK canvas arm that sets a content fit)"
+refuses "$T/gtk-contentfit.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
+    "names GtkContentFit" "a canvas arm that lets the toolkit fit the blit"
+
+# N4f: THE COMPOSE TRACK REPORT REMOVED — the same silent-inert state as
+# N4c, one interpreter over.
+hits="$(perturb "$COMPOSE" 'KayaPresent\.canvasTrack\(' 'kayaNoTrackReport(' \
+    "$T/compose-notrack.kt")"
+applied "$hits" "N4f (the Compose canvas track report removed)"
+refuses "$GTK" "$WINUI" "$SWIFTUI" "$T/compose-notrack.kt" \
+    "nothing reports a canvas's assigned track" "a Compose arm that reports no track"
+
+# N4g: THE GTK TRACK REPORT REMOVED.
+hits="$(perturb "$GTK" '\.set_canvas_track\(' '.no_track_report(' \
+    "$T/gtk-notrack.rs")"
+applied "$hits" "N4g (the GTK canvas track report removed)"
+refuses "$T/gtk-notrack.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
+    "nothing reports a canvas's assigned track" "a GTK arm that reports no track"
+
+# N4h: THE WINUI TRACK REPORT REMOVED.
+hits="$(perturb "$WINUI" 'scene\.set_canvas_track\(' 'scene.no_track_report(' \
+    "$T/winui-notrack.rs")"
+applied "$hits" "N4h (the WinUI canvas track report removed)"
+refuses "$GTK" "$T/winui-notrack.rs" "$SWIFTUI" "$COMPOSE" \
+    "nothing reports a canvas's assigned track" "a WinUI arm that reports no track"
+
+# N4i: THE WINUI REPORT READ OFF THE ELEMENT'S OWN BOX — the reading the
+# ledger bullet's original wording would have produced, measured as
+# track==raster by construction with the policy dead.
+hits="$(perturb "$WINUI" 'LayoutInformation::GetLayoutSlot\(' 'element_own_box(' \
+    "$T/winui-ownbox.rs")"
+applied "$hits" "N4i (the WinUI report no longer reads the layout slot)"
+refuses "$GTK" "$T/winui-ownbox.rs" "$SWIFTUI" "$COMPOSE" \
+    "no longer reads the parent-assigned layout slot" "a slot report replaced by the element box"
+
 # --- Clause 5: THE INK VERB'S PER-MODE COMPARE, live. ----------------
 # `expect_ink` names both palettes and the HOST picks one, so a mac leg
 # evaluates exactly one of the two arms — which is how a light-only
@@ -516,4 +642,4 @@ if ! offenders="$(check "$GTK" "$WINUI" "$SWIFTUI" "$COMPOSE")"; then
 fi
 echo "check-canvas-blit: OK (4 backends: the one rule, the four pixel formats," \
     "the one swizzle, the true scale reported, the 1:1 blit and its track" \
-    "report, and both ink modes compared)"
+    "report, the GTK canvas's own 1:1 snapshot, and both ink modes compared)"

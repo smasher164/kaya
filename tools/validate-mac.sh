@@ -34,7 +34,7 @@ timing() {
 # THE scene list: the mechanical per-scene surfaces below derive from
 # it — one registration per new scene; the leg blocks stay explicit
 # because they encode per-language coverage decisions.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets sizepolicy"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface windowed canvas sizepolicy"
+DEPTH_SCENES="typeface windowed canvas"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -611,7 +611,13 @@ run_build() {
 build_ocaml() {
     # One dune build covers the binding library and all scenes
     # (dune-project at the repo root scopes to bindings/ and guests/).
-    dune build
+    #
+    # --root . BECAUSE DUNE WALKS UP. A bare `dune build` finds the
+    # NEAREST dune-project at or above the working directory, so run from
+    # a git worktree under the repo it builds the PARENT checkout and
+    # fails on an alias that does not exist there — measured 2026-08-28.
+    # In the ordinary checkout the two are the same directory.
+    dune build --root .
 }
 
 build_haskell() {
@@ -1189,12 +1195,31 @@ run canvasdark-rust-swiftui env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
 drain
 
 # The size-policy scene (docs/canvas-plan.md §3.2.1): what a canvas does
-# with a track that is not its viewbox. RUST ONLY and MAC ONLY for now —
-# it is a depth slice, and the three backends that report no canvas
-# track hold `depth_stub("sizepolicy")` (docs/deferred.md).
+# with a track that is not its viewbox — all eight languages since the
+# bindings wave, MAC AND iOS ONLY, because the three backends that report
+# no canvas track hold `depth_stub("sizepolicy")` (docs/deferred.md).
+#
+# No C floor guest: the floor's roster is guests/c/Makefile's SCENES,
+# which check-steps' sweep_c_floor reads from the other side.
 KAYA_SELFTEST_SCRIPT="$(scene_script sizepolicy)"
 export KAYA_SELFTEST_SCRIPT
 run sizepolicy-rust-swiftui env KAYA_SELFTEST=sizepolicy "$RUST_GUESTS"/sizepolicy
+run sizepolicy-python-swiftui env KAYA_SELFTEST=sizepolicy python3 guests/python/sizepolicy.py
+run sizepolicy-go-swiftui env KAYA_SELFTEST=sizepolicy target/go-guests/kaya-go
+run sizepolicy-csharp-swiftui env KAYA_SELFTEST=sizepolicy KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run sizepolicy-ocaml-swiftui env KAYA_SELFTEST=sizepolicy KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/sizepolicy.exe
+run sizepolicy-haskell-swiftui env KAYA_SELFTEST=sizepolicy "$(hs_bin sizepolicy)"
+run sizepolicy-swift-swiftui env KAYA_SELFTEST=sizepolicy target/swift-guests/sizepolicy
+# NO JAVA LEG, and it is the ink read rather than the binding: the java
+# guest passes every MODEL observable in this scene and its window
+# renders byte-identically to python's, but `expect_ink` samples a canvas
+# frame this backend recorded during an earlier layout and never
+# corrected, so it reads a rectangle one canvas away from the one it
+# named. Measured 2026-08-28 with the frames and the render side by side
+# (docs/traps.md, docs/deferred.md's size-policy entry). The guest and
+# the Main selector are here; the leg wires when that read is fixed.
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome

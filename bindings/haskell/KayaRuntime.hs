@@ -422,9 +422,21 @@ parseUndo rec = do
 --
 -- The undo pair rides the same tuple as everything else: the window in
 -- the id slot, the label as the payload, and the restored state in the
--- last member.
+-- next member. The LAST member is the generated decoder's tail: the
+-- canvas asks' bare trailing values — the assigned size, and a tick's
+-- frame time (docs/canvas-plan.md §3.2.1).
 pollOccurrence ::
-  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe UndoDelta))
+  IO
+    ( Maybe
+        ( Word16,
+          Word64,
+          [Value],
+          Maybe Value,
+          Maybe ClipValues,
+          Maybe UndoDelta,
+          [Value]
+        )
+    )
 pollOccurrence = do
   Ring dat capacity headPtr tailPtr h <- ring
   let mask = capacity - 1
@@ -440,12 +452,12 @@ pollOccurrence = do
               if kind == occKindUndone || kind == occKindRedone
                 then do
                   (w, label, delta) <- parseUndo (dat `plusPtr` at)
-                  return (Just (kind, w, [], Just (VStr label), Nothing, Just delta))
+                  return (Just (kind, w, [], Just (VStr label), Nothing, Just delta, []))
                 else do
                   ordinary <- parseOccurrence occurrenceBlob (dat `plusPtr` at)
                   return
                     ( fmap
-                        (\(k, ident, keys, payload, clip) -> (k, ident, keys, payload, clip, Nothing))
+                        (\(k, ident, keys, payload, clip, rest) -> (k, ident, keys, payload, clip, Nothing, rest))
                         ordinary
                     )
             -- Word32 wraps on its own; hand the space back with release.

@@ -2009,5 +2009,19 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		clip, _ := parseClip(rec, at)
 		payload = clip
 	}
+	if kind == occDrawRequested || kind == occTick {
+		// The canvas asks carry a run of BARE values after the key
+		// path — the assigned size, and a tick's frame time — with
+		// no count in front, so they are read until the record ends
+		// (docs/canvas-plan.md §3.2.1).
+		end := int(binary.LittleEndian.Uint32(rec[0:]))
+		tail := []any{}
+		for at < end {
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		payload = tail
+	}
 	return kind, id, keys, payload, true
 }

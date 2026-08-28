@@ -44,6 +44,7 @@ import (
 	"dev.kaya/guests/go/scroll"
 	"dev.kaya/guests/go/sections"
 	selectscene "dev.kaya/guests/go/select"
+	"dev.kaya/guests/go/sizepolicy"
 	"dev.kaya/guests/go/split"
 	"dev.kaya/guests/go/stall"
 	"dev.kaya/guests/go/styling"
@@ -98,6 +99,7 @@ var scenes = map[string]func() *kaya.App{
 	"scroll":     scroll.App,
 	"sections":   sections.App,
 	"select":     selectscene.App,
+	"sizepolicy": sizepolicy.App,
 	"split":      split.App,
 	"stall":      stall.App,
 	"styling":    styling.App,

@@ -40,8 +40,10 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # `canvas` is rust-only for the same reason `windowed` is: it is the
 # compiled conformance scene every lane runs, and the drawing it declares
 # is in viewbox units, so one guest's op stream is every platform's
-# (docs/canvas-plan.md §3.2).
-DEPTH_SCENES="windowed canvas"
+# (docs/canvas-plan.md §3.2). `sizepolicy` is rust-only because it is a
+# depth slice: the seven other bindings have no `fixed`/`on_draw`/`on_tick`
+# spelling yet (docs/deferred.md's size-policy entry).
+DEPTH_SCENES="windowed canvas sizepolicy"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1044,6 +1046,16 @@ for proto in x11 wayland; do
     # (docs/canvas-plan.md phase 4).
     run "$proto" canvasdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"
+    # THE SIZE-POLICY SCENE (docs/canvas-plan.md §3.2.1): what a canvas
+    # does with a track that is not its viewbox. This backend reports the
+    # track off its own frame clock and blits 1:1, so `expect_raster` can
+    # tell a re-rastered canvas from a stretched one — the one canvas
+    # observable a policy moves.
+    #
+    # NO a11y-leg.sh: this scene asserts no ax verb (its own closing
+    # comment says why), so it needs no session bus.
+    run "$proto" sizepolicy-rust env KAYA_SELFTEST=sizepolicy \
+        "$CARGO_TARGET_DIR/debug/examples/sizepolicy"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

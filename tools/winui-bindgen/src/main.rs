@@ -234,10 +234,26 @@ fn main() {
         "Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap".to_string(),
         "Windows.Storage.Streams.IBuffer".to_string(),
         // `Image.Stretch`, the same transitivity trap: unfiltered, the
-        // enum leaves `SetStretch` a vtable pad. A canvas STRETCHES TO
-        // FILL its track rather than letterboxing inside it (§3.2 rule
-        // 2), and Image's default is Uniform.
+        // enum leaves `SetStretch` a vtable pad. The blit fills a box
+        // the backend sized from the BUFFER, so Fill is exact rather
+        // than a stretch (docs/canvas-plan.md §3.2.1).
         "Microsoft.UI.Xaml.Media.Stretch".to_string(),
+        // THE SIZE POLICY'S TWO CHANNELS (§3.2.1). The REPORT is what
+        // layout assigned a canvas, and `LayoutSlot` is the only read
+        // that answers it: a canvas's Image carries an explicit
+        // Width/Height from the buffer (the 1:1 blit), which is a hard
+        // constraint, so its own arranged box is the RASTER's size and
+        // never the track's. The DRIVE is `CompositionTarget.Rendering`,
+        // the non-harness frame clock (§15.4).
+        "Microsoft.UI.Xaml.Controls.Primitives.LayoutInformation".to_string(),
+        "Microsoft.UI.Xaml.Media.CompositionTarget".to_string(),
+        "Microsoft.UI.Xaml.Media.RenderingEventArgs".to_string(),
+        // The transitivity trap once more, one type down: `RenderingTime`
+        // is a vtable pad without its return struct, which would leave
+        // the frame drive holding a frame with no time in it — and a
+        // clock read inside the callback is exactly the jitter the
+        // platform's own frame timestamp exists to remove.
+        "Windows.Foundation.TimeSpan".to_string(),
         // THE SCALE CHANNEL (§5): `XamlRoot.RasterizationScale` already
         // reached the file, but its `Changed` event did not — the
         // add-handler's argument type was unfiltered, so only

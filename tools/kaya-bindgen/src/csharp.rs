@@ -630,6 +630,40 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            payload = ParseClip(rec, at, out int _pasteEnd);");
         c.line("        }");
     }
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1).
+    let values_tail = crate::values_tail_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !values_tail.is_empty() {
+        c.line(&format!("        if ({values_tail})"));
+        c.line("        {");
+        c.line("            // The canvas asks carry a run of BARE values after the");
+        c.line("            // key path — the assigned size, and a tick's frame time");
+        c.line("            // — with no count in front, so they are read until the");
+        c.line("            // record ends (docs/canvas-plan.md §3.2.1).");
+        c.line("            int end = (int)BitConverter.ToUInt32(rec, 0);");
+        c.line("            var tail = new List<object>();");
+        c.line("            while (at < end)");
+        c.line("            {");
+        c.line("                uint ttype = BitConverter.ToUInt32(rec, at);");
+        c.line("                int tlen = BitConverter.ToInt32(rec, at + 4);");
+        c.line("                switch (ttype)");
+        c.line("                {");
+        c.line("                    case ValueBool: tail.Add(rec[at + 8] != 0); break;");
+        c.line("                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, at + 8)); break;");
+        c.line("                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, at + 8)); break;");
+        c.line(
+            "                    default: tail.Add(Encoding.UTF8.GetString(rec, at + 8, tlen)); break;",
+        );
+        c.line("                }");
+        c.line("                at += 8 + ((tlen + 7) & ~7);");
+        c.line("            }");
+        c.line("            payload = tail;");
+        c.line("        }");
+    }
     c.line("        return true;");
     c.line("    }");
     c.line("}");

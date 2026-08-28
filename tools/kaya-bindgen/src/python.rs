@@ -556,6 +556,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        clip, values, at = parse_clip(buf, at)");
         c.line("        payload = (clip, values)");
     }
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1).
+    let values_tail = crate::values_tail_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !values_tail.is_empty() {
+        c.line(&format!("    if kind in ({values_tail},):"));
+        c.line("        # The canvas asks carry a run of BARE values after the");
+        c.line("        # key path — the assigned size, and a tick's frame time");
+        c.line("        # — with no count in front, so they are read until the");
+        c.line("        # record ends (docs/canvas-plan.md §3.2.1).");
+        c.line("        payload = []");
+        c.line("        while at < _size:");
+        c.line("            value, at = parse_value(buf, at)");
+        c.line("            payload.append(value)");
+    }
     c.line("    return kind, ident, keys, payload");
 
     c.out

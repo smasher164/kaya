@@ -78,10 +78,17 @@ use bindings::Microsoft::UI::Xaml::Media::FontFamily;
 use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
 use bindings::Microsoft::UI::Xaml::Media::Imaging::{BitmapImage, WriteableBitmap};
 use bindings::Microsoft::UI::Xaml::ElementTheme;
-// The canvas's two: a stretch mode (a drawing fills its track rather than
-// letterboxing inside it, docs/canvas-plan.md §3.2 rule 2) and the
-// interface that turns a WinRT IBuffer into bytes.
-use bindings::Microsoft::UI::Xaml::Media::{ImageSource, Stretch};
+// The canvas's four: a stretch mode (the blit fills a box `set_drawing`
+// sized from the BUFFER, so Fill is exact rather than a stretch —
+// docs/canvas-plan.md §3.2.1), the frame drive and its timestamp
+// (§15.4), and the interface that turns a WinRT IBuffer into bytes.
+use bindings::Microsoft::UI::Xaml::Media::{
+    CompositionTarget, ImageSource, RenderingEventArgs, Stretch,
+};
+// THE TRACK LAYOUT ASSIGNED (§3.2.1): the area the parent gave a child,
+// which is not the child's own arranged box once the child carries an
+// explicit size. See `canvas_track_of`.
+use bindings::Microsoft::UI::Xaml::Controls::Primitives::LayoutInformation;
 use windows::Win32::System::WinRT::IBufferByteAccess;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -1183,6 +1190,13 @@ thread_local! {
     /// Whether the two presentation edges are wired yet
     /// (`presentation_report`). UI thread only, like CORE.
     static PRESENTATION_WATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A canvas-track report is already queued for this turn
+    /// (`schedule_canvas_tracks`) — the table's `scheduled` flag one
+    /// widget over, because LayoutUpdated fires per canvas per pass.
+    static CANVAS_TRACKS_DUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether the platform's frame drive is attached
+    /// (`attach_frame_drive`). UI thread only, like CORE.
+    static FRAME_DRIVE_ATTACHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The UI thread's dispatcher, for waking it from other threads.
@@ -1353,6 +1367,155 @@ fn report_presentation_now() {
     });
 }
 
+/// WHAT LAYOUT ASSIGNED ONE CANVAS, in points (docs/canvas-plan.md
+/// §3.2.1) — `kaya_window_moved`'s shape one widget over, and the report
+/// the stretch defect was missing. The core decides what to do with it:
+/// re-raster, ask the guest, or nothing at all.
+///
+/// A GROWN CANVAS'S TRACK IS ITS LAYOUT SLOT, never its own arranged
+/// box. `set_drawing` gives the Image an explicit Width/Height from the
+/// BUFFER — that is the 1:1 blit — and an explicit size is a HARD
+/// constraint in XAML, so `ActualWidth` reads back the raster's size
+/// however much room the row had. Reporting that would make the track
+/// and the raster agree BY CONSTRUCTION and leave the whole policy
+/// inert: it is the SwiftUI trap in this toolkit's spelling (§3.2.1,
+/// "the backend reader has to sit OUTSIDE the grow frame", measured
+/// there while the depth slice landed).
+///
+/// AN UNGROWN CANVAS IS ITS OWN BOX, and that conditional is the mac's
+/// `.frame(maxWidth: node.grow > 0 ? .infinity : nil)` verbatim: content
+/// is the floor, so its track IS its viewbox and all three policies
+/// agree. The slot would answer the whole COLUMN's width there — a Grid
+/// cell spans the panel's cross axis whatever the child does with it —
+/// and a `scale` canvas would then re-raster into that, letterboxed,
+/// with every frozen ink probe landing somewhere else.
+fn canvas_track_of(core: &CoreState, id: WidgetId, image: &Image) -> Option<(f64, f64)> {
+    let element: FrameworkElement = windows_core::Interface::cast(image).ok()?;
+    if core.grow.get(&id).copied().unwrap_or(0.0) > 0.0 {
+        let slot = LayoutInformation::GetLayoutSlot(&element).ok()?;
+        return Some((f64::from(slot.Width), f64::from(slot.Height)));
+    }
+    Some((element.ActualWidth().ok()?, element.ActualHeight().ok()?))
+}
+
+/// Every live canvas's track, reported to the core. A report that
+/// changes nothing emits nothing, so re-asking is free — which is what
+/// makes a missed layout edge harmless, exactly as with the
+/// presentation.
+///
+/// The registries are PUSH-ONLY (see the harness's `resolve_id`), so a
+/// destroyed canvas is skipped by asking `widgets` rather than by
+/// shrinking them.
+fn report_canvas_tracks(core: &mut CoreState) {
+    for i in 0..core.canvas_ids.len() {
+        let id = WidgetId(core.canvas_ids[i]);
+        if !core.widgets.contains_key(&id) {
+            continue;
+        }
+        let image = core.canvases[i].clone();
+        let Some(size) = canvas_track_of(core, id, &image) else {
+            continue;
+        };
+        let reported = crate::fault::guard("reporting a canvas's assigned track", || {
+            core.scene.set_canvas_track(id, size)
+        });
+        let Some((ops, asks)) = reported else { continue };
+        for op in ops {
+            let what = op_head(&op);
+            if let Err(e) = apply(core, op) {
+                crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+                return;
+            }
+        }
+        for occ in asks {
+            core.occurrences.send(occ);
+        }
+    }
+}
+
+/// The report, coalesced onto the dispatcher — `schedule_report`'s shape
+/// one widget over, and for its two reasons. LayoutUpdated fires once
+/// per canvas per layout PASS, and the report can apply a re-raster,
+/// which must not run inside the pass that provoked it.
+fn schedule_canvas_tracks() {
+    if CANVAS_TRACKS_DUE.replace(true) {
+        return;
+    }
+    let Some(dispatcher) = DISPATCHER.get() else {
+        CANVAS_TRACKS_DUE.set(false);
+        return;
+    };
+    let handler = DispatcherQueueHandler::new(move || {
+        CANVAS_TRACKS_DUE.set(false);
+        CORE.with_borrow_mut(|core| {
+            if let Some(core) = core.as_mut() {
+                report_canvas_tracks(core);
+            }
+        });
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
+/// THE PLATFORM'S FRAME DRIVE, outside the harness (docs/canvas-plan.md
+/// §15.4). `CompositionTarget.Rendering` is this platform's display-link
+/// schedule and `RenderingEventArgs.RenderingTime` is the frame's own
+/// timestamp, which is what the tick has to carry: a clock read inside
+/// the callback re-imports exactly the jitter a frame time removes.
+///
+/// NOT UNDER THE HARNESS, which is the determinism half of the ruling: a
+/// scene's frame count is what the `frame` verb advanced, so a second
+/// clock running beside it would make every animation leg a question
+/// about the machine's load. `KAYA_SELFTEST` is the same discriminator
+/// the harness spawn reads.
+///
+/// ONCE PER PROCESS, not once per canvas: this is a STATIC event on the
+/// UI thread rather than a per-view schedule, so N canvases would be N
+/// callbacks carrying one timestamp. Attached at the first canvas
+/// because a subscription holds the compositor in a continuous render
+/// loop, and an app with no canvas may not pay that.
+///
+/// NO LANE REACHES THIS (docs/deferred.md's size-policy entry): every
+/// scene drives frames by verb, deliberately.
+fn attach_frame_drive() {
+    if std::env::var("KAYA_SELFTEST").is_ok() || FRAME_DRIVE_ATTACHED.replace(true) {
+        return;
+    }
+    let rendering = EventHandler::<windows_core::IInspectable>::new(move |_, args| {
+        let Some(args) = args.as_ref() else { return Ok(()) };
+        let Ok(frame) = windows_core::Interface::cast::<RenderingEventArgs>(args) else {
+            return Ok(());
+        };
+        let Ok(time) = frame.RenderingTime() else { return Ok(()) };
+        // TimeSpan is in hundreds of nanoseconds; the core's clock is
+        // seconds (§15.4).
+        drive_frame(time.Duration as f64 / 1e7);
+        Ok(())
+    });
+    if let Err(e) = CompositionTarget::Rendering(&rendering) {
+        FRAME_DRIVE_ATTACHED.set(false);
+        crate::fault::report(format!("kaya: attaching the frame drive failed: {e}"));
+    }
+}
+
+/// One frame, at `time` seconds: every `tick` canvas is handed the size
+/// it was assigned and that time. The occurrences are asks, so they go
+/// out the same channel a click does.
+fn drive_frame(time: f64) {
+    if !time.is_finite() {
+        return;
+    }
+    CORE.with(|slot| {
+        let Ok(mut core) = slot.try_borrow_mut() else { return };
+        let Some(core) = core.as_mut() else { return };
+        let ticks = crate::fault::guard("driving a frame", || core.scene.frame(time))
+            .unwrap_or_default();
+        for occ in ticks {
+            core.occurrences.send(occ);
+        }
+    });
+}
+
 fn drain_transactions() {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
@@ -1376,9 +1539,7 @@ fn drain_transactions() {
                     }
                 }
                 // A canvas that became a redraw one with its track
-                // already known (docs/canvas-plan.md §3.2.1). Empty on
-                // this backend while it holds depth_stub("sizepolicy"),
-                // because nothing here reports a track.
+                // already known (docs/canvas-plan.md §3.2.1).
                 for occ in core.scene.take_asks() {
                     core.occurrences.send(occ);
                 }
@@ -1429,6 +1590,13 @@ fn drain_transactions() {
             if let Err(e) = presentation_report(core) {
                 crate::fault::report(format!("kaya: reporting the presentation failed: {e}"));
             }
+            // AND EVERY CANVAS'S TRACK, for the presentation's reason:
+            // a canvas created in this batch has no layout yet, so the
+            // number here is usually rejected as non-positive and the
+            // real report comes off LayoutUpdated — but a layout edge
+            // that lands while the core is borrowed is dropped, and
+            // re-asking is what makes that harmless (§3.2.1).
+            report_canvas_tracks(core);
         });
     });
 }
@@ -11197,10 +11365,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // Image control, filled by the SetDrawing arm from a
                     // WriteableBitmap (docs/canvas-plan.md §8).
                     //
-                    // STRETCH TO FILL, never letterbox (§3.2 rule 2);
-                    // Image's default Stretch is Uniform.
+                    // FILL, AND STRICTLY 1:1 FOR IT (§3.2.1, ruling 2):
+                    // `set_drawing` gives this element an explicit
+                    // Width/Height taken from the BUFFER's own pixels
+                    // over the scale they were drawn at, so Fill fills
+                    // exactly those and a track bigger than the buffer
+                    // leaves MARGIN. Whether the buffer is the viewbox's
+                    // size or the track's is the CORE's decision and the
+                    // whole content of the size policy; this arm may not
+                    // have an opinion about it. Image's default is
+                    // Uniform, which would rescale a `fixed` canvas.
                     let image = Image::new()?;
                     image.SetStretch(Stretch::Fill)?;
+                    // THE REPORT, on this backend's own layout edge —
+                    // see `canvas_track_of` for what is read and
+                    // `schedule_canvas_tracks` for why it is deferred.
+                    // LayoutUpdated rather than SizeChanged for the
+                    // table's reason two thousand lines up: this
+                    // backend's bindings project no SizeChanged, and a
+                    // grown canvas's own box does not move when the
+                    // window resizes — only its slot does.
+                    let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                        schedule_canvas_tracks();
+                        Ok(())
+                    });
+                    image.LayoutUpdated(&laid)?;
+                    attach_frame_drive();
                     core.canvases.push(image.clone());
                     core.canvas_ids.push(id.0);
                     NativeWidget::Canvas(image)
@@ -17379,14 +17569,38 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// The size policy's two reads, on the backend that reports no
-    /// canvas track yet (docs/canvas-plan.md §3.2.1).
-    fn canvas_raster_shape(&self, _target: crate::harness::Target) -> String {
-        crate::depth_stub("sizepolicy")
+    /// WHICH SIZE the raster is, asked of the CORE like the probe above
+    /// (docs/canvas-plan.md §3.2.1): the two numbers being compared were
+    /// produced on opposite sides of the boundary — the TRACK is what
+    /// this backend measured and reported, the VIEWBOX is what the guest
+    /// declared. It is the only canvas read a size policy can move.
+    fn canvas_raster_shape(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(target.index, core.canvas_ids.len()) else {
+                return Ok(format!("<this window holds {} canvases>", core.canvas_ids.len()));
+            };
+            Ok(core
+                .scene
+                .canvas_raster_shape(WidgetId(core.canvas_ids[i]))
+                .unwrap_or_else(|| "<the core holds no drawing for this canvas>".to_owned()))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    /// ADVANCE THE FRAME CLOCK by the core's own deterministic step
+    /// (§15.4). The step is the CORE's — `next_harness_frame` — so a
+    /// leg's frame count is one number in all three harnesses, and no
+    /// wall clock reaches a tick under the harness.
     fn frame(&self) {
-        crate::depth_stub("sizepolicy")
+        Self::on_ui_mut(|core| {
+            let time = crate::capi::harness_frame_time();
+            let ticks = crate::fault::guard("driving a frame", || core.scene.frame(time))
+                .unwrap_or_default();
+            for occ in ticks {
+                core.occurrences.send(occ);
+            }
+            Ok(())
+        })
     }
 
     /// THE BLIT, out of DWM's print of this window's composited content

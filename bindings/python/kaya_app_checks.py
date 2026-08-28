@@ -72,6 +72,52 @@ check("a template node never shares a number with a live widget",
 check("widget and node ids run through one counter",
       node.id == live.id + 2 and after.id == node.id + 1)
 
+# THE SIZE POLICY IS A LIVE-ZONE DECLARATION IN THIS SLICE
+# (docs/canvas-plan.md §3.2.1, docs/deferred.md's template-zone entry).
+# Python's one handle serves both zones, so the refusal is a raise rather
+# than a missing method, and its SENTENCE is what an app reads.
+with app.build():
+    with kaya.column():
+        with kaya.for_each(c):
+            try:
+                kaya.canvas((10.0, 10.0), fixed=True)
+                check("a template-node size policy is refused", False)
+            except RuntimeError as e:
+                check("a template-node size policy is refused",
+                      "LIVE-ZONE declaration in this slice" in str(e))
+            kaya.label("empty")
+
+with app.build():
+    with kaya.column():
+        try:
+            kaya.canvas((10.0, 10.0), fixed=True, on_draw=lambda d, size: None)
+            check("a canvas declares ONE size policy", False)
+        except ValueError:
+            check("a canvas declares ONE size policy", True)
+        # THE ARITY IS THE POLICY'S, NEVER THE RECORD KIND'S. A tick
+        # canvas is a redraw canvas too — the core asks it once, as a
+        # draw_requested, before its first frame — so both stored handlers
+        # must take the time. Reading the arity off the record instead
+        # raised inside the handler guard, which logged and moved on, and
+        # the ticking canvas stayed empty with the scene still green
+        # (measured 2026-08-28, docs/canvas-plan.md §3.2.1).
+        drawn = kaya.canvas((10.0, 10.0), on_draw=lambda d, size: None)
+        ticked = kaya.canvas((10.0, 10.0), on_tick=lambda d, size, t: None)
+        widened = True
+        for handle in (drawn, ticked):
+            seat = app._draw_handlers.get(handle.id)
+            if seat is None:
+                widened = False
+                continue
+            _, fn = seat
+            try:
+                with handle.draw() as d:
+                    fn(d, (10.0, 10.0), 0.0)
+            except TypeError:
+                widened = False
+        check("both size-policy handlers are stored widened to take the "
+              "frame time", widened)
+
 with app.build():
     s.set(2)
     check("derived recomputes on source write", derived._mirror is True)

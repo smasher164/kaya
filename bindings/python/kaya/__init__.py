@@ -3328,16 +3328,75 @@ class _DrawScope:
         return False
 
 
-def canvas(viewbox, grow=None):
+def _size_policy(handle, fixed, on_draw, on_tick):
+    """WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+    (docs/canvas-plan.md §3.2.1). `scale` is spelled by declaring
+    nothing, so nothing is emitted for it.
+
+    THE HANDLER IS THE DECLARATION: registering it and putting the
+    policy on the wire are ONE act, so a registered-but-unreachable
+    handler is unspellable."""
+    declared = [k for k, v in (("fixed", fixed), ("on_draw", on_draw),
+                               ("on_tick", on_tick)) if v]
+    if not declared:
+        return
+    if len(declared) > 1:
+        # Chained calls elsewhere have an order and the last policy
+        # wins; simultaneous keywords have none, so two of them is a
+        # question this cannot answer rather than a race to resolve.
+        raise ValueError(
+            "kaya: a canvas declares ONE size policy, not "
+            + " and ".join(declared)
+            + " (docs/canvas-plan.md §3.2.1)"
+        )
+    if isinstance(handle, Node):
+        raise RuntimeError(
+            "kaya: the size policy is a LIVE-ZONE declaration in this "
+            "slice — a canvas inside a row template keeps `scale` "
+            "(docs/deferred.md, the template-zone size policy entry)"
+        )
+    if fixed:
+        policy = wire.SIZE_POLICY_FIXED
+    else:
+        policy = (wire.SIZE_POLICY_REDRAW if on_draw is not None
+                  else wire.SIZE_POLICY_TICK)
+        _app._register_draw(handle, policy, on_draw or on_tick)
+    _records().append(wire.tx_set_size_policy(handle.id, policy))
+
+
+def canvas(viewbox, grow=None, fixed=None, on_draw=None, on_tick=None):
     """A drawing surface. `viewbox` is the (width, height) coordinate
     system the ops are written in AND the canvas's natural size in
     points, which is what keeps one op stream identical on five
     platforms (docs/canvas-plan.md §3.2). Declare what it draws with
-    `with handle.draw() as d:`; until then it is present and empty."""
+    `with handle.draw() as d:`; until then it is present and empty.
+
+    WHAT IT DOES WITH A TRACK THAT IS NOT ITS VIEWBOX is one of three
+    declarations, and declaring NOTHING is `scale` — the core
+    re-rasterizes this same drawing fitted uniformly into whatever track
+    layout hands over (§3.2.1):
+
+    - `fixed=True` REFUSES COERCION: the drawing is rastered at the
+      viewbox and placed in the track without adapting to it. The one
+      true property, because it asserts something about the drawing
+      rather than providing a capability.
+    - `on_draw=fn` says the drawing IS a function of size: `fn(d, size)`
+      is handed a recorder and the size layout assigned, and draws for
+      it. Providing the function is the declaration.
+    - `on_tick=fn` is the same on the platform's frame clock:
+      `fn(d, size, time)`, once a frame, with the frame's time in
+      seconds. THE TIME IS THE PLATFORM'S — a guest that reads its own
+      clock re-imports the jitter Choreographer and CADisplayLink exist
+      to remove (§15.4).
+
+    Both handlers run inside a transaction THE BINDING opens
+    (tools/check-ambient-tx.sh) and never reach the app as an
+    occurrence."""
     w, h = viewbox
     handle = _widget(wire.KIND_CANVAS)
     _canvas_viewboxes[handle.id] = (float(w), float(h))
     _set_grow(handle, grow)
+    _size_policy(handle, fixed, on_draw, on_tick)
     return handle
 
 
@@ -3649,6 +3708,12 @@ class App:
         self._collections = {}
         self._signals = {}
         self._node_handlers = {}
+        # THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE, keyed by canvas id
+        # (docs/canvas-plan.md §3.2.1). Its own table because these do
+        # not fold an occurrence into app state: they answer the ask with
+        # a drawing, inside a transaction this binding opens, and the
+        # guest never sees it.
+        self._draw_handlers = {}
         # THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD, and the only
         # reason App carries a lock — everything above is
         # app-thread-only by construction.
@@ -3665,6 +3730,53 @@ class App:
             self._node_handlers[(kind, handle.id)] = fn
         else:
             self._widget_handlers[(kind, handle.id)] = fn
+
+    def _register_draw(self, handle, policy, fn):
+        """The registration half of `canvas(on_draw=)`/`(on_tick=)`.
+        Private: registering the handler and declaring the policy are ONE
+        act (`_size_policy` does both), so a handler nothing ever calls
+        cannot be spelled.
+
+        THE HANDLER IS WIDENED HERE, and that is what keeps the dispatch
+        honest: a TICK canvas is a REDRAW canvas too — the core asks it
+        once, as a draw_requested, before its first frame — so the answer
+        path must have ONE call shape or the tick handler is called with
+        the wrong one on that first ask. Measured 2026-08-28: reading the
+        arity off the RECORD kind raised inside the handler guard, which
+        logged and moved on, and the ticking canvas stayed empty until
+        frame 1 with the scene still passing (docs/traps.md)."""
+        if policy == wire.SIZE_POLICY_REDRAW:
+            drawn = fn
+            fn = lambda d, size, _time: drawn(d, size)  # noqa: E731
+        self._draw_handlers[handle.id] = (handle, fn)
+
+    def _answer_canvas(self, ident, kind, values):
+        """ANSWER ONE CANVAS ASK: draw at the size the core assigned and
+        submit that drawing (docs/canvas-plan.md §3.2.1).
+
+        The binding opens the transaction — a guest opening its own
+        inside a handler is what tools/check-ambient-tx.sh refuses — and
+        the ask never reaches the app.
+
+        The assigned size BECOMES the canvas's viewbox, so the ops are
+        written in the points layout handed over and a later plain
+        `draw()` on the same canvas keeps them."""
+        seat = self._draw_handlers.get(ident)
+        if seat is None:
+            return
+        handle, fn = seat
+        size = (float(values[0]), float(values[1]))
+        # The frame's time in seconds rides third on a tick; a redraw is
+        # the same question without a clock. ONE CALL SHAPE either way —
+        # `_register_draw` widened an on_draw handler to take it, so
+        # nothing here reads the record kind.
+        time = float(values[2]) if kind == wire.OCC_TICK else 0.0
+
+        def answer():
+            _canvas_viewboxes[ident] = size
+            with handle.draw() as d:
+                fn(d, size, time)
+        self._dispatch(answer)
 
     def _register_history(self, window_id, on_undone, on_redone):
         """Seat a surface's two history handlers. Per window and NOT
@@ -4072,6 +4184,15 @@ class App:
                 handler = table.get(ident)
                 if handler is not None:
                     self._dispatch(handler, label, delta)
+                continue
+            if kind in (wire.OCC_DRAW_REQUESTED, wire.OCC_TICK):
+                # THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER
+                # DISPATCHED TO THE APP: the guest declared a
+                # drawing-as-a-function-of-size, so this draws it. keys
+                # is empty — the core asks only LIVE canvases in this
+                # slice and refuses a template-node policy by name
+                # (docs/deferred.md).
+                self._answer_canvas(ident, kind, payload)
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):

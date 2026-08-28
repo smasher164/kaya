@@ -142,6 +142,9 @@ public final class Main {
             case "assets":
                 app = Assets::app;
                 break;
+            case "sizepolicy":
+                app = SizePolicy::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

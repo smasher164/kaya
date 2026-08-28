@@ -179,6 +179,12 @@ type App struct {
 	// Each canvas's declared viewbox, so a redraw in a LATER transaction
 	// does not have to repeat it (docs/canvas-plan.md §2.2).
 	canvasViewboxes map[uint64]Viewbox
+	// A canvas's drawing as a FUNCTION OF ITS SIZE (docs/canvas-plan.md
+	// §3.2.1). Not a handler table like the ones above: these produce a
+	// DRAWING rather than a mutation, so Serve answers the ask itself and
+	// the guest never sees one. The float64 is the frame's time in
+	// seconds, 0 for a plain redraw.
+	draws map[uint64]func(*Draw, Viewbox, float64)
 	// Non-zero exactly while a template body is being declared: the
 	// record-time mirror-read guard's arm. openFors is For-only (it
 	// carries collection ids for nesting), so the guard has its own
@@ -232,6 +238,7 @@ func NewApp() *App {
 		children:       make(map[uint64][]uint64),
 		derived:        make(map[uint64][]func(*Tx)),
 		canvasViewboxes: make(map[uint64]Viewbox),
+		draws:           make(map[uint64]func(*Draw, Viewbox, float64)),
 	}
 }
 
@@ -1192,6 +1199,64 @@ func (tx *Tx) DrawAt(n Node, keys []any, vb Viewbox, body func(d *Draw)) {
 	values = append(values, d.ops...)
 	tx.emit(TxSetDrawing(n.id, vb.W, vb.H, uint32(len(d.ops)),
 		uint32(len(keys)), values))
+}
+
+// Fixed declares that THIS CANVAS REFUSES COERCION: it draws at its
+// viewbox and is placed in whatever track layout gives it, never
+// adapting to it (docs/canvas-plan.md §3.2.1, ruling 2).
+//
+// The ONE TRUE PROPERTY of the size policy, because it ASSERTS
+// something about the drawing rather than providing a capability: the
+// content is not a function of the assigned track. That buys an
+// intrinsic size from the viewbox, a strictly 1:1 blit
+// (tools/check-canvas-blit.sh) and NO promise of raster-once — a
+// display-scale or appearance change re-runs the same display list.
+//
+// The other two policies are HANDLERS (OnDraw, OnTick), and a canvas
+// that declares nothing is `scale`.
+func (w Widget) Fixed() Widget {
+	w.tx.emit(TxSetSizePolicy(w.id, SizePolicyFixed))
+	return w
+}
+
+// OnDraw declares that THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE:
+// the core hands it the size layout assigned and takes back what fn
+// draws for that size, which becomes the viewbox — so a chart re-lays
+// out for the width instead of scaling its old pixels.
+//
+// THE BINDING OPENS THE TRANSACTION, not the guest
+// (tools/check-ambient-tx.sh): Serve answers the request and keeps
+// looping, so it never surfaces as an occurrence.
+//
+// LATEST-WINS: a size the guest never caught up with is dropped rather
+// than drawn late, so a drag-resize storm cannot queue.
+func (w Widget) OnDraw(fn func(d *Draw, size Viewbox)) Widget {
+	return w.registerDraw(SizePolicyRedraw,
+		func(d *Draw, size Viewbox, _ float64) { fn(d, size) })
+}
+
+// OnTick is OnDraw on the platform's FRAME CLOCK: fn is handed the
+// assigned size and the frame's time in seconds (docs/canvas-plan.md
+// §15.4).
+//
+// THE TIME IS THE PLATFORM'S. A guest that reads its own clock
+// re-imports exactly the jitter Choreographer's frame time and
+// CADisplayLink's targetTimestamp were built to remove. Under the
+// harness it is the core's deterministic step, advanced by a verb.
+func (w Widget) OnTick(fn func(d *Draw, size Viewbox, time float64)) Widget {
+	return w.registerDraw(SizePolicyTick, fn)
+}
+
+// registerDraw is the ONE ACT the two handlers above are: the closure
+// and the policy record together. NOT EXPORTED on purpose — a guest
+// that could register without declaring would have a handler nothing
+// ever calls, which is the "one more thing to keep consistent" the
+// ruling refused (docs/canvas-plan.md §3.2.1). The emit comes first so
+// a chain through a dead transaction dies before the table moves.
+func (w Widget) registerDraw(policy uint32, fn func(*Draw, Viewbox, float64)) Widget {
+	w.tx.emit(TxSetSizePolicy(w.id, policy))
+	w.tx.app.draws[w.id] = fn
+	return w
 }
 
 // Slider creates a slider over min..max at value, with its change
@@ -3405,6 +3470,11 @@ func (t *Tpl) Image(source []byte) Node {
 // (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
 // every copy is born with it; Tx.DrawAt re-declares one copy's
 // afterwards.
+//
+// NO SIZE POLICY HERE, and the missing methods are the refusal: Fixed,
+// OnDraw and OnTick are Widget's and a Node has none of them, so a
+// stamped canvas keeps `scale` and the compiler says so (docs/deferred.md,
+// the template-zone size policy entry).
 func (t *Tpl) Canvas(vb Viewbox, body func(d *Draw)) Node {
 	n := t.Widget(KindCanvas)
 	d := &Draw{viewbox: vb}
@@ -3850,6 +3920,62 @@ func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
 	a.nodeToggles[n.id] = fn
 }
 
+// answerCanvasAsk answers one draw_requested or tick. A method rather
+// than an inline arm so sizepolicy_test.go can drive it with no ring.
+//
+// ONE CALL SHAPE, decided at registration: OnDraw widens its closure to
+// the tick's arity, so a TICK canvas — which the core asks once as a
+// draw_requested before its first frame — is answered here with time 0
+// and never with the wrong number of arguments.
+func (a *App) answerCanvasAsk(kind uint16, id uint64, keys []any, tail []any) {
+	// A stamped copy's canvas is never asked: the size policy is a
+	// live-zone declaration in this slice and the core refuses a
+	// template-node one by name (docs/deferred.md).
+	if len(keys) != 0 {
+		panic(fmt.Sprintf("kaya: the core asks only live canvases, and this ask "+
+			"names template node %d with %d keys", id, len(keys)))
+	}
+	fn := a.draws[id]
+	if fn == nil {
+		return // unclaimed, and it drops like any other occurrence
+	}
+	size, time := drawAsk(kind, tail)
+	a.dispatch(func(tx *Tx) {
+		// The assigned size IS the next viewbox, so a later plain Tx.Draw
+		// on this canvas is written in it too.
+		tx.app.canvasViewboxes[id] = size
+		tx.Draw(Widget{id: id, tx: tx}, func(d *Draw) { fn(d, size, time) })
+	})
+}
+
+// drawAsk cuts a canvas ask's decoded tail — the run of bare values
+// ParseOccurrence reads to the end of the record: the assigned width and
+// height, plus a tick's frame time in seconds. A tail that does not say
+// that is the core disagreeing with this binding about the record, so it
+// refuses naming what it read rather than drawing at a size nobody sent.
+func drawAsk(kind uint16, tail []any) (Viewbox, float64) {
+	want := 2
+	if kind == occTick {
+		want = 3
+	}
+	if len(tail) < want {
+		panic(fmt.Sprintf("kaya: a canvas ask carries %d values, want %d", len(tail), want))
+	}
+	vals := make([]float64, want)
+	for i := range vals {
+		v, ok := tail[i].(float64)
+		if !ok {
+			panic(fmt.Sprintf("kaya: value %d of a canvas ask is a %T, want a float64",
+				i, tail[i]))
+		}
+		vals[i] = v
+	}
+	if kind == occTick {
+		return Viewbox{W: vals[0], H: vals[1]}, vals[2]
+	}
+	return Viewbox{W: vals[0], H: vals[1]}, 0
+}
+
 // Serve dispatches occurrences ON THE CALLING GOROUTINE and returns when
 // the core has shut down. Separate from Run because WHO OWNS THE PROCESS
 // ENTRY differs by platform and nothing else does
@@ -3885,7 +4011,16 @@ func (a *App) Serve() {
 		files, _ := payload.([]PickedFile)
 		clipValues, isClip := payload.(ClipValues)
 		undo, isUndo := payload.(undoReport)
+		tail, _ := payload.([]any)
 		switch {
+		// THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER MAPPED
+		// (docs/canvas-plan.md §3.2.1): the guest registered a
+		// drawing-as-a-function-of-size, so this draws it, submits the
+		// one record and keeps looping. The transaction is the binding's
+		// (tools/check-ambient-tx.sh), and an unclaimed ask drops like
+		// any other.
+		case kind == occDrawRequested || kind == occTick:
+			a.answerCanvasAsk(kind, id, keys, tail)
 		case kind == occButtonClicked && len(keys) == 0:
 			if fn := a.widgetHandlers[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx) })

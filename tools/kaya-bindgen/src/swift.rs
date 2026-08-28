@@ -490,7 +490,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// checkbox's new state for TOGGLED, the slider's new value for");
     c.line("/// VALUE_CHANGED, nil for clicks.");
     c.line("func kayaParseOccurrence(_ rec: [UInt8])");
-    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?)?");
+    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?, tail: [KayaValue])?");
     c.line("{");
     c.line("    rec.withUnsafeBytes { raw in");
     c.line("        let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)");
@@ -507,7 +507,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
     c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
-    c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil)");
+    c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil, [])");
     c.line("        }");
     // The picker's answer: the one occurrence whose payload is a LIST
     // OF RECORDS, which no single KayaValue can carry — hence the
@@ -539,7 +539,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                files.append(KayaPickedFile(");
     c.line("                    handle: UInt64(handle), name: name, localPath: localPath))");
     c.line("            }");
-    c.line("            return (kind, id, [], nil, files, nil)");
+    c.line("            return (kind, id, [], nil, files, nil, [])");
     c.line("        }");
     // The privileged read's one answer, in its own arm: the generic
     // tail would take the CLIP KIND for a path length, so a text answer
@@ -550,7 +550,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             name.to_uppercase()
         ));
         c.line("            let (clip, _) = kayaParseClip(raw, 16)");
-        c.line("            return (kind, id, [], nil, [], clip)");
+        c.line("            return (kind, id, [], nil, [], clip, [])");
         c.line("        }");
     }
     let id_only = crate::id_only_occurrence_names(spec)
@@ -564,7 +564,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("            || {cond}"));
     }
     c.line("        {");
-    c.line("            return (kind, id, [], nil, [], nil)");
+    c.line("            return (kind, id, [], nil, [], nil, [])");
     c.line("        }");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
@@ -579,7 +579,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
         c.line("        {");
         c.line("            let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)");
-        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil)");
+        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, [])");
         c.line("        }");
     }
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
@@ -657,7 +657,48 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            clip = kayaParseClip(raw, at).clip");
         c.line("        }");
     }
-    c.line("        return (kind, id, keys, payload, [], clip)");
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1). Its own
+    // tuple member because the run is 2 values for a redraw and 3 for a
+    // tick, and `payload` is one.
+    c.line("        var tail: [KayaValue] = []");
+    let values_tail = crate::values_tail_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !values_tail.is_empty() {
+        c.line(&format!("        if {}", values_tail[0]));
+        for cond in &values_tail[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            // The canvas asks carry a run of BARE values after the");
+        c.line("            // key path — the assigned size, and a tick's frame time");
+        c.line("            // — with no count in front, so they are read until the");
+        c.line("            // record ends (docs/canvas-plan.md §3.2.1).");
+        c.line("            let end = Int(raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self))");
+        c.line("            var tailAt = at");
+        c.line("            while tailAt < end {");
+        c.line("                let ttype = raw.loadUnaligned(fromByteOffset: tailAt, as: UInt32.self)");
+        c.line("                let tlen = Int(raw.loadUnaligned(fromByteOffset: tailAt + 4, as: UInt32.self))");
+        c.line("                switch ttype {");
+        c.line("                case UInt32(KAYA_VALUE_BOOL):");
+        c.line("                    tail.append(.bool(raw[tailAt + 8] != 0))");
+        c.line("                case UInt32(KAYA_VALUE_I64):");
+        c.line("                    tail.append(.i64(Int64(bitPattern:");
+        c.line("                        raw.loadUnaligned(fromByteOffset: tailAt + 8, as: UInt64.self))))");
+        c.line("                case UInt32(KAYA_VALUE_F64):");
+        c.line("                    tail.append(.f64(Double(bitPattern:");
+        c.line("                        raw.loadUnaligned(fromByteOffset: tailAt + 8, as: UInt64.self))))");
+        c.line("                default:");
+        c.line("                    tail.append(.str(String(");
+        c.line("                        decoding: raw[(tailAt + 8)..<(tailAt + 8 + tlen)], as: UTF8.self)))");
+        c.line("                }");
+        c.line("                tailAt += 8 + ((tlen + 7) & ~7)");
+        c.line("            }");
+        c.line("        }");
+    }
+    c.line("        return (kind, id, keys, payload, [], clip, tail)");
     c.line("    }");
     c.line("}");
     c.out

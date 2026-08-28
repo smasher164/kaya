@@ -876,6 +876,36 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            payload = parseClip(rec, b, at, new int[1]);");
         c.line("        }");
     }
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1).
+    let values_tail = crate::values_tail_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !values_tail.is_empty() {
+        c.line(&format!("        if ({values_tail}) {{"));
+        c.line("            // The canvas asks carry a run of BARE values after the");
+        c.line("            // key path — the assigned size, and a tick's frame time —");
+        c.line("            // with no count in front, so they are read until the");
+        c.line("            // record ends (docs/canvas-plan.md §3.2.1).");
+        c.line("            int end = b.getInt(0);");
+        c.line("            List<Object> tail = new ArrayList<>();");
+        c.line("            while (at < end) {");
+        c.line("                int ttype = b.getInt(at);");
+        c.line("                int tlen = b.getInt(at + 4);");
+        c.line("                switch (ttype) {");
+        c.line("                    case VALUE_BOOL: tail.add(rec[at + 8] != 0); break;");
+        c.line("                    case VALUE_I64: tail.add(b.getLong(at + 8)); break;");
+        c.line("                    case VALUE_F64: tail.add(b.getDouble(at + 8)); break;");
+        c.line("                    default:");
+        c.line("                        tail.add(new String(rec, at + 8, tlen, StandardCharsets.UTF_8));");
+        c.line("                }");
+        c.line("                at += 8 + ((tlen + 7) & ~7);");
+        c.line("            }");
+        c.line("            payload = tail;");
+        c.line("        }");
+    }
     c.line("        return new Occ(kind, id, keys, payload);");
     c.line("    }");
     c.line("");

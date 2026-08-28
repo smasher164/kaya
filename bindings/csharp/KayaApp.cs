@@ -97,6 +97,51 @@ readonly struct Widget
     internal readonly ulong Id;
 
     internal Widget(ulong id) => Id = id;
+
+    /// <summary>THIS CANVAS REFUSES COERCION: it draws at its viewbox and
+    /// is placed in whatever track layout gives it, never adapting to it
+    /// (docs/canvas-plan.md §3.2.1, ruling 2). A canvas that declares
+    /// nothing is `scale`, which has no spelling on purpose.</summary>
+    public Widget Fixed()
+    {
+        KayaApp.AmbientTx("Fixed()").SizePolicy(this, KayaWire.SizePolicyFixed);
+        return this;
+    }
+
+    /// <summary>THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: `f` is
+    /// handed the size layout assigned, which becomes the viewbox it draws
+    /// in, and the core takes back what it drew for that size.
+    ///
+    /// PROVIDING THE HANDLER IS THE DECLARATION, so this registers `f` AND
+    /// puts the policy on the wire in one act — a registered handler
+    /// nothing ever calls is unspellable (docs/canvas-plan.md §3.2.1).
+    ///
+    /// The binding answers the ask inside a transaction IT opens
+    /// (tools/check-ambient-tx.sh); it never reaches the guest as an
+    /// occurrence.</summary>
+    public Widget OnDraw(Action<Draw, Viewbox> f)
+    {
+        var tx = KayaApp.AmbientTx("OnDraw()");
+        tx.App.RegisterDraw(this, (d, size, _) => f(d, size));
+        tx.SizePolicy(this, KayaWire.SizePolicyRedraw);
+        return this;
+    }
+
+    /// <summary>The same, on the platform's FRAME CLOCK: `f` is handed the
+    /// assigned size and the frame's time in seconds. A tick canvas is a
+    /// redraw canvas too — the core asks it once before its first frame.
+    ///
+    /// THE TIME IS THE PLATFORM'S; a guest that reads its own clock
+    /// re-imports the jitter the frame time exists to remove. Under the
+    /// harness it is the core's deterministic step, advanced by a
+    /// verb.</summary>
+    public Widget OnTick(Action<Draw, Viewbox, double> f)
+    {
+        var tx = KayaApp.AmbientTx("OnTick()");
+        tx.App.RegisterDraw(this, f);
+        tx.SizePolicy(this, KayaWire.SizePolicyTick);
+        return this;
+    }
 }
 
 /// A half-open span of a text widget's content — Start up to but not
@@ -589,6 +634,16 @@ sealed class KayaApp
     // does not have to repeat it (docs/canvas-plan.md §2.2).
     internal readonly Dictionary<ulong, Viewbox> CanvasViewboxes = new();
 
+    // THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
+    // §3.2.1), keyed by canvas widget id. Not a handler table like the
+    // others: these produce a DRAWING rather than a model edit, so
+    // DispatchLoop answers the ask itself and the guest never sees it.
+    // ONE ARITY FOR BOTH POLICIES — the third argument is the frame's
+    // time in seconds, 0 for a plain redraw — because a TICK canvas is
+    // asked as a `draw_requested` once before its first frame, and the
+    // handler that answers that ask is the tick one.
+    readonly Dictionary<ulong, Action<Draw, Viewbox, double>> draws = new();
+
     // No `nodes`: template nodes draw from `widgets`, one sequence per
     // app (DESIGN.md, Binding conventions).
     ulong signals, widgets, collections, menuItems;
@@ -904,6 +959,22 @@ sealed class KayaApp
     public void OnValueChanged(Node n, Action<Tx, List<object>, double> handler) =>
         nodeValues[n.Id] = handler;
 
+    /// The open transaction, reached ambiently by the chained canvas
+    /// declarations (Widget.Fixed, OnDraw, OnTick) — Signal.Derive's route
+    /// and for the same reason: the handle is an id alone.
+    internal static Tx AmbientTx(string what) =>
+        Ambient?.CurrentTx ?? throw new InvalidOperationException(
+            $"kaya: {what} is a declaration and belongs inside a transaction "
+            + "(a build or a handler)");
+
+    /// The registration half of Widget.OnDraw and Widget.OnTick. NOT
+    /// PUBLIC on purpose: registering the handler and declaring the policy
+    /// are ONE act, and a guest that could do the first without the second
+    /// would hold a handler nothing ever calls (docs/canvas-plan.md
+    /// §3.2.1).
+    internal void RegisterDraw(Widget canvas, Action<Draw, Viewbox, double> f) =>
+        draws[canvas.Id] = f;
+
     /// One handler dispatch: an exception crosses the Build boundary
     /// (which rolled the mirrors back and dropped the records), is
     /// logged, and the loop moves to the next occurrence. Fatal runtime
@@ -987,6 +1058,34 @@ sealed class KayaApp
                     + "App.Post, which runs your function as a transaction over there.");
     }
 
+    /// Answer one canvas ask inside the binding's own transaction: the
+    /// ASSIGNED SIZE becomes this canvas's viewbox — so a later plain
+    /// Tx.Draw uses it too — and exactly one drawing goes back for it.
+    void AnswerCanvasAsk(
+        Tx tx, ulong canvas, Action<Draw, Viewbox, double> f, List<object> ask)
+    {
+        var size = new Viewbox(AskNumber(ask, 0), AskNumber(ask, 1));
+        // A `draw_requested` carries no time, and a TICK canvas is handed
+        // one of those before its first frame: that frame is time 0.
+        double time = ask.Count > 2 ? AskNumber(ask, 2) : 0.0;
+        CanvasViewboxes[canvas] = size;
+        tx.Draw(new Widget(canvas), d => f(d, size, time));
+    }
+
+    /// One value out of the ask's bare tail. A refusal rather than a
+    /// silent zero: the tail is f64 by construction
+    /// (crates/kaya/src/protocol.rs), so any other shape means the wire
+    /// moved under this arm — Dispatch logs the throw and rolls back.
+    static double AskNumber(List<object> ask, int at)
+    {
+        if (at < ask.Count && ask[at] is double d)
+            return d;
+        string got = at < ask.Count ? ask[at]?.GetType().Name ?? "null" : "absent";
+        throw new InvalidOperationException(
+            "kaya: a canvas ask carries width, height (and a tick's time) as f64 — "
+                + $"value {at} of {ask.Count} is {got}");
+    }
+
     void DispatchLoop()
     {
         ClaimAppThread();
@@ -1004,7 +1103,26 @@ sealed class KayaApp
             }
             string text = payload as string;
             bool isChecked = payload is bool b && b;
-            if (kind == KayaWire.OccKindSortRequested && keys.Count == 0)
+            // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
+            // OVER (docs/canvas-plan.md §3.2.1): the guest registered a
+            // drawing-as-a-function-of-size, so this draws it, submits the
+            // one record and keeps looping. No registration means DROP,
+            // like any unclaimed occurrence.
+            //
+            // AN EMPTY KEY PATH IS THE WHOLE RULE HERE: the size policy is
+            // a live-zone declaration in this slice and the core refuses
+            // one against a template node by name, so no stamped copy is
+            // ever asked (docs/deferred.md, THE TEMPLATE ZONE IS REFUSED).
+            if ((kind == KayaWire.OccKindDrawRequested || kind == KayaWire.OccKindTick)
+                && keys.Count == 0)
+            {
+                if (draws.TryGetValue(id, out var draw))
+                {
+                    var ask = payload as List<object> ?? new List<object>();
+                    Dispatch(tx => AnswerCanvasAsk(tx, id, draw, ask));
+                }
+            }
+            else if (kind == KayaWire.OccKindSortRequested && keys.Count == 0)
             {
                 uint column = payload is uint u ? u : 0;
                 if (sortHandlers.TryGetValue(id, out var fn))
@@ -1676,6 +1794,12 @@ sealed class Tx
         if (grow is double g) SetGrow(w, g);
         return w;
     }
+
+    /// WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+    /// (docs/canvas-plan.md §3.2.1) — behind Widget.Fixed, Widget.OnDraw
+    /// and Widget.OnTick, which is where a guest declares it.
+    internal void SizePolicy(Widget w, uint policy) =>
+        Records.Add(KayaWire.TxSetSizePolicy(w.Id, policy));
 
     /// DECLARE the whole drawing on a canvas, replacing whatever was
     /// declared before. The lambda reads as immediate-mode drawing and
@@ -3229,6 +3353,12 @@ sealed class Tpl
     /// (docs/canvas-plan.md §3.1). The drawing is declared with the node,
     /// so every copy is born with it; Tx.Draw(Node, keys, …) re-declares
     /// one copy's afterwards.
+    ///
+    /// NO SIZE POLICY HERE, AND THE COMPILER IS THE REFUSAL: Fixed,
+    /// OnDraw and OnTick are Widget's and Node does not carry them, so a
+    /// canvas in a row template is `scale` — the default, and correct
+    /// (docs/deferred.md, THE TEMPLATE ZONE IS REFUSED, LOUDLY, under the
+    /// size-policy entry; the core panics naming it too).
     public Node Canvas(Viewbox viewbox, Action<Draw> body)
     {
         var n = Widget(KayaWire.KindCanvas);

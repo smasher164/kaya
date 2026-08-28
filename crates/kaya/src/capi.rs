@@ -3290,8 +3290,17 @@ static HARNESS_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 /// monotone on its own.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_harness_frame() {
+    drive_frame(harness_frame_time());
+}
+
+/// The harness clock's NEXT step, in seconds. ONE COUNTER FOR THE
+/// PROCESS, which is the same reason `HARNESS_FRAME_HZ` is one number: a
+/// leg's frame count is part of the scene, so the backends that own their
+/// own scene (GTK, WinUI) advance this clock rather than keeping one of
+/// their own.
+pub(crate) fn harness_frame_time() -> f64 {
     let n = HARNESS_FRAMES.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    drive_frame(n as f64 / HARNESS_FRAME_HZ);
+    n as f64 / HARNESS_FRAME_HZ
 }
 
 /// Presentation-side occurrences the core produced rather than a user

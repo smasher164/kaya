@@ -1858,6 +1858,27 @@ public final class KayaWire {
         if (kind == OCC_KIND_PASTED) {
             payload = parseClip(rec, b, at, new int[1]);
         }
+        if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK) {
+            // The canvas asks carry a run of BARE values after the
+            // key path — the assigned size, and a tick's frame time —
+            // with no count in front, so they are read until the
+            // record ends (docs/canvas-plan.md §3.2.1).
+            int end = b.getInt(0);
+            List<Object> tail = new ArrayList<>();
+            while (at < end) {
+                int ttype = b.getInt(at);
+                int tlen = b.getInt(at + 4);
+                switch (ttype) {
+                    case VALUE_BOOL: tail.add(rec[at + 8] != 0); break;
+                    case VALUE_I64: tail.add(b.getLong(at + 8)); break;
+                    case VALUE_F64: tail.add(b.getDouble(at + 8)); break;
+                    default:
+                        tail.add(new String(rec, at + 8, tlen, StandardCharsets.UTF_8));
+                }
+                at += 8 + ((tlen + 7) & ~7);
+            }
+            payload = tail;
+        }
         return new Occ(kind, id, keys, payload);
     }
 

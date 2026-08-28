@@ -1745,6 +1745,29 @@ static class KayaWire
         {
             payload = ParseClip(rec, at, out int _pasteEnd);
         }
+        if (kind == OccKindDrawRequested || kind == OccKindTick)
+        {
+            // The canvas asks carry a run of BARE values after the
+            // key path — the assigned size, and a tick's frame time
+            // — with no count in front, so they are read until the
+            // record ends (docs/canvas-plan.md §3.2.1).
+            int end = (int)BitConverter.ToUInt32(rec, 0);
+            var tail = new List<object>();
+            while (at < end)
+            {
+                uint ttype = BitConverter.ToUInt32(rec, at);
+                int tlen = BitConverter.ToInt32(rec, at + 4);
+                switch (ttype)
+                {
+                    case ValueBool: tail.Add(rec[at + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, at + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, at + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, at + 8, tlen)); break;
+                }
+                at += 8 + ((tlen + 7) & ~7);
+            }
+            payload = tail;
+        }
         return true;
     }
 }

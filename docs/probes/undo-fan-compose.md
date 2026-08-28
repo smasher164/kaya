@@ -516,11 +516,13 @@ file, `kayaWriteText` and the KayaTextField observer.
   kayaNativeUndoEchoProbe` over the tree finds only the pre-existing
   `tools/win/undoprobe/` names, which are a sibling's. THE THREE LANE
   RUNS AND EVERY GATE ABOVE WERE TAKEN AFTER THE REMOVAL.
+- **Rebuilt in place, not created** — the lane's own artifacts,
+  rebuilt every run, not mine to delete:
   ```
-- **Rebuilt in place, not created:** `android/milestone2/build`,
+  android/milestone2/build
+  android/kaya/build
+  target/aarch64-linux-android
   ```
-  `android/kaya/build`, `target/aarch64-linux-android` — the lane's own
-  artifacts, rebuilt every run, not mine to delete.
 - Kept in the scratchpad, because they are re-runnable instruments:
   `undo3a.sh` (§3a), `undocaret.sh` (contract point 3),
   `undoprobe-leg.sh` (the shipped-source measurement), their three

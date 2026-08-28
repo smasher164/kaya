@@ -1131,4 +1131,13 @@ def parse_occurrence(buf):
     if kind in (OCC_PASTED,):
         clip, values, at = parse_clip(buf, at)
         payload = (clip, values)
+    if kind in (OCC_DRAW_REQUESTED, OCC_TICK,):
+        # The canvas asks carry a run of BARE values after the
+        # key path — the assigned size, and a tick's frame time
+        # — with no count in front, so they are read until the
+        # record ends (docs/canvas-plan.md §3.2.1).
+        payload = []
+        while at < _size:
+            value, at = parse_value(buf, at)
+            payload.append(value)
     return kind, ident, keys, payload

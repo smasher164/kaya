@@ -655,6 +655,15 @@ fn reconcile_grow_align(child: &gtk4::Widget) {
         gtk4::Orientation::Vertical => child.set_valign(fill_or_start),
         _ => child.set_halign(fill_or_start),
     }
+    // A GROWN CANVAS TAKES THE WHOLE OFFERED BOX ON BOTH AXES
+    // (docs/canvas-plan.md §3.2.1). Without it a `redraw` canvas never
+    // starts: it is sized by a blit it cannot have until a track is
+    // reported, and Start clamps its allocation to that zero
+    // (docs/traps.md, "A canvas sized by its own blit NEVER STARTS").
+    if grow_weight(child) > 0.0 && child.is::<KayaCanvas>() {
+        child.set_halign(gtk4::Align::Fill);
+        child.set_valign(gtk4::Align::Fill);
+    }
 }
 
 /// The flex layout manager: GTK's half of the `grow` contract. GtkBox cannot
@@ -1120,10 +1129,10 @@ enum NativeWidget {
     /// `GtkScrolledWindow`, in that order (viewport, control). Both halves
     /// have to be reachable — see `widget` and `control` below.
     Textarea(gtk4::ScrolledWindow, gtk4::TextView),
-    /// The blit's widget: a `GtkPicture` over a `GdkMemoryTexture`, the
+    /// The blit's widget: a `KayaCanvas` over a `GdkMemoryTexture`, the
     /// raw-pixel sibling of `Image`'s encoded decode
     /// (docs/canvas-plan.md §8).
-    Canvas(gtk4::Picture),
+    Canvas(KayaCanvas),
 }
 
 impl NativeWidget {
@@ -1687,6 +1696,101 @@ fn presentation_report(core: &mut CoreState) {
     }
 }
 
+/// WHAT LAYOUT ASSIGNED EACH CANVAS, reported to the core — and what the
+/// core does with it IS the size policy (docs/canvas-plan.md §3.2.1):
+/// `scale` re-rasters the display list it already holds at this track,
+/// `redraw` and `tick` are asked for a drawing at it, `fixed` records the
+/// number and changes nothing.
+///
+/// THE REPORT IS WHAT THE STRETCH DEFECT WAS MISSING (docs/deferred.md):
+/// without it the core can only ever raster at the viewbox, and the
+/// backend is left to stretch that buffer into whatever it was given.
+///
+/// A canvas GTK has not laid out yet is SKIPPED rather than reported as
+/// zero: the core would refuse the number anyway, and sending it would be
+/// this backend saying something it has not measured.
+fn canvas_track_report(core: &mut CoreState) {
+    let canvases: Vec<(KayaCanvas, WidgetId)> =
+        core.canvases.iter().cloned().zip(core.canvas_ids.iter().copied()).collect();
+    let mut asks = Vec::new();
+    for (canvas, id) in canvases {
+        let track = (f64::from(canvas.width()), f64::from(canvas.height()));
+        if track.0 <= 0.0 || track.1 <= 0.0 {
+            continue;
+        }
+        let scene = &mut core.scene;
+        let Some((ops, mut asked)) =
+            crate::fault::guard("reporting a canvas's assigned track", || {
+                scene.set_canvas_track(id, track)
+            })
+        else {
+            continue;
+        };
+        for op in ops {
+            apply(core, op);
+        }
+        asks.append(&mut asked);
+    }
+    for occ in asks {
+        core.occurrences.send(occ);
+    }
+}
+
+/// A FRAME (docs/canvas-plan.md §15.4): every `tick` canvas is handed the
+/// track it was assigned and this time, in seconds.
+fn drive_frame(core: &mut CoreState, time: f64) {
+    let scene = &mut core.scene;
+    let ticks = crate::fault::guard("driving a frame", || scene.frame(time)).unwrap_or_default();
+    for occ in ticks {
+        core.occurrences.send(occ);
+    }
+}
+
+/// The harness owns the clock while it is running (§15.4) — the same
+/// discriminator the startup deadline reads.
+fn harness_drives_frames() -> bool {
+    std::env::var_os("KAYA_SELFTEST").is_some()
+}
+
+/// THE WINDOW'S FRAME CLOCK: the one reader of every canvas's track, and
+/// the platform's frame drive outside the harness.
+///
+/// ONE PER WINDOW, never one per canvas: GTK has a frame clock per
+/// surface, so a second callback would hand the same frame's timestamp in
+/// twice and measure every canvas as many times as there are canvases.
+/// (`kaya_frame`'s monotone guard exists because the mac attaches a
+/// driver per canvas; nothing here needs it.)
+///
+/// THE TRACK HALF RUNS IN BOTH MODES AND THE FRAME HALF DOES NOT. A
+/// scene's frame count is what its `frame` verbs advanced, so a wall
+/// clock ticking beside them would make every animation leg a question
+/// about the machine's load. The size policy is not a harness feature,
+/// though, so the reader a scene reads through has to be the one a real
+/// app runs — the mac arm's "one reader, both jobs".
+fn attach_canvas_clock(core: &mut CoreState) {
+    if core.canvas_clock {
+        return;
+    }
+    core.canvas_clock = true;
+    core.window.add_tick_callback(|_, clock| {
+        // THE CORE BORROW CAN ALREADY BE HELD: a harness read pumps the
+        // main context without releasing it (`run_scheduled_report`), and
+        // the frame clock is a source that pump dispatches. A frame is
+        // periodic, so the answer to a busy borrow is the next one.
+        CORE.with(|slot| {
+            let Ok(mut core) = slot.try_borrow_mut() else { return };
+            let Some(core) = core.as_mut() else { return };
+            canvas_track_report(core);
+            if !harness_drives_frames() {
+                // The clock's own timestamp, in microseconds — never one
+                // read here, which is the jitter it was fixed to remove.
+                drive_frame(core, clock.frame_time() as f64 / 1_000_000.0);
+            }
+        });
+        glib::ControlFlow::Continue
+    });
+}
+
 /// `run_scheduled_report`'s try-then-retry, for the same reason: a scale
 /// or appearance notify can arrive in a main-loop turn that already holds
 /// the CORE borrow, and a harness read pumps the context while holding
@@ -2089,8 +2193,12 @@ struct CoreState {
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id, and `kind#index` is the only address
     /// the harness has (the `column_ids` shape).
-    canvases: Vec<gtk4::Picture>,
+    canvases: Vec<KayaCanvas>,
     canvas_ids: Vec<WidgetId>,
+    /// Whether this window's frame clock is attached — the canvas track
+    /// reader and the frame drive (`attach_canvas_clock`). ONE per
+    /// window, so it is a flag rather than a handle per canvas.
+    canvas_clock: bool,
     scrolls: Vec<gtk4::ScrolledWindow>,
     progresses: Vec<gtk4::ProgressBar>,
     selects: Vec<gtk4::DropDown>,
@@ -2354,9 +2462,9 @@ fn drain_transactions() {
                     apply(core, op);
                 }
                 // A canvas that became a redraw one with its track
-                // already known (docs/canvas-plan.md §3.2.1). Empty on
-                // this backend while it holds depth_stub("sizepolicy"),
-                // because nothing here reports a track.
+                // already known (docs/canvas-plan.md §3.2.1) — the ask the
+                // track report itself cannot make, because the policy
+                // arrived after the geometry did.
                 for occ in core.scene.take_asks() {
                     core.occurrences.send(occ);
                 }
@@ -5987,29 +6095,135 @@ fn read_stream_to_end(
     );
 }
 
+/// THE CANVAS'S WIDGET: a `GdkPaintable` drawn at the size the CORE
+/// rastered it for, centred in whatever track layout assigned, clipped
+/// to it.
+///
+/// NOT A `GtkPicture`, and the size policy is why (docs/canvas-plan.md
+/// §3.2.1, ruling 2): `fixed` rasters at the viewbox whatever the track
+/// is, so the blit has to be strictly 1:1, and no member of
+/// `GtkContentFit` means that (docs/traps.md, "A canvas sized by its own
+/// blit NEVER STARTS", second half). tools/check-canvas-blit.sh refuses
+/// that vocabulary by name.
+mod canvas_view {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub struct KayaCanvasInner {
+        paintable: std::cell::RefCell<Option<gtk4::gdk::Paintable>>,
+        /// The blit's size in POINTS — the raster's pixels over the scale
+        /// it was drawn at. Held here rather than read back off the
+        /// paintable because `gdk_paintable_get_intrinsic_width` is an
+        /// integer and a fractional display scale makes this one not.
+        size: std::cell::Cell<(f64, f64)>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for KayaCanvasInner {
+        const NAME: &'static str = "KayaCanvas";
+        type Type = KayaCanvas;
+        type ParentType = gtk4::Widget;
+
+        fn class_init(klass: &mut Self::Class) {
+            // `GtkPicture`'s own role, which is what a canvas answers to
+            // (tools/scenes/canvas.steps' expect_ax).
+            klass.set_accessible_role(gtk4::AccessibleRole::Img);
+        }
+    }
+
+    impl ObjectImpl for KayaCanvasInner {}
+
+    impl WidgetImpl for KayaCanvasInner {
+        /// CONTENT IS THE FLOOR: the natural size is the drawing's own, so
+        /// an ungrown canvas is its viewbox and its track IS its viewbox.
+        /// The minimum is 0 — `GtkPicture::can-shrink`'s default — because
+        /// a canvas given less is clipped rather than resized.
+        fn measure(
+            &self,
+            orientation: gtk4::Orientation,
+            _for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let (w, h) = self.size.get();
+            let natural = if orientation == gtk4::Orientation::Horizontal { w } else { h };
+            (0, natural.ceil().max(0.0) as i32, -1, -1)
+        }
+
+        /// THE BLIT, 1:1 (docs/canvas-plan.md §3.2.1): the paintable at the
+        /// size it was drawn for, centred, leftover as margin, anything
+        /// over the edge clipped. WHICH size that is — the viewbox for
+        /// `fixed`, the assigned track for everything else — is the core's
+        /// decision and this arm may not have an opinion about it.
+        fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+            let Some(paintable) = self.paintable.borrow().clone() else { return };
+            let (pw, ph) = self.size.get();
+            if pw <= 0.0 || ph <= 0.0 {
+                return;
+            }
+            let (w, h) = (f64::from(self.obj().width()), f64::from(self.obj().height()));
+            snapshot.push_clip(&gtk4::graphene::Rect::new(0.0, 0.0, w as f32, h as f32));
+            snapshot.save();
+            snapshot.translate(&gtk4::graphene::Point::new(
+                ((w - pw) / 2.0).round() as f32,
+                ((h - ph) / 2.0).round() as f32,
+            ));
+            gtk4::prelude::PaintableExt::snapshot(&paintable, snapshot, pw, ph);
+            snapshot.restore();
+            snapshot.pop();
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KayaCanvas(ObjectSubclass<KayaCanvasInner>)
+            @extends gtk4::Widget,
+            @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
+    }
+
+    impl Default for KayaCanvas {
+        fn default() -> Self {
+            glib::Object::new()
+        }
+    }
+
+    impl KayaCanvas {
+        /// The blit and the points it covers. `None` is PRESENT AND EMPTY,
+        /// never absent — the image arm's rule verbatim
+        /// (tools/check-empty-child.sh).
+        pub fn set_blit(
+            &self,
+            paintable: Option<&gtk4::gdk::Paintable>,
+            width: f64,
+            height: f64,
+        ) {
+            self.imp().paintable.replace(paintable.cloned());
+            let size = if paintable.is_some() { (width, height) } else { (0.0, 0.0) };
+            if self.imp().size.replace(size) != size {
+                self.queue_resize();
+            }
+            self.queue_draw();
+        }
+    }
+}
+
+use canvas_view::KayaCanvas;
+
 /// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into
-/// a `GdkMemoryTexture`, shown at the LOGICAL size the raster's own scale
-/// names.
+/// a `GdkMemoryTexture`, handed to the canvas at the LOGICAL size the
+/// raster's own scale names.
 ///
 /// `R8g8b8a8Premultiplied` IS tiny-skia's `Pixmap` layout — R at byte 0,
 /// A at byte 3 — so this arm swizzles nothing. `expect_ink` is what fails
 /// if that ever stops being true.
 ///
-/// THE SNAPSHOT IS WHERE THE SCALE GOES (§5 rule 2). A `GdkTexture`
-/// carries none, and `GtkPicture`'s natural size is the texture's PIXEL
-/// size, so a 2x raster would ask layout for twice the viewbox and every
-/// container above it would inherit that. `gtk_snapshot_to_paintable`
-/// takes the intrinsic size as an argument, which is the one place a
-/// logical size can be stated.
-///
-/// A drawing that will not decode is PRESENT AND EMPTY, never absent —
-/// the image arm's rule verbatim (tools/check-empty-child.sh): the
-/// GtkPicture stays in the tree with its paintable cleared.
-fn set_drawing(picture: &gtk4::Picture, width: u32, height: u32, scale: f64, pixels: &[u8]) {
+/// THE SIZE IS WHERE THE SCALE GOES (§5 rule 2). A `GdkTexture` carries
+/// none, so a 2x raster handed over by its pixel count would ask layout
+/// for twice the viewbox and every container above it would inherit that.
+fn set_drawing(canvas: &KayaCanvas, width: u32, height: u32, scale: f64, pixels: &[u8]) {
     let stride = width as usize * 4;
     let want = stride * height as usize;
     if width == 0 || height == 0 || !scale.is_finite() || scale <= 0.0 || pixels.len() < want {
-        picture.set_paintable(gtk4::gdk::Paintable::NONE);
+        canvas.set_blit(None, 0.0, 0.0);
         return;
     }
     let bytes = glib::Bytes::from(&pixels[..want]);
@@ -6021,10 +6235,8 @@ fn set_drawing(picture: &gtk4::Picture, width: u32, height: u32, scale: f64, pix
         stride,
     );
     let (lw, lh) = (f64::from(width) / scale, f64::from(height) / scale);
-    let snapshot = gtk4::Snapshot::new();
-    gtk4::prelude::PaintableExt::snapshot(&texture, &snapshot, lw, lh);
-    let sized = snapshot.to_paintable(Some(&gtk4::graphene::Size::new(lw as f32, lh as f32)));
-    picture.set_paintable(sized.as_ref());
+    use gtk4::prelude::Cast;
+    canvas.set_blit(Some(texture.upcast_ref::<gtk4::gdk::Paintable>()), lw, lh);
 }
 
 fn apply(core: &mut CoreState, op: ApplyOp) {
@@ -6299,17 +6511,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 WidgetKind::Canvas => {
                     // The raw-pixel sibling of the arm above: a
-                    // GdkMemoryTexture in a GtkPicture, filled by the
-                    // SetDrawing arm (docs/canvas-plan.md §8).
-                    //
-                    // FILL, NEVER CONTAIN: §3.2 rule 2 is stretch to
-                    // fill rather than fit with letterboxing, and
-                    // GtkPicture's default is Contain.
-                    let picture = gtk4::Picture::new();
-                    picture.set_content_fit(gtk4::ContentFit::Fill);
-                    core.canvases.push(picture.clone());
+                    // GdkMemoryTexture in a KayaCanvas, filled by the
+                    // SetDrawing arm (docs/canvas-plan.md §8) and blitted
+                    // 1:1 (§3.2.1, the type's own comment).
+                    let canvas = KayaCanvas::default();
+                    core.canvases.push(canvas.clone());
                     core.canvas_ids.push(id);
-                    NativeWidget::Canvas(picture)
+                    // The first canvas is what starts the window's frame
+                    // clock: the track reader every policy needs, and the
+                    // frame drive outside the harness.
+                    attach_canvas_clock(core);
+                    NativeWidget::Canvas(canvas)
                 }
             };
             {
@@ -7032,8 +7244,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             buffer.select_range(&stop, &start);
         }
         ApplyOp::SetDrawing { id, width, height, scale, pixels } => {
-            if let Some(NativeWidget::Canvas(picture)) = core.widgets.get(&id) {
-                set_drawing(&picture.clone(), width, height, scale, &pixels.0);
+            if let Some(NativeWidget::Canvas(canvas)) = core.widgets.get(&id) {
+                set_drawing(&canvas.clone(), width, height, scale, &pixels.0);
             }
         }
         ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {
@@ -8605,6 +8817,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 images: Vec::new(),
                 canvases: Vec::new(),
                 canvas_ids: Vec::new(),
+                canvas_clock: false,
                 scrolls: Vec::new(),
                 progresses: Vec::new(),
                 selects: Vec::new(),
@@ -11480,17 +11693,27 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    /// THE SIZE POLICY IS NOT ON THIS BACKEND YET (docs/canvas-plan.md
-    /// §3.2.1): nothing here reports a canvas's assigned track, so the
-    /// core can only ever raster at the viewbox and this read would
-    /// answer "no track reported" for every canvas — a sentence a scene
-    /// could not tell from a broken one.
-    fn canvas_raster_shape(&self, _target: crate::harness::Target) -> String {
-        crate::depth_stub("sizepolicy")
+    /// WHICH SIZE this canvas's raster is (docs/canvas-plan.md §3.2.1),
+    /// asked of the CORE like `canvas_probe`: the two numbers being
+    /// compared were made on opposite sides of the boundary — the TRACK is
+    /// what `canvas_track_report` measured off this window's layout, the
+    /// VIEWBOX is what the guest declared.
+    fn canvas_raster_shape(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(target.index, core.canvas_ids.len()) else {
+                return format!("<this window holds {} canvases>", core.canvas_ids.len());
+            };
+            core.scene
+                .canvas_raster_shape(core.canvas_ids[i])
+                .unwrap_or_else(|| "<the core holds no drawing for this canvas>".to_owned())
+        })
     }
 
+    /// ADVANCE THE FRAME CLOCK by one frame at the CORE's own step
+    /// (§15.4) — never this platform's, whose tick callback drives no
+    /// frame while the harness is running.
     fn frame(&self) {
-        crate::depth_stub("sizepolicy")
+        Self::on_main_mut(|core| drive_frame(core, crate::capi::harness_frame_time()))
     }
 
     /// THE BLIT, sampled off the window's OWN RENDERED PIXELS through the
@@ -11991,6 +12214,15 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
         return Some(atspi::Role::Slider);
     }
     if w.is::<gtk4::Picture>() {
+        return Some(atspi::Role::Image);
+    }
+    // The canvas is kaya's own widget rather than a GtkPicture (the size
+    // policy's 1:1 blit) and declares `AccessibleRole::Img`, which the bus
+    // publishes as Image exactly like the picture above — MEASURED, like
+    // every other row here: without this arm three scenes read
+    // "<not in the accessibility tree>" (docs/traps.md, "A canvas sized by
+    // its own blit NEVER STARTS", last paragraph).
+    if w.is::<KayaCanvas>() {
         return Some(atspi::Role::Image);
     }
     if w.is::<gtk4::ProgressBar>() {

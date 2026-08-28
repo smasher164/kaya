@@ -334,7 +334,19 @@ in docs/deferred.md.
    them — six bindings spell the typed narrowing exactly as the untyped
    one and are told apart only by the receiver's type. Fourteen watched
    census reds beside the Haskell four, each a shape that COMPILES and
-   lies),
+   lies.
+   AND THE SIZE-POLICY SURFACE SINCE 2026-08-28, which is neither a KIND
+   nor a WINDOW PROP and so was invisible to both sweeps above while TX
+   47 and occurrences 20/21 reached all eight bindings through the
+   generator: `fixed`, `on_draw` and `on_tick` in every binding's own
+   handler idiom (chained on five, keyword arguments on Python's
+   `canvas`, labelled on OCaml's, a Build action plus two App-registered
+   handlers on Haskell's), `scale` with NO spelling anywhere because it
+   is what a canvas that declares nothing gets, and the TEMPLATE ZONE
+   REFUSED — by type where the zone has its own handle, and in one
+   BYTE-FROZEN SENTENCE, compared FLATTENED, in the two whose single
+   handle serves both zones. Sixteen watched census reds plus the
+   sentence's own),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -473,7 +485,7 @@ in docs/deferred.md.
    the ROUNDED scale, or reported none at all, is invisible to all of
    them — which is GTK's own trap, since gtk_widget_get_scale_factor
    "returns the next higher integer value" under fractional scaling.
-   Nine watched negatives on doctored copies, counts printed; two of them
+   Eleven watched negatives on doctored copies, counts printed; two of them
    caught the gate's own first draft, whose comment-stripping shifted
    every line number and whose block reader stopped at the first bracket
    it found rather than the one at the block's indent),

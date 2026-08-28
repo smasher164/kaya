@@ -462,6 +462,27 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(J)Ljava/lang/String;".into(),
                 fn_ptr: present_canvas_probe as *mut _,
             },
+            // The size policy's four channels (docs/canvas-plan.md §3.2.1).
+            NativeMethod {
+                name: "canvasTrack".into(),
+                sig: "(JDD)V".into(),
+                fn_ptr: present_canvas_track as *mut _,
+            },
+            NativeMethod {
+                name: "frame".into(),
+                sig: "(D)V".into(),
+                fn_ptr: present_frame as *mut _,
+            },
+            NativeMethod {
+                name: "harnessFrame".into(),
+                sig: "()V".into(),
+                fn_ptr: present_harness_frame as *mut _,
+            },
+            NativeMethod {
+                name: "canvasRasterShape".into(),
+                sig: "(J)Ljava/lang/String;".into(),
+                fn_ptr: present_canvas_raster_shape as *mut _,
+            },
             // The undo tier (docs/undo-plan.md D6/§3).
             NativeMethod {
                 name: "undoRoute".into(),
@@ -815,6 +836,50 @@ extern "system" fn present_canvas_probe<'a>(
     let answer = std::str::from_utf8(&buf[..wrote]).unwrap_or("");
     env.new_string(answer)
         .expect("kaya: handing the canvas probe back to the JVM failed")
+        .into_raw()
+}
+
+/// KayaPresent.canvasTrack: the box layout assigned one canvas, in
+/// device-independent points (docs/canvas-plan.md §3.2.1). Without it
+/// the core can only raster at the viewbox and the size policy is inert.
+extern "system" fn present_canvas_track(
+    _env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    width: jni::sys::jdouble,
+    height: jni::sys::jdouble,
+) {
+    crate::capi::kaya_canvas_track(widget as u64, width, height);
+}
+
+/// KayaPresent.frame: the platform's own frame time in seconds, which is
+/// Choreographer's through `withFrameNanos` (§15.4).
+extern "system" fn present_frame(_env: JNIEnv, _class: JClass, time: jni::sys::jdouble) {
+    crate::capi::kaya_frame(time);
+}
+
+/// KayaPresent.harnessFrame: the deterministic step a scene's `frame`
+/// verb drives. No time crosses — the core owns the clock (§15.4).
+extern "system" fn present_harness_frame(_env: JNIEnv, _class: JClass) {
+    crate::capi::kaya_harness_frame();
+}
+
+/// KayaPresent.canvasRasterShape: `expect_raster`'s observation, as the
+/// ASCII word or sentence the harness compares (docs/canvas-plan.md
+/// §3.2.1). An id that names no drawn canvas answers with the empty
+/// string.
+extern "system" fn present_canvas_raster_shape<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+) -> jni::sys::jstring {
+    let mut buf = [0u8; 160];
+    let wrote = unsafe {
+        crate::capi::kaya_canvas_raster_shape(widget as u64, buf.as_mut_ptr(), buf.len())
+    };
+    let answer = std::str::from_utf8(&buf[..wrote]).unwrap_or("");
+    env.new_string(answer)
+        .expect("kaya: handing the canvas raster shape back to the JVM failed")
         .into_raw()
 }
 

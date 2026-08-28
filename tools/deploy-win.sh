@@ -163,8 +163,10 @@ for arg in "$@"; do
         windowed_rust) SUITE="$arg" ;;
         # THE CANVAS (docs/canvas-plan.md): compiled and rust-only for
         # windowed's reason — the drawing is declared in viewbox units,
-        # so one guest's op stream is every platform's.
-        canvas_rust|canvasdark_rust) SUITE="$arg" ;;
+        # so one guest's op stream is every platform's. The size policy
+        # is its depth sibling (§3.2.1) and rust-only for the same
+        # reason; GTK and Compose still hold depth_stub("sizepolicy").
+        canvas_rust|canvasdark_rust|sizepolicy_rust) SUITE="$arg" ;;
         varied_python) SUITE="$arg" ;;
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
         stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
@@ -272,6 +274,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="$ROOT/target/aarch64-pc-windows-msvc/release"
 SDK="$ROOT/third_party/winappsdk"
 BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-arm64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll"
+# NAMED BEFORE IT IS MISSED. Without the unpacked SDK this run says
+# nothing but two bare `shasum: ... No such file` lines, minutes apart,
+# and then fails — measured 2026-08-28 from a fresh worktree, which is
+# exactly where it bites: third_party/ is gitignored, so a worktree is
+# born without it while the main checkout has had one for months.
+if [ ! -f "$BOOTSTRAP" ]; then
+    echo "deploy-win: the Windows App SDK is not unpacked under $SDK" \
+        "— run tools/fetch-winappsdk.sh first (it fetches the five pinned" \
+        "packages and verifies each one's sha256). A worktree needs its own" \
+        "copy, or a symlink to one." >&2
+    exit 1
+fi
 
 # Connection multiplexing: ONE master TCP/auth handshake, every
 # subsequent ssh/scp rides it (~1.4s per round trip before). The socket
@@ -383,7 +397,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # conformance scene is COMPILED and rust-only by design
 # (docs/virtualization-plan.md §6.3): it is the one windowing scene the
 # mobile lanes can also run, where the portfolio and varied are python.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-windowed canvas}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-windowed canvas sizepolicy}"
 # GO-ONLY SCENES: a guest that exists in Go and only Go BY DESIGN
 # rather than by sequencing — an editor written in Rust would be kaya
 # testing itself (docs/editor-plan.md). Such a scene can join neither
@@ -1971,6 +1985,14 @@ case "$SUITE" in
         # (tools/guest/run_canvasdark_rust.cmd sets KAYA_APPEARANCE=dark
         # and runs the same canvas.exe).
         run_suite canvasdark_rust
+        # THE SIZE POLICY (docs/canvas-plan.md §3.2.1): what a canvas
+        # does with a track that is not its viewbox. This backend
+        # reports the track off `LayoutInformation.GetLayoutSlot` and the
+        # core decides — so `expect_raster` is the one canvas read that
+        # can tell a re-rastered canvas from a stretched one, and the
+        # `frame` verb is the harness's own clock. Pooled: no typed
+        # input, no window close, no OS chrome.
+        run_suite sizepolicy_rust
         run_suite portfolio_python
         run_suite varied_python
         run_suite a11yrows_rust

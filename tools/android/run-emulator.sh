@@ -1776,6 +1776,16 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2/.MainActivity canvas \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script canvas)'" \
         --es KAYA_APPEARANCE dark
+    # THE SIZE POLICY (docs/canvas-plan.md §3.2.1). The track is THIS
+    # device's — a phone assigns nothing a desktop does — so the scene
+    # asserts `expect_raster`, which compares the track this backend
+    # reported against the viewbox the guest declared, and normalized ink
+    # bounds rather than a frozen hash on the two canvases whose stream
+    # follows the track.
+    run_apk sizepolicy-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity sizepolicy \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script sizepolicy)'"
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \

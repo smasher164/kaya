@@ -525,6 +525,48 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
     }
+    // One parse helper per canvas ask (draw_requested, tick): the click
+    // identity shape, then a run of BARE values with no count in front of
+    // them — the assigned size, and a tick's frame time — read until the
+    // record ends (docs/canvas-plan.md §3.2.1). Derived, so a third ask
+    // of this family reaches the C floor with zero emitter edits.
+    for name in crate::values_tail_occurrence_names(spec) {
+        let up = name.to_uppercase();
+        let pad = " ".repeat(31 + name.len());
+        c.line(&format!(
+            "/* Decode a {name} occurrence: id plus path_len key-path values,"
+        ));
+        c.line(" * then the trailing run of bare values (width and height in");
+        c.line(" * points, and a tick's frame time in seconds) — read to the end");
+        c.line(" * of the record, since the run carries no count. Returns 1 and");
+        c.line(" * fills the outputs, or 0 for other kinds. */");
+        c.line(&format!(
+            "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
+        ));
+        c.line(&format!("{pad}KayaVal *keys, uint32_t max_keys,"));
+        c.line(&format!("{pad}uint32_t *n_keys, KayaVal *vals,"));
+        c.line(&format!("{pad}uint32_t max_vals, uint32_t *n_vals) {{"));
+        c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+        c.line(&format!("    if (r->header.kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    *id = r->id;");
+        c.line("    *n_keys = r->path_len;");
+        c.line("    *n_vals = 0;");
+        c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+        c.line("    for (uint32_t k = 0; k < r->path_len; k++) {");
+        c.line("        KayaVal scratch;");
+        c.line("        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);");
+        c.line("    }");
+        c.line("    while (at < r->header.size) {");
+        c.line("        KayaVal scratch;");
+        c.line("        int room = *n_vals < max_vals;");
+        c.line("        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);");
+        c.line("        (*n_vals)++;");
+        c.line("    }");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
     c.line("#endif /* KAYA_WIRE_H */");
     c.out
 }

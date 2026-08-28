@@ -410,11 +410,93 @@ enum KayaSymbol: Int64 {
 
 struct KayaWidget {
     let id: UInt64
+
+    /// THIS CANVAS REFUSES COERCION: it draws at its viewbox and is placed
+    /// in whatever track layout gives it, never adapting to it
+    /// (docs/canvas-plan.md §3.2.1, ruling 2). The one true PROPERTY of the
+    /// size policy — it asserts that the content is not a function of the
+    /// assigned track; the other two are handlers, and a canvas that
+    /// declares nothing is `scale`.
+    @discardableResult
+    func fixed() -> KayaWidget {
+        let (_, tx) = kayaDeclaring()
+        tx.tx.setSizePolicy(id, UInt32(SIZE_POLICY_FIXED))
+        return self
+    }
+
+    /// THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core hands it
+    /// the size layout assigned and takes back what this draws for that
+    /// size, which becomes its viewbox. PROVIDING THE HANDLER IS THE
+    /// DECLARATION, so this registers and puts the policy on the wire in
+    /// ONE act — a registered handler nothing could reach is unspellable.
+    ///
+    /// The binding answers the ask inside a transaction of its own
+    /// (tools/check-ambient-tx.sh); it never reaches the guest.
+    @discardableResult
+    func onDraw(_ handler: @escaping (KayaDraw, KayaViewbox) -> Void) -> KayaWidget {
+        // WIDENED HERE, not at dispatch: one stored shape means the
+        // answer path never asks which policy it holds, and a tick
+        // canvas — which is asked once as a draw_requested before its
+        // first frame — cannot be called with the wrong arity.
+        declareDrawing(UInt32(SIZE_POLICY_REDRAW)) { d, size, _ in handler(d, size) }
+    }
+
+    /// The same on the platform's FRAME CLOCK, the handler also receiving
+    /// the frame's time in seconds. Under the harness that clock is the
+    /// core's deterministic step, advanced by a verb, so a leg's frame
+    /// count is part of the scene and never a fact about the machine.
+    @discardableResult
+    func onTick(_ handler: @escaping (KayaDraw, KayaViewbox, Double) -> Void) -> KayaWidget {
+        declareDrawing(UInt32(SIZE_POLICY_TICK), handler)
+    }
+
+    @discardableResult
+    private func declareDrawing(
+        _ policy: UInt32, _ f: @escaping (KayaDraw, KayaViewbox, Double) -> Void
+    ) -> KayaWidget {
+        let (app, tx) = kayaDeclaring()
+        app.registerDraw(id, f)
+        tx.tx.setSizePolicy(id, policy)
+        return self
+    }
 }
 
 /// A template node: a blueprint entry, stamped per collection entry.
+///
+/// NO `fixed`/`onDraw`/`onTick` HERE, and the compiler is the refusal:
+/// the size policy is a live-zone declaration in this slice, so a canvas
+/// inside a row template keeps `scale` (docs/deferred.md, the
+/// template-zone size policy entry, which says what closing it costs).
 struct KayaNodeHandle {
     let id: UInt64
+}
+
+/// The app and the open transaction a size-policy declaration needs:
+/// the registry the handler joins, and the batch the policy record rides
+/// (KayaSignal.derive's guard, one handle type over).
+private func kayaDeclaring() -> (app: KayaApp, tx: KayaAppTx) {
+    guard let app = KayaApp.ambient, let tx = app.currentTx else {
+        preconditionFailure(
+            "kaya: a canvas's size policy is declared inside a transaction (build or handler)")
+    }
+    return (app, tx)
+}
+
+/// The size a canvas ask was made about: two bare f64 values after the
+/// key path, in device-independent points (spec records 20 and 21).
+private func kayaAssignedSize(_ tail: [KayaValue]) -> KayaViewbox? {
+    guard tail.count >= 2, case .f64(let w) = tail[0], case .f64(let h) = tail[1] else {
+        return nil
+    }
+    return KayaViewbox(w, h)
+}
+
+/// A tick's third value, the frame's time in seconds. A draw_requested
+/// carries none and answers 0, which is what a tick canvas's first ask
+/// is.
+private func kayaFrameTime(_ tail: [KayaValue]) -> Double {
+    guard tail.count >= 3, case .f64(let t) = tail[2] else { return 0.0 }
+    return t
 }
 
 /// A collection instance handle: the collection plus the key path selecting
@@ -1149,6 +1231,14 @@ final class KayaApp {
     /// Each canvas's declared viewbox, so a redraw in a LATER
     /// transaction does not have to repeat it (docs/canvas-plan.md §2.2).
     fileprivate var canvasViewboxes: [UInt64: KayaViewbox] = [:]
+    /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
+    /// §3.2.1), keyed by the canvas's widget id. Not a message handler:
+    /// these produce a DRAWING, so dispatchLoop answers the ask itself and
+    /// keeps looping rather than handing the guest an occurrence. ONE
+    /// SHAPE, widened at registration, so the answer path never has to ask
+    /// which policy declared it; the Double is the frame's time in
+    /// seconds, 0 for a plain redraw.
+    private var draws: [UInt64: (KayaDraw, KayaViewbox, Double) -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
@@ -1522,6 +1612,17 @@ final class KayaApp {
         widgetHandlers[w.id] = handler
     }
 
+    /// The registration half of `KayaWidget.onDraw` / `KayaWidget.onTick`.
+    /// NOT PUBLIC on purpose: registering the closure and declaring the
+    /// policy on the wire are ONE act, and a guest that could do the first
+    /// without the second would hold a handler nothing ever calls
+    /// (docs/canvas-plan.md §3.2.1).
+    fileprivate func registerDraw(
+        _ canvas: UInt64, _ f: @escaping (KayaDraw, KayaViewbox, Double) -> Void
+    ) {
+        draws[canvas] = f
+    }
+
     /// Register a click handler for a template node; it also receives
     /// the stamped copy's keys, outermost first.
     func onClick(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void) {
@@ -1753,7 +1854,7 @@ final class KayaApp {
                 }
                 continue
             }
-            guard let (kind, id, keys, payload, files, clip) = kayaParseOccurrence(buf)
+            guard let (kind, id, keys, payload, files, clip, tail) = kayaParseOccurrence(buf)
             else { continue }
             var text: String?
             var checked = false
@@ -1768,6 +1869,37 @@ final class KayaApp {
             default: break
             }
             switch (kind, keys.isEmpty) {
+            // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER MAPPED
+            // (docs/canvas-plan.md §3.2.1): the guest registered a
+            // drawing-as-a-function-of-size, so this draws it, submits the
+            // one record and keeps looping. The transaction is the
+            // binding's — a guest opening its own inside a handler is the
+            // camouflage tools/check-ambient-tx.sh refuses.
+            //
+            // ONE CALL SHAPE, decided at registration rather than here: a
+            // tick canvas is a redraw canvas too and is asked once, as a
+            // draw_requested, before its first frame, so its handler
+            // answers that ask with time 0 instead of the canvas staying
+            // empty until the clock moves.
+            //
+            // The keys are not consulted: only a KayaWidget can carry a
+            // policy, so a template node's id is never in this table.
+            case (UInt16(KAYA_OCCURRENCE_DRAW_REQUESTED), _),
+                (UInt16(KAYA_OCCURRENCE_TICK), _):
+                if let drawing = draws[id], let size = kayaAssignedSize(tail) {
+                    let time = kayaFrameTime(tail)
+                    // The size that arrived IS this canvas's viewbox from
+                    // here on, so a later plain `draw` uses it too.
+                    canvasViewboxes[id] = size
+                    let canvas = KayaWidget(id: id)
+                    // No `dispatch` wrapper: a drawing handler cannot
+                    // throw (the recorder's ops do not), so there is no
+                    // error for it to log — the rest of this switch wraps
+                    // handlers the guest declared `throws`.
+                    build { tx in
+                        tx.draw(canvas) { d in drawing(d, size, time) }
+                    }
+                }
             case (UInt16(KAYA_OCCURRENCE_SORT_REQUESTED), true):
                 if let handler = sortHandlers[id] {
                     // The generated parser boxes the column as .i64.

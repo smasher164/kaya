@@ -404,7 +404,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("parseOccurrence ::");
     c.line("  (Word64 -> IO BS.ByteString) ->");
     c.line("  Ptr Word8 ->");
-    c.line("  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))");
+    c.line("  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, [Value]))");
     c.line("parseOccurrence redeem rec = do");
     c.line("  kind <- peekByteOff rec 4 :: IO Word16");
     let accepted = crate::occurrence_names(spec)
@@ -420,7 +420,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        then do");
     c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
     c.line("          choice <- peekByteOff rec 16 :: IO Word32");
-    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing))");
+    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, []))");
     // The picker's answer is a LIST OF RECORDS, and no single Value
     // can carry one — so the three values per file ride the VALUES
     // slot, flattened, and KayaApp regroups them in threes. The
@@ -437,7 +437,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                (v, next) <- parseValue rec at");
     c.line("                readValues (n - 1 :: Int) next (v : acc)");
     c.line("          vals <- readValues (fromIntegral count * 3) 32 []");
-    c.line("          return (Just (kind, ident, vals, Nothing, Nothing))");
+    c.line("          return (Just (kind, ident, vals, Nothing, Nothing, []))");
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!(
             "      else if kind == occKind{}",
@@ -445,7 +445,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         ));
         c.line("        then do");
         c.line("          (clip, _) <- parseClip redeem rec 16");
-        c.line("          return (Just (kind, ident, [], Nothing, Just clip))");
+        c.line("          return (Just (kind, ident, [], Nothing, Just clip, []))");
     }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
@@ -455,7 +455,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        -- Surface lifecycle records carry the surface id alone");
     c.line("        -- (derived from the record shapes).");
     c.line(&format!("        else if {id_only}"));
-    c.line("          then return (Just (kind, ident, [], Nothing, Nothing))");
+    c.line("          then return (Just (kind, ident, [], Nothing, Nothing, []))");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))
@@ -467,7 +467,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("        else if {id_pair}"));
         c.line("          then do");
         c.line("            second <- peekByteOff rec 16 :: IO Word64");
-        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing))");
+        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, []))");
     }
     c.line("          else do");
     c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");
@@ -516,7 +516,37 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line("              else return Nothing");
         }
     }
-    c.line("          return (Just (kind, ident, keys, payload, clip))");
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1). Its own
+    // slot because the run is 2 values for a redraw and 3 for a tick,
+    // and `payload` is one.
+    {
+        let values_tail = crate::values_tail_occurrence_names(spec)
+            .iter()
+            .map(|n| format!("kind == occKind{}", pascal(n)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        if values_tail.is_empty() {
+            c.line("          let tail_ = []");
+        } else {
+            c.line("          -- The canvas asks carry a run of BARE values after");
+            c.line("          -- the key path — the assigned size, and a tick's");
+            c.line("          -- frame time — with no count in front, so they are");
+            c.line("          -- read until the record ends (canvas-plan §3.2.1).");
+            c.line("          tail_ <-");
+            c.line(&format!("            if {values_tail}"));
+            c.line("              then do");
+            c.line("                stop <- peekByteOff rec 0 :: IO Word32");
+            c.line("                let rest at acc");
+            c.line("                      | at >= fromIntegral stop = return (reverse acc)");
+            c.line("                      | otherwise = do");
+            c.line("                          (v, next) <- parseValue rec at");
+            c.line("                          rest next (v : acc)");
+            c.line("                rest at' []");
+            c.line("              else return []");
+        }
+    }
+    c.line("          return (Just (kind, ident, keys, payload, clip, tail_))");
     c.out
 }
 

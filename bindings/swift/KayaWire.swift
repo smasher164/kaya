@@ -1574,7 +1574,7 @@ func kayaParseClip(_ raw: UnsafeRawBufferPointer, _ at: Int)
 /// checkbox's new state for TOGGLED, the slider's new value for
 /// VALUE_CHANGED, nil for clicks.
 func kayaParseOccurrence(_ rec: [UInt8])
-    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?)?
+    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?, tail: [KayaValue])?
 {
     rec.withUnsafeBytes { raw in
         let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
@@ -1604,7 +1604,7 @@ func kayaParseOccurrence(_ rec: [UInt8])
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
             // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
             let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
-            return (kind, id, [], .i64(Int64(choice)), [], nil)
+            return (kind, id, [], .i64(Int64(choice)), [], nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
@@ -1631,11 +1631,11 @@ func kayaParseOccurrence(_ rec: [UInt8])
                 files.append(KayaPickedFile(
                     handle: UInt64(handle), name: name, localPath: localPath))
             }
-            return (kind, id, [], nil, files, nil)
+            return (kind, id, [], nil, files, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT) {
             let (clip, _) = kayaParseClip(raw, 16)
-            return (kind, id, [], nil, [], clip)
+            return (kind, id, [], nil, [], clip, [])
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
@@ -1644,14 +1644,14 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
         {
-            return (kind, id, [], nil, [], nil)
+            return (kind, id, [], nil, [], nil, [])
         }
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
         if kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
         {
             let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
-            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil)
+            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, [])
         }
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
         var keys: [KayaValue] = []
@@ -1704,6 +1704,35 @@ func kayaParseOccurrence(_ rec: [UInt8])
         {
             clip = kayaParseClip(raw, at).clip
         }
-        return (kind, id, keys, payload, [], clip)
+        var tail: [KayaValue] = []
+        if kind == UInt16(KAYA_OCCURRENCE_DRAW_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_TICK)
+        {
+            // The canvas asks carry a run of BARE values after the
+            // key path — the assigned size, and a tick's frame time
+            // — with no count in front, so they are read until the
+            // record ends (docs/canvas-plan.md §3.2.1).
+            let end = Int(raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self))
+            var tailAt = at
+            while tailAt < end {
+                let ttype = raw.loadUnaligned(fromByteOffset: tailAt, as: UInt32.self)
+                let tlen = Int(raw.loadUnaligned(fromByteOffset: tailAt + 4, as: UInt32.self))
+                switch ttype {
+                case UInt32(KAYA_VALUE_BOOL):
+                    tail.append(.bool(raw[tailAt + 8] != 0))
+                case UInt32(KAYA_VALUE_I64):
+                    tail.append(.i64(Int64(bitPattern:
+                        raw.loadUnaligned(fromByteOffset: tailAt + 8, as: UInt64.self))))
+                case UInt32(KAYA_VALUE_F64):
+                    tail.append(.f64(Double(bitPattern:
+                        raw.loadUnaligned(fromByteOffset: tailAt + 8, as: UInt64.self))))
+                default:
+                    tail.append(.str(String(
+                        decoding: raw[(tailAt + 8)..<(tailAt + 8 + tlen)], as: UTF8.self)))
+                }
+                tailAt += 8 + ((tlen + 7) & ~7)
+            }
+        }
+        return (kind, id, keys, payload, [], clip, tail)
     }
 }

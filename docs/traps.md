@@ -6,6 +6,39 @@ these the hard way.
 
 ## Platform / toolkit
 
+- **A canvas's recorded frame can outlive the layout that produced it,
+  and only a PIXEL read can tell.** `KayaCanvasReader` records each
+  canvas's global frame from a `GeometryReader` in `.background` and
+  reports it to the core as the assigned track. Measured 2026-08-28 on
+  the JVM's `sizepolicy` leg: the four canvases reported
+  `y = 16/108/164/256` (heights 84/84/120/120, and OVERLAPPING, so not
+  any one layout) and kept those values for the life of the process,
+  while the window rendered the same picture python's did at
+  `y = 44/136/228/320`. Every MODEL observable passed — `expect_raster`,
+  `expect_drawing`, `expect_drawing_hash`, `expect_ax` — because they
+  read the core, and the core's own track came from that same stale
+  report, so it agreed with itself. `expect_ink` is the only verb that
+  crosses to the window, and it sampled a rectangle a canvas away: the
+  transparent centre of the TICKING canvas, read back as `000000` for
+  `canvas@fit`.
+  WHAT WAS RULED OUT, each measured rather than argued: the render (the
+  java and python window captures are byte-identical), the window roster
+  (one visible NSWindow, `windows=1`, content bounds 480x420,
+  `isFlipped=true` in both), the number of apply batches (3 in both), a
+  slow start (a python guest delayed 6s before `run()` still passes),
+  a resize afterwards (no re-report), and `onGeometryChange(for:)` in
+  place of `onChange(of: frame)` — which observes position as well as
+  size and changed nothing, so the reader is not simply missing a
+  reposition callback. The remaining suspects are a view tree that is
+  laid out before the window is shown and never re-reports, or two trees
+  with one set of readers detached.
+  THE LESSON THAT GENERALIZES: a backend geometry report the CORE also
+  consumes cannot be checked by anything that reads the core — the two
+  agree by construction, exactly as `expect_raster` and the track do. It
+  takes a pixel read, or a second independent measurement, to see it.
+  The size-policy scene runs its other seven languages green;
+  docs/deferred.md carries the open half.
+
 (Entries about AppKit, UIKit, and Android Views survive their backends
 — the roster is one backend per platform since 2026-07-20 — because
 the same patterns return through interpreter drop-downs
@@ -5636,6 +5669,55 @@ SwiftUI's `\.colorScheme`, and only a view can read the latter. They were
 measured AGREEING here, which is the evidence for the claim rather than
 the claim itself, and the comment now says so.
 
+## A canvas sized by its own blit NEVER STARTS, and GTK has no 1:1 content fit (2026-08-28)
+
+MEASURED on the linux lane while landing the size policy's GTK arm, and
+both halves are about the same sentence: on GTK a canvas widget's size
+comes from the blit the core hands it.
+
+FIRST, THE ONE THAT LOOKS LIKE A DEAD BACKEND. `sizepolicy-rust-x11`
+failed with
+
+    raster <the core holds no drawing for this canvas>
+    ink <the canvas laid out at 0x77 inside its toplevel> at 50,50
+
+for `canvas@live` and `canvas@clock` while `canvas@fit` and `canvas@mark`
+beside them passed every assertion. The two that passed had called
+`tx.draw` at build time and so had a blit; a `redraw` canvas has NO blit
+until the core asks it for a drawing, and the core asks only once a
+backend has REPORTED A TRACK. GTK's cross-axis default align is Start,
+and `adjust_for_align` clamps a non-Fill child's allocation to its
+natural size — zero — so the report is degenerate, the ask never goes
+out, and the canvas stays empty for the life of the process. The cycle
+closes on itself and nothing anywhere is red except the scene.
+
+The rule that breaks it is the mac arm's, in GTK's spelling: A GROWN
+CANVAS TAKES THE WHOLE OFFERED BOX ON BOTH AXES (`.frame(maxWidth: grow >
+0 ? .infinity : nil, maxHeight: ...)` there, `set_halign`/`set_valign`
+Fill in `reconcile_grow_align` here). Compose met the identical defect
+the same day, which is why it is written down as a class rather than as a
+GTK bug: any backend that derives a canvas's size from its buffer has it.
+
+SECOND, WHY THE WIDGET IS NOT A `GtkPicture` ANY MORE. `fixed` rasters at
+the viewbox whatever the track is, so the blit must be strictly 1:1 — and
+no member of `GtkContentFit` means that: `Fill` stretches, `Contain` and
+`Cover` scale up, `ScaleDown` scales down. Nor can the squeeze be avoided
+by alignment, because GTK never allocates a widget more than its parent
+assigned. This scene reaches the squeeze: four grown canvases in a 420pt
+window get about 100pt each against a 120pt viewbox. So the canvas is a
+`GtkWidget` subclass (`KayaCanvas`) whose natural size is the blit and
+whose snapshot draws the blit at that size, centred and clipped.
+`gtk.rs` carried `ContentFit::Fill` with a comment citing §3.2's rule 2,
+which §3.2.1 had superseded — the stretch defect, written out by hand and
+documented as the rule.
+
+AND THE ROLE MOVED WITH THE CLASS. `atspi_role_of` keys the Image role on
+`w.is::<gtk4::Picture>()`, so the new widget dropped out of the bus rank
+census entirely and `canvas`, `canvasdark` and `portfolio` all read
+`ax "<not in the accessibility tree>"` on the same run. A widget swap in
+this backend is also an accessibility change, and that function is where
+it lands.
+
 ## exit() is not final on Windows: a wedged teardown holds the process past the grace (2026-08-27)
 
 The harness's exit grace fired on time and the process still lived 40
@@ -5695,3 +5777,49 @@ background task that can restart makes that instant unrepresentative,
 so TaskStop/monitor teardown comes BEFORE the process census, never
 after (an agent's "0 leftover processes" was true when measured and
 false 79 seconds later).
+
+## A `redraw` canvas sized from its own buffer NEVER STARTS (2026-08-28)
+
+MEASURED on the android lane while landing the size policy's Compose arm.
+The first draft sized the canvas node from its child — the blitted image —
+clamped into the incoming constraints, which is the honest reading of
+"content is the floor" and is right for the two CONSTANT modes. Four
+canvases, one scene:
+
+    raster track    drawing 12/5,0,95,100   ink light D2E3F7   <- scale  PASS
+    raster viewbox  drawing 12/5,0,95,100   ink light D2E3F7   <- fixed  PASS
+    raster , wanted track                                      <- redraw FAIL
+    ink <the canvas laid out at 0x0>                           <- redraw FAIL
+    drawing <no canvas canvas@clock>                           <- tick   FAIL
+
+THE CYCLE: a `redraw` or `tick` canvas has NO buffer until the core asks
+for one, and the core asks only once a backend reports a track
+(`kaya_canvas_track`). Sized from the child there is no child, so the node
+is zero wide, the report is degenerate, the ask never goes out, and the
+canvas stays empty for the process's life. The two constant-mode canvases
+beside it pass, which is what makes this expensive to read: three of the
+four numbers in the verdict look like a canvas that was never declared.
+
+`raster ` with NOTHING after it is the tell, and it is a different answer
+from `raster no track reported`: the empty string is
+`kaya_canvas_raster_shape` returning 0 because the core holds no DRAWING
+for that widget, while "no track reported" means it holds a drawing and no
+track. One says the ask never happened, the other says the report never
+did.
+
+THE RULE, and it is what KayaSwiftUI.swift already spells: a GROWN canvas
+takes the whole offered box on both axes —
+`.frame(maxWidth: node.grow > 0 ? .infinity : nil, maxHeight: ...)` there,
+`constraints.maxWidth/maxHeight` in the Compose Layout's measure block —
+so the first report is a real size and the cycle starts. An UNGROWN canvas
+keeps its natural size, which IS its track. The GTK and WinUI arms of the
+same fan-out have the identical bootstrap and will meet this the same way.
+
+AND THE READER MUST BE THE NODE THAT CLAIMS THE TRACK, not the one that
+carries the pixels — the same sentence §3.2.1 records for SwiftUI's
+`.background`. A Compose wrapper additionally may not carry the a11y tag:
+`Image` publishes `Role.Image` only when the name rides its own
+contentDescription parameter (the 2026-07-25 finding at `a11yTag`'s
+declaration), so tagging the wrapper answered `expect_ax canvas@chart`
+with `ax "group/"` and one child, and reddened tools/scenes/canvas.steps
+on both appearance legs.

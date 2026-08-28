@@ -1089,6 +1089,64 @@ mod tests {
         );
     }
 
+    /// THE PORTFOLIO'S DRAWN MARK, byte for byte what
+    /// guests/python/portfolio.py declares — `fixed`'s forcing artifact
+    /// (docs/canvas-plan.md §3.2.1, ruling 3). Here for scene_figure's
+    /// reason: the strings tools/scenes/portfolio.steps freezes are
+    /// DERIVED from the core's own raster, never typed from a lane.
+    fn portfolio_mark() -> Vec<Value> {
+        let line = [(2.0, 13.0), (9.0, 7.0), (16.0, 11.0), (26.0, 3.0)];
+        let area: Vec<(f64, f64)> =
+            line.iter().copied().chain([(26.0, 26.0), (2.0, 26.0)]).collect();
+        let mut v = Vec::new();
+        let poly = |v: &mut Vec<Value>, pts: &[(f64, f64)]| {
+            for (i, (x, y)) in pts.iter().enumerate() {
+                let code = if i == 0 { wire::DRAW_MOVE_TO } else { wire::DRAW_LINE_TO };
+                v.extend([op(code), n(*x), n(*y)]);
+            }
+        };
+        for paint in [wire::PAINT_GROUND, wire::PAINT_SERIES_FILL] {
+            poly(&mut v, &area);
+            v.push(op(wire::DRAW_CLOSE));
+            v.extend([op(wire::DRAW_FILL), op(paint), op(wire::FILL_NONZERO)]);
+        }
+        poly(&mut v, &line);
+        v.extend([op(wire::DRAW_STROKE), op(wire::PAINT_SERIES), n(2.0)]);
+        v
+    }
+
+    #[test]
+    fn the_portfolio_mark_expectations_are_derived() {
+        let _serial = crate::assets::serially();
+        let box_ = (28.0, 28.0);
+        let d = validate(box_, &portfolio_mark()).expect("the mark validates");
+        let p = probe(&d);
+        assert_eq!(
+            (drawing_observation(&p), format!("{:016x}", p.hash)),
+            ("21/4,7,96,93".to_string(), "29abce8483ccc343".to_string()),
+            "tools/scenes/portfolio.steps freezes these two"
+        );
+        // THE CENTRE, and only the centre: a `fixed` canvas is placed in
+        // a track it does not fill, and `expect_ink` samples hundredths
+        // of the canvas's OWN BOX — so an edge probe would land in the
+        // letterbox margin the backend leaves around it.
+        let at_centre = |mode: Mode, label: &str| -> String {
+            let r = rasterize(&d, d.viewbox, Presentation { scale: 1.0, mode });
+            let x = r.width as usize / 2;
+            let y = r.height as usize / 2;
+            let i = (y * r.width as usize + x) * 4;
+            let px = [r.pixels[i], r.pixels[i + 1], r.pixels[i + 2], r.pixels[i + 3]];
+            println!("core mark {label} at 50,50 = {px:02X?}");
+            assert_eq!(px[3], 255, "{label} 50,50 must be opaque: {px:02X?}");
+            format!("{label} {:02X}{:02X}{:02X}", px[0], px[1], px[2])
+        };
+        assert_eq!(
+            format!("{} {}", at_centre(Mode::Light, "light"), at_centre(Mode::Dark, "dark")),
+            "light D2E3F7 dark 212A35",
+            "tools/scenes/portfolio.steps freezes exactly this string"
+        );
+    }
+
     #[test]
     fn a_drawing_rasterizes_and_probes() {
         let drawing = validate((100.0, 50.0), &chart()).expect("the chart validates");

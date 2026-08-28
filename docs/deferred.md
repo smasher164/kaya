@@ -3260,31 +3260,114 @@ count, so the saving is measured rather than assumed.
   whose `expect_raster canvas@fit "track"` IS this defect's
   assertion — nothing else can see it, since the hash and the ink
   bounds come from the canonical raster and are policy-blind. The
-  BREADTH is open below (the three other backends, the seven other
+  BREADTH is open below (the two other backends, the seven other
   bindings, the template zone and the portfolio's drawn mark).
+  GTK JOINED 2026-08-28, and its half of the stretch was the widget:
+  `GtkPicture` was set to `ContentFit::Fill` — this defect written out
+  by hand — and no other member of that vocabulary means 1:1 either, so
+  the canvas widget is kaya's own `KayaCanvas` now (docs/canvas-plan.md
+  §3.2.1's GTK note).
 - **THE SIZE POLICY IS A DEPTH SLICE (2026-08-27)** — spec, core, the
-  Rust binding, the SwiftUI mac arm and tools/scenes/sizepolicy.steps
-  are in; nothing else is. What is open, and each of it is fan-out work
-  rather than a design question (docs/canvas-plan.md §3.2.1 settled the
-  spelling):
-  - **DEPTH STUB: sizepolicy on gtk** — nothing in gtk.rs reports a
-    canvas's assigned track, so `canvas_raster_shape` would answer "no
-    track reported" for every canvas and `frame` would advance a clock
-    no canvas is watching. Closes when the GTK arm reports its
-    `GtkPicture`'s allocation through `kaya_canvas_track` and drives
-    `kaya_frame` off a `GtkTickCallback`.
-  - **DEPTH STUB: sizepolicy on winui** — the same, one backend over:
-    the report is the `Image`'s arranged size and the frame drive is
-    `CompositionTarget::Rendering`.
-  - **DEPTH STUB: sizepolicy on compose** — the same: the report is the
-    canvas `Layout`'s assigned constraints and the frame drive is
-    `withFrameNanos`.
-  - **iOS is DECLARED OFF, not stubbed**, and the distinction is real:
-    swift/KayaSwiftUI.swift serves mac AND iOS, so the feature is
-    THERE on the simulator — it has simply never been run there. A
-    `kayaDepthStub("sizepolicy", on: "ios")` would be a lie about a
-    backend that has the arm. `IOS_UNWIRED_SCENES` in
-    tools/ios/run-sim.sh carries it until a run measures it.
+  Rust binding, the SwiftUI mac arm, the GTK arm (2026-08-28) and
+  tools/scenes/sizepolicy.steps are in; nothing else is.
+  THE BINDINGS WAVE LANDED 2026-08-28 and closes the seven-binding half:
+  every binding spells the three declarations in its own idiom (Rust,
+  Go, C#, Java, Swift chain them; Python takes keywords on `canvas`,
+  OCaml labelled arguments, Haskell a Build action beside two
+  App-registered handlers), each putting the policy on the wire in the
+  same act as the registration, and each answering the two asks inside a
+  transaction the BINDING opens. `guests/<lang>/sizepolicy.*` exists in
+  all eight and the scene runs seven of them on the mac lane, which is
+  why it moved from validate-mac's DEPTH_SCENES into SCENES. The C floor
+  can spell it — `kaya_tx_set_size_policy` plus a generated
+  `kaya_parse_draw_requested`/`kaya_parse_tick` — and carries no guest,
+  which is the floor's roster (guests/c/Makefile's SCENES), not a gap.
+  WHAT IS STILL OPEN, and each of it is fan-out work rather than a
+  design question (docs/canvas-plan.md §3.2.1 settled the spelling):
+  - **THE JAVA LEG IS NOT WIRED, and the cause is the mac backend's
+    canvas geometry rather than the binding.** Every model observable
+    passes on that guest and its window renders byte-identically to
+    python's, but `expect_ink` reads a frame `KayaCanvasReader` recorded
+    in an earlier layout and never corrected, so it samples a rectangle
+    one canvas away and reads the ticking canvas's transparent centre.
+    The measurements, and the six things ruled out, are in
+    docs/traps.md. The same stale report is what the CORE takes as the
+    assigned track, so this is not only a test-read defect: a `scale`
+    canvas on that leg re-rasters for a track it no longer has, and
+    nothing that reads the core can see it. Closes when the reader
+    reports the LIVE frame — the candidate is to find the canvas's view
+    by its accessibility identifier at read time instead of trusting a
+    stored rectangle. The guest and the `case "sizepolicy"` selector arm
+    are in the tree; only `run sizepolicy-java-swiftui` is missing.
+  - **THE PORTFOLIO'S DRAWN MARK IS IMPLEMENTED AND HELD, awaiting the
+    maintainer's visual ruling.** The wave delivered it (a 28x28 `fixed`
+    sparkline chip with frozen drawing, hash and ink) and its own
+    capture showed the scene-blind failure: inserted as a column child
+    it took a share of the column's leftover, so the chip floats
+    centred in empty space and the chart moved to the column's bottom —
+    every assertion green, the dashboard's face rearranged. Visuals are
+    the maintainer's, so the whole change is held as the coordinator's
+    `mark-held.patch` (guest block + scene expectations) rather than
+    shipped ugly. The wave's original blocker — no GTK/WinUI track
+    reports — closed in this same merge, so when the placement is
+    ruled the scene can also take `expect_raster canvas@mark "viewbox"`
+    (portable: `fixed` rasters at the viewbox everywhere) and the
+    declaration stops being inert.
+  - ~~**DEPTH STUB: sizepolicy on gtk**~~ — LANDED 2026-08-28: the GTK
+    arm reports each canvas's allocation to `Scene::set_canvas_track` off
+    the window's own `GtkTickCallback` and drives the frame clock from
+    the same callback, `KAYA_SELFTEST`-guarded so a scene's frame count
+    stays the scene's; the `sizepolicy-rust` leg is wired on both
+    protocols in tools/linux/run-suites.sh. THE BLIT MOVED WITH IT, and
+    that is the part a reader will not expect: `fixed` rasters at the
+    viewbox whatever the track is, so the blit has to be strictly 1:1 —
+    and no member of `GtkContentFit` means that (Fill stretches, Contain
+    and Cover scale up, ScaleDown scales down), while GTK never allocates
+    a widget more than its parent assigned, so a squeezed canvas met one
+    of those fits whichever was chosen. The canvas widget is a
+    `KayaCanvas` now (a `GtkWidget` subclass: natural size = the blit,
+    snapshot = the blit centred and clipped), and `ContentFit::Fill` —
+    which cited §3.2's superseded rule 2 — is gone with the stretch it
+    named. tools/check-canvas-blit.sh gained the GTK half of clause 4.
+  - ~~**DEPTH STUB: sizepolicy on winui**~~ — CLOSED 2026-08-28: the
+    winui arm reports the track, drives frames off
+    `CompositionTarget::Rendering` outside the harness, and the
+    `sizepolicy_rust` leg runs on the windows lane. THE REPORT IS NOT
+    THE `Image`'s ARRANGED SIZE, which is what this bullet said and what
+    a first attempt would write: `set_drawing` gives that Image an
+    explicit Width/Height taken from the BUFFER — the 1:1 blit — and an
+    explicit size is a HARD constraint in XAML, so `ActualWidth` reads
+    the RASTER's size back however much room the row had, track and
+    raster agree by construction, and the policy is inert with every leg
+    green. It is the SwiftUI trap in this toolkit's spelling (§3.2.1,
+    "the backend reader has to sit OUTSIDE the grow frame"). What
+    answers is `LayoutInformation.GetLayoutSlot` — the area the PARENT
+    assigned — for a GROWN canvas, and the element's own box for an
+    ungrown one, which is the mac's
+    `.frame(maxWidth: node.grow > 0 ? .infinity : nil)` conditional
+    verbatim: a Grid cell spans the panel's cross axis whatever the
+    child does with it, so the slot of an ungrown canvas is the whole
+    column's width and a `scale` canvas would re-raster into it
+    letterboxed, with every frozen ink probe landing somewhere else.
+    Three types had to leave the bindgen filter's vtable pads for any of
+    it (`LayoutInformation`, `CompositionTarget`, `RenderingEventArgs`
+    plus `Windows.Foundation.TimeSpan` for its `RenderingTime`).
+  - ~~**DEPTH STUB: sizepolicy on compose**~~ — LANDED 2026-08-28: the
+    canvas arm is a `Layout` that reports its own CONSTRAINED size
+    through `KayaPresent.canvasTrack` (the image inside it is always the
+    buffer, so reading that would make track and raster agree by
+    construction), blits the buffer 1:1 and centred, and drives
+    `kaya_frame` off `withFrameNanos` outside the harness. `expect_raster`
+    and `frame` are real arms; `sizepolicy-compose` is wired in
+    tools/android/run-emulator.sh against guests/rust/sizepolicy.rs.
+    Watched red on a live emulator leg with the track report cut out
+    (`raster no track reported, wanted track`).
+  - ~~**iOS is DECLARED OFF, not stubbed**~~ — CLOSED 2026-08-28: the
+    distinction was real (swift/KayaSwiftUI.swift serves mac AND iOS, so
+    the feature was THERE and simply never run), and a run has now
+    measured it. `sizepolicy` moved from `IOS_UNWIRED_SCENES` into
+    `IOS_SWIFT_SCENES`, and `sizepolicy-swift` passes on the simulator
+    with the verdict string the mac's own leg prints, byte for byte.
   - **THE TEMPLATE ZONE IS REFUSED, LOUDLY.** A `set_size_policy`
     against a canvas TEMPLATE NODE panics naming this entry, rather
     than being half-implemented: the core would have to key the policy,
@@ -3311,7 +3394,8 @@ count, so the saving is measured rather than assumed.
     answer, the same one the look-bug class already has.
   KEY: size policy, sizepolicy, set_size_policy, expect_raster, frame
   verb, canvas_track, kaya_frame, on_draw, on_tick, fixed, letterbox,
-  KayaCanvasTicker, template zone canvas
+  KayaCanvasTicker, template zone canvas, KayaCanvasReader,
+  kayaCanvasFrames, sizepolicy-java-swiftui, portfolio mark, MARK_BOX
 - ~~CROSS-ISA byte-identity of the canvas raster is UNMEASURED~~ —
   CLOSED 2026-08-26: measured before the first hash went into a .steps file,
   and the two agree: aarch64 and x86_64 both rasterize the canvas

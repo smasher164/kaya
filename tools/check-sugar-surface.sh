@@ -359,6 +359,188 @@ if [ "$table_fake" -ne 8 ]; then
 fi
 unset table_fake
 
+# --- THE SIZE-POLICY SURFACE, in all eight --------------------------
+#
+# WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+# (docs/canvas-plan.md §3.2.1). Invisible to every sweep above for the
+# table's reason one surface over: `size_policy` is not a KIND and not a
+# WINDOW PROP, and TX 47 plus occurrences 20/21 reach all eight bindings
+# through the GENERATOR whether or not a guest can spell any of them —
+# which is exactly the state this wave found (the records generated,
+# nothing above them).
+#
+# `scale` HAS NO SPELLING ANYWHERE, deliberately: it is what a canvas
+# that declares nothing gets, so there is nothing here to check for it.
+# The other three are one semantics in eight idioms, each riding where
+# that binding's OWN handler convention rides (the 2026-08-24 ruling
+# `on_sort` was decided by): chained on rust/go/csharp/java/swift,
+# KEYWORD arguments on python's `canvas`, LABELLED arguments on ocaml's,
+# and on haskell a Build action for the property beside two
+# App-registered handlers. Written out rather than derived from a casing
+# rule for that reason.
+want_policy() {
+    if ! grep -qE "$4" "$2"; then
+        echo "check-sugar-surface: $1 has no sugar for the canvas's '$3'" \
+            "(wanted /$4/ in $2)"
+        status=1
+    fi
+}
+
+# check_policy_fixed <snake_case> <PascalCase> <camelCase>
+check_policy_fixed() {
+    local snake="$1" pascal="$2" camel="$3"
+    want_policy rust    crates/kaya/src/app.rs              "$snake" \
+        "pub fn ${snake}\\(self\\) -> Self"
+    # The keyword on the constructor, WITH its default: `fixed` alone
+    # would match the parameter list of anything.
+    want_policy python  bindings/python/kaya/__init__.py    "$snake" \
+        "def canvas\\(viewbox.*${snake}=None"
+    want_policy go      bindings/go/app.go                  "$snake" \
+        "func \\(w Widget\\) ${pascal}\\(\\) Widget"
+    want_policy csharp  bindings/csharp/KayaApp.cs          "$snake" \
+        "public Widget ${pascal}\\(\\)"
+    want_policy java    bindings/java/dev/kaya/KayaApp.java "$snake" \
+        "public Widget ${camel}\\(\\)"
+    want_policy swift   bindings/swift/KayaApp.swift        "$snake" \
+        "func ${camel}\\(\\) -> KayaWidget"
+    # A PROPERTY IS A Build ACTION HERE, which is where every other live
+    # prop in this binding stands — and it takes a Widget, which is the
+    # template zone's refusal (a Node cannot be passed).
+    want_policy haskell bindings/haskell/KayaApp.hs         "$snake" \
+        "^${camel} :: Widget -> Build \\(\\)"
+    want_policy ocaml   bindings/ocaml/kaya_app.ml          "$snake" \
+        "\\?\\(${snake} = false\\)"
+}
+check_policy_fixed fixed Fixed fixed
+
+# check_policy_handler <snake_case> <PascalCase> <camelCase> <hs-arg-type>
+check_policy_handler() {
+    local snake="$1" pascal="$2" camel="$3" hsarg="$4"
+    want_policy rust    crates/kaya/src/app.rs              "$snake" \
+        "pub fn ${snake}<M>\\("
+    want_policy python  bindings/python/kaya/__init__.py    "$snake" \
+        "def canvas\\(viewbox.*${snake}=None"
+    want_policy go      bindings/go/app.go                  "$snake" \
+        "func \\(w Widget\\) ${pascal}\\(fn func\\(d \\*Draw, size Viewbox"
+    want_policy csharp  bindings/csharp/KayaApp.cs          "$snake" \
+        "public Widget ${pascal}\\(Action<Draw, Viewbox"
+    want_policy java    bindings/java/dev/kaya/KayaApp.java "$snake" \
+        "public Widget ${camel}\\("
+    want_policy swift   bindings/swift/KayaApp.swift        "$snake" \
+        "func ${camel}\\(_ handler: @escaping \\(KayaDraw, KayaViewbox"
+    # APP-REGISTERED, like this binding's other handlers, and typed on
+    # Widget: the live zone is the only one a policy may be declared in.
+    want_policy haskell bindings/haskell/KayaApp.hs         "$snake" \
+        "^${camel} :: App -> Widget -> \\(${hsarg}\\) -> IO \\(\\)"
+    want_policy ocaml   bindings/ocaml/kaya_app.ml          "$snake" \
+        "\\?\\(${snake} : \\(draw -> viewbox"
+}
+check_policy_handler on_draw OnDraw onDraw "Viewbox -> \\[DrawOp\\]"
+check_policy_handler on_tick OnTick onTick "Viewbox -> Double -> \\[DrawOp\\]"
+
+# AND THE TEMPLATE ZONE IS REFUSED, all eight, which is the half a
+# spelling census cannot see: the size policy is a LIVE-ZONE declaration
+# in this slice and a canvas inside a row template keeps `scale`
+# (docs/deferred.md). Six bindings refuse it with a TYPE — the template
+# zone hands out its own handle and the three declarations do not exist
+# on it — so what is checked there is that the template constructor
+# carries no policy argument and the node type no policy method. The two
+# whose one handle serves both zones raise, and their sentence is frozen
+# BYTE FOR BYTE, because an app reads it and two spellings of one refusal
+# is the divergence invariant 1 forbids.
+#
+# COMPARED FLATTENED, and that is not a convenience: python splices the
+# sentence across adjacent string literals and ocaml across a
+# backslash-continued one, so the bytes an app sees are one line while
+# the bytes on disk are three. check-verbs' `expect_ax` clause reads its
+# three harnesses the same way and for the same reason.
+policy_sentence_out=$(python3 - <<'PY'
+import pathlib, re, sys
+
+SENTENCE = ("kaya: the size policy is a LIVE-ZONE declaration in this slice "
+            "— a canvas inside a row template keeps `scale` "
+            "(docs/deferred.md, the template-zone size policy entry)")
+
+def flat(text: str) -> str:
+    # Python's adjacent-literal splice, then OCaml's backslash-newline one.
+    text = re.sub(r'"\s*\n\s*"', "", text)
+    text = re.sub(r"\\\s*\n\s*", "", text)
+    return re.sub(r"\s+", " ", text)
+
+AMBIENT = ["bindings/python/kaya/__init__.py", "bindings/ocaml/kaya_app.ml"]
+fails = []
+want = re.sub(r"\s+", " ", SENTENCE)
+for name in AMBIENT:
+    if want not in flat(pathlib.Path(name).read_text(encoding="utf-8")):
+        fails.append(f"{name} serves both zones with ONE handle but does not "
+                     f"refuse a template-node size policy in the frozen "
+                     f"words: \"{want}\"")
+# THE CLAUSE'S OWN NEGATIVE, watched on every run: a copy with the
+# sentence perturbed must stop matching, or this is a grep nobody has
+# seen fail.
+src = pathlib.Path(AMBIENT[0]).read_text(encoding="utf-8")
+doctored, n = re.subn("LIVE-ZONE declaration", "live-zone declaration", src)
+print(f"check-sugar-surface: template-zone sentence perturbation applied "
+      f"{n} substitution(s)")
+if n < 1:
+    fails.append("the template-zone sentence self-test perturbed NOTHING — a "
+                 "negative that did not perturb is a failed test")
+elif want in flat(doctored):
+    fails.append("the template-zone sentence self-test stayed GREEN against a "
+                 "doctored copy — the clause reads something else")
+for line in fails:
+    print("check-sugar-surface: " + line)
+sys.exit(1 if fails else 0)
+PY
+)
+policy_rc=$?
+echo "$policy_sentence_out"
+if [ "$policy_rc" -ne 0 ]; then
+    status=1
+fi
+# The typed refusals: a template constructor that grew a policy argument
+# would be a second, unrefusable spelling of the same thing.
+policy_typed_fail=0
+if grep -qE "func \\(t \\*Tpl\\) Canvas\\(.*(fixed|onDraw|onTick)" bindings/go/app.go; then
+    echo "check-sugar-surface: go's Tpl.Canvas takes a size policy — the" \
+        "template zone is refused BY TYPE in this slice (docs/deferred.md)"
+    policy_typed_fail=1
+fi
+if grep -qE "public Node Canvas\\(.*(Fixed|OnDraw|OnTick)" bindings/csharp/KayaApp.cs; then
+    echo "check-sugar-surface: c#'s Tpl.Canvas takes a size policy — the" \
+        "template zone is refused BY TYPE in this slice (docs/deferred.md)"
+    policy_typed_fail=1
+fi
+if grep -qE "public Node canvas\\(.*(fixed|onDraw|onTick)" bindings/java/dev/kaya/KayaApp.java; then
+    echo "check-sugar-surface: java's Tpl.canvas takes a size policy — the" \
+        "template zone is refused BY TYPE in this slice (docs/deferred.md)"
+    policy_typed_fail=1
+fi
+if grep -qE "^canvasOf :: Viewbox -> \\[DrawOp\\] -> .*(Bool|DrawOp\\] -> \\()" bindings/haskell/KayaApp.hs; then
+    echo "check-sugar-surface: haskell's canvasOf takes a size policy — the" \
+        "template zone is refused BY TYPE in this slice (docs/deferred.md)"
+    policy_typed_fail=1
+fi
+[ "$policy_typed_fail" = 0 ] || status=1
+
+# THEIR BUILT-IN NEGATIVE TESTS, the table clause's discipline: a
+# pattern that can only pass is a pattern nobody notices has rotted.
+policy_fake=$(check_policy_fixed kaya_fake_fixed KayaFakeFixed kayaFakeFixed 2>&1 \
+    | grep -c "has no sugar for the canvas's")
+if [ "$policy_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($policy_fake/8 size-policy" \
+        "'fixed' patterns fired for a declaration that exists nowhere)"
+    exit 1
+fi
+policy_fake=$(check_policy_handler on_kaya_fake OnKayaFake onKayaFake "Nope" 2>&1 \
+    | grep -c "has no sugar for the canvas's")
+if [ "$policy_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($policy_fake/8 size-policy" \
+        "handler patterns fired for a handler that exists nowhere)"
+    exit 1
+fi
+unset policy_fake policy_typed_fail
+
 # The built-in negative test: a kind that exists nowhere must fail in
 # every binding, or the patterns themselves have rotted. The fake runs
 # inside $( ), so its `status=1` dies with that subshell and the real

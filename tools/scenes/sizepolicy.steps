@@ -90,10 +90,7 @@ expect_drawing canvas@clock "6/25,0,65,100"
 expect_raster canvas@clock "track"
 #
 # NO `expect_ax` HERE, and the omission is structural rather than an
-# oversight: check-steps' ax_bus clause requires every ax-asserting
-# scene to have a LINUX leg going through tools/linux/a11y-leg.sh, and
-# this scene has no linux leg at all while GTK holds
-# depth_stub("sizepolicy"). A canvas being an image to an assistive
-# client is asserted by tools/scenes/canvas.steps, on a scene that IS
-# wired there (§9); the size policy changes what is drawn and at what
+# oversight: a canvas being an image to an assistive client is asserted
+# by tools/scenes/canvas.steps, on a scene wired through the linux
+# a11y bus leg (§9); the size policy changes what is drawn and at what
 # size, and nothing about what a canvas is.

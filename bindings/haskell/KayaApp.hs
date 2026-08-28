@@ -210,6 +210,13 @@ module KayaApp
     canvas,
     canvasOf,
     drawAt,
+    -- The size policy, LIVE CANVASES ONLY (docs/canvas-plan.md §3.2.1):
+    -- 'fixed' is the property, 'onDraw' and 'onTick' are the drawing as a
+    -- function of the size it is handed. `scale` is spelled by writing
+    -- none of them.
+    fixed,
+    onDraw,
+    onTick,
     -- The TEMPLATE zone's own surface: one constructor per widget kind, each
     -- returning 'Tpl Node' (the module header's naming rule).
     TplStrSource,
@@ -2455,6 +2462,55 @@ canvas vb ops = leafish $ do
   emitB (drawingRecord n [] vb ops)
   return w
 
+-- | THIS CANVAS REFUSES COERCION: it draws at its viewbox and is placed
+-- in whatever track layout gives it, never adapting to it
+-- (docs\/canvas-plan.md §3.2.1). A PROPERTY rather than a handler, which
+-- is why it is a 'Build' action like every other live prop; the other
+-- two policies are 'onDraw' and 'onTick', and a canvas that declares
+-- none of the three is @scale@.
+fixed :: Widget -> Build ()
+fixed (Widget w) = emitB (W.txSetSizePolicy w W.sizePolicyFixed)
+
+-- | THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core hands over
+-- the size layout assigned and takes back the ops drawn for it
+-- (docs\/canvas-plan.md §3.2.1). PROVIDING THE FUNCTION IS THE
+-- DECLARATION — that is what @redraw@ means — so this registers it AND
+-- puts the policy on the wire in one act.
+--
+-- The size handed over IS the drawing's viewbox, so a chart re-lays-out
+-- for the width instead of scaling its old pixels. The ask never reaches
+-- the guest as an occurrence: 'dispatchLoop' answers it inside a
+-- transaction the BINDING opens (tools\/check-ambient-tx.sh).
+--
+-- Registered at the element that produced the occurrence, like 'onSort'
+-- — LIVE CANVASES ONLY, and the argument type is the refusal (see
+-- 'canvasOf').
+onDraw :: App -> Widget -> (Viewbox -> [DrawOp]) -> IO ()
+onDraw app w f = registerDraw app w W.sizePolicyRedraw (\size _ -> f size)
+
+-- | The same, on the platform's FRAME CLOCK: the function is handed the
+-- assigned size and the frame's time in seconds. @on_tick@ is @on_draw@
+-- plus that drive, so a ticking canvas is asked as a plain redraw once
+-- before its first frame and answers that ask at time 0.
+--
+-- THE TIME IS THE PLATFORM'S. A guest that reads its own clock
+-- re-imports the frame jitter the platforms' frame times exist to
+-- remove; under the harness it is the core's deterministic step, moved
+-- by the @frame@ verb.
+onTick :: App -> Widget -> (Viewbox -> Double -> [DrawOp]) -> IO ()
+onTick app w f = registerDraw app w W.sizePolicyTick f
+
+-- REGISTERING AND DECLARING ARE ONE ACT: a handler without its policy
+-- record is a drawing function nothing ever calls (docs/canvas-plan.md
+-- §3.2.1's ruling 1). THE HANDLER IS WIDENED HERE, not at dispatch: one
+-- stored shape means the answer path never asks which policy it holds,
+-- so calling a tick function with a redraw's arity is unspellable
+-- rather than merely avoided.
+registerDraw :: App -> Widget -> Word32 -> (Viewbox -> Double -> [DrawOp]) -> IO ()
+registerDraw app (Widget n) policy f = do
+  modifyIORef' (appDraws app) (Map.insert n f)
+  submitTx app (emitB (W.txSetSizePolicy n policy))
+
 -- Construction sugar, template flavor: one name per widget, and the
 -- argument's type picks the addressable source — a constant, a signal, or an
 -- element field.
@@ -2698,6 +2754,11 @@ gridOf = gridWith
 -- case set_drawing grew its keys-first addressing for
 -- (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
 -- every copy is born with it; 'drawAt' re-declares one copy's afterwards.
+--
+-- NO SIZE POLICY HERE, and the type is the refusal: 'fixed' takes a
+-- 'Widget' and 'onDraw'\/'onTick' register at one, so a stamped copy
+-- keeps @scale@ — the default, and correct (docs/deferred.md, the
+-- template-zone bullet of the size-policy entry).
 canvasOf :: Viewbox -> [DrawOp] -> Tpl Node
 canvasOf vb ops = do
   n@(Node i) <- widget W.kindCanvas
@@ -3263,7 +3324,15 @@ data App = App
     appMenuToggled :: IORef (Map.Map Word64 (Bool -> IO ())),
     appMenuToggledNode :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
     appMenuSelected :: IORef (Map.Map Word64 (Int -> IO ())),
-    appMenuSelectedNode :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ()))
+    appMenuSelectedNode :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ())),
+    -- The canvas's drawing-as-a-function-of-size (docs/canvas-plan.md
+    -- §3.2.1), keyed by the canvas's widget id. NOT a handler in the
+    -- sense the tables above are: these produce a DRAWING rather than
+    -- doing something, so 'dispatchLoop' answers the ask itself and the
+    -- guest never sees it. ONE STORED SHAPE for both policies —
+    -- 'onDraw' widens a size-only function — so the answer path has one
+    -- call shape and the frame time is 0 for a plain redraw.
+    appDraws :: IORef (Map.Map Word64 (Viewbox -> Double -> [DrawOp]))
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -3557,6 +3626,7 @@ newApp =
     <*> newIORef Map.empty -- appMenuToggledNode
     <*> newIORef Map.empty -- appMenuSelected
     <*> newIORef Map.empty -- appMenuSelectedNode
+    <*> newIORef Map.empty -- appDraws
 
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
@@ -3617,7 +3687,25 @@ dispatchLoop app = do
     Nothing -> do
       more <- waitOccurrences
       if more then dispatchLoop app else return () -- shutdown
-    Just (kind, ident, keys, payload, clip, undone)
+    Just (kind, ident, keys, payload, clip, undone, askTail)
+      -- THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER MAPPED
+      -- (docs/canvas-plan.md §3.2.1): the guest registered a drawing as a
+      -- function of size, so this calls it for the size the core asked
+      -- about and submits the one set_drawing itself, in a transaction the
+      -- BINDING opens (tools/check-ambient-tx.sh). An unregistered canvas
+      -- id drops the ask like any other unclaimed occurrence.
+      --
+      -- The size the ask carried IS the new viewbox, which is what makes
+      -- the coordinates the assigned points.
+      | kind == W.occKindDrawRequested || kind == W.occKindTick -> do
+          draws <- readIORef (appDraws app)
+          case Map.lookup ident draws of
+            Nothing -> return ()
+            Just f ->
+              dispatch $ do
+                let (box, time) = askSize askTail
+                submitTx app (emitB (drawingRecord ident [] box (f box time)))
+          dispatchLoop app
       | kind == W.occKindSortRequested -> do
           let column = case payload of Just (W.VI64 n) -> fromIntegral n; _ -> 0
           case keys of
@@ -3782,11 +3870,26 @@ dispatchLoop app = do
               handlers <- readIORef (appMenuSelectedNode app)
               dispatch (mapM_ (\h -> h keys index) (Map.lookup ident handlers))
           dispatchLoop app
-    Just (_, ident, [], _, _, _) -> do
+    Just (_, ident, [], _, _, _, _) -> do
       handlers <- readIORef (appWidgetHandlers app)
       dispatch (mapM_ id (Map.lookup ident handlers))
       dispatchLoop app
-    Just (_, ident, keys, _, _, _) -> do
+    Just (_, ident, keys, _, _, _, _) -> do
       handlers <- readIORef (appNodeHandlers app)
       dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
       dispatchLoop app
+
+-- The canvas ask's trailing values: the size the core is asking about,
+-- and a tick's frame time in seconds. TIME 0 FOR A PLAIN REDRAW, which
+-- is not a special case but the record's own shape — a ticking canvas is
+-- asked once as a draw_requested before its first frame, and the stored
+-- function takes the time either way.
+askSize :: [W.Value] -> (Viewbox, Double)
+askSize (W.VF64 w : W.VF64 h : rest) =
+  (Viewbox w h, case rest of W.VF64 t : _ -> t; _ -> 0)
+askSize other =
+  errorWithoutStackTrace
+    ( "kaya: a canvas ask carries "
+        ++ show other
+        ++ ", wanted the assigned width and height as f64"
+    )

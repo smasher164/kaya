@@ -763,6 +763,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\t\tpayload = clip");
         c.line("\t}");
     }
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1).
+    let values_tail = crate::values_tail_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occ{}", camel(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !values_tail.is_empty() {
+        c.line(&format!("\tif {values_tail} {{"));
+        c.line("\t\t// The canvas asks carry a run of BARE values after the key");
+        c.line("\t\t// path — the assigned size, and a tick's frame time — with");
+        c.line("\t\t// no count in front, so they are read until the record ends");
+        c.line("\t\t// (docs/canvas-plan.md §3.2.1).");
+        c.line("\t\tend := int(binary.LittleEndian.Uint32(rec[0:]))");
+        c.line("\t\ttail := []any{}");
+        c.line("\t\tfor at < end {");
+        c.line("\t\t\tvar v any");
+        c.line("\t\t\tv, at = parseValue(rec, at)");
+        c.line("\t\t\ttail = append(tail, v)");
+        c.line("\t\t}");
+        c.line("\t\tpayload = tail");
+        c.line("\t}");
+    }
     c.line("\treturn kind, id, keys, payload, true");
     c.line("}");
     c.out

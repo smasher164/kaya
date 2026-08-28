@@ -1475,4 +1475,62 @@ static inline int kaya_parse_menu_value_changed(const uint8_t *rec, uint64_t *id
     return 1;
 }
 
+/* Decode a draw_requested occurrence: id plus path_len key-path values,
+ * then the trailing run of bare values (width and height in
+ * points, and a tick's frame time in seconds) — read to the end
+ * of the record, since the run carries no count. Returns 1 and
+ * fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_draw_requested(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *keys, uint32_t max_keys,
+                                             uint32_t *n_keys, KayaVal *vals,
+                                             uint32_t max_vals, uint32_t *n_vals) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_DRAW_REQUESTED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    *n_vals = 0;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    while (at < r->header.size) {
+        KayaVal scratch;
+        int room = *n_vals < max_vals;
+        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);
+        (*n_vals)++;
+    }
+    return 1;
+}
+
+/* Decode a tick occurrence: id plus path_len key-path values,
+ * then the trailing run of bare values (width and height in
+ * points, and a tick's frame time in seconds) — read to the end
+ * of the record, since the run carries no count. Returns 1 and
+ * fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_tick(const uint8_t *rec, uint64_t *id,
+                                   KayaVal *keys, uint32_t max_keys,
+                                   uint32_t *n_keys, KayaVal *vals,
+                                   uint32_t max_vals, uint32_t *n_vals) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TICK)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    *n_vals = 0;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    while (at < r->header.size) {
+        KayaVal scratch;
+        int room = *n_vals < max_vals;
+        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);
+        (*n_vals)++;
+    }
+    return 1;
+}
+
 #endif /* KAYA_WIRE_H */

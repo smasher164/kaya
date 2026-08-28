@@ -348,6 +348,27 @@ pub(crate) fn u32_slot_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str
         .collect()
 }
 
+/// THE CANVAS ASKS: a click identity tag followed by a run of BARE f64
+/// values — draw_requested's `size`, tick's `frame` (docs/canvas-plan.md
+/// §3.2.1). `wire::draw_body` writes those values one after another with
+/// no count in front of them, so a reader takes values UNTIL THE RECORD
+/// ENDS; that is what lets one arm serve both arities (2 for a redraw, 3
+/// for a tick) without the spec carrying a length it does not have.
+pub(crate) fn values_tail_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 4
+                && r.fields[0].name == "id"
+                && r.fields[1].name == "path_len"
+                && r.fields[2].name == "reserved"
+                && matches!(r.fields[3].ty, kaya::spec::FieldTy::Values)
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
 /// Occurrences carrying an UNDO DELTA: a window, four u32 run lengths,
 /// the group's `label`, and one flat `delta` Values tail the runs cut up
 /// (docs/undo-plan.md D5, and `wire::undo_body`).

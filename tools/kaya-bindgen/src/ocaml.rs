@@ -420,7 +420,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    if kind = occ_kind_alert_result");
     c.line("    then");
     c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
-    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None)");
+    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, [])");
     // The picker's answer is a LIST OF RECORDS, and no single `value`
     // can carry one — so the three values per file ride the VALUES
     // slot, flattened, and kaya_app regroups them in threes. The
@@ -439,7 +439,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        out := v :: !out;");
     c.line("        at := next");
     c.line("      done;");
-    c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None)");
+    c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None, [])");
     c.line("    end");
     // The privileged read's one answer, in its own arm: the generic
     // tail would take the CLIP KIND for a path length, so a text answer
@@ -448,7 +448,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    else if kind = occ_kind_{name}"));
         c.line("    then begin");
         c.line("      let clip, values, _ = parse_clip byte 16 in");
-        c.line("      Some (kind, Int64.of_int id, [], None, Some (clip, values))");
+        c.line("      Some (kind, Int64.of_int id, [], None, Some (clip, values), [])");
         c.line("    end");
     }
     let id_only = crate::id_only_occurrence_names(spec)
@@ -459,7 +459,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    (* Surface lifecycle records carry the surface id alone");
     c.line("       ( derived from the record shapes ). *)");
     c.line(&format!("    else if {id_only}"));
-    c.line("    then Some (kind, Int64.of_int id, [], None, None)");
+    c.line("    then Some (kind, Int64.of_int id, [], None, None, [])");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))
@@ -474,7 +474,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        ( kind,");
         c.line("          Int64.of_int (u32_at byte 16),");
         c.line("          [],");
-        c.line("          Some (I64 (Int64.of_int id)),\n          None )");
+        c.line("          Some (I64 (Int64.of_int id)),\n          None,\n          [] )");
     }
     c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");
@@ -525,7 +525,37 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      else None");
     }
     c.line("    in");
-    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload, clip)");
+    // The canvas asks: bare values after the key path, no count in front
+    // of them, so they are read until the record ends (§3.2.1). Its own
+    // slot because the run is 2 values for a redraw and 3 for a tick,
+    // and `payload` is one.
+    c.line("    let tail =");
+    let values_tail = crate::values_tail_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if values_tail.is_empty() {
+        c.line("      []");
+    } else {
+        c.line(&format!("      if {values_tail} then begin"));
+        c.line("        (* The canvas asks carry a run of BARE values after the");
+        c.line("           key path — the assigned size, and a tick's frame time");
+        c.line("           — with no count in front, so they are read until the");
+        c.line("           record ends (docs/canvas-plan.md §3.2.1). *)");
+        c.line("        let stop = u32_at byte 0 in");
+        c.line("        let out = ref [] in");
+        c.line("        while !at < stop do");
+        c.line("          let v, next = parse_value byte !at in");
+        c.line("          out := v :: !out;");
+        c.line("          at := next");
+        c.line("        done;");
+        c.line("        List.rev !out");
+        c.line("      end");
+        c.line("      else []");
+    }
+    c.line("    in");
+    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload, clip, tail)");
     c.line("    end");
     c.line("  end");
     c.out

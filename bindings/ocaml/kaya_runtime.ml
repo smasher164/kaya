@@ -298,7 +298,7 @@ let poll_occurrence =
         let parsed =
           match undo with
           | Some _ ->
-              Some (kind, Int64.of_int (Kaya_wire.u32_at byte (at + 8)), [], None, None)
+              Some (kind, Int64.of_int (Kaya_wire.u32_at byte (at + 8)), [], None, None, [])
           | None -> Kaya_wire.parse_occurrence (fun i -> byte (at + i))
         in
         (* The cursors are u32 and wrap; OCaml ints are wider, so wrap by
@@ -306,8 +306,8 @@ let poll_occurrence =
         h := (!h + size) land 0xFFFFFFFF;
         store_release_u32 head_addr !h;
         match parsed with
-        | Some (kind, id, keys, payload, clip) ->
-            Some (kind, id, keys, payload, clip, undo)
+        | Some (kind, id, keys, payload, clip, tail) ->
+            Some (kind, id, keys, payload, clip, tail, undo)
         | None -> scan ()
       end
     in

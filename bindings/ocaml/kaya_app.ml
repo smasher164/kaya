@@ -22,6 +22,14 @@ type node = Node of int64
    scene can freeze it. *)
 type viewbox = float * float
 
+(* The drawing scope's recorder. The calls read as immediate-mode
+   drawing; they are recorded, and ONE record is submitted when the scope
+   closes — the For template trace's fiction with a drawing scope instead
+   of a loop (docs/canvas-plan.md §2.1). [d_ops] accumulates reversed.
+   Declared up here because the app's registry of size-dependent drawings
+   names it. *)
+type draw = { d_viewbox : viewbox; mutable d_ops : Kaya_wire.value list }
+
 (* WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
    note, which every binding's copy of this surface shortens. *)
 type capabilities = { aux_windows : bool }
@@ -227,6 +235,16 @@ type app = {
   (* Each canvas's declared viewbox, so a redraw in a LATER transaction
      does not have to repeat it (docs/canvas-plan.md §2.2). *)
   canvas_viewboxes : (int64, viewbox) Hashtbl.t;
+  (* A canvas's DRAWING AS A FUNCTION OF THE SIZE IT WAS ASSIGNED
+     (docs/canvas-plan.md §3.2.1), keyed by canvas id. Not a handler
+     table like the others: these produce a DRAWING rather than reaching
+     the guest, so [dispatch_loop] answers the ask itself and the guest
+     never hears it.
+     ONE SHAPE, NOT TWO. [~on_tick]'s handler is stored verbatim and
+     [~on_draw]'s is widened with an ignored time, because a tick canvas
+     is asked as a plain draw_requested once before its first frame and
+     the arity must not depend on the record kind. *)
+  canvas_draws : (int64, draw -> viewbox -> float -> unit) Hashtbl.t;
 }
 
 (* One transaction: everything queued inside build (or a handler) applies
@@ -326,6 +344,7 @@ let create () =
     tpl_depth = 0;
     derived = Hashtbl.create 8;
     canvas_viewboxes = Hashtbl.create 8;
+    canvas_draws = Hashtbl.create 8;
   }
 
 let emit tx record = tx.records <- record :: tx.records
@@ -983,12 +1002,6 @@ let text_baseline_wire = function
   | Top -> Int64.of_int Kaya_wire.text_baseline_top
   | Bottom -> Int64.of_int Kaya_wire.text_baseline_bottom
 
-(* The drawing scope's recorder. The calls read as immediate-mode
-   drawing; they are recorded, and ONE record is submitted when the scope
-   closes — the For template trace's fiction with a drawing scope instead
-   of a loop (docs/canvas-plan.md §2.1). [d_ops] accumulates reversed. *)
-type draw = { d_viewbox : viewbox; mutable d_ops : Kaya_wire.value list }
-
 (* The box this drawing is written in, so a chart can compute its own
    extents without the app carrying the numbers twice. *)
 let viewbox d = d.d_viewbox
@@ -1049,12 +1062,44 @@ let drawing_record id keys ((vb_w, vb_h) as vb) body =
   Kaya_wire.tx_set_drawing id (Kaya_wire.F64 vb_w) (Kaya_wire.F64 vb_h)
     (List.length ops) (List.length keys) (keys @ ops)
 
+(* WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+   (docs/canvas-plan.md §3.2.1), lowered for [~fixed], [~on_draw] and
+   [~on_tick]. The guest never spells the number, and a canvas that
+   declares nothing is `scale`.
+
+   THE SIZE POLICY IS A LIVE-ZONE DECLARATION IN THIS SLICE. OCaml's
+   [Tpl.canvas] is refused by the compiler — it has none of the three
+   labels — but the LIVE [canvas] can be CALLED inside a template body,
+   where [widget] mints a template node and the [Widget] wrapper says
+   nothing about which zone the id landed in. So the refusal here is
+   [tpl_depth], the same reading [guard_mirror_read] and
+   [alloc_menu_item] take (docs/deferred.md, the template-zone size
+   policy entry). *)
+let declare_size_policy tx id policy =
+  if tx.app.tpl_depth > 0 then
+    failwith
+      "kaya: the size policy is a LIVE-ZONE declaration in this slice — a \
+       canvas inside a row template keeps `scale` (docs/deferred.md, the \
+       template-zone size policy entry)";
+  emit tx (Kaya_wire.tx_set_size_policy id policy)
+
 (* A drawing surface. [~viewbox] is the coordinate system the ops are
    written in AND the canvas's natural size in points, which is what
    keeps one op stream identical on five platforms (§3.2). [~draw]
    declares what it draws at construction; [draw] re-declares it later,
-   and until one of them runs the canvas is present and empty. *)
-let canvas ?grow ?a11y_id ?a11y_label ~viewbox ?draw () =
+   and until one of them runs the canvas is present and empty.
+
+   THE THREE SIZE-POLICY DECLARATIONS RIDE HERE, where this binding's
+   other handlers ride (§3.2.1, ruling 1). [~fixed:true] refuses
+   coercion; [~on_draw] hands the drawing the size it was assigned and
+   [~on_tick] the size and the frame's time in seconds, and REGISTERING
+   IS DECLARING — each puts its policy on the wire in the same act, so a
+   handler nothing can call is unspellable. Writing none of the three is
+   `scale`. The binding answers both asks itself (see [dispatch_loop]);
+   they never reach the guest. *)
+let canvas ?grow ?a11y_id ?a11y_label ~viewbox ?draw ?(fixed = false)
+    ?(on_draw : (draw -> viewbox -> unit) option)
+    ?(on_tick : (draw -> viewbox -> float -> unit) option) () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_canvas in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1065,6 +1110,21 @@ let canvas ?grow ?a11y_id ?a11y_label ~viewbox ?draw () =
      guest side remembers it so a redraw in a later handler does not
      repeat it. *)
   Hashtbl.replace tx.app.canvas_viewboxes id viewbox;
+  (* The policy is a PROP and rides ahead of the drawing, as it does in
+     the Rust model's chain. *)
+  if fixed then declare_size_policy tx id Kaya_wire.size_policy_fixed;
+  Option.iter
+    (fun f ->
+      declare_size_policy tx id Kaya_wire.size_policy_redraw;
+      (* Widened to the stored shape at REGISTRATION, never chosen at
+         dispatch: see [canvas_draws]. *)
+      Hashtbl.replace tx.app.canvas_draws id (fun d size _ -> f d size))
+    on_draw;
+  Option.iter
+    (fun f ->
+      declare_size_policy tx id Kaya_wire.size_policy_tick;
+      Hashtbl.replace tx.app.canvas_draws id f)
+    on_tick;
   Option.iter (fun body -> emit tx (drawing_record id [] viewbox body)) draw;
   w
 
@@ -3195,8 +3255,32 @@ let dispatch_loop app =
     match Kaya_runtime.poll_occurrence () with
     | None ->
         if Kaya_runtime.wait_occurrences () then loop () else () (* shutdown *)
-    | Some (kind, id, keys, payload, clip, undo) ->
-        (if kind = Kaya_wire.occ_kind_sort_requested then
+    | Some (kind, id, keys, payload, clip, tail, undo) ->
+        (if
+           kind = Kaya_wire.occ_kind_draw_requested
+           || kind = Kaya_wire.occ_kind_tick
+         then
+           (* THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
+              ON (docs/canvas-plan.md §3.2.1): the guest declared a
+              drawing as a function of size, so this draws it inside the
+              transaction the BINDING opens and keeps looping. The size
+              and a tick's time ride as the record's bare trailing
+              values. No handler drops the ask like any unclaimed one. *)
+           (match (Hashtbl.find_opt app.canvas_draws id, tail) with
+           | Some handler, Kaya_wire.F64 bw :: Kaya_wire.F64 bh :: rest ->
+               let box = (bw, bh) in
+               let time =
+                 match rest with Kaya_wire.F64 t :: _ -> t | _ -> 0.0
+               in
+               dispatch app (fun () ->
+                   let tx = the_tx () in
+                   (* The assigned size is this canvas's viewbox from
+                      here on, so a later plain [draw] uses it too. *)
+                   Hashtbl.replace tx.app.canvas_viewboxes id box;
+                   emit tx
+                     (drawing_record id [] box (fun d -> handler d box time)))
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_sort_requested then
            (match (payload, keys) with
            | Some (Kaya_wire.I64 column), [] ->
                (match Hashtbl.find_opt app.sort_handlers id with

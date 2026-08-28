@@ -152,6 +152,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -443,6 +444,13 @@ val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
  * coordinates, and `kayaPhotograph` is the one place that crosses.
  */
 val kayaCanvasBoxes = HashMap<Long, android.graphics.Rect>()
+
+/**
+ * Whether the scene's `frame` verb owns the tick clock, so the canvas
+ * arm attaches no `withFrameNanos` driver of its own (docs/canvas-plan.md
+ * §15.4). The same discriminator the startup deadline reads.
+ */
+private val kayaHarnessDrivesFrames = System.getenv("KAYA_SELFTEST") != null
 
 /**
  * The selection background each textarea is painted UNDER, ARGB, by
@@ -6841,15 +6849,43 @@ object KayaCompose {
                             failures.add("drawing $measured, wanted $want")
                         }
                     }
-                    // THE SIZE POLICY'S TWO VERBS (docs/canvas-plan.md
-                    // §3.2.1). Nothing here reports a canvas's assigned
-                    // track yet, so `expect_raster` would answer "no
-                    // track reported" for every canvas and `frame`
-                    // would advance a clock no canvas is watching —
-                    // both refuse where check-stubs and check-steps can
-                    // see it.
-                    "expect_raster" -> depthStub("sizepolicy")
-                    "frame" -> depthStub("sizepolicy")
+                    // WHICH SIZE THE RASTER IS (docs/canvas-plan.md
+                    // §3.2.1), asked of the CORE like the probe: the two
+                    // numbers being compared were produced on opposite
+                    // sides of the boundary — the TRACK is what this
+                    // backend measured and reported, the VIEWBOX is what
+                    // the guest declared.
+                    //
+                    // The only canvas read a size policy can move: the
+                    // hash and the ink bounds come from the CANONICAL
+                    // raster, which is taken at the viewbox by
+                    // definition, so a canvas that stretched a
+                    // viewbox-sized buffer into its track answers both of
+                    // them identically.
+                    "expect_raster" -> {
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            val node = kayaCanvasTarget(parts[1])
+                            if (node == null) "<no canvas ${parts[1]}>"
+                            else KayaPresent.canvasRasterShape(node.id)
+                        }
+                        if (got == want) {
+                            observed.add("raster $want")
+                        } else {
+                            failures.add("raster $got, wanted $want")
+                        }
+                    }
+                    // ADVANCE THE FRAME CLOCK (§15.4). A VERB, never wall
+                    // clock: the core owns the step, so a leg's frame
+                    // count is part of the scene and not a fact about the
+                    // load on the machine that ran it.
+                    "frame" -> {
+                        val frames = if (parts.size > 1) (parts[1].toIntOrNull() ?: 1) else 1
+                        onUi(activity) {
+                            repeat(maxOf(frames, 1)) { KayaPresent.harnessFrame() }
+                        }
+                        observed.add("frame $frames")
+                    }
                     // THE BLIT, sampled off the window's own rendered
                     // pixels (§7.2) — the one canvas read that fails
                     // when the buffer never reached the platform's image
@@ -7724,14 +7760,14 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// A depth stub is a CALL, never a sentence — tools/check-stubs.sh reads
-// it, and its silence is bought by an OPEN entry in docs/deferred.md
-// (tools/lib/stub-ledger.py).
-private fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on android — " +
-            "it is a depth slice; see CLAUDE.md's sequencing",
-    )
+// THIS BACKEND STUBS NOTHING TODAY, so it carries no depthStub: an
+// unused private function fails tools/check-detekt.sh. The next depth
+// slice writes it back in as a CALL, never a sentence —
+// tools/check-stubs.sh reads the call, and its silence is bought by an
+// OPEN entry in docs/deferred.md (tools/lib/stub-ledger.py):
+//
+//     private fun depthStub(scene: String): Nothing =
+//         error("kaya: the $scene scene is not yet materialized on android")
 
 /**
  * THE BLIT'S BYTES (docs/canvas-plan.md §8): the core's premultiplied
@@ -9644,34 +9680,129 @@ private fun KayaRenderCore(
             // THE INTRINSIC SIZE IS ALREADY THE VIEWBOX. The scale this
             // backend reports IS the composition's density (§5), so the
             // raster is viewbox-times-density pixels and Image's default
-            // sizing — the painter's pixel size over the density —
-            // lands on the viewbox in dp with no arithmetic here.
-            // FillBounds is §3.2 rule 2: a grown track stretches the
-            // drawing rather than letterboxing it.
+            // sizing — the painter's pixel size — lands on the viewbox
+            // in dp with no arithmetic here.
             //
-            // It threads `a11y` the way KIND_IMAGE's does, a drawing
-            // being an image to the accessibility tree (§9): the name
-            // rides Image's own contentDescription, and null there is
-            // Compose's spelling of "decoration, hide it".
+            // STRICTLY 1:1, NEVER STRETCHED (§3.2.1, ruling 2): the
+            // image is measured UNBOUNDED so it takes exactly those
+            // pixels, and a track bigger than the buffer leaves MARGIN
+            // rather than a rescale. Whether the buffer is the viewbox's
+            // size or the track's is the CORE's decision and the whole
+            // content of the size policy — this arm may not have an
+            // opinion about it.
+            //
+            // THE TRACK IS THIS LAYOUT'S OWN SIZE, never the image's:
+            // `boxFill` puts the grow fill HERE, so the constrained size
+            // is the cell a grower earned, while the image inside is
+            // always the buffer. Reading the image would make the track
+            // and the raster agree by construction and leave the policy
+            // inert (KayaSwiftUI.swift's `.background` trap, one toolkit
+            // over).
+            //
+            // A GROWER TAKES THE WHOLE OFFERED BOX, BOTH AXES, which is
+            // KayaSwiftUI.swift's `.frame(maxWidth:.infinity,
+            // maxHeight:.infinity)` in this toolkit's spelling, and it is
+            // the half that cannot be derived from the buffer: a `redraw`
+            // or `tick` canvas HAS no buffer until the core asks, and the
+            // core only asks once a track is reported. Sized from the
+            // child, such a canvas is 0 wide, the report is degenerate,
+            // the ask never goes out and it stays empty for the process's
+            // life (docs/traps.md, "A `redraw` canvas sized from its own
+            // buffer NEVER STARTS"). An UNGROWN canvas keeps its natural
+            // size, which is content-is-the-floor and the track it truly
+            // has.
+            //
+            // AND AN UNGROWN ONE IS CLAMPED INTO its constraints, never
+            // merely floored by them: letting a `fixed` canvas's
+            // oversized buffer push this layout out would report the
+            // VIEWBOX as the track, and scene.rs's canvas_raster_shape
+            // answers "track" for that — the one word it cannot then
+            // tell from a re-raster.
+            //
+            // ONE READER, BOTH JOBS: `expect_ink` samples the box this
+            // records and the core rasters for the size this reports.
+            //
+            // THE TAG RIDES THE IMAGE, not this Layout: `Image` publishes
+            // Role.Image only when the name rides its own
+            // contentDescription PARAMETER (the measured finding at
+            // `a11yTag`'s declaration), so a tag on the wrapper answers
+            // `expect_ax` with `group/` and one child (docs/traps.md, the
+            // same entry).
             //
             // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
             // ABSENT — the image arm's rule verbatim, for its reason
             // (tools/check-empty-child.sh).
             val drawing = node.drawing
-            val locate = Modifier.onGloballyPositioned {
-                val r = it.boundsInWindow()
-                kayaCanvasBoxes[node.id] = android.graphics.Rect(
-                    r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+            val canvasDensity = LocalDensity.current.density.toDouble()
+            Layout(
+                content = {
+                    if (drawing != null) {
+                        Image(
+                            bitmap = drawing,
+                            contentDescription = node.a11yLabel.ifEmpty { null },
+                            contentScale = ContentScale.None,
+                            modifier = a11yTag,
+                        )
+                    } else {
+                        Box(modifier = a11yTag)
+                    }
+                },
+                modifier = boxFill.onGloballyPositioned {
+                    val r = it.boundsInWindow()
+                    kayaCanvasBoxes[node.id] = android.graphics.Rect(
+                        r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+                    KayaPresent.canvasTrack(
+                        node.id,
+                        it.size.width.toDouble() / canvasDensity,
+                        it.size.height.toDouble() / canvasDensity,
+                    )
+                },
+            ) { measurables, constraints ->
+                val placeables = measurables.map { it.measure(Constraints()) }
+                val grown = node.grow > 0
+                val width = if (grown && constraints.hasBoundedWidth) {
+                    constraints.maxWidth
+                } else {
+                    (placeables.maxOfOrNull { it.width } ?: 0)
+                        .coerceIn(constraints.minWidth, constraints.maxWidth)
+                }
+                val height = if (grown && constraints.hasBoundedHeight) {
+                    constraints.maxHeight
+                } else {
+                    (placeables.maxOfOrNull { it.height } ?: 0)
+                        .coerceIn(constraints.minHeight, constraints.maxHeight)
+                }
+                layout(width, height) {
+                    // CENTRED, which is the letterbox: `scale` fits its
+                    // figure inside the track and `fixed` sits in the
+                    // middle of one it refused to adapt to.
+                    placeables.forEach {
+                        it.placeRelative((width - it.width) / 2, (height - it.height) / 2)
+                    }
+                }
             }
-            if (drawing != null) {
-                Image(
-                    bitmap = drawing,
-                    contentDescription = node.a11yLabel.ifEmpty { null },
-                    contentScale = ContentScale.FillBounds,
-                    modifier = boxFill.then(locate).then(a11yTag),
-                )
-            } else {
-                Box(modifier = locate.then(a11yTag))
+            // THE PLATFORM'S FRAME DRIVE, outside the harness
+            // (docs/canvas-plan.md §15.4). `withFrameNanos` is Compose's
+            // own Choreographer schedule and hands back the frame's
+            // timestamp, which is what the tick has to carry: a clock
+            // read inside the callback re-imports exactly the jitter the
+            // frame time was fixed to remove.
+            //
+            // NOT UNDER THE HARNESS, and that is the determinism half of
+            // the ruling: a scene's frame count is what the `frame` verb
+            // advanced, so a second clock running beside it would make
+            // every animation leg a question about the machine's load.
+            //
+            // ONE PER CANVAS, because this backend is not told which
+            // canvases tick — the size policy is the core's. `kaya_frame`
+            // is monotone in the timestamp, so the second and later
+            // canvases in a frame cost a comparison and nothing else.
+            if (!kayaHarnessDrivesFrames) {
+                LaunchedEffect(node.id) {
+                    while (true) {
+                        withFrameNanos { KayaPresent.frame(it / 1_000_000_000.0) }
+                    }
+                }
             }
         }
     }

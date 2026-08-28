@@ -156845,6 +156845,53 @@ pub mod Microsoft {
                         SystemBackdropProperty: usize,
                     }
                     windows_core::imp::define_interface!(
+                        ILayoutInformation,
+                        ILayoutInformation_Vtbl,
+                        0xceea0a8c_5a4f_5d7a_8fea_77b5e0e0230c
+                    );
+                    impl windows_core::RuntimeType for ILayoutInformation {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct ILayoutInformation_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                    }
+                    windows_core::imp::define_interface!(
+                        ILayoutInformationStatics,
+                        ILayoutInformationStatics_Vtbl,
+                        0x8ddb192d_b7ff_5307_acf4_d4e547da5815
+                    );
+                    impl windows_core::RuntimeType for ILayoutInformationStatics {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct ILayoutInformationStatics_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub GetLayoutExceptionElement:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut core::ffi::c_void,
+                                *mut *mut core::ffi::c_void,
+                            )
+                                -> windows_core::HRESULT,
+                        pub GetLayoutSlot: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut super::super::super::super::super::Windows::Foundation::Rect,
+                        )
+                            -> windows_core::HRESULT,
+                        pub GetAvailableSize: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut super::super::super::super::super::Windows::Foundation::Size,
+                        )
+                            -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
                         IPopup,
                         IPopup_Vtbl,
                         0x4e3ab19d_2f95_579c_9535_906c58629437
@@ -157535,6 +157582,95 @@ pub mod Microsoft {
                         IsCheckedProperty: usize,
                         IsThreeStateProperty: usize,
                     }
+                    #[repr(transparent)]
+                    #[derive(Clone, Debug, Eq, PartialEq)]
+                    pub struct LayoutInformation(windows_core::IUnknown);
+                    windows_core::imp::interface_hierarchy!(
+                        LayoutInformation,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    impl LayoutInformation {
+                        pub fn GetLayoutExceptionElement<P0>(
+                            dispatcher: P0,
+                        ) -> windows_core::Result<super::super::UIElement>
+                        where
+                            P0: windows_core::Param<windows_core::IInspectable>,
+                        {
+                            Self::ILayoutInformationStatics(|this| unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetLayoutExceptionElement)(
+                                    windows_core::Interface::as_raw(this),
+                                    dispatcher.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            })
+                        }
+                        pub fn GetLayoutSlot<P0>(
+                            element: P0,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        >
+                        where
+                            P0: windows_core::Param<super::super::FrameworkElement>,
+                        {
+                            Self::ILayoutInformationStatics(|this| unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetLayoutSlot)(
+                                    windows_core::Interface::as_raw(this),
+                                    element.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            })
+                        }
+                        pub fn GetAvailableSize<P0>(
+                            element: P0,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        >
+                        where
+                            P0: windows_core::Param<super::super::UIElement>,
+                        {
+                            Self::ILayoutInformationStatics(|this| unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAvailableSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    element.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            })
+                        }
+                        fn ILayoutInformationStatics<
+                            R,
+                            F: FnOnce(&ILayoutInformationStatics) -> windows_core::Result<R>,
+                        >(
+                            callback: F,
+                        ) -> windows_core::Result<R> {
+                            static SHARED: windows_core::imp::FactoryCache<
+                                LayoutInformation,
+                                ILayoutInformationStatics,
+                            > = windows_core::imp::FactoryCache::new();
+                            SHARED.call(callback)
+                        }
+                    }
+                    impl windows_core::RuntimeType for LayoutInformation {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_class::<Self, ILayoutInformation>();
+                    }
+                    unsafe impl windows_core::Interface for LayoutInformation {
+                        type Vtable = <ILayoutInformation as windows_core::Interface>::Vtable;
+                        const IID: windows_core::GUID =
+                            <ILayoutInformation as windows_core::Interface>::IID;
+                    }
+                    impl windows_core::RuntimeName for LayoutInformation {
+                        const NAME: &'static str =
+                            "Microsoft.UI.Xaml.Controls.Primitives.LayoutInformation";
+                    }
+                    unsafe impl Send for LayoutInformation {}
+                    unsafe impl Sync for LayoutInformation {}
                     #[repr(transparent)]
                     #[derive(Clone, Debug, Eq, PartialEq)]
                     pub struct Popup(windows_core::IUnknown);
@@ -177140,6 +177276,105 @@ pub mod Microsoft {
                 unsafe impl Sync for Brush {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct CompositionTarget(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    CompositionTarget,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl CompositionTarget {
+                    pub fn Rendering<P0>(handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::EventHandler<
+                                windows_core::IInspectable,
+                            >,
+                        >,
+                    {
+                        Self::ICompositionTargetStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Rendering)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn RemoveRendering(token: i64) -> windows_core::Result<()> {
+                        Self::ICompositionTargetStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveRendering)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn RemoveRendered(token: i64) -> windows_core::Result<()> {
+                        Self::ICompositionTargetStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveRendered)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn SurfaceContentsLost<P0>(handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::EventHandler<
+                                windows_core::IInspectable,
+                            >,
+                        >,
+                    {
+                        Self::ICompositionTargetStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SurfaceContentsLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn RemoveSurfaceContentsLost(token: i64) -> windows_core::Result<()> {
+                        Self::ICompositionTargetStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveSurfaceContentsLost)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    fn ICompositionTargetStatics<
+                        R,
+                        F: FnOnce(&ICompositionTargetStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            CompositionTarget,
+                            ICompositionTargetStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for CompositionTarget {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionTarget>();
+                }
+                unsafe impl windows_core::Interface for CompositionTarget {
+                    type Vtable = <ICompositionTarget as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <ICompositionTarget as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for CompositionTarget {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Media.CompositionTarget";
+                }
+                unsafe impl Send for CompositionTarget {}
+                unsafe impl Sync for CompositionTarget {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct FontFamily(windows_core::IUnknown);
                 windows_core::imp::interface_hierarchy!(
                     FontFamily,
@@ -177474,6 +177709,63 @@ pub mod Microsoft {
                     RelativeTransformProperty: usize,
                 }
                 windows_core::imp::define_interface!(
+                    ICompositionTarget,
+                    ICompositionTarget_Vtbl,
+                    0x7d938324_e3ad_597c_93f6_520725410e68
+                );
+                impl windows_core::RuntimeType for ICompositionTarget {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ICompositionTarget_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    ICompositionTargetStatics,
+                    ICompositionTargetStatics_Vtbl,
+                    0x12a4be6f_6db1_5165_b622_d57ab782745b
+                );
+                impl windows_core::RuntimeType for ICompositionTargetStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ICompositionTargetStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Rendering: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveRendering: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    Rendered: usize,
+                    pub RemoveRendered: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SurfaceContentsLost: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveSurfaceContentsLost:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            i64,
+                        ) -> windows_core::HRESULT,
+                    GetCompositorForCurrentThread: usize,
+                }
+                windows_core::imp::define_interface!(
                     IFontFamily,
                     IFontFamily_Vtbl,
                     0x18fa5bc1_7294_527c_bb02_b213e0b3a2a3
@@ -177651,6 +177943,25 @@ pub mod Microsoft {
                 #[doc(hidden)]
                 pub struct IImageSourceFactory_Vtbl {
                     pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IRenderingEventArgs,
+                    IRenderingEventArgs_Vtbl,
+                    0xa67c8f8d_1885_5fc9_975c_901224f79b1e
+                );
+                impl windows_core::RuntimeType for IRenderingEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IRenderingEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub RenderingTime: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::Foundation::TimeSpan,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     ISolidColorBrush,
@@ -177844,6 +178155,45 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for ImageSource {}
                 unsafe impl Sync for ImageSource {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct RenderingEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    RenderingEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl RenderingEventArgs {
+                    pub fn RenderingTime(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::Foundation::TimeSpan,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderingTime)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for RenderingEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IRenderingEventArgs>();
+                }
+                unsafe impl windows_core::Interface for RenderingEventArgs {
+                    type Vtable = <IRenderingEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IRenderingEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for RenderingEventArgs {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Media.RenderingEventArgs";
+                }
+                unsafe impl Send for RenderingEventArgs {}
+                unsafe impl Sync for RenderingEventArgs {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct SolidColorBrush(windows_core::IUnknown);
@@ -179804,6 +180154,17 @@ pub mod Windows {
                     .map(|| result__)
                 }
             }
+            pub fn GetTimeSpan(&self) -> windows_core::Result<TimeSpan> {
+                let this = self;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetTimeSpan)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
             pub fn GetPoint(&self) -> windows_core::Result<Point> {
                 let this = self;
                 unsafe {
@@ -180033,6 +180394,20 @@ pub mod Windows {
                     .ok()
                 }
             }
+            pub fn GetTimeSpanArray(
+                &self,
+                value: &mut windows_core::Array<TimeSpan>,
+            ) -> windows_core::Result<()> {
+                let this = self;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetTimeSpanArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
             pub fn GetPointArray(
                 &self,
                 value: &mut windows_core::Array<Point>,
@@ -180094,6 +180469,7 @@ pub mod Windows {
             fn GetBoolean(&self) -> windows_core::Result<bool>;
             fn GetString(&self) -> windows_core::Result<windows_core::HSTRING>;
             fn GetGuid(&self) -> windows_core::Result<windows_core::GUID>;
+            fn GetTimeSpan(&self) -> windows_core::Result<TimeSpan>;
             fn GetPoint(&self) -> windows_core::Result<Point>;
             fn GetSize(&self) -> windows_core::Result<Size>;
             fn GetRect(&self) -> windows_core::Result<Rect>;
@@ -180152,6 +180528,10 @@ pub mod Windows {
             fn GetGuidArray(
                 &self,
                 value: &mut windows_core::Array<windows_core::GUID>,
+            ) -> windows_core::Result<()>;
+            fn GetTimeSpanArray(
+                &self,
+                value: &mut windows_core::Array<TimeSpan>,
             ) -> windows_core::Result<()>;
             fn GetPointArray(
                 &self,
@@ -180427,6 +180807,25 @@ pub mod Windows {
                         let this: &Identity =
                             &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                         match IPropertyValue_Impl::GetGuid(this) {
+                            Ok(ok__) => {
+                                result__.write(core::mem::transmute_copy(&ok__));
+                                windows_core::HRESULT(0)
+                            }
+                            Err(err) => err.into(),
+                        }
+                    }
+                }
+                unsafe extern "system" fn GetTimeSpan<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    result__: *mut TimeSpan,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        match IPropertyValue_Impl::GetTimeSpan(this) {
                             Ok(ok__) => {
                                 result__.write(core::mem::transmute_copy(&ok__));
                                 windows_core::HRESULT(0)
@@ -180786,6 +181185,27 @@ pub mod Windows {
                         .into()
                     }
                 }
+                unsafe extern "system" fn GetTimeSpanArray<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    value_array_size: *mut u32,
+                    value: *mut *mut TimeSpan,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        IPropertyValue_Impl::GetTimeSpanArray(
+                            this,
+                            &mut windows_core::imp::array_proxy(
+                                core::mem::transmute_copy(&value),
+                                value_array_size,
+                            ),
+                        )
+                        .into()
+                    }
+                }
                 unsafe extern "system" fn GetPointArray<
                     Identity: IPropertyValue_Impl,
                     const OFFSET: isize,
@@ -180868,7 +181288,7 @@ pub mod Windows {
                     GetString: GetString::<Identity, OFFSET>,
                     GetGuid: GetGuid::<Identity, OFFSET>,
                     GetDateTime: 0,
-                    GetTimeSpan: 0,
+                    GetTimeSpan: GetTimeSpan::<Identity, OFFSET>,
                     GetPoint: GetPoint::<Identity, OFFSET>,
                     GetSize: GetSize::<Identity, OFFSET>,
                     GetRect: GetRect::<Identity, OFFSET>,
@@ -180887,7 +181307,7 @@ pub mod Windows {
                     GetInspectableArray: GetInspectableArray::<Identity, OFFSET>,
                     GetGuidArray: GetGuidArray::<Identity, OFFSET>,
                     GetDateTimeArray: 0,
-                    GetTimeSpanArray: 0,
+                    GetTimeSpanArray: GetTimeSpanArray::<Identity, OFFSET>,
                     GetPointArray: GetPointArray::<Identity, OFFSET>,
                     GetSizeArray: GetSizeArray::<Identity, OFFSET>,
                     GetRectArray: GetRectArray::<Identity, OFFSET>,
@@ -180957,7 +181377,10 @@ pub mod Windows {
                 *mut windows_core::GUID,
             ) -> windows_core::HRESULT,
             GetDateTime: usize,
-            GetTimeSpan: usize,
+            pub GetTimeSpan: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut TimeSpan,
+            ) -> windows_core::HRESULT,
             pub GetPoint: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 *mut Point,
@@ -181042,7 +181465,11 @@ pub mod Windows {
                 *mut *mut windows_core::GUID,
             ) -> windows_core::HRESULT,
             GetDateTimeArray: usize,
-            GetTimeSpanArray: usize,
+            pub GetTimeSpanArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut u32,
+                *mut *mut TimeSpan,
+            ) -> windows_core::HRESULT,
             pub GetPointArray: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 *mut u32,
@@ -181147,7 +181574,11 @@ pub mod Windows {
                 *mut *mut core::ffi::c_void,
             ) -> windows_core::HRESULT,
             CreateDateTime: usize,
-            CreateTimeSpan: usize,
+            pub CreateTimeSpan: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                TimeSpan,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
             pub CreatePoint: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 Point,
@@ -181249,7 +181680,13 @@ pub mod Windows {
                 *mut *mut core::ffi::c_void,
             ) -> windows_core::HRESULT,
             CreateDateTimeArray: usize,
-            CreateTimeSpanArray: usize,
+            pub CreateTimeSpanArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                u32,
+                *const TimeSpan,
+                *mut *mut core::ffi::c_void,
+            )
+                -> windows_core::HRESULT,
             pub CreatePointArray: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 u32,
@@ -181459,6 +181896,17 @@ pub mod Windows {
                 unsafe {
                     let mut result__ = core::mem::zeroed();
                     (windows_core::Interface::vtable(this).GetGuid)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
+            pub fn GetTimeSpan(&self) -> windows_core::Result<TimeSpan> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetTimeSpan)(
                         windows_core::Interface::as_raw(this),
                         &mut result__,
                     )
@@ -181687,6 +182135,20 @@ pub mod Windows {
                 let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
                 unsafe {
                     (windows_core::Interface::vtable(this).GetGuidArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
+            pub fn GetTimeSpanArray(
+                &self,
+                value: &mut windows_core::Array<TimeSpan>,
+            ) -> windows_core::Result<()> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetTimeSpanArray)(
                         windows_core::Interface::as_raw(this),
                         value.set_abi_len(),
                         value as *mut _ as _,
@@ -181983,6 +182445,19 @@ pub mod Windows {
                     .and_then(|| windows_core::Type::from_abi(result__))
                 })
             }
+            pub fn CreateTimeSpan(
+                value: TimeSpan,
+            ) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreateTimeSpan)(
+                        windows_core::Interface::as_raw(this),
+                        value,
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
             pub fn CreatePoint(value: Point) -> windows_core::Result<windows_core::IInspectable> {
                 Self::IPropertyValueStatics(|this| unsafe {
                     let mut result__ = core::mem::zeroed();
@@ -182212,6 +182687,20 @@ pub mod Windows {
                     .and_then(|| windows_core::Type::from_abi(result__))
                 })
             }
+            pub fn CreateTimeSpanArray(
+                value: &[TimeSpan],
+            ) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreateTimeSpanArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.len().try_into().unwrap(),
+                        value.as_ptr(),
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
             pub fn CreatePointArray(
                 value: &[Point],
             ) -> windows_core::Result<windows_core::IInspectable> {
@@ -182300,6 +182789,20 @@ pub mod Windows {
             const SIGNATURE: windows_core::imp::ConstBuffer =
                 windows_core::imp::ConstBuffer::from_slice(
                     b"struct(Windows.Foundation.Size;f4;f4)",
+                );
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct TimeSpan {
+            pub Duration: i64,
+        }
+        impl windows_core::TypeKind for TimeSpan {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for TimeSpan {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Foundation.TimeSpan;i8)",
                 );
         }
         #[repr(transparent)]
@@ -182695,6 +183198,19 @@ pub mod Windows {
                     let this = self;
                     unsafe {
                         (windows_core::Interface::vtable(this).WriteDouble)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn WriteTimeSpan(
+                    &self,
+                    value: super::super::Foundation::TimeSpan,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).WriteTimeSpan)(
                             windows_core::Interface::as_raw(this),
                             value,
                         )
@@ -183131,6 +183647,19 @@ pub mod Windows {
                         .ok()
                     }
                 }
+                pub fn WriteTimeSpan(
+                    &self,
+                    value: super::super::Foundation::TimeSpan,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).WriteTimeSpan)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn WriteString(
                     &self,
                     value: &windows_core::HSTRING,
@@ -183235,6 +183764,10 @@ pub mod Windows {
                 fn WriteUInt64(&self, value: u64) -> windows_core::Result<()>;
                 fn WriteSingle(&self, value: f32) -> windows_core::Result<()>;
                 fn WriteDouble(&self, value: f64) -> windows_core::Result<()>;
+                fn WriteTimeSpan(
+                    &self,
+                    value: &super::super::Foundation::TimeSpan,
+                ) -> windows_core::Result<()>;
                 fn WriteString(&self, value: &windows_core::HSTRING) -> windows_core::Result<u32>;
                 fn MeasureString(&self, value: &windows_core::HSTRING)
                     -> windows_core::Result<u32>;
@@ -183464,6 +183997,20 @@ pub mod Windows {
                             IDataWriter_Impl::WriteDouble(this, value).into()
                         }
                     }
+                    unsafe extern "system" fn WriteTimeSpan<
+                        Identity: IDataWriter_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: super::super::Foundation::TimeSpan,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IDataWriter_Impl::WriteTimeSpan(this, core::mem::transmute(&value))
+                                .into()
+                        }
+                    }
                     unsafe extern "system" fn WriteString<
                         Identity: IDataWriter_Impl,
                         const OFFSET: isize,
@@ -183611,7 +184158,7 @@ pub mod Windows {
                         WriteSingle: WriteSingle::<Identity, OFFSET>,
                         WriteDouble: WriteDouble::<Identity, OFFSET>,
                         WriteDateTime: 0,
-                        WriteTimeSpan: 0,
+                        WriteTimeSpan: WriteTimeSpan::<Identity, OFFSET>,
                         WriteString: WriteString::<Identity, OFFSET>,
                         MeasureString: MeasureString::<Identity, OFFSET>,
                         StoreAsync: StoreAsync::<Identity, OFFSET>,
@@ -183682,7 +184229,11 @@ pub mod Windows {
                 pub WriteDouble:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f64) -> windows_core::HRESULT,
                 WriteDateTime: usize,
-                WriteTimeSpan: usize,
+                pub WriteTimeSpan: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::Foundation::TimeSpan,
+                )
+                    -> windows_core::HRESULT,
                 pub WriteString: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,

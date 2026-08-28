@@ -108,6 +108,9 @@ mod assets;
 #[path = "canvas.rs"]
 mod canvas;
 
+#[path = "sizepolicy.rs"]
+mod sizepolicy;
+
 /// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
 /// hold that.
@@ -161,6 +164,11 @@ fn app(ctx: kaya::AppCtx) {
         // so this guest is byte-for-byte the one the mac runs and the
         // frozen hash is the same string here.
         Ok("canvas") => canvas::app(ctx),
+        // The size-policy scene (docs/canvas-plan.md §3.2.1): four grown
+        // canvases whose tracks are this device's, which is why every
+        // figure is drawn in fractions of the box it is handed and the
+        // redraw canvas has no frozen hash.
+        Ok("sizepolicy") => sizepolicy::app(ctx),
         // The typeface scene asks for the vendored font BY ASSET NAME
         // and does not read a path or an environment variable at all
         // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE

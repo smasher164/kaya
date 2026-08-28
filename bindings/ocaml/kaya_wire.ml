@@ -1530,7 +1530,7 @@ let parse_occurrence byte =
     if kind = occ_kind_alert_result
     then
       (* The alert's one answer: id + u32 choice (the alert_choice values). *)
-      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None)
+      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, [])
     else if kind = occ_kind_file_dialog_result
     then begin
       (* id, a count, then three Values per file (handle, name,
@@ -1544,17 +1544,17 @@ let parse_occurrence byte =
         out := v :: !out;
         at := next
       done;
-      Some (kind, Int64.of_int id, List.rev !out, None, None)
+      Some (kind, Int64.of_int id, List.rev !out, None, None, [])
     end
     else if kind = occ_kind_clipboard_result
     then begin
       let clip, values, _ = parse_clip byte 16 in
-      Some (kind, Int64.of_int id, [], None, Some (clip, values))
+      Some (kind, Int64.of_int id, [], None, Some (clip, values), [])
     end
     (* Surface lifecycle records carry the surface id alone
        ( derived from the record shapes ). *)
     else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested
-    then Some (kind, Int64.of_int id, [], None, None)
+    then Some (kind, Int64.of_int id, [], None, None, [])
     (* Surface-pair records (window, section): the SECOND id
        keys the handler; the first rides as the payload. *)
     else if kind = occ_kind_section_selected
@@ -1564,7 +1564,8 @@ let parse_occurrence byte =
           Int64.of_int (u32_at byte 16),
           [],
           Some (I64 (Int64.of_int id)),
-          None )
+          None,
+          [] )
     else begin
     let path_len = u32_at byte 16 in
     let keys = ref [] in
@@ -1588,6 +1589,23 @@ let parse_occurrence byte =
         Some (clip, values)
       else None
     in
-    Some (kind, Int64.of_int id, List.rev !keys, payload, clip)
+    let tail =
+      if kind = occ_kind_draw_requested || kind = occ_kind_tick then begin
+        (* The canvas asks carry a run of BARE values after the
+           key path — the assigned size, and a tick's frame time
+           — with no count in front, so they are read until the
+           record ends (docs/canvas-plan.md §3.2.1). *)
+        let stop = u32_at byte 0 in
+        let out = ref [] in
+        while !at < stop do
+          let v, next = parse_value byte !at in
+          out := v :: !out;
+          at := next
+        done;
+        List.rev !out
+      end
+      else []
+    in
+    Some (kind, Int64.of_int id, List.rev !keys, payload, clip, tail)
     end
   end

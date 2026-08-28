@@ -267,6 +267,39 @@ object KayaPresent {
      */
     @JvmStatic external fun canvasProbe(widget: Long): String
 
+    /**
+     * WHAT LAYOUT ASSIGNED ONE CANVAS, in device-independent points
+     * (docs/canvas-plan.md §3.2.1). A fact this backend MEASURED, going
+     * the other way from every apply record; what the core does with it
+     * — re-raster, ask the guest, or nothing — is the size policy.
+     * kaya_canvas_track's JNI spelling.
+     */
+    @JvmStatic external fun canvasTrack(widget: Long, width: Double, height: Double)
+
+    /**
+     * A FRAME at the platform's own frame time in seconds (§15.4).
+     * Choreographer fixes that timestamp at schedule time — which is
+     * what `withFrameNanos` hands back — so it is passed through rather
+     * than read here. kaya_frame's JNI spelling.
+     */
+    @JvmStatic external fun frame(time: Double)
+
+    /**
+     * THE HARNESS'S FRAME, at the CORE'S deterministic step. No time
+     * crosses: three harnesses keeping three counters would be the
+     * hand-copied-constant class, and a leg's frame count has to be one
+     * number everywhere (§15.4). kaya_harness_frame's JNI spelling.
+     */
+    @JvmStatic external fun harnessFrame()
+
+    /**
+     * WHICH SIZE one canvas's raster is — `"track"` or `"viewbox"`, or a
+     * sentence naming all three numbers (§3.2.1). `""` when the id names
+     * no canvas that has been drawn. kaya_canvas_raster_shape's JNI
+     * spelling.
+     */
+    @JvmStatic external fun canvasRasterShape(widget: Long): String
+
     /** [scrollToRow]'s no-answer: KAYA_ROW_NOT_FOUND (u64::MAX) as the
      *  jlong it crosses as. */
     const val ROW_NOT_FOUND = -1L

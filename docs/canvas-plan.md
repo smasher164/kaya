@@ -656,6 +656,50 @@ fan-out:
   the non-harness frame drive is exercised by no lane — both in
   docs/deferred.md's size-policy entry with what closes them.
 
+THE BINDINGS WAVE LANDED 2026-08-28, and two things it settled are worth
+having before the backends follow:
+
+- **The spelling is each binding's own handler idiom**, exactly as
+  `on_sort` was: chained on Rust, Go, C#, Java and Swift; keyword
+  arguments on Python's `canvas`; labelled arguments on OCaml's; a Build
+  action plus two App-registered handlers on Haskell's. What is uniform
+  is that registering the handler and putting the policy on the wire are
+  ONE act, and that the binding — never the guest — opens the
+  transaction that answers an ask.
+- **WIDEN THE HANDLER AT REGISTRATION, do not switch on the record.** A
+  `tick` canvas is a REDRAW canvas too: the core asks it once, as a
+  `draw_requested`, before its first frame. A binding that chose the
+  handler's shape from the RECORD KIND called the tick handler with the
+  wrong arity on exactly that ask — measured in Python 2026-08-28, where
+  the error was swallowed by the handler guard and the ticking canvas
+  stayed empty until the first `frame` verb WITH THE SCENE STILL GREEN,
+  because the scene only samples that canvas after a frame. Storing one
+  widened handler (Rust's `Box<dyn Fn(&mut Draw, Viewbox, f64)>` shape)
+  makes the mistake unspellable, and every binding does that now.
+
+GTK JOINED 2026-08-28, and what it cost there is one finding worth
+keeping:
+
+- **`GtkPicture` cannot blit 1:1, so the canvas widget is kaya's own.**
+  Every member of `GtkContentFit` scales at some size — `Fill`
+  stretches, `Contain` and `Cover` scale up, `ScaleDown` scales down —
+  and GTK never allocates a widget more than its parent assigned
+  (`adjust_for_align` clamps every non-Fill align), so the SQUEEZED arm
+  is reachable and every fit distorts a `fixed` canvas there. This
+  scene reaches it: four grown canvases in a 420pt window get about
+  100pt each against a 120pt viewbox. `KayaCanvas` is a `GtkWidget`
+  subclass whose natural size is the blit (content is the floor) and
+  whose snapshot draws the blit at that size, centred, clipped —
+  tools/check-canvas-blit.sh holds both halves and refuses the
+  `ContentFit` vocabulary by name.
+- **The track reader and the frame drive are ONE tick callback, on the
+  WINDOW.** GTK has a frame clock per surface, so one callback per
+  canvas would hand the same timestamp in N times — the reason
+  `kaya_frame` is monotone at all — and one per window needs no such
+  guard. The track half runs in both modes and the frame half is
+  `KAYA_SELFTEST`-guarded, which is the mac arm's split with the
+  reader and the ticker in one place.
+
 ### §3.3 The op vocabulary (v1)
 
 Five geometry ops and two text ops.

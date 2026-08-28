@@ -1736,7 +1736,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets table canvas"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets table canvas sizepolicy"
     # Machine-read by check-steps' wired(), which replaced a bare-name
     # grep that comments and unrelated code satisfied: a scene is wired
     # here IF AND ONLY IF it is in a list above, declared desktop-only,
@@ -1750,7 +1750,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # the packaging milestone (official upstream support exists,
     # PEP 730). The legs wire when it lands.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-    IOS_UNWIRED_SCENES="portfolio varied sizepolicy"
+    IOS_UNWIRED_SCENES="portfolio varied"
     # NOT NARROWER any more, except by design: editor runs from the Go
     # suite alone (the plan chose Go so a binding's awkward corners
     # would show; there is no rust or swift editor guest). Everything
