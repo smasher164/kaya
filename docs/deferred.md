@@ -3300,9 +3300,15 @@ count, so the saving is measured rather than assumed.
     app, and every scene drives frames by verb instead — deliberately,
     since a leg's frame count may not be a fact about the machine. So
     the code that runs in a SHIPPED app is the half no test reaches.
-    What would reach it is a capture round on a running animation
-    (docs/canvas-plan.md §7.3's per-platform captures), which is the
-    same answer the look-bug class already has.
+    RULED 2026-08-27 (late): the forcing artifact is a REAL 60fps
+    canvas animation — a simulation or small game as its own scene or
+    app — because nothing in the tree can be promoted into the role:
+    the portfolio chart is NOT a tick user (Day tick is a MODEL change;
+    the chart redraws through the ordinary submit path), and a scene
+    that fakes frames by verb is the harness half again. Until that
+    artifact exists, a capture round on a running animation
+    (docs/canvas-plan.md §7.3's per-platform captures) is the interim
+    answer, the same one the look-bug class already has.
   KEY: size policy, sizepolicy, set_size_policy, expect_raster, frame
   verb, canvas_track, kaya_frame, on_draw, on_tick, fixed, letterbox,
   KayaCanvasTicker, template zone canvas
