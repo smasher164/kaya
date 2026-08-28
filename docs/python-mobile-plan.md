@@ -61,9 +61,26 @@ set of `repr` behaviors), and 3.15 is the first version whose iOS
 artifact python.org builds. Cost accepted: the pre-release rides until
 2026-10-01, and the pin moves to final when it lands. Android could
 have started on 3.14 stable today; it waits for the shared pin
-instead. tools/check-pins.sh's curl clause covers the fetch the moment
-a script downloads these by URL: version AND sha256, checked on the
-cached path too.
+instead.
+
+THE PIN LIVES IN THE FLAKE, not in a fetch script (the maintainer's
+call, 2026-08-28, made mid-slice and immediately better): flake.nix
+fetchurl + runCommand wrap the XCframework the way the flake already
+wraps apple-sdk_26 and the Android SDK — prebuilt vendor artifacts as
+pinned inputs — exported to the dev shell as KAYA_CPYTHON_IOS,
+darwin-only. The store's content addressing IS the byte check, the
+dev-shell fingerprint moves when the pin moves, and check-pins has
+nothing to hold: a structural guard outranks the gate clause this
+replaced (invariant 3's own hierarchy). NIXPKGS CANNOT SUPPLY THE
+ARTIFACT ITSELF: its python315 is a HOST interpreter (the machine the
+build runs on), and this milestone embeds a TARGET one, cross-built
+against the iOS SDK — the thing only python.org ships prebuilt.
+Where nixpkgs' python315 does serve: at the fan-out step, the dev
+shell's own python3 moves to 3.15 from the same pinned nixpkgs, so
+the three desktop lanes and the two mobile lanes format every scene
+string under ONE interpreter version. Not before — a shell bump moves
+the fingerprint and reruns every gate for lanes that do not exist
+yet.
 
 ### D2 — the entry point: the Go ruling, generalized (docs/go-mobile-plan.md §D5)
 
@@ -172,6 +189,17 @@ precedent for simulator-only proof).
    `portfolio-python` leg green on the sim lane, startup cost
    measured (invariant 8 — if source-compilation or extraction
    dominates leg time, the `__pycache__`/stamp answers land here).
+   ITS EMBEDDING SMOKE IS ALREADY MEASURED (2026-08-28, same session
+   as step 0): a C host initializing the store-pinned framework's
+   CPython on a pthread with `install_signal_handlers=0`, run on a
+   booted pool simulator — 3.15.0rc1 up, `sys.platform == "ios"`, an
+   IN-PLACE `lib-dynload/_hashlib...so` import (the D5 exemption,
+   measured as demanded), `ctypes.CDLL(None)` calling
+   `kaya_spec_hash` through the force-loaded archive with the
+   binding's exact `wire.SPEC_HASH` answered, threading's
+   `main_thread` agreeing the worker IS Python's main thread, clean
+   finalize. What remains of this step is the app-shaped work: the
+   binding's `_find_library`/run() arms, the guest import, the leg.
 2. Android: the JNI shim + gradle asset split, the same leg green on
    the emulator lane.
 3. Fan-out: the portfolio's `IOS_UNWIRED_SCENES`/`ANDROID_UNWIRED_SCENES`

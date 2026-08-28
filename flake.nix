@@ -58,6 +58,25 @@
             mkdir -p "$out/bin"
             ln -s ${pkgs.llvmPackages_22.clang}/bin/clang "$out/bin/kaya-asan-clang"
           '';
+          # CPython for the iOS lane (docs/python-mobile-plan.md §D1):
+          # python.org's official XCframework, pinned HERE and not by a
+          # fetch script — the store's content addressing IS the hash
+          # check, the dev-shell fingerprint moves when this pin moves,
+          # and check-pins has nothing to hold (a structural guard
+          # outranks a gate, invariant 3). 3.15.0rc1 until the final
+          # lands (scheduled 2026-10-01). Exported darwin-only in the
+          # shellHook so a linux `nix develop` never pays an 84 MB
+          # fetch it cannot use.
+          cpythonIos = pkgs.runCommand "cpython-ios-3.15.0rc1"
+            {
+              src = pkgs.fetchurl {
+                url = "https://www.python.org/ftp/python/3.15.0/python-3.15.0rc1-iOS-XCframework.tar.gz";
+                hash = "sha256-F4v3vvnNDxiyfKy5ixQzKlukTJQnVD/7cfiAm8HxHDw=";
+              };
+            } ''
+            mkdir -p "$out"
+            tar -xzf "$src" -C "$out"
+          '';
         in
         {
         default = pkgs.mkShell {
@@ -163,6 +182,9 @@
             export ANDROID_HOME="${androidSdk}/libexec/android-sdk"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk-bundle"
+          '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+            # The iOS lane's embedded CPython (see cpythonIos above).
+            export KAYA_CPYTHON_IOS="${cpythonIos}/Python.xcframework"
           '';
         };
       });
