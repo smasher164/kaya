@@ -5866,3 +5866,41 @@ contentDescription parameter (the 2026-07-25 finding at `a11yTag`'s
 declaration), so tagging the wrapper answered `expect_ax canvas@chart`
 with `ax "group/"` and one child, and reddened tools/scenes/canvas.steps
 on both appearance legs.
+
+
+## A one-shot `ime set` is dropped by a freshly restored emulator (2026-08-28)
+
+The android lane installs the clipboard helper and makes its IME the
+default before any leg runs (tools/android/run-emulator.sh
+cliphelper_prepare). On a pool freshly restored from snapshot, the
+`ime enable` took ("already enabled" on inspection minutes later) but
+the one-shot `ime set` on its heels was DROPPED by the still-settling
+input method service — no error, `settings get secure
+default_input_method` kept answering the stock keyboard, and the
+runner's 10s poll watched a value that was never going to change. The
+refusal sentence was right and the matrix's android lane died in
+preflight at 45s with 0 legs; the identical commands issued by hand on
+the same emulator minutes later took instantly, which is what named the
+race. Both selection sites (cliphelper_prepare and select_helper_ime)
+now RE-ISSUE enable+set inside the poll loop rather than once before
+it, so a dropped request is retried every 200ms until the setting reads
+back or the poll refuses. The lane rerun against the warm pool passed
+120/120 with cliphelper at 2s.
+
+
+## A streaming logcat verdict watch wedged with the verdict in the buffer (2026-08-28)
+
+The android runner read each leg's verdict with one streaming watch:
+`timeout 60 adb logcat -s kaya:* -e 'KAYA_SELFTEST: (OK|FAILED)' -m 1`.
+On a cold five-emulator pool, leg a11yrows-go printed `KAYA_SELFTEST:
+OK` 67ms after its epoch — the at-fail buffer dump preserves the line —
+while the streaming watch produced NOTHING for its whole 60s and the
+leg was marked FAIL at 62s. The stream (host adb client under
+five-device contention) wedged; the buffer was fine, which is why the
+diagnostic dump taken seconds later could read the verdict the watch
+missed. The watch is a bounded poll of `logcat -d` now — a fresh dump
+per try, `timeout 10` on each, 120 tries at 0.5s — because a dump
+re-issued cannot stay wedged past its own timeout while a stream can
+wedge for the whole ceiling. Same family as the dropped one-shot
+`ime set` (entry above): on this pool, a single long-lived adb
+operation is a bet, and a re-issued short one is a measurement.

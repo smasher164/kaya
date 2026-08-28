@@ -473,18 +473,18 @@ cliphelper_prepare() { # serial
         tries=$((tries + 1))
         sleep 0.2
     done
-    # Neither of these is the check — the poll below is. They are
-    # explicitly non-fatal so that stays true whatever `set -e` context a
-    # future caller puts this function in.
-    adb -s "$serial" shell ime enable "$CLIPHELPER_IME" >/dev/null || true
-    adb -s "$serial" shell ime set "$CLIPHELPER_IME" >/dev/null || true
     # AND IT MUST ACTUALLY BE THE SELECTED ONE. `ime set` returns before
     # the setting settles, and the gate that reads it is consulted much
     # later, inside a leg — so poll the setting ClipboardService itself
     # reads (Settings.Secure DEFAULT_INPUT_METHOD, compared by PACKAGE)
-    # rather than sleeping and hoping.
+    # rather than sleeping and hoping. enable/set RE-ISSUE inside the
+    # poll, non-fatal each time (the poll is the check, whatever `set -e`
+    # context a future caller adds): a freshly restored snapshot's input
+    # method service drops a one-shot set (docs/traps.md 2026-08-28).
     tries=0
     while [ "$tries" -lt 50 ]; do
+        adb -s "$serial" shell ime enable "$CLIPHELPER_IME" >/dev/null || true
+        adb -s "$serial" shell ime set "$CLIPHELPER_IME" >/dev/null || true
         current="$(adb -s "$serial" shell settings get secure default_input_method \
             2>/dev/null | tr -d '\r')"
         case "$current" in
@@ -675,9 +675,12 @@ timing cliphelper
 # before it runs.
 select_helper_ime() { # serial
     local serial="$1" tries=0 current=''
-    adb -s "$serial" shell ime enable "$CLIPHELPER_IME" >/dev/null || true
-    adb -s "$serial" shell ime set "$CLIPHELPER_IME" >/dev/null || true
+    # enable/set inside the poll for the same reason as
+    # cliphelper_prepare's: a one-shot set can be dropped
+    # (docs/traps.md 2026-08-28).
     while [ "$tries" -lt 50 ]; do
+        adb -s "$serial" shell ime enable "$CLIPHELPER_IME" >/dev/null || true
+        adb -s "$serial" shell ime set "$CLIPHELPER_IME" >/dev/null || true
         current="$(adb -s "$serial" shell settings get secure default_input_method \
             2>/dev/null | tr -d '\r')"
         case "$current" in
@@ -1196,8 +1199,19 @@ run_apk_on() {
     # and 0s all landed on wallpaper or on the launch splash. The recording
     # pipeline is the visual record — `KAYA_RECORD=1` when you want
     # pictures.)
-    local out
-    out=$(timeout 60 adb -s "$serial" logcat -s kaya:* -e 'KAYA_SELFTEST: (OK|FAILED)' -m 1) || true
+    # POLLED DUMPS, NEVER ONE STREAM: a streaming watch wedged for its
+    # whole 60s with the verdict already sitting in the buffer it was
+    # reading (docs/traps.md 2026-08-28). Each try is a fresh
+    # `logcat -d`, which cannot wedge past its own timeout.
+    local out=''
+    local vtries=0
+    while [ "$vtries" -lt 120 ]; do
+        out=$(timeout 10 adb -s "$serial" logcat -d -s kaya:* 2>/dev/null \
+            | grep -E -m 1 'KAYA_SELFTEST: (OK|FAILED)') || true
+        [ -n "$out" ] && break
+        vtries=$((vtries + 1))
+        sleep 0.5
+    done
     printf '%s\n' "$out"
     # THE RECREATION LEG'S OWN PROOF (docs/deferred.md's mount entry).
     # A green verdict does not say the relaunch happened: a count that
