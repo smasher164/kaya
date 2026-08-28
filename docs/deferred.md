@@ -8585,3 +8585,16 @@ the gate's COMPANION MODE on 2026-08-27, on a plain malloc rather than a
 walled page, once flake.nix put a clang whose ASan starts (22.1.8) in the
 dev shell as `kaya-asan-clang`; the wall remains the primary. See the
 struck ASan entry at the top of this file.
+
+
+## HOLD — the mirrored adaptive sugar awaits demand (ruled 2026-08-28)
+KEY: row_above, mirrored sugar, stack_below, adaptive layout, mobile-first
+
+`row(stack_below=N)` ships with the adaptive-layout milestone
+(docs/adaptive-layout-plan.md D3); its mirror — `column(row_above=N)`,
+the web's mobile-first direction, a column that widens into a row above
+a threshold — was ruled LEDGERED, not built: one adaptive sugar until a
+guest wants the other. Both lower to the same wire record, so closing
+this entry is one keyword argument in eight bindings plus its
+check-sugar-surface census row, not a mechanism. Closes when a real
+scene or app asks for the mobile-first spelling.
