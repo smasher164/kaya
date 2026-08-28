@@ -6908,6 +6908,13 @@ private func kayaRunScript(_ script: String) {
                     guard let node = kayaTarget(rasterSpec, "canvas", kayaScene.canvases) else {
                         return "<no canvas \(rasterSpec)>"
                     }
+                    #if os(macOS)
+                        // A stale track and the raster made for it agree by
+                        // construction, so the track is corrected from the
+                        // live AX read before the core answers
+                        // (kayaCanvasLiveResolve, docs/traps.md).
+                        kayaCanvasLiveResolve(node)
+                    #endif
                     return KayaHost.canvasRasterShape(node.id)
                 }
                 if gotRaster == wantRaster {
@@ -10550,8 +10557,10 @@ func kayaWindowCaption(_ windowId: UInt64) -> String {
 }
 
 /// Where each canvas landed, in SwiftUI's global (window) space —
-/// recorded by a reader on the canvas arm, the way every other geometry
-/// fact in this file is recorded, never written from a layout pass.
+/// recorded by a reader on the canvas arm, and on macOS corrected at
+/// read time from the AX client's independent answer, because a
+/// recorded frame can outlive the layout that produced it
+/// (kayaCanvasLiveResolve, docs/traps.md).
 @MainActor var kayaCanvasFrames: [UInt64: CGRect] = [:]
 
 /// The canvas arm's geometry reader (KayaTrackReader's shape). It exists
@@ -10567,7 +10576,9 @@ func kayaWindowCaption(_ windowId: UInt64) -> String {
 /// ONE READER, BOTH JOBS, on purpose: `expect_ink` samples the frame this
 /// records and the core rasters for the size this reports, so a scene
 /// that finds the canvas in one place while the core drew for another is
-/// impossible by construction rather than by care.
+/// impossible by construction rather than by care. When the record goes
+/// stale, kayaCanvasLiveResolve corrects BOTH from the live AX read, so
+/// the rule holds on the corrected value too (docs/traps.md).
 /// THE PLATFORM'S FRAME DRIVE, outside the harness (docs/canvas-plan.md
 /// §15.4). `TimelineView(.animation)` is SwiftUI's own display-link
 /// schedule and hands back the frame's date, which is what the tick has
@@ -10615,6 +10626,91 @@ private struct KayaCanvasReader: View {
         }
     }
 }
+
+#if os(macOS)
+    /// The recorded frame can outlive the layout that produced it — on the
+    /// JVM's legs the readers' tree stops re-reporting while the window
+    /// renders on, so the stored rectangles keep positions from an earlier
+    /// layout for the life of the process (measured 2026-08-28,
+    /// docs/traps.md). A report the CORE also consumes cannot be checked
+    /// by anything that reads the core, so the check is a SECOND,
+    /// INDEPENDENT measurement: the AX client's own answer for the
+    /// element carrying the canvas's identifier, taken at read time.
+    /// The identifier rides OUTSIDE the grow frame (kayaA11y wraps the
+    /// whole arm), so the AX box is the TRACK — reading the blitted
+    /// image's box instead would echo the raster back as the track and
+    /// bury the size policy under agreement by construction.
+    ///
+    /// On disagreement past a point, BOTH consumers move together: the
+    /// stored frame (expect_ink's sample rectangle) and the track report
+    /// (the core's raster size) — the one-reader rule kept on the
+    /// corrected value.
+    @MainActor func kayaCanvasLiveResolve(_ node: KayaNode) {
+        guard !node.a11yId.isEmpty,
+            let window = NSApp.windows.first(where: { $0.isVisible }),
+            let content = window.contentView,
+            let live = kayaAxCanvasFrame(node.a11yId, window, content)
+        else { return }
+        if ProcessInfo.processInfo.environment["KAYA_AX_TRACE"] != nil {
+            FileHandle.standardError.write(
+                Data(
+                    "KAYA_AX_TRACE: canvas \(node.a11yId) stored=\(String(describing: kayaCanvasFrames[node.id])) live=\(live)\n"
+                        .utf8))
+        }
+        if let stored = kayaCanvasFrames[node.id],
+            abs(stored.minX - live.minX) <= 1, abs(stored.minY - live.minY) <= 1,
+            abs(stored.width - live.width) <= 1, abs(stored.height - live.height) <= 1
+        {
+            return
+        }
+        kayaCanvasFrames[node.id] = live
+        KayaHost.canvasTrack(node.id, live.size)
+    }
+
+    /// The canvas's live frame in SwiftUI's global (window content, y-down)
+    /// space, or nil when the AX tree cannot answer UNAMBIGUOUSLY — an
+    /// ambiguous identifier is refused here for kayaAxReadOnMain's reason,
+    /// and a nil leaves the stored frame in charge, which is exactly the
+    /// pre-resolve behavior.
+    @MainActor private func kayaAxCanvasFrame(
+        _ identifier: String, _ window: NSWindow, _ content: NSView
+    ) -> CGRect? {
+        // Create + bound + announce: kayaAxReadOnMain's discipline (the
+        // measured reasons live on its comments; kayaPanelAxApp is the
+        // other copy).
+        let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        if !kayaAxAnnounced {
+            kayaAxAnnounced = true
+            AXUIElementSetAttributeValue(
+                app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(
+                app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+        var matches: [AXUIElement] = []
+        kayaAxFindAll(app, identifier, 0, &matches)
+        guard matches.count == 1, let hit = matches.first,
+            let posRef = kayaAxCopy(hit, kAXPositionAttribute),
+            let sizeRef = kayaAxCopy(hit, kAXSizeAttribute),
+            CFGetTypeID(posRef) == AXValueGetTypeID(),
+            CFGetTypeID(sizeRef) == AXValueGetTypeID()
+        else { return nil }
+        var p = CGPoint.zero
+        var s = CGSize.zero
+        guard AXValueGetValue(posRef as! AXValue, .cgPoint, &p),
+            AXValueGetValue(sizeRef as! AXValue, .cgSize, &s),
+            s.width > 1, s.height > 1
+        else { return nil }
+        // AX speaks the primary screen's top-left-origin y-down space;
+        // Cocoa's screen space is bottom-left y-up on the same screen.
+        guard let primary = NSScreen.screens.first else { return nil }
+        let cocoa = NSRect(
+            x: p.x, y: primary.frame.maxY - p.y - s.height, width: s.width, height: s.height)
+        let inContent = content.convert(window.convertFromScreen(cocoa), from: nil)
+        let y = content.isFlipped ? inContent.minY : content.bounds.height - inContent.maxY
+        return CGRect(x: inContent.minX, y: y, width: inContent.width, height: inContent.height)
+    }
+#endif
 
 /// `expect_ink` compares WITHIN ±1 PER CHANNEL (ruled 2026-08-26,
 /// docs/canvas-plan.md §7.2). THIS is the platform the tolerance exists
@@ -10698,6 +10794,12 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
         return (x, y)
     }
     guard !wanted.isEmpty else { return "<no probe points in \(points)>" }
+    #if os(macOS)
+        // The stored frame is corrected from the live AX read first —
+        // kayaCanvasLiveResolve's comment carries why a stored rectangle
+        // cannot be trusted at read time (docs/traps.md).
+        kayaCanvasLiveResolve(node)
+    #endif
     guard let frame = kayaCanvasFrames[node.id], frame.width > 1, frame.height > 1 else {
         return "<the canvas laid out at \(kayaCanvasFrames[node.id].map(String.init(describing:)) ?? "no recorded frame")>"
     }

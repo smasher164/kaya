@@ -3277,28 +3277,42 @@ count, so the saving is measured rather than assumed.
   App-registered handlers), each putting the policy on the wire in the
   same act as the registration, and each answering the two asks inside a
   transaction the BINDING opens. `guests/<lang>/sizepolicy.*` exists in
-  all eight and the scene runs seven of them on the mac lane, which is
-  why it moved from validate-mac's DEPTH_SCENES into SCENES. The C floor
+  all eight and the scene runs all eight on the mac lane (the java leg
+  since the coordinate-flip close below), which is why it moved from
+  validate-mac's DEPTH_SCENES into SCENES. The C floor
   can spell it — `kaya_tx_set_size_policy` plus a generated
   `kaya_parse_draw_requested`/`kaya_parse_tick` — and carries no guest,
   which is the floor's roster (guests/c/Makefile's SCENES), not a gap.
   WHAT IS STILL OPEN, and each of it is fan-out work rather than a
   design question (docs/canvas-plan.md §3.2.1 settled the spelling):
-  - **THE JAVA LEG IS NOT WIRED, and the cause is the mac backend's
-    canvas geometry rather than the binding.** Every model observable
-    passes on that guest and its window renders byte-identically to
-    python's, but `expect_ink` reads a frame `KayaCanvasReader` recorded
-    in an earlier layout and never corrected, so it samples a rectangle
-    one canvas away and reads the ticking canvas's transparent centre.
-    The measurements, and the six things ruled out, are in
-    docs/traps.md. The same stale report is what the CORE takes as the
-    assigned track, so this is not only a test-read defect: a `scale`
-    canvas on that leg re-rasters for a track it no longer has, and
-    nothing that reads the core can see it. Closes when the reader
-    reports the LIVE frame — the candidate is to find the canvas's view
-    by its accessibility identifier at read time instead of trusting a
-    stored rectangle. The guest and the `case "sizepolicy"` selector arm
-    are in the tree; only `run sizepolicy-java-swiftui` is missing.
+  - ~~**THE JAVA LEG IS NOT WIRED, and the cause is the mac backend's
+    canvas geometry rather than the binding.**~~ — CLOSED 2026-08-28 by
+    the ledgered candidate: `kayaCanvasLiveResolve` resolves the
+    canvas's AX element by its accessibility identifier at read time,
+    reads the element's own position and size — a second measurement,
+    independent of `KayaCanvasReader`'s stored rectangle — and on
+    disagreement past a point corrects the stored frame AND re-reports
+    the track, so `expect_ink`'s sample rectangle and the core's raster
+    move together (the one-reader rule kept on the corrected value).
+    Both track-consulting verbs resolve first (`expect_ink`,
+    `expect_raster`); the AX box is the TRACK because the identifier
+    rides outside the grow frame — measured on the healthy python leg
+    agreeing with the reader to the point on all four canvases,
+    including the grown `fixed` one whose blit box would have echoed
+    the raster back. AND THE CLOSE IDENTIFIED THE CAUSE the ledger's
+    theory had wrong: the recorded frames were never from an earlier
+    layout — they are the Y-FLIP of the true ones (content height 420;
+    `420 - y - h` reproduces all four recorded positions exactly), so
+    on the JVM host the reader's `.global` frames arrive in a
+    bottom-left-origin space while every other leg's arrive top-down.
+    That is why the heights were right, the positions overlapped, and
+    the render was byte-identical. Corrected, the JVM leg's rectangles
+    are python's own 44/136/228/320 and the verdict text matches
+    python's byte for byte. `sizepolicy-java-swiftui` is wired in
+    tools/validate-mac.sh, and that leg is the standing negative: the
+    JVM's readers report the mirrored space for the life of the
+    process, so dropping the correction reds it (docs/traps.md holds
+    the full measurement).
   - **THE PORTFOLIO'S DRAWN MARK IS IMPLEMENTED AND HELD, awaiting the
     maintainer's visual ruling.** The wave delivered it (a 28x28 `fixed`
     sparkline chip with frozen drawing, hash and ink) and its own

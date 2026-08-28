@@ -6,21 +6,19 @@ these the hard way.
 
 ## Platform / toolkit
 
-- **A canvas's recorded frame can outlive the layout that produced it,
-  and only a PIXEL read can tell.** `KayaCanvasReader` records each
-  canvas's global frame from a `GeometryReader` in `.background` and
-  reports it to the core as the assigned track. Measured 2026-08-28 on
-  the JVM's `sizepolicy` leg: the four canvases reported
-  `y = 16/108/164/256` (heights 84/84/120/120, and OVERLAPPING, so not
-  any one layout) and kept those values for the life of the process,
-  while the window rendered the same picture python's did at
-  `y = 44/136/228/320`. Every MODEL observable passed — `expect_raster`,
-  `expect_drawing`, `expect_drawing_hash`, `expect_ax` — because they
-  read the core, and the core's own track came from that same stale
-  report, so it agreed with itself. `expect_ink` is the only verb that
-  crosses to the window, and it sampled a rectangle a canvas away: the
-  transparent centre of the TICKING canvas, read back as `000000` for
-  `canvas@fit`.
+- **A geometry report can arrive in the wrong COORDINATE SPACE, agree
+  with everything that shares its source, and only an independent read
+  can tell.** `KayaCanvasReader` records each canvas's global frame from
+  a `GeometryReader` in `.background` and reports it to the core as the
+  assigned track. Measured 2026-08-28 on the JVM's `sizepolicy` leg: the
+  four canvases reported `y = 16/108/164/256` while the window rendered
+  the same picture python's did at `y = 44/136/228/320`. Every MODEL
+  observable passed — `expect_raster`, `expect_drawing`,
+  `expect_drawing_hash`, `expect_ax` — because they read the core, and
+  the core's own track came from that same report, so it agreed with
+  itself. `expect_ink` is the only verb that crosses to the window, and
+  it sampled a rectangle a canvas away: the transparent centre of the
+  TICKING canvas, read back as `000000` for `canvas@fit`.
   WHAT WAS RULED OUT, each measured rather than argued: the render (the
   java and python window captures are byte-identical), the window roster
   (one visible NSWindow, `windows=1`, content bounds 480x420,
@@ -28,16 +26,35 @@ these the hard way.
   slow start (a python guest delayed 6s before `run()` still passes),
   a resize afterwards (no re-report), and `onGeometryChange(for:)` in
   place of `onChange(of: frame)` — which observes position as well as
-  size and changed nothing, so the reader is not simply missing a
-  reposition callback. The remaining suspects are a view tree that is
-  laid out before the window is shown and never re-reports, or two trees
-  with one set of readers detached.
+  size and changed nothing.
+  THE CAUSE, identified at the close after a day of stale-record
+  theories: the recorded frames are the Y-FLIP of the true ones —
+  content height 420, and `420 - y - h` reproduces all four recorded
+  positions EXACTLY (fit 420-44-120=256, mark 164, live 108, clock 16).
+  On the JVM host the reader's `.global` frames arrive in a
+  bottom-left-origin (y-up) space; on every other host they arrive
+  top-down. A flip preserves every height and x, produces overlapping
+  y-ranges that look like no one layout, and renders identically —
+  which is exactly the measured signature, and why "recorded in an
+  earlier layout" survived so long as the theory. When four positions
+  are wrong and four sizes are right, CHECK THE FLIP ARITHMETIC before
+  theorising about staleness.
+  THE FIX is a read-time correction, not a reader patch, because the
+  report's space cannot be discriminated from inside SwiftUI:
+  `kayaCanvasLiveResolve` (swift/KayaSwiftUI.swift) resolves the
+  canvas's AX element by its accessibility identifier at read time,
+  converts the AX answer through named coordinate spaces (AX top-left
+  screen -> Cocoa screen -> window -> content -> SwiftUI global), and on
+  disagreement past a point corrects the stored frame AND re-reports
+  the track, so both consumers move together. Both track-consulting
+  verbs resolve first; calibrated on the healthy python leg agreeing
+  with the reader to the point on all four canvases. The standing
+  negative is the wired `sizepolicy-java-swiftui` leg itself, which
+  reds if the correction is dropped.
   THE LESSON THAT GENERALIZES: a backend geometry report the CORE also
   consumes cannot be checked by anything that reads the core — the two
   agree by construction, exactly as `expect_raster` and the track do. It
   takes a pixel read, or a second independent measurement, to see it.
-  The size-policy scene runs its other seven languages green;
-  docs/deferred.md carries the open half.
 
 (Entries about AppKit, UIKit, and Android Views survive their backends
 — the roster is one backend per platform since 2026-07-20 — because

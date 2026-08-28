@@ -165,7 +165,7 @@ for arg in "$@"; do
         # windowed's reason — the drawing is declared in viewbox units,
         # so one guest's op stream is every platform's. The size policy
         # is its depth sibling (§3.2.1) and rust-only for the same
-        # reason; GTK and Compose still hold depth_stub("sizepolicy").
+        # reason.
         canvas_rust|canvasdark_rust|sizepolicy_rust) SUITE="$arg" ;;
         varied_python) SUITE="$arg" ;;
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;

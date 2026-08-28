@@ -1195,9 +1195,10 @@ run canvasdark-rust-swiftui env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
 drain
 
 # The size-policy scene (docs/canvas-plan.md §3.2.1): what a canvas does
-# with a track that is not its viewbox — all eight languages since the
-# bindings wave, MAC AND iOS ONLY, because the three backends that report
-# no canvas track hold `depth_stub("sizepolicy")` (docs/deferred.md).
+# with a track that is not its viewbox — all eight languages here since
+# the bindings wave closed with the java leg (docs/deferred.md's
+# size-policy entry); the other four lanes run it rust-only (compose on
+# android), for canvas's compiled-guest reason.
 #
 # No C floor guest: the floor's roster is guests/c/Makefile's SCENES,
 # which check-steps' sweep_c_floor reads from the other side.
@@ -1212,14 +1213,12 @@ run sizepolicy-ocaml-swiftui env KAYA_SELFTEST=sizepolicy KAYA_LIB="$ROOT/target
     _build/default/guests/ocaml/sizepolicy.exe
 run sizepolicy-haskell-swiftui env KAYA_SELFTEST=sizepolicy "$(hs_bin sizepolicy)"
 run sizepolicy-swift-swiftui env KAYA_SELFTEST=sizepolicy target/swift-guests/sizepolicy
-# NO JAVA LEG, and it is the ink read rather than the binding: the java
-# guest passes every MODEL observable in this scene and its window
-# renders byte-identically to python's, but `expect_ink` samples a canvas
-# frame this backend recorded during an earlier layout and never
-# corrected, so it reads a rectangle one canvas away from the one it
-# named. Measured 2026-08-28 with the frames and the render side by side
-# (docs/traps.md, docs/deferred.md's size-policy entry). The guest and
-# the Main selector are here; the leg wires when that read is fixed.
+# THE JVM'S LEG IS THE STALE-FRAME NEGATIVE: its readers keep positions
+# from an early layout for the life of the process, so this leg reds if
+# the read-time correction is ever dropped (kayaCanvasLiveResolve,
+# docs/traps.md).
+run sizepolicy-java-swiftui env KAYA_SELFTEST=sizepolicy KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome
