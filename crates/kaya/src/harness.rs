@@ -328,6 +328,30 @@ pub enum Step {
     /// `"<x,y> <x,y> ... = <RRGGBB>/<RRGGBB>/..."`: the points in
     /// hundredths of the box, then the colours they must sample.
     ExpectInk(Target, String, String),
+    /// WHICH SIZE this canvas's raster actually is — `"track"` or
+    /// `"viewbox"` (docs/canvas-plan.md §3.2.1). The only canvas
+    /// observable a size policy can move: the hash and the ink bounds
+    /// both come from the CANONICAL raster, which is taken at the
+    /// viewbox by definition, so a canvas that stretched a viewbox-sized
+    /// buffer into its track answers both of them identically to one
+    /// that re-rasterized at the track.
+    ///
+    /// The two candidates come from different places on purpose — the
+    /// TRACK is a number the backend measured and reported, the VIEWBOX
+    /// one the guest declared — so this is a read of an artifact against
+    /// two independent inputs, not the model agreeing with itself.
+    ExpectRaster(Target, String),
+    /// ADVANCE THE FRAME CLOCK by `n` frames, and let every `tick` canvas
+    /// draw for each (docs/canvas-plan.md §15.4).
+    ///
+    /// A VERB, NEVER WALL CLOCK. Under the harness the core's own
+    /// deterministic step is the only thing that moves a frame, so a
+    /// leg's frame count is part of the scene: a scene that asserts the
+    /// figure at frame 0, advances, and asserts it at frame N is exactly
+    /// as reproducible on a loaded machine as on an idle one. The number
+    /// of frames per second is the core's `HARNESS_FRAME_HZ`, so three
+    /// harnesses share one clock rather than three counters.
+    Frame(u32),
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
     /// contract, and the second blind spot shares cannot see: growers
@@ -680,6 +704,7 @@ impl Step {
             | Step::ExpectSelection(t, _)
             | Step::ExpectDrawingHash(t, _)
             | Step::ExpectDrawing(t, _)
+            | Step::ExpectRaster(t, _)
             | Step::Compose(t, _) => vec![t],
             Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
@@ -725,7 +750,8 @@ impl Step {
             | Step::Shortcut(..)
             | Step::ResizeWindow(..)
             | Step::ExpectSplit(..)
-            | Step::ExpectPanes(..) => Vec::new(),
+            | Step::ExpectPanes(..)
+            | Step::Frame(..) => Vec::new(),
         }
     }
 
@@ -765,6 +791,10 @@ impl Step {
             Step::ExpectDrawingHash { .. } => true,
             Step::ExpectDrawing { .. } => true,
             Step::ExpectInk { .. } => true,
+            Step::ExpectRaster { .. } => true,
+            // A frame is a DRIVE, not a read: it changes the scene and
+            // is not retried.
+            Step::Frame(_) => false,
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectTitle { .. } => true,
@@ -995,6 +1025,18 @@ pub trait Stage: Send + 'static {
     /// answer (`"<mode> RRGGBB/..."`), and the compare is tolerant by
     /// exactly ±1 per channel — see [`INK_TOLERANCE`].
     fn canvas_ink(&self, target: Target, points: &str) -> String;
+    /// WHICH SIZE the raster this canvas last produced is: `"track"` when
+    /// it is the size the BACKEND reported, `"viewbox"` when it is the
+    /// one the GUEST declared, and on disagreement all three numbers
+    /// rather than a guess about which is wrong. Asked of the core, like
+    /// [`Stage::canvas_probe`] — the two numbers being compared were
+    /// produced on opposite sides of the boundary.
+    fn canvas_raster_shape(&self, target: Target) -> String;
+    /// ADVANCE THE FRAME CLOCK by one frame and drive every `tick`
+    /// canvas at the core's own deterministic step (§15.4). The step is
+    /// the core's, not the stage's, so a leg's frame count is one number
+    /// in all three harnesses.
+    fn frame(&self);
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -1577,6 +1619,39 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     )
                 })?;
                 Step::ExpectInk(target, points.trim().to_owned(), want.trim().to_owned())
+            }
+            "expect_raster" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_raster wants a target and a string: {line:?}")
+                })?;
+                let want = parse_string(text)?;
+                // A CLOSED SET, refused at parse time: a typo would
+                // otherwise be a string the stage can never answer, and
+                // the leg would read as a real disagreement about the
+                // raster rather than as a broken scene.
+                if want != "track" && want != "viewbox" {
+                    return Err(format!(
+                        "expect_raster wants \"track\" or \"viewbox\" — which size the \
+                         canvas's raster is (docs/canvas-plan.md §3.2.1) — got {want:?}"
+                    ));
+                }
+                Step::ExpectRaster(parse_target(target)?, want)
+            }
+            "frame" => {
+                // Bare `frame` is one frame; `frame <n>` is n. Zero is
+                // refused: a step that drives nothing is a scene saying
+                // something it does not mean.
+                let n: u32 = if rest.is_empty() {
+                    1
+                } else {
+                    rest.trim()
+                        .parse()
+                        .map_err(|_| format!("frame wants a whole number of frames: {line:?}"))?
+                };
+                if n == 0 {
+                    return Err(format!("frame 0 advances nothing: {line:?}"));
+                }
+                Step::Frame(n)
             }
             "expect_root_fills" => {
                 if !rest.is_empty() {
@@ -3506,6 +3581,26 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("ink {got} at {points}, wanted {want}"))
                 }
             })),
+            Step::ExpectRaster(target, want) => Some(poll(|| {
+                let got = stage.canvas_raster_shape(*target);
+                if got == *want {
+                    Ok(format!("raster {want}"))
+                } else {
+                    // THE THREE NUMBERS ARE THE DIAGNOSIS and the stage
+                    // already carries them: "viewbox" where "track" was
+                    // wanted is the stretch defect itself, "no track
+                    // reported" is a backend that never sent the
+                    // geometry, and the `neither` form names all three
+                    // sizes so nobody has to guess which moved.
+                    Err(format!("raster {got}, wanted {want}"))
+                }
+            })),
+            Step::Frame(n) => {
+                for _ in 0..*n {
+                    stage.frame();
+                }
+                Some(Ok(format!("frame {n}")))
+            }
             Step::ExpectRootFills => Some(poll(|| {
                 // Empty means fills; anything else is the platform's
                 // own description of the hug, for the failure text
@@ -4991,6 +5086,17 @@ mod tests {
                 .clone()
                 .unwrap_or_else(|| "<mock stage blits nothing>".to_owned())
         }
+        /// A SENTENCE, never "track" or "viewbox": a mock that happened
+        /// to answer one of the two words would let a scene pass here
+        /// with nothing rastered at all.
+        fn canvas_raster_shape(&self, _target: Target) -> String {
+            "<mock stage rasterizes nothing>".into()
+        }
+        /// The mock has no core to drive, and COUNTS instead — the frame
+        /// verb's only observable in this suite.
+        fn frame(&self) {
+            FRAMES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -5114,6 +5220,9 @@ mod tests {
     /// tests. Held for the whole of the one test that writes it, so two
     /// tests in the same binary cannot read each other's answer.
     static INK_ANSWER: Mutex<Option<String>> = Mutex::new(None);
+    /// How many frames MockStage was driven. The `frame` verb's only
+    /// observable in this suite — the mock has no core to tick.
+    static FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     static INK_SERIAL: Mutex<()> = Mutex::new(());
     /// The picker and the save panel MockStage answers with, and how
     /// many more reads each has left in it. Written only by the verb
@@ -5790,6 +5899,10 @@ mod tests {
         fn canvas_ink(&self, _target: Target, _points: &str) -> String {
             "<mock stage blits nothing>".into()
         }
+        fn canvas_raster_shape(&self, _target: Target) -> String {
+            "<mock stage rasterizes nothing>".into()
+        }
+        fn frame(&self) {}
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -6023,6 +6136,10 @@ mod tests {
         fn canvas_ink(&self, _target: Target, _points: &str) -> String {
             "<mock stage blits nothing>".into()
         }
+        fn canvas_raster_shape(&self, _target: Target) -> String {
+            "<mock stage rasterizes nothing>".into()
+        }
+        fn frame(&self) {}
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }

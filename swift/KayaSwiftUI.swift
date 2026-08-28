@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x2f62f356091de5b6
+let kayaSpecHash: UInt64 = 0x1cd31581dd9eb228
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -3051,6 +3051,46 @@ enum KayaHost {
         var buffer = [UInt8](repeating: 0, count: 128)
         let wrote = buffer.withUnsafeMutableBufferPointer { buf in
             api.canvas_probe(widget, buf.baseAddress, UInt(buf.count))
+        }
+        guard wrote > 0 else { return "" }
+        return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
+    }
+
+    /// WHAT LAYOUT ASSIGNED ONE CANVAS, in points (docs/canvas-plan.md
+    /// §3.2.1). `kaya_window_moved`'s shape one widget over: a fact this
+    /// backend measured, going the other way from every apply record.
+    /// The core decides what to do with it — re-raster, ask the guest, or
+    /// nothing at all — which is the size policy.
+    static func canvasTrack(_ widget: UInt64, _ size: CGSize) {
+        guard api != nil else { return }
+        api.canvas_track(widget, Double(size.width), Double(size.height))
+    }
+
+    /// A FRAME at the platform's own timestamp (§15.4). CADisplayLink
+    /// fixes `targetTimestamp` at schedule time, which is why it is
+    /// passed through rather than read here.
+    static func frame(_ time: CFTimeInterval) {
+        guard api != nil else { return }
+        api.frame(Double(time))
+    }
+
+    /// THE HARNESS'S FRAME, at the CORE'S deterministic step. No time
+    /// crosses: three harnesses keeping three counters would be the
+    /// hand-copied-constant class, and a leg's frame count has to be one
+    /// number everywhere (§15.4).
+    static func harnessFrame() {
+        guard api != nil else { return }
+        api.harness_frame()
+    }
+
+    /// WHICH SIZE one canvas's raster is — `"track"` or `"viewbox"`, or a
+    /// sentence naming all three numbers (§3.2.1). Empty when the id
+    /// names no canvas that has been drawn.
+    static func canvasRasterShape(_ widget: UInt64) -> String {
+        guard api != nil else { return "" }
+        var buffer = [UInt8](repeating: 0, count: 160)
+        let wrote = buffer.withUnsafeMutableBufferPointer { buf in
+            api.canvas_raster_shape(widget, buf.baseAddress, UInt(buf.count))
         }
         guard wrote > 0 else { return "" }
         return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
@@ -6850,6 +6890,41 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("drawing \(drawMeasured), wanted \(wantDraw)")
                 }
+            case "expect_raster":
+                // WHICH SIZE THE RASTER IS (docs/canvas-plan.md §3.2.1),
+                // asked of the CORE like the probe: the two numbers being
+                // compared were produced on opposite sides of the
+                // boundary — the TRACK is what this backend measured and
+                // reported, the VIEWBOX is what the guest declared.
+                //
+                // The only canvas read a size policy can move: the hash
+                // and the ink bounds come from the CANONICAL raster,
+                // which is taken at the viewbox by definition, so a
+                // canvas that stretched a viewbox-sized buffer into its
+                // track answers both of them identically.
+                let rasterSpec = Substring(parts[1])
+                let wantRaster = kayaQuoted(Array(parts[2...]))
+                let gotRaster = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaTarget(rasterSpec, "canvas", kayaScene.canvases) else {
+                        return "<no canvas \(rasterSpec)>"
+                    }
+                    return KayaHost.canvasRasterShape(node.id)
+                }
+                if gotRaster == wantRaster {
+                    observed.append("raster \(wantRaster)")
+                } else {
+                    failures.append("raster \(gotRaster), wanted \(wantRaster)")
+                }
+            case "frame":
+                // ADVANCE THE FRAME CLOCK (§15.4). A VERB, never wall
+                // clock: the core owns the step, so a leg's frame count
+                // is part of the scene and not a fact about the load on
+                // the machine that ran it.
+                let frames = parts.count > 1 ? (Int(parts[1]) ?? 1) : 1
+                DispatchQueue.main.sync {
+                    for _ in 0..<max(frames, 1) { KayaHost.harnessFrame() }
+                }
+                observed.append("frame \(frames)")
             case "expect_ink":
                 // THE BLIT, sampled off the window's own pixels (§7.2) — the
                 // one canvas read that fails when the buffer never reached the
@@ -10483,6 +10558,45 @@ func kayaWindowCaption(_ windowId: UInt64) -> String {
 /// so `expect_ink` can find the canvas ON THE REAL SURFACE rather than
 /// re-rendering the node, which would agree with the arm by
 /// construction.
+/// It ALSO reports the track to the core (docs/canvas-plan.md §3.2.1),
+/// which is what makes the size policy possible at all: without a report
+/// saying what layout assigned, the core can only ever raster at the
+/// viewbox and leave the backend to stretch the picture — the defect
+/// this closes (docs/deferred.md).
+///
+/// ONE READER, BOTH JOBS, on purpose: `expect_ink` samples the frame this
+/// records and the core rasters for the size this reports, so a scene
+/// that finds the canvas in one place while the core drew for another is
+/// impossible by construction rather than by care.
+/// THE PLATFORM'S FRAME DRIVE, outside the harness (docs/canvas-plan.md
+/// §15.4). `TimelineView(.animation)` is SwiftUI's own display-link
+/// schedule and hands back the frame's date, which is what the tick has
+/// to carry: a clock read inside the callback re-imports exactly the
+/// jitter `targetTimestamp` was built to remove.
+///
+/// NOT UNDER THE HARNESS, and that is the determinism half of the
+/// ruling: a scene's frame count is what the `frame` verb advanced, so a
+/// second clock running beside it would make every animation leg a
+/// question about the machine's load. `KAYA_SELFTEST` is the same
+/// discriminator the startup deadline uses.
+///
+/// ONE PER CANVAS, because this backend is not told which canvases tick
+/// — the size policy is the core's. `kaya_frame` is monotone in the
+/// timestamp, so the second and later canvases in a frame cost a
+/// comparison and nothing else.
+private struct KayaCanvasTicker: View {
+    var body: some View {
+        TimelineView(.animation) { context in
+            Color.clear.onChange(of: context.date) { _, date in
+                KayaHost.frame(date.timeIntervalSinceReferenceDate)
+            }
+        }
+    }
+}
+
+private let kayaHarnessDrivesFrames =
+    ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
+
 private struct KayaCanvasReader: View {
     let id: UInt64
 
@@ -10490,8 +10604,14 @@ private struct KayaCanvasReader: View {
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
             Color.clear
-                .onAppear { kayaCanvasFrames[id] = frame }
-                .onChange(of: frame) { _, f in kayaCanvasFrames[id] = f }
+                .onAppear {
+                    kayaCanvasFrames[id] = frame
+                    KayaHost.canvasTrack(id, frame.size)
+                }
+                .onChange(of: frame) { _, f in
+                    kayaCanvasFrames[id] = f
+                    KayaHost.canvasTrack(id, f.size)
+                }
         }
     }
 }
@@ -11509,6 +11629,15 @@ struct KayaRender: View {
             // drawn at. No draw op is interpreted here and no drawing API
             // is owned here.
             //
+            // STRICTLY 1:1, NEVER STRETCHED (§3.2.1, ruling 2, and
+            // tools/check-canvas-blit.sh's clause): the image is NOT
+            // `.resizable()` and its size is the buffer's own pixels over
+            // the scale they were drawn at, so a track bigger than the
+            // buffer leaves MARGIN rather than a rescale. Whether the
+            // buffer is the viewbox's size or the track's is the CORE's
+            // decision, and the whole content of the size policy — this
+            // arm may not have an opinion about it.
+            //
             // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
             // ABSENT — the image arm's rule verbatim, for its reason
             // (tools/check-empty-child.sh).
@@ -11530,7 +11659,18 @@ struct KayaRender: View {
                     Color.clear.frame(width: 0, height: 0)
                 }
             }
+            // THE TRACK IS WHAT A GROWER IS OFFERED, and the reader has to
+            // sit OUTSIDE the box that claims it: `.background` measures
+            // the view it decorates, so on the bare image it would report
+            // the BUFFER's size — the track and the raster would agree by
+            // construction and the size policy could never do anything.
+            // A canvas that does not grow is its natural size, which is
+            // content-is-the-floor and the track it truly has.
+            .frame(
+                maxWidth: node.grow > 0 ? .infinity : nil,
+                maxHeight: node.grow > 0 ? .infinity : nil)
             .background(KayaCanvasReader(id: node.id))
+            .background(kayaHarnessDrivesFrames ? nil : KayaCanvasTicker())
         default:
             EmptyView()
         }

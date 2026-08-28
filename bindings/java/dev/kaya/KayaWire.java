@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x2f62f356091de5b6L;
+    public static final long SPEC_HASH = 0x1cd31581dd9eb228L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -54,6 +54,10 @@ public final class KayaWire {
     public static final int PAINT_GROUND = 5;
     public static final int FILL_RULE_NONZERO = 0;
     public static final int FILL_RULE_EVEN_ODD = 1;
+    public static final int SIZE_POLICY_SCALE = 0;
+    public static final int SIZE_POLICY_FIXED = 1;
+    public static final int SIZE_POLICY_REDRAW = 2;
+    public static final int SIZE_POLICY_TICK = 3;
     public static final int TEXT_ALIGN_START = 0;
     public static final int TEXT_ALIGN_MIDDLE = 1;
     public static final int TEXT_ALIGN_END = 2;
@@ -204,6 +208,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_APP_IDENTITY = 44;
     public static final short TX_KIND_SET_COLUMN_HEADERS = 45;
     public static final short TX_KIND_SET_DRAWING = 46;
+    public static final short TX_KIND_SET_SIZE_POLICY = 47;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -259,6 +264,8 @@ public final class KayaWire {
     public static final short OCC_KIND_UNDONE = 17;
     public static final short OCC_KIND_REDONE = 18;
     public static final short OCC_KIND_SORT_REQUESTED = 19;
+    public static final short OCC_KIND_DRAW_REQUESTED = 20;
+    public static final short OCC_KIND_TICK = 21;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -770,6 +777,15 @@ public final class KayaWire {
         b.putInt(count);
         b.putInt(pathLen);
         encodeValues(b, ops);
+        return finish(b);
+    }
+
+    /** WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry). */
+    public static byte[] txSetSizePolicy(long widgetId, int policy) {
+        Enc b = begin(TX_KIND_SET_SIZE_POLICY);
+        b.putLong(widgetId);
+        b.putInt(policy);
+        b.putInt(0);
         return finish(b);
     }
 
@@ -1693,7 +1709,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK) {
             return null;
         }
         long id = b.getLong(8);

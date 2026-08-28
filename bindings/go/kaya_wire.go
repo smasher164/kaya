@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x2f62f356091de5b6
+	SpecHash uint64 = 0x1cd31581dd9eb228
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -55,6 +55,10 @@ const (
 	PaintGround = 5
 	FillRuleNonzero = 0
 	FillRuleEvenOdd = 1
+	SizePolicyScale = 0
+	SizePolicyFixed = 1
+	SizePolicyRedraw = 2
+	SizePolicyTick = 3
 	TextAlignStart = 0
 	TextAlignMiddle = 1
 	TextAlignEnd = 2
@@ -205,6 +209,7 @@ const (
 	txSetAppIdentity = 44
 	txSetColumnHeaders = 45
 	txSetDrawing = 46
+	txSetSizePolicy = 47
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -260,6 +265,8 @@ const (
 	occUndone = 17
 	occRedone = 18
 	occSortRequested = 19
+	occDrawRequested = 20
+	occTick = 21
 )
 
 func pad8(b []byte) []byte {
@@ -752,6 +759,15 @@ func TxSetDrawing(widgetId uint64, vbW any, vbH any, count uint32, pathLen uint3
 	b = binary.LittleEndian.AppendUint32(b, count)
 	b = binary.LittleEndian.AppendUint32(b, pathLen)
 	b = encodeValues(b, ops)
+	return endRecord(b)
+}
+
+// TxSetSizePolicy: WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry).
+func TxSetSizePolicy(widgetId uint64, policy uint32) []byte {
+	b := beginRecord(txSetSizePolicy)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint32(b, policy)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }
 
@@ -1818,7 +1834,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

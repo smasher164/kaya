@@ -243,6 +243,19 @@ pub struct KayaHostApi {
     /// a string kaya wrote.
     pub presentation: extern "C" fn(f64, bool),
     pub canvas_probe: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    /// THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` is
+    /// the report that says what layout assigned one canvas, in points —
+    /// window_moved's shape, one widget over, and the report the stretch
+    /// defect was missing. `frame` is the platform's frame drive at its
+    /// OWN timestamp; `harness_frame` is the deterministic step a scene
+    /// verb advances, kept in the core so three harnesses share one
+    /// number. `canvas_raster_shape` is the harness's read of WHICH size
+    /// the raster is, which is the only canvas observable a size policy
+    /// can move.
+    pub canvas_track: extern "C" fn(u64, f64, f64),
+    pub frame: extern "C" fn(f64),
+    pub harness_frame: extern "C" fn(),
+    pub canvas_raster_shape: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
 }
 
 unsafe extern "C" {
@@ -360,6 +373,10 @@ pub(crate) fn run() -> i32 {
         row_extent: crate::capi::kaya_row_extent,
         presentation: crate::capi::kaya_presentation,
         canvas_probe: crate::capi::kaya_canvas_probe,
+        canvas_track: crate::capi::kaya_canvas_track,
+        frame: crate::capi::kaya_frame,
+        harness_frame: crate::capi::kaya_harness_frame,
+        canvas_raster_shape: crate::capi::kaya_canvas_raster_shape,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry): both of its tiers do, and the declaration has to beat the

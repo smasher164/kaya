@@ -87,6 +87,12 @@ VERB_FEATURE = {
     "expect_drawing_hash": "canvas",
     "expect_drawing": "canvas",
     "expect_ink": "canvas",
+    # docs/canvas-plan.md §3.2.1. The verb again, not the scene name: the
+    # portfolio's drawn mark will be `fixed` without being called after
+    # it, and a backend that reports no canvas track has to hold those
+    # legs off too.
+    "expect_raster": "sizepolicy",
+    "frame": "sizepolicy",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

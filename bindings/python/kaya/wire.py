@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x2f62f356091de5b6
+SPEC_HASH = 0x1cd31581dd9eb228
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -51,6 +51,10 @@ PAINT_AXIS = 4
 PAINT_GROUND = 5
 FILL_RULE_NONZERO = 0
 FILL_RULE_EVEN_ODD = 1
+SIZE_POLICY_SCALE = 0
+SIZE_POLICY_FIXED = 1
+SIZE_POLICY_REDRAW = 2
+SIZE_POLICY_TICK = 3
 TEXT_ALIGN_START = 0
 TEXT_ALIGN_MIDDLE = 1
 TEXT_ALIGN_END = 2
@@ -202,6 +206,7 @@ TX_SET_BRAND_TYPEFACE = 43
 TX_SET_APP_IDENTITY = 44
 TX_SET_COLUMN_HEADERS = 45
 TX_SET_DRAWING = 46
+TX_SET_SIZE_POLICY = 47
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -257,6 +262,8 @@ OCC_PASTED = 16
 OCC_UNDONE = 17
 OCC_REDONE = 18
 OCC_SORT_REQUESTED = 19
+OCC_DRAW_REQUESTED = 20
+OCC_TICK = 21
 
 
 def _pad(b):
@@ -489,6 +496,10 @@ def tx_set_column_headers(widget_id, sorted, direction, count, path_len, titles)
 def tx_set_drawing(widget_id, vb_w, vb_h, count, path_len, ops):
     """DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws."""
     return record(TX_SET_DRAWING, struct.pack("<Q", widget_id) + _enc.value(vb_w) + _enc.value(vb_h) + struct.pack("<I", count) + struct.pack("<I", path_len) + _enc.values(ops))
+
+def tx_set_size_policy(widget_id, policy):
+    """WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry)."""
+    return record(TX_SET_SIZE_POLICY, struct.pack("<Q", widget_id) + struct.pack("<I", policy) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id, text):
@@ -1030,7 +1041,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).

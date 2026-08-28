@@ -487,6 +487,23 @@ pub enum Occurrence {
     SortRequested { id: WidgetId, column: u32 },
     /// The header click on a stamped copy's nested table.
     InstanceSortRequested { node: TemplateNodeId, path: Path, column: u32 },
+    /// A REDRAW CANVAS IS ASKED FOR ITS DRAWING AT THE SIZE IT WAS
+    /// ASSIGNED (docs/canvas-plan.md §3.2.1). `size` is in
+    /// device-independent points, and it is the guest's next viewbox.
+    /// LATEST-WINS: a newer size REPLACES a request the guest has not
+    /// answered yet, so a drag-resize storm collapses to the newest size
+    /// and a slow guest cannot stuff a queue.
+    DrawRequested { id: WidgetId, size: (f64, f64) },
+    InstanceDrawRequested { node: TemplateNodeId, path: Path, size: (f64, f64) },
+    /// A FRAME, for a canvas with an on_tick handler. `time` is in
+    /// seconds and is the PLATFORM'S, never the guest's own clock —
+    /// Choreographer's frame time and CADisplayLink's targetTimestamp
+    /// are both fixed at schedule time, and a guest that read its own
+    /// clock would re-import the jitter both removed (§15.4). Under the
+    /// harness it is the core's own deterministic step, so a leg's frame
+    /// count is part of the scene rather than a fact about the machine.
+    Tick { id: WidgetId, size: (f64, f64), time: f64 },
+    InstanceTick { node: TemplateNodeId, path: Path, size: (f64, f64), time: f64 },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The user moved a slider the guest created directly; one
@@ -1481,6 +1498,12 @@ pub enum TxOp {
         path: Vec<Value>,
         ops: Vec<Value>,
     },
+    /// WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+    /// (docs/canvas-plan.md §3.2.1). `scale` is the default and needs no
+    /// record; the other three are what a guest's declaration lowers to
+    /// — `fixed` from the property, `redraw` from an on_draw handler,
+    /// `tick` from an on_tick one.
+    SetSizePolicy { widget: WidgetId, policy: u32 },
 }
 
 /// A transaction: applied atomically, in submission order, last write
@@ -1741,6 +1764,22 @@ impl OccSink {
                         crate::ring::REC_SORT_REQUESTED,
                         &crate::wire::sort_body(&tag, column),
                     );
+                }
+                Occurrence::DrawRequested { id, size } => {
+                    let body = crate::wire::draw_body(id.0, &[], size, None);
+                    ring.push_record(crate::ring::REC_DRAW_REQUESTED, &body);
+                }
+                Occurrence::InstanceDrawRequested { node, path, size } => {
+                    let body = crate::wire::draw_body(node.0, &path, size, None);
+                    ring.push_record(crate::ring::REC_DRAW_REQUESTED, &body);
+                }
+                Occurrence::Tick { id, size, time } => {
+                    let body = crate::wire::draw_body(id.0, &[], size, Some(time));
+                    ring.push_record(crate::ring::REC_TICK, &body);
+                }
+                Occurrence::InstanceTick { node, path, size, time } => {
+                    let body = crate::wire::draw_body(node.0, &path, size, Some(time));
+                    ring.push_record(crate::ring::REC_TICK, &body);
                 }
                 Occurrence::MenuActivated { item } => {
                     let tag = crate::wire::click_tag(item.0, &[]);

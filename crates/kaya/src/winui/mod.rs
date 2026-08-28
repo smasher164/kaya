@@ -1375,6 +1375,13 @@ fn drain_transactions() {
                         break 'drain;
                     }
                 }
+                // A canvas that became a redraw one with its track
+                // already known (docs/canvas-plan.md §3.2.1). Empty on
+                // this backend while it holds depth_stub("sizepolicy"),
+                // because nothing here reports a track.
+                for occ in core.scene.take_asks() {
+                    core.occurrences.send(occ);
+                }
             }
             // ONE coalesced track re-stamp for the whole drain — the
             // batch boundary the deferred reindex is deferred TO
@@ -17370,6 +17377,16 @@ impl crate::harness::Stage for WinUiStage {
                 .unwrap_or_else(|| "<the core holds no drawing for this canvas>".to_owned()))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// The size policy's two reads, on the backend that reports no
+    /// canvas track yet (docs/canvas-plan.md §3.2.1).
+    fn canvas_raster_shape(&self, _target: crate::harness::Target) -> String {
+        crate::depth_stub("sizepolicy")
+    }
+
+    fn frame(&self) {
+        crate::depth_stub("sizepolicy")
     }
 
     /// THE BLIT, out of DWM's print of this window's composited content

@@ -67,6 +67,15 @@
 
 #define REC_SORT_REQUESTED 19
 
+/**
+ * THE CANVAS'S TWO ASKS (docs/canvas-plan.md §3.2.1): the core hands a
+ * redraw canvas the size it was assigned and takes back a drawing, and
+ * hands a ticking one the same size plus the frame's time.
+ */
+#define REC_DRAW_REQUESTED 20
+
+#define REC_TICK 21
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -196,6 +205,12 @@
  * (docs/canvas-plan.md §3.1).
  */
 #define TX_SET_DRAWING 46
+
+/**
+ * WHAT A CANVAS DOES WITH A TRACK BIGGER THAN ITS VIEWBOX
+ * (docs/canvas-plan.md §3.2.1).
+ */
+#define TX_SET_SIZE_POLICY 47
 
 /**
  * `sorted`'s no-column sentinel (alert_choice's cancel precedent).
@@ -377,6 +392,14 @@
 #define FILL_NONZERO 0
 
 #define FILL_EVEN_ODD 1
+
+#define SIZE_POLICY_SCALE 0
+
+#define SIZE_POLICY_FIXED 1
+
+#define SIZE_POLICY_REDRAW 2
+
+#define SIZE_POLICY_TICK 3
 
 #define TEXT_ALIGN_START 0
 
@@ -748,6 +771,16 @@
 #define KAYA_OCCURRENCE_SORT_REQUESTED 19
 
 /**
+ * THE CANVAS'S TWO ASKS (docs/canvas-plan.md §3.2.1): { u64 id; u32
+ * path_len; u32 reserved; path_len values; width; height } for a redraw,
+ * and the same with a third f64 value — the frame's time in seconds —
+ * for a tick. Identity as in button_clicked.
+ */
+#define KAYA_OCCURRENCE_DRAW_REQUESTED 20
+
+#define KAYA_OCCURRENCE_TICK 21
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -950,6 +983,13 @@
  * (docs/canvas-plan.md §3.1).
  */
 #define KAYA_TX_SET_DRAWING 46
+
+/**
+ * What a canvas does with a track that is not its viewbox
+ * (docs/canvas-plan.md §3.2.1): { u64 widget_id; u32 policy; u32 pad }.
+ * Never sent for `scale`, which is what a canvas with no record is.
+ */
+#define KAYA_TX_SET_SIZE_POLICY 47
 
 /**
  * `sorted`'s no-column sentinel, and `direction`'s two values.
@@ -1527,6 +1567,15 @@
  */
 #define KAYA_ROW_NOT_FOUND UINT64_MAX
 
+/**
+ * The harness clock's rate. ONE NUMBER, in the core, and that is the
+ * point: three harnesses keeping three counters is the
+ * hand-copied-constant class one surface over
+ * (tools/check-file-modes.sh's trap), and a leg's frame count is part
+ * of the scene.
+ */
+#define HARNESS_FRAME_HZ 60.0
+
 typedef struct BoolKind BoolKind;
 
 /**
@@ -1794,6 +1843,21 @@ typedef struct KayaHostApi {
    */
   void (*presentation)(double, bool);
   uintptr_t (*canvas_probe)(uint64_t, uint8_t*, uintptr_t);
+  /**
+   * THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` is
+   * the report that says what layout assigned one canvas, in points —
+   * window_moved's shape, one widget over, and the report the stretch
+   * defect was missing. `frame` is the platform's frame drive at its
+   * OWN timestamp; `harness_frame` is the deterministic step a scene
+   * verb advances, kept in the core so three harnesses share one
+   * number. `canvas_raster_shape` is the harness's read of WHICH size
+   * the raster is, which is the only canvas observable a size policy
+   * can move.
+   */
+  void (*canvas_track)(uint64_t, double, double);
+  void (*frame)(double);
+  void (*harness_frame)(void);
+  uintptr_t (*canvas_raster_shape)(uint64_t, uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -2395,6 +2459,37 @@ double kaya_row_extent(uint64_t for_target, uint64_t index);
 void kaya_presentation(double scale, bool dark);
 
 /**
+ * THE TRACK LAYOUT ASSIGNED ONE CANVAS, in device-independent points,
+ * reported by the backend exactly as `kaya_window_moved` reports a For's
+ * visible band (docs/canvas-plan.md §3.2.1). This is the report the
+ * stretch defect was missing: without it the core could only ever raster
+ * at the viewbox and leave the backend to stretch the picture.
+ *
+ * What happens next is the canvas's SIZE POLICY: `scale` re-rasterizes
+ * the held display list under a uniform fit, `redraw` and `tick` are
+ * asked for a drawing at this size, and `fixed` records the number and
+ * changes nothing. A report that changes nothing emits nothing.
+ */
+void kaya_canvas_track(uint64_t widget, double width, double height);
+
+void kaya_frame(double time);
+
+/**
+ * THE HARNESS'S FRAME CLOCK: advance by exactly one frame at
+ * `HARNESS_FRAME_HZ` and drive it. Wall clock never reaches a tick
+ * under the harness, so a leg's frame count is what the scene's `frame`
+ * verbs advanced and not a fact about the machine's load.
+ *
+ * BYPASSES `kaya_frame`'s MONOTONE GUARD deliberately: this clock
+ * starts at one sixtieth while a platform's starts at a timestamp
+ * decades wide, so a stray platform frame would silence every harness
+ * frame for the rest of the run. Under the harness no platform driver
+ * is attached, so the two clocks never both run — and this counter is
+ * monotone on its own.
+ */
+void kaya_harness_frame(void);
+
+/**
  * WHAT THE HARNESS READS BACK ABOUT ONE CANVAS: the CANONICAL raster's
  * hash and the two legible facts, as one ASCII line
  * `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (docs/canvas-plan.md §7.1, §7.2).
@@ -2414,6 +2509,27 @@ void kaya_presentation(double scale, bool dark);
  * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
  */
 uintptr_t kaya_canvas_probe(uint64_t widget, uint8_t *out, uintptr_t cap);
+
+/**
+ * WHICH SIZE ONE CANVAS'S RASTER IS — `expect_raster`'s observation
+ * (docs/canvas-plan.md §3.2.1). `"track"` when it is the size the
+ * BACKEND reported, `"viewbox"` when it is the one the GUEST declared,
+ * and on disagreement all three numbers rather than a guess about which
+ * is wrong (invariant 3: a diagnostic prints what it measured).
+ *
+ * This is the only canvas read the size policy can move. `kaya_canvas_probe`
+ * rasterizes at the viewbox by definition — that is what makes its hash
+ * one string on five platforms — so the hash and the ink bounds are
+ * policy-blind, and a canvas that stretched its buffer instead of
+ * re-rastering at the track would answer both of them identically.
+ *
+ * Writes at most `cap` bytes to `out` and returns how many it wrote; 0
+ * means `widget` names no canvas that has been drawn.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_canvas_raster_shape(uint64_t widget, uint8_t *out, uintptr_t cap);
 
 /**
  * Presentation side: block until the next transaction, resolve it

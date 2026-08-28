@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x2f62f356091de5b6;
+    public const ulong SpecHash = 0x1cd31581dd9eb228;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -53,6 +53,10 @@ static class KayaWire
     public const uint PaintGround = 5;
     public const uint FillRuleNonzero = 0;
     public const uint FillRuleEvenOdd = 1;
+    public const uint SizePolicyScale = 0;
+    public const uint SizePolicyFixed = 1;
+    public const uint SizePolicyRedraw = 2;
+    public const uint SizePolicyTick = 3;
     public const uint TextAlignStart = 0;
     public const uint TextAlignMiddle = 1;
     public const uint TextAlignEnd = 2;
@@ -203,6 +207,7 @@ static class KayaWire
     public const ushort TxKindSetAppIdentity = 44;
     public const ushort TxKindSetColumnHeaders = 45;
     public const ushort TxKindSetDrawing = 46;
+    public const ushort TxKindSetSizePolicy = 47;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -258,6 +263,8 @@ static class KayaWire
     public const ushort OccKindUndone = 17;
     public const ushort OccKindRedone = 18;
     public const ushort OccKindSortRequested = 19;
+    public const ushort OccKindDrawRequested = 20;
+    public const ushort OccKindTick = 21;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -789,6 +796,16 @@ static class KayaWire
         w.Write(pathLen);
         EncodeValues(w, ops);
         return Finish(stream, w, TxKindSetDrawing);
+    }
+
+    /// WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry).
+    public static byte[] TxSetSizePolicy(ulong widgetId, uint policy)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(policy);
+        w.Write(0u);
+        return Finish(stream, w, TxKindSetSizePolicy);
     }
 
     /// set_property with a constant text value.
@@ -1640,7 +1657,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

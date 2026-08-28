@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x2f62f356091de5b6ULL
+#define KAYA_SPEC_HASH 0x1cd31581dd9eb228ULL
 
 
 /* Create a signal holding `initial`. */
@@ -610,6 +610,15 @@ static inline void kaya_tx_set_drawing(KayaTx *tx, uint64_t widget_id, KayaVal v
     kaya_wire_u32(tx, count);
     kaya_wire_u32(tx, path_len);
     kaya_wire_values(tx, ops, ops_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry). */
+static inline void kaya_tx_set_size_policy(KayaTx *tx, uint64_t widget_id, uint32_t policy) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_SIZE_POLICY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, policy);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, kaya_at);
 }
 

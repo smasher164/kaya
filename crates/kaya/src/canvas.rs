@@ -434,15 +434,40 @@ fn resolve(paint: i64, mode: Mode) -> tiny_skia::Color {
 // The raster
 // ---------------------------------------------------------------------
 
-/// Rasterize at `target` logical points and `p.scale` device pixels per
-/// point. THE TWO SCALES ARE DIFFERENT THINGS: positions carry the
-/// viewbox stretch AND the device scale, while stroke widths and font
-/// sizes carry the device scale ALONE, so a 1pt gridline is 1pt at every
-/// canvas size and a non-uniform stretch never produces an elliptical
-/// pen or a squashed glyph (§3.2 rule 3).
-pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Raster {
-    let (vb_w, vb_h) = drawing.viewbox;
-    let (t_w, t_h) = target;
+/// THE UNIFORM-FIT LETTERBOX (docs/canvas-plan.md §3.2.1, ruling 12):
+/// where the viewbox lands inside a track, at ONE scale factor for both
+/// axes, centred, with the leftover as margin. `k` multiplies positions,
+/// stroke widths and font sizes alike — it is the SAME DRAWING at a new
+/// size, which is what makes `scale` a re-raster rather than a stretch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    pub k: f64,
+    pub ox: f64,
+    pub oy: f64,
+}
+
+pub fn fit(viewbox: (f64, f64), track: (f64, f64)) -> Fit {
+    let (vb_w, vb_h) = viewbox;
+    let (t_w, t_h) = track;
+    let k = (t_w / vb_w).min(t_h / vb_h);
+    Fit { k, ox: (t_w - vb_w * k) / 2.0, oy: (t_h - vb_h * k) / 2.0 }
+}
+
+/// Rasterize the display list into a buffer `track` logical points across
+/// at `p.scale` device pixels per point, with the viewbox fitted into it
+/// uniformly and centred.
+///
+/// ONE SCALE FOR EVERYTHING, which is the correction ruling 12 made: the
+/// superseded rule held stroke widths and font sizes at the device scale
+/// alone so a non-uniform stretch could not produce an elliptical pen,
+/// and under a uniform fit there is no such stretch to mitigate. Holding
+/// the pen at 1pt while positions grew would make `scale` a third thing
+/// that is neither the same drawing nor a redrawn one.
+///
+/// A canvas at its natural size passes `drawing.viewbox` and gets k = 1
+/// with no margin, which is every caller before the size policy existed.
+pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raster {
+    let (t_w, t_h) = track;
     let width = ((t_w * p.scale).round() as i64).clamp(0, 16384) as u32;
     let height = ((t_h * p.scale).round() as i64).clamp(0, 16384) as u32;
     let Some(mut pixmap) = tiny_skia::Pixmap::new(width.max(1), height.max(1)) else {
@@ -452,8 +477,9 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
         return Raster { width: 0, height: 0, scale: p.scale, pixels: Vec::new() };
     }
 
-    let sx = t_w / vb_w * p.scale;
-    let sy = t_h / vb_h * p.scale;
+    let Fit { k, ox, oy } = fit(drawing.viewbox, track);
+    let s = k * p.scale;
+    let (dx, dy) = (ox * p.scale, oy * p.scale);
     let mut builder = tiny_skia::PathBuilder::new();
     // The SELECTED face or the sentence saying why there is none. Held
     // rather than refused at the `font` op, so a face nothing draws with
@@ -462,8 +488,8 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
 
     for op in &drawing.ops {
         match op {
-            Op::MoveTo(x, y) => builder.move_to((x * sx) as f32, (y * sy) as f32),
-            Op::LineTo(x, y) => builder.line_to((x * sx) as f32, (y * sy) as f32),
+            Op::MoveTo(x, y) => builder.move_to((x * s + dx) as f32, (y * s + dy) as f32),
+            Op::LineTo(x, y) => builder.line_to((x * s + dx) as f32, (y * s + dy) as f32),
             Op::Close => builder.close(),
             Op::Stroke { paint, width } => {
                 let built = std::mem::replace(&mut builder, tiny_skia::PathBuilder::new());
@@ -475,7 +501,7 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
                     // vocabulary (§3.3), so they are tiny-skia's
                     // defaults and are the same number on every lane.
                     let stroke = tiny_skia::Stroke {
-                        width: (width * p.scale) as f32,
+                        width: (width * s) as f32,
                         ..Default::default()
                     };
                     pixmap.stroke_path(
@@ -508,7 +534,7 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
                 }
             }
             Op::Font { asset, size, weight } => {
-                face = Some(Face::open(asset, size * p.scale, *weight));
+                face = Some(Face::open(asset, size * s, *weight));
             }
             Op::Text { x, y, paint, align, baseline, text } => {
                 // THE RASTER RESOLVES THE FONT AGAIN and validation
@@ -530,7 +556,7 @@ pub fn rasterize(drawing: &Drawing, target: (f64, f64), p: Presentation) -> Rast
                     // it, so a face has always been selected here (§3.5).
                     None => unreachable!("a canvas text op with no font reached the raster"),
                 };
-                if let Some(path) = face.outline(text, x * sx, y * sy, *align, *baseline) {
+                if let Some(path) = face.outline(text, x * s + dx, y * s + dy, *align, *baseline) {
                     let mut style = tiny_skia::Paint::default();
                     style.set_color(resolve(*paint, p.mode));
                     style.anti_alias = true;
@@ -964,6 +990,105 @@ mod tests {
         );
     }
 
+    /// THE SIZE-POLICY SCENE'S OWN FIGURES, byte for byte what
+    /// guests/rust/sizepolicy.rs declares (tools/scenes/sizepolicy.steps).
+    /// Written out here for scene_chart's reason: the core's tests can
+    /// sample the pixels five lanes will argue about without a guest
+    /// process.
+    fn panel(v: &mut Vec<Value>, box_: (f64, f64), l: f64, t: f64, r: f64, b: f64, paint: i64) {
+        let (w, h) = box_;
+        v.extend([op(wire::DRAW_MOVE_TO), n(l * w), n(t * h)]);
+        for (x, y) in [(r, t), (r, b), (l, b)] {
+            v.extend([op(wire::DRAW_LINE_TO), n(x * w), n(y * h)]);
+        }
+        v.push(op(wire::DRAW_CLOSE));
+        v.extend([op(wire::DRAW_FILL), op(paint), op(wire::FILL_NONZERO)]);
+    }
+
+    fn scene_figure(box_: (f64, f64)) -> Vec<Value> {
+        let mut v = Vec::new();
+        panel(&mut v, box_, 0.05, 0.0, 0.95, 1.0, wire::PAINT_GROUND);
+        panel(&mut v, box_, 0.25, 0.0, 0.75, 1.0, wire::PAINT_SERIES_FILL);
+        v
+    }
+
+    fn scene_bar(box_: (f64, f64), frame: u32) -> Vec<Value> {
+        let mut v = Vec::new();
+        let right = 0.35 + 0.10 * f64::from(frame);
+        panel(&mut v, box_, 0.25, 0.0, right, 1.0, wire::PAINT_AXIS);
+        v
+    }
+
+    /// WHAT tools/scenes/sizepolicy.steps FREEZES, derived here and
+    /// copied there — never typed from a platform's read, and never
+    /// guessed (the dark ink pair was guessed wrong by one on two
+    /// channels before the canvas scene derived it, docs/traps.md).
+    ///
+    /// THE FIGURE IS FRACTIONS OF WHATEVER BOX IT IS HANDED, which is
+    /// what lets one frozen string hold for four canvases whose tracks
+    /// differ on every platform: the bounds normalize to the same
+    /// hundredths at 300x120 and at whatever the mac column assigns.
+    #[test]
+    fn the_size_policy_scene_expectations_are_derived() {
+        let _serial = crate::assets::serially();
+        // Two boxes far apart in size AND aspect: the frozen strings
+        // below have to be the same at both, or they are not byte-shared
+        // and the scene cannot hold on five platforms.
+        for box_ in [(300.0, 120.0), (461.0, 87.0)] {
+            let d = validate(box_, &scene_figure(box_)).expect("the figure validates");
+            let p = probe(&d);
+            assert_eq!(drawing_observation(&p), "12/5,0,95,100", "figure at {box_:?}");
+            for frame in [1u32, 3] {
+                let d = validate(box_, &scene_bar(box_, frame)).expect("the bar validates");
+                let want = match frame {
+                    1 => "6/25,0,45,100",
+                    _ => "6/25,0,65,100",
+                };
+                assert_eq!(drawing_observation(&probe(&d)), want, "bar {frame} at {box_:?}");
+            }
+        }
+        // THE TWO CONSTANT-MODE CANVASES KEEP §7.1's PRIMARY OBSERVABLE,
+        // and this is the amendment made concrete: `scale` and `fixed`
+        // declare the drawing a constant function of the track, so their
+        // op stream is a pure function of the guest's declaration and
+        // hashes to one string on five platforms. The redraw and tick
+        // canvases beside them have NO frozen hash — their streams are
+        // functions of a track the platforms legitimately differ on —
+        // and the scene says so out loud.
+        let constant = validate((300.0, 120.0), &scene_figure((300.0, 120.0))).unwrap();
+        assert_eq!(
+            format!("{:016x}", probe(&constant).hash),
+            "8185fc030ee419b6",
+            "tools/scenes/sizepolicy.steps freezes this hash for canvas@fit and canvas@mark"
+        );
+
+        // The one probe point every canvas in that scene can be sampled
+        // at: the CENTRE. A `scale` canvas letterboxes its figure inside
+        // the track and a `fixed` one is centred inside it by the
+        // backend, so an edge probe would land in margin on one and in
+        // ink on another — the centre is inside the figure for all four.
+        let d = validate((300.0, 120.0), &scene_figure((300.0, 120.0))).unwrap();
+        let at_centre = |mode: Mode, label: &str| -> String {
+            let r = rasterize(&d, d.viewbox, Presentation { scale: 1.0, mode });
+            let x = r.width as usize / 2;
+            let y = r.height as usize / 2;
+            let i = (y * r.width as usize + x) * 4;
+            let px = [r.pixels[i], r.pixels[i + 1], r.pixels[i + 2], r.pixels[i + 3]];
+            println!("core {label} at 50,50 = {px:02X?}");
+            // OPACITY IS THE PRECONDITION for sampling at all: the
+            // backends drop the alpha byte, so a translucent probe point
+            // would read darkened toward the compositor's ground with no
+            // diagnostic saying why.
+            assert_eq!(px[3], 255, "{label} 50,50 must be opaque: {px:02X?}");
+            format!("{label} {:02X}{:02X}{:02X}", px[0], px[1], px[2])
+        };
+        assert_eq!(
+            format!("{} {}", at_centre(Mode::Light, "light"), at_centre(Mode::Dark, "dark")),
+            "light D2E3F7 dark 212A35",
+            "tools/scenes/sizepolicy.steps freezes exactly this string"
+        );
+    }
+
     #[test]
     fn a_drawing_rasterizes_and_probes() {
         let drawing = validate((100.0, 50.0), &chart()).expect("the chart validates");
@@ -1283,12 +1408,38 @@ mod tests {
         assert!(top.1 > bottom.1, "top {top:?} sits below bottom {bottom:?}");
     }
 
-    /// A stroke width is in POINTS and does not carry the viewbox
-    /// stretch: the same 1pt gridline in a box stretched to twice its
-    /// natural width covers twice the pixels horizontally and the SAME
-    /// number vertically (§3.2 rule 3).
+    /// THE LETTERBOX ARITHMETIC (§3.2.1, ruling 12), which is the half of
+    /// the size policy no scene can see: `expect_drawing`'s bounds and
+    /// §7.1's hash both come from `probe`, which rasterizes at the
+    /// VIEWBOX, so the fit is invisible to every canvas observable.
+    ///
+    /// It replaces `a_stretch_does_not_thicken_the_pen`, which proved the
+    /// arithmetic of the SUPERSEDED §3.2 rule 3 (positions carry the
+    /// stretch, pens do not) — the mitigation for a hazard the uniform
+    /// fit removes.
     #[test]
-    fn a_stretch_does_not_thicken_the_pen() {
+    fn the_fit_is_uniform_and_centred() {
+        // A wider track than the viewbox's aspect: k is the HEIGHT's
+        // ratio and the leftover is horizontal margin, halved on each
+        // side. A stretch would have taken tw/vbw on x.
+        let f = fit((100.0, 50.0), (400.0, 100.0));
+        assert_eq!(f.k, 2.0, "one factor, the smaller ratio: {f:?}");
+        assert_eq!((f.ox, f.oy), (100.0, 0.0), "the leftover is centred: {f:?}");
+        // Taller: the same the other way round.
+        let f = fit((100.0, 50.0), (100.0, 200.0));
+        assert_eq!((f.k, f.ox, f.oy), (1.0, 0.0, 75.0), "{f:?}");
+        // The natural size is the identity, which is what makes every
+        // pre-policy caller byte-identical.
+        assert_eq!(fit((300.0, 120.0), (300.0, 120.0)), Fit { k: 1.0, ox: 0.0, oy: 0.0 });
+    }
+
+    /// THE PEN SCALES WITH EVERYTHING ELSE. Ruling 12 replaced §3.2's
+    /// rule 3 along with the stretch it mitigated: `scale` is THE SAME
+    /// DRAWING at a new size, so a 2pt rule in a box fitted at k=2 is 4
+    /// device points thick, and the ROWS it covers double exactly as its
+    /// length does.
+    #[test]
+    fn the_uniform_fit_scales_the_pen_with_the_drawing() {
         let d = validate(
             (100.0, 50.0),
             &vec![
@@ -1298,8 +1449,6 @@ mod tests {
             ],
         )
         .unwrap();
-        let natural = rasterize(&d, (100.0, 50.0), Presentation::default());
-        let stretched = rasterize(&d, (200.0, 50.0), Presentation::default());
         let rows = |r: &Raster| {
             (0..r.height as usize)
                 .filter(|y| {
@@ -1307,7 +1456,41 @@ mod tests {
                 })
                 .count()
         };
-        assert_eq!(rows(&natural), rows(&stretched), "the pen is the same thickness");
-        assert_eq!(stretched.width, natural.width * 2);
+        let natural = rasterize(&d, (100.0, 50.0), Presentation::default());
+        let fitted = rasterize(&d, (200.0, 100.0), Presentation::default());
+        assert_eq!((fitted.width, fitted.height), (natural.width * 2, natural.height * 2));
+        assert_eq!(rows(&fitted), rows(&natural) * 2, "the pen doubled with the box");
+    }
+
+    /// A TRACK THE VIEWBOX DOES NOT MATCH LEAVES MARGIN, not a squashed
+    /// picture: the buffer is the TRACK's size, and the ink sits centred
+    /// inside it with the leftover untouched.
+    #[test]
+    fn a_mismatched_track_letterboxes_rather_than_stretching() {
+        let d = validate((100.0, 50.0), &chart()).unwrap();
+        // 400x100: k = min(4, 2) = 2, so the figure is 200x100 and there
+        // are 100 points of margin on each side.
+        let r = rasterize(&d, (400.0, 100.0), Presentation::default());
+        assert_eq!((r.width, r.height), (400, 100));
+        let (l, t, right, b) = ink(&r).expect("the chart put ink on the raster");
+        // The natural ink spans 10..90 of a 100-wide box; inside the
+        // fitted 200-wide figure at x 100..300 that is 120..280 of 400,
+        // which is 30..70 hundredths. A stretch would have left it at
+        // 10..90.
+        assert!((28..=32).contains(&l), "left {l}");
+        assert!((68..=72).contains(&right), "right {right}");
+        // The vertical axis fills the fit exactly, so its fractions are
+        // the natural ones — within the one hundredth the two buffers'
+        // different pixel heights can round apart by.
+        let natural = ink(&rasterize(&d, (100.0, 50.0), Presentation::default())).unwrap();
+        assert!((t - natural.1).abs() <= 1, "top {t} vs natural {}", natural.1);
+        assert!((b - natural.3).abs() <= 1, "bottom {b} vs natural {}", natural.3);
+        // AND THE MARGIN IS UNTOUCHED: nothing drew in the left gutter.
+        let w = r.width as usize;
+        for y in 0..r.height as usize {
+            for x in 0..90 {
+                assert_eq!(r.pixels[(y * w + x) * 4 + 3], 0, "margin ink at {x},{y}");
+            }
+        }
     }
 }

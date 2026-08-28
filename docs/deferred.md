@@ -3204,8 +3204,8 @@ count, so the saving is measured rather than assumed.
   install moved into the first-mount branch -> the per-window refusal.
   `tools/java-typecheck.sh` runs the KayaApp backstop off-device on every
   gate sweep, watched failing against a copy with the latch removed.
-- A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
-  assigned track (found while landing the depth slice 2026-08-26). The
+- ~~A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
+  assigned track~~ (found while landing the depth slice 2026-08-26). The
   core rasters at the VIEWBOX times the reported scale, and the backend
   blits that image into whatever track layout gives it — so a canvas at
   its natural size is pixel-exact, and one given more space has its pen
@@ -3246,6 +3246,66 @@ count, so the saving is measured rather than assumed.
   track; the source spelling and fixed's forcing artifact (a drawn
   mark in the portfolio dashboard) are recorded at
   docs/canvas-plan.md §3.2.1's evening addendum.
+  DEPTH LANDED 2026-08-27: the missing report is `kaya_canvas_track`,
+  the backend geometry report this entry's first paragraph asks for;
+  `rasterize` takes a TRACK and fits the viewbox into it uniformly and
+  centred, so it can no longer stretch anything, and
+  `a_stretch_does_not_thicken_the_pen` is gone with the rule it proved
+  (`the_fit_is_uniform_and_centred` and
+  `the_uniform_fit_scales_the_pen_with_the_drawing` are its
+  replacements). Spec: `size_policy`, tx 47 `set_size_policy`,
+  occurrences 20/21. Rust binding: `Widget::fixed`,
+  `Widget::on_draw`, `Widget::on_tick`. Backend: the SwiftUI arm's
+  1:1 blit and its track report. Scene: tools/scenes/sizepolicy.steps,
+  whose `expect_raster canvas@fit "track"` IS this defect's
+  assertion — nothing else can see it, since the hash and the ink
+  bounds come from the canonical raster and are policy-blind. The
+  BREADTH is open below (the three other backends, the seven other
+  bindings, the template zone and the portfolio's drawn mark).
+- **THE SIZE POLICY IS A DEPTH SLICE (2026-08-27)** — spec, core, the
+  Rust binding, the SwiftUI mac arm and tools/scenes/sizepolicy.steps
+  are in; nothing else is. What is open, and each of it is fan-out work
+  rather than a design question (docs/canvas-plan.md §3.2.1 settled the
+  spelling):
+  - **DEPTH STUB: sizepolicy on gtk** — nothing in gtk.rs reports a
+    canvas's assigned track, so `canvas_raster_shape` would answer "no
+    track reported" for every canvas and `frame` would advance a clock
+    no canvas is watching. Closes when the GTK arm reports its
+    `GtkPicture`'s allocation through `kaya_canvas_track` and drives
+    `kaya_frame` off a `GtkTickCallback`.
+  - **DEPTH STUB: sizepolicy on winui** — the same, one backend over:
+    the report is the `Image`'s arranged size and the frame drive is
+    `CompositionTarget::Rendering`.
+  - **DEPTH STUB: sizepolicy on compose** — the same: the report is the
+    canvas `Layout`'s assigned constraints and the frame drive is
+    `withFrameNanos`.
+  - **iOS is DECLARED OFF, not stubbed**, and the distinction is real:
+    swift/KayaSwiftUI.swift serves mac AND iOS, so the feature is
+    THERE on the simulator — it has simply never been run there. A
+    `kayaDepthStub("sizepolicy", on: "ios")` would be a lie about a
+    backend that has the arm. `IOS_UNWIRED_SCENES` in
+    tools/ios/run-sim.sh carries it until a run measures it.
+  - **THE TEMPLATE ZONE IS REFUSED, LOUDLY.** A `set_size_policy`
+    against a canvas TEMPLATE NODE panics naming this entry, rather
+    than being half-implemented: the core would have to key the policy,
+    the track and the mailbox per stamped copy, and address the ask by
+    node plus key path. The wire grammar already carries that shape
+    (`draw_body` takes a path and `Occurrence::InstanceDrawRequested`
+    exists, both round-tripped in wire.rs's tests), so the closing work
+    is scene.rs's side alone. Until then a canvas in a row template is
+    `scale`, which is the default and correct.
+  - **THE NON-HARNESS FRAME DRIVE IS EXERCISED BY NO LANE.**
+    `KayaCanvasTicker` (a `TimelineView(.animation)`, one per canvas,
+    absent under `KAYA_SELFTEST`) is what drives `kaya_frame` in a real
+    app, and every scene drives frames by verb instead — deliberately,
+    since a leg's frame count may not be a fact about the machine. So
+    the code that runs in a SHIPPED app is the half no test reaches.
+    What would reach it is a capture round on a running animation
+    (docs/canvas-plan.md §7.3's per-platform captures), which is the
+    same answer the look-bug class already has.
+  KEY: size policy, sizepolicy, set_size_policy, expect_raster, frame
+  verb, canvas_track, kaya_frame, on_draw, on_tick, fixed, letterbox,
+  KayaCanvasTicker, template zone canvas
 - ~~CROSS-ISA byte-identity of the canvas raster is UNMEASURED~~ —
   CLOSED 2026-08-26: measured before the first hash went into a .steps file,
   and the two agree: aarch64 and x86_64 both rasterize the canvas

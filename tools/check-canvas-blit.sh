@@ -261,6 +261,62 @@ if m:
         f"gdk_surface_get_scale's double is the one to read, and the container "
         f"runs Xvfb at scale 1, so no lane can tell the two apart")
 
+# --- 4. THE BLIT IS STRICTLY 1:1, AND THE TRACK IS REPORTED. ---------
+#
+# THE STRETCH DEFECT (docs/deferred.md, "A canvas STRETCHES ITS BUFFER")
+# was exactly this pair going wrong: no backend told the core what layout
+# had assigned, so the core could only ever raster at the VIEWBOX, and
+# the backend then drew that buffer into whatever track it had — pen,
+# glyphs and all. Both halves of the fix are invisible to every canvas
+# observable, which is why they are here: the hash and the ink bounds
+# come from the CANONICAL raster, taken at the viewbox by definition
+# (§7.1), so a stretched blit and a re-rastered one answer them
+# identically. `expect_raster` is the runtime half, and it can only ever
+# run where a scene runs.
+#
+# `fixed` is what makes the 1:1 rule load-bearing rather than incidental
+# (§3.2.1, ruling 2): its whole guarantee is that the content does not
+# follow the track, and a `.resizable()` anywhere in this arm would take
+# that away with every observable still green.
+swiftui_body = strip_comments(read(swiftui))
+arm = re.search(r"^(\s*)case kindCanvas:\n(.*?)^\1(case |default:)",
+                swiftui_body, re.S | re.M)
+if arm is None:
+    bad.append(
+        f"{swiftui}: no `case kindCanvas:` arm — the canvas blit moved and this "
+        f"clause is blind, which is worse than a failure: it would pass for any "
+        f"arm at all")
+else:
+    body = arm.group(2)
+    for want, why in (
+        (r"CGFloat\(buffer\.width\) / node\.drawingScale",
+         "the macOS NSImage's size from the BUFFER's own pixels over the scale "
+         "they were drawn at"),
+        (r"cgImage: buffer, scale: node\.drawingScale",
+         "the iOS UIImage's scale from the buffer's own"),
+    ):
+        if re.search(want, body) is None:
+            bad.append(
+                f"{swiftui}: the canvas arm no longer takes {why}. A blit sized "
+                f"from anything but the buffer is a STRETCH, and no canvas "
+                f"observable can see one — the hash and the ink bounds are both "
+                f"taken at the viewbox (docs/canvas-plan.md §3.2.1, §7.1)")
+    if re.search(r"\.resizable\(\)", body):
+        bad.append(
+            f"{swiftui}: the canvas arm calls .resizable(). That is the stretch "
+            f"this architecture removed: the core decides what size to raster at "
+            f"— the viewbox for `fixed`, the assigned track for everything else "
+            f"— and the backend blits those pixels one to one. `fixed`'s whole "
+            f"guarantee is that the content does not follow the track, and every "
+            f"scene assertion stays green without it")
+    if re.search(r"KayaHost\.canvasTrack\(", swiftui_body) is None:
+        bad.append(
+            f"{swiftui}: nothing reports a canvas's assigned track. Without the "
+            f"report the core can only raster at the viewbox and the size policy "
+            f"is inert — `scale` never re-rasters, `redraw` is never asked, and "
+            f"`expect_raster` answers \"no track reported\" (docs/canvas-plan.md "
+            f"§3.2.1)")
+
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 PY
@@ -386,7 +442,35 @@ applied "$hits" "N3c (the Compose density report pinned to 1.0)"
 refuses "$GTK" "$WINUI" "$SWIFTUI" "$T/compose-flat.kt" \
     "no longer reads" "a Compose report that stopped reading the density"
 
-# --- Clause 4: THE INK VERB'S PER-MODE COMPARE, live. ----------------
+# N4: A RESIZABLE CANVAS BLIT — the stretch this architecture removed,
+# in the one line that reintroduces it, with every canvas observable
+# still green.
+hits="$(perturb "$SWIFTUI" 'cgImage: buffer, scale: node.drawingScale, orientation: .up\)\)' \
+    'cgImage: buffer, scale: node.drawingScale, orientation: .up)).resizable()' \
+    "$T/swiftui-resizable.swift")"
+applied "$hits" "N4 (the SwiftUI canvas blit made resizable)"
+refuses "$GTK" "$WINUI" "$T/swiftui-resizable.swift" "$COMPOSE" \
+    "calls .resizable()" "a canvas arm that stretches its buffer"
+
+# N4b: THE BLIT SIZED FROM THE TRACK INSTEAD OF THE BUFFER — the same
+# defect written the other way round, and the one a reader reaches for
+# when a `fixed` canvas looks small in its row.
+hits="$(perturb "$SWIFTUI" 'width: CGFloat\(buffer.width\) / node.drawingScale,' \
+    'width: CGFloat(kayaCanvasFrames[node.id]?.width ?? 0),' \
+    "$T/swiftui-tracksize.swift")"
+applied "$hits" "N4b (the macOS blit sized from the laid-out frame)"
+refuses "$GTK" "$WINUI" "$T/swiftui-tracksize.swift" "$COMPOSE" \
+    "no longer takes the macOS NSImage's size" "a blit sized from the track"
+
+# N4c: THE TRACK REPORT REMOVED — the shipped state this closes. Every
+# canvas observable stays green and the size policy is silently inert.
+hits="$(perturb "$SWIFTUI" 'KayaHost\.canvasTrack\(' 'kayaNoTrackReport(' \
+    "$T/swiftui-notrack.swift")"
+applied "$hits" "N4c (the SwiftUI canvas track report removed)"
+refuses "$GTK" "$WINUI" "$T/swiftui-notrack.swift" "$COMPOSE" \
+    "nothing reports a canvas's assigned track" "a backend that reports no track"
+
+# --- Clause 5: THE INK VERB'S PER-MODE COMPARE, live. ----------------
 # `expect_ink` names both palettes and the HOST picks one, so a mac leg
 # evaluates exactly one of the two arms — which is how a light-only
 # frozen string reached a dark-mode host and reddened a scene nobody had
@@ -431,4 +515,5 @@ if ! offenders="$(check "$GTK" "$WINUI" "$SWIFTUI" "$COMPOSE")"; then
     exit 1
 fi
 echo "check-canvas-blit: OK (4 backends: the one rule, the four pixel formats," \
-    "the one swizzle, the true scale reported, and both ink modes compared)"
+    "the one swizzle, the true scale reported, the 1:1 blit and its track" \
+    "report, and both ink modes compared)"

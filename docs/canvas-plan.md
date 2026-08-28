@@ -630,6 +630,32 @@ The tick's determinism under the harness is a verb, never wall clock:
 the harness drives frames explicitly, so a leg's frame count is part of
 the scene, not the machine's load.
 
+DEPTH LANDED 2026-08-27, and what it cost is worth knowing before the
+fan-out:
+
+- **The report is `kaya_canvas_track`**, `kaya_window_moved`'s shape one
+  widget over, and it is the thing the stretch defect was missing.
+- **`rasterize` takes a TRACK** and fits the viewbox into it uniformly
+  and centred, so it can no longer stretch anything. The pen scales with
+  the drawing, which is ruling 12 replacing §3.2's rule 3.
+- **`expect_raster <target> "track"|"viewbox"`** is the scene's only
+  window onto any of this. §7.1's hash and §7.2's bounds both come from
+  the CANONICAL raster, which is taken at the VIEWBOX by definition, so
+  a canvas that stretched a viewbox-sized buffer answers them
+  identically to one that re-rastered at the track. The new verb
+  compares two numbers made on opposite sides of the boundary: the track
+  a backend measured, and the viewbox a guest declared.
+- **The backend reader has to sit OUTSIDE the grow frame.** SwiftUI's
+  `.background` measures the view it decorates, so on the bare `Image`
+  it reports the BUFFER's size — track and raster then agree by
+  construction and the policy is inert. Measured while landing this.
+- **A tick canvas is asked once before its first frame.** It is a redraw
+  canvas too, so it has a drawing at frame 0 rather than being empty
+  until the clock moves.
+- **The template zone is refused by name**, not half-implemented, and
+  the non-harness frame drive is exercised by no lane — both in
+  docs/deferred.md's size-policy entry with what closes them.
+
 ### §3.3 The op vocabulary (v1)
 
 Five geometry ops and two text ops.

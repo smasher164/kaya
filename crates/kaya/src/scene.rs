@@ -430,6 +430,9 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         // A drawing renders app state, it is not state
         // (docs/canvas-plan.md ruling 10, set_column_headers' reasoning).
         TxOp::SetDrawing { .. } => UndoVerdict::Refused("set_drawing"),
+        // A size policy is how a drawing answers its track, on the same
+        // reasoning: it is not state either.
+        TxOp::SetSizePolicy { .. } => UndoVerdict::Refused("set_size_policy"),
         TxOp::CreateFor { .. } => UndoVerdict::Refused("create_for"),
         TxOp::CreateWhen { .. } => UndoVerdict::Refused("create_when"),
         TxOp::VariantCase { .. } => UndoVerdict::Refused("variant_case"),
@@ -563,6 +566,29 @@ pub(crate) struct Scene {
     /// is taken at it, and a report that changes it re-rasters every
     /// canvas (docs/canvas-plan.md §5, §6).
     presentation: crate::canvas::Presentation,
+    /// EVERY CANVAS'S SIZE POLICY (docs/canvas-plan.md §3.2.1). Absent
+    /// means `scale`, which is the mode a guest that declares nothing
+    /// gets, so this map holds only the three declared ones.
+    canvas_policies: HashMap<WidgetId, u32>,
+    /// The TRACK layout assigned each canvas, in points, as its backend
+    /// last reported it (`kaya_canvas_track`). Absent before the first
+    /// report, which is why every raster falls back to the viewbox.
+    canvas_tracks: HashMap<WidgetId, (f64, f64)>,
+    /// THE LATEST-WINS MAILBOX (§3.2.1). One entry per redraw canvas:
+    /// the size a request is outstanding for. A newer size REPLACES the
+    /// pending entry rather than queueing behind it, and the guest's
+    /// answering set_drawing is what re-arms the ask — so a drag-resize
+    /// storm collapses to the newest size and a guest slower than the
+    /// resize can never stuff a queue.
+    canvas_pending: HashMap<WidgetId, (f64, f64)>,
+    /// The size each outstanding request went out for, so the answer can
+    /// tell "the guest caught up" from "the size moved while it drew".
+    canvas_asked: HashMap<WidgetId, (f64, f64)>,
+    /// Draw requests a TRANSACTION produced — a canvas that became a
+    /// redraw one after its track was already known. Drained by the
+    /// caller of [`Scene::apply`] onto its own occurrence sink, because a
+    /// scene owns no sink of its own.
+    asks: Vec<Occurrence>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget that
@@ -2431,8 +2457,15 @@ impl Scene {
                     let live = path.is_empty()
                         && self.widgets.get(&widget) == Some(&WidgetKind::Canvas);
                     if live {
+                        self.drawings.insert(widget, drawing.clone());
                         self.emit_drawing(widget, &drawing, &mut out);
-                        self.drawings.insert(widget, drawing);
+                        // THE MAILBOX'S RECEIVE HALF (§3.2.1): this is
+                        // the answer to an outstanding draw request, so
+                        // the ask re-arms — and if the track moved while
+                        // the guest was drawing, the LATEST size goes out
+                        // now and the sizes in between are dropped.
+                        let again = self.canvas_answered(widget);
+                        self.asks.extend(again);
                     } else {
                         let node = widget.0;
                         assert!(
@@ -2479,6 +2512,39 @@ impl Scene {
                             self.drawing_overrides.insert((node, keypath), drawing);
                         }
                     }
+                }
+                TxOp::SetSizePolicy { widget, policy } => {
+                    assert!(
+                        crate::wire::vocab_name(crate::wire::SIZE_POLICIES, i64::from(policy))
+                            .is_some(),
+                        "kaya: {policy} is not a canvas size policy; the vocabulary is \
+                         scale (0), fixed (1), redraw (2), tick (3) \
+                         (docs/canvas-plan.md §3.2.1)"
+                    );
+                    assert!(
+                        self.widgets.get(&widget) == Some(&WidgetKind::Canvas),
+                        "kaya: set_size_policy targets {widget:?}, which is not a live \
+                         canvas — the size policy is a LIVE-ZONE declaration in this \
+                         slice, and a canvas inside a row template keeps `scale` \
+                         (docs/deferred.md, the template-zone size policy entry)"
+                    );
+                    if policy == crate::wire::SIZE_POLICY_SCALE {
+                        self.canvas_policies.remove(&widget);
+                    } else {
+                        self.canvas_policies.insert(widget, policy);
+                    }
+                    // A policy change re-rasters what is already declared:
+                    // the same display list, a different target.
+                    if let Some(drawing) = self.drawings.get(&widget).cloned() {
+                        self.emit_drawing(widget, &drawing, &mut out);
+                    }
+                    // ...and re-arms the ask, so a canvas that becomes a
+                    // redraw one AFTER its track was reported is asked
+                    // now rather than at the next resize, which may never
+                    // come. Drained by whoever ran this transaction
+                    // (`take_asks`).
+                    let asks = self.ask_canvas(widget);
+                    self.asks.extend(asks);
                 }
                 TxOp::CreateFor { id, collection } => {
                     // Live For: a real container widget; its template
@@ -5253,6 +5319,13 @@ impl Scene {
         self.bar_instances.retain(|_, wid| !dead.contains(wid));
         self.drawing_instances.retain(|_, wid| !dead.contains(wid));
         self.drawings.retain(|wid, _| !dead.contains(wid));
+        // The size policy's three side tables die with the canvas: an
+        // outstanding ask against a destroyed widget would otherwise be
+        // an answer nobody can give, and the mailbox would never re-arm.
+        self.canvas_policies.retain(|wid, _| !dead.contains(wid));
+        self.canvas_tracks.retain(|wid, _| !dead.contains(wid));
+        self.canvas_pending.retain(|wid, _| !dead.contains(wid));
+        self.canvas_asked.retain(|wid, _| !dead.contains(wid));
         for site_id in &stamp.when_sites {
             if let Some(mut site) = self.when_sites.remove(site_id) {
                 if let Some(bysig) = self.when_by_signal.get_mut(&site.signal) {
@@ -5385,10 +5458,14 @@ impl Scene {
     /// all arrive here, so a backend can never see two spellings of the
     /// same picture.
     ///
-    /// The canvas is rastered at its VIEWBOX, which is its natural size;
-    /// a track bigger than that stretches the blit. The assigned-size
-    /// report that would let the core carry §3.2's stretch itself is
-    /// phase-3 work (docs/canvas-plan.md §11, docs/deferred.md).
+    /// WHICH SIZE it is rastered at is the size policy's whole content
+    /// (docs/canvas-plan.md §3.2.1): `fixed` never adapts and takes the
+    /// VIEWBOX, and every other policy takes the TRACK the backend
+    /// reported — `scale` fitting the held display list into it
+    /// uniformly, `redraw` and `tick` having just been handed that same
+    /// size to draw for, so their fit is the identity. Before any track
+    /// report there is only the viewbox, which is also every raster this
+    /// function took before the policy existed.
     fn emit_drawing(
         &mut self,
         id: WidgetId,
@@ -5396,7 +5473,7 @@ impl Scene {
         out: &mut Vec<ApplyOp>,
     ) {
         let raster =
-            crate::canvas::rasterize(drawing, drawing.viewbox, self.presentation);
+            crate::canvas::rasterize(drawing, self.raster_target(id, drawing), self.presentation);
         out.push(ApplyOp::SetDrawing {
             id,
             width: raster.width,
@@ -5404,6 +5481,142 @@ impl Scene {
             scale: raster.scale,
             pixels: crate::protocol::Blob::from(raster.pixels),
         });
+    }
+
+    fn raster_target(&self, id: WidgetId, drawing: &crate::canvas::Drawing) -> (f64, f64) {
+        if self.canvas_policies.get(&id) == Some(&crate::wire::SIZE_POLICY_FIXED) {
+            return drawing.viewbox;
+        }
+        self.canvas_tracks.get(&id).copied().unwrap_or(drawing.viewbox)
+    }
+
+    /// ASK ONE CANVAS FOR A DRAWING AT ITS ASSIGNED SIZE — the mailbox's
+    /// send half (§3.2.1). Nothing goes out for a constant-mode canvas
+    /// (`scale`/`fixed` need no round trip, which is the whole point of
+    /// declaring the function constant), for a canvas whose track no
+    /// backend has reported yet, or while a request is already
+    /// outstanding: that last one is what makes the mailbox a MAILBOX
+    /// rather than a queue — the newest size sits in `canvas_pending`
+    /// and goes out when the guest answers.
+    fn ask_canvas(&mut self, id: WidgetId) -> Vec<Occurrence> {
+        let policy = self.canvas_policies.get(&id).copied().unwrap_or(crate::wire::SIZE_POLICY_SCALE);
+        if policy != crate::wire::SIZE_POLICY_REDRAW && policy != crate::wire::SIZE_POLICY_TICK {
+            return Vec::new();
+        }
+        let Some(size) = self.canvas_tracks.get(&id).copied() else {
+            return Vec::new();
+        };
+        self.canvas_pending.insert(id, size);
+        if self.canvas_asked.contains_key(&id) {
+            return Vec::new();
+        }
+        self.canvas_asked.insert(id, size);
+        vec![Occurrence::DrawRequested { id, size }]
+    }
+
+    /// The mailbox's receive half: the guest answered. If the size moved
+    /// while it was drawing, the LATEST one goes out now and every size
+    /// in between is dropped rather than drawn late.
+    fn canvas_answered(&mut self, id: WidgetId) -> Vec<Occurrence> {
+        let Some(asked) = self.canvas_asked.remove(&id) else {
+            return Vec::new();
+        };
+        match self.canvas_pending.get(&id).copied() {
+            Some(latest) if latest != asked => {
+                self.canvas_asked.insert(id, latest);
+                vec![Occurrence::DrawRequested { id, size: latest }]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Draw requests a transaction produced, taken by whoever applied it.
+    pub(crate) fn take_asks(&mut self) -> Vec<Occurrence> {
+        std::mem::take(&mut self.asks)
+    }
+
+    /// THE BACKEND REPORTS WHAT LAYOUT ASSIGNED A CANVAS, in points —
+    /// `kaya_window_moved`'s shape one widget over, and the report the
+    /// stretch defect was missing (docs/canvas-plan.md §3.2.1,
+    /// docs/deferred.md). A `scale` canvas re-rasters here; a `redraw`
+    /// or `tick` one is asked; a `fixed` one records the number and
+    /// changes nothing, which is what refusing coercion means.
+    pub(crate) fn set_canvas_track(
+        &mut self,
+        id: WidgetId,
+        size: (f64, f64),
+    ) -> (Vec<ApplyOp>, Vec<Occurrence>) {
+        if !size.0.is_finite() || !size.1.is_finite() || size.0 <= 0.0 || size.1 <= 0.0 {
+            return (Vec::new(), Vec::new());
+        }
+        // DEDUPED AT HALF A POINT, not at equality, and the reason is a
+        // loop rather than cost: the raster rounds to whole DEVICE
+        // pixels, so the blit's logical size can differ from the track
+        // that produced it by up to half a point at scale 1 — and the
+        // backend reports the blit's box back. Exact equality would let
+        // that fraction re-raster forever.
+        if let Some((w, h)) = self.canvas_tracks.get(&id) {
+            if (w - size.0).abs() < 0.5 && (h - size.1).abs() < 0.5 {
+                return (Vec::new(), Vec::new());
+            }
+        }
+        self.canvas_tracks.insert(id, size);
+        let mut out = Vec::new();
+        let policy =
+            self.canvas_policies.get(&id).copied().unwrap_or(crate::wire::SIZE_POLICY_SCALE);
+        if policy == crate::wire::SIZE_POLICY_SCALE {
+            if let Some(drawing) = self.drawings.get(&id).cloned() {
+                self.emit_drawing(id, &drawing, &mut out);
+            }
+        }
+        let asks = self.ask_canvas(id);
+        (out, asks)
+    }
+
+    /// A FRAME (docs/canvas-plan.md §15.4): every `tick` canvas whose
+    /// track is known is handed that size and the platform's own frame
+    /// time. Ticking canvases are asked in id order for the apply
+    /// channel's reason — a HashMap's order is not a fact about kaya.
+    pub(crate) fn frame(&mut self, time: f64) -> Vec<Occurrence> {
+        let mut ticking: Vec<WidgetId> = self
+            .canvas_policies
+            .iter()
+            .filter(|(_, p)| **p == crate::wire::SIZE_POLICY_TICK)
+            .map(|(id, _)| *id)
+            .collect();
+        ticking.sort_by_key(|id| id.0);
+        ticking
+            .into_iter()
+            .filter_map(|id| {
+                self.canvas_tracks.get(&id).copied().map(|size| Occurrence::Tick { id, size, time })
+            })
+            .collect()
+    }
+
+    /// WHICH SIZE the raster this canvas last produced actually is —
+    /// `expect_raster`'s observation (docs/canvas-plan.md §3.2.1). The
+    /// two candidates come from different places on purpose: the TRACK is
+    /// a number the backend measured and reported, the VIEWBOX is one the
+    /// guest declared, and the raster is what the core made of them. It
+    /// is the only canvas observable the size policy can move — `probe`
+    /// rasterizes at the viewbox by definition, so §7.1's hash and
+    /// `expect_drawing`'s bounds are policy-blind.
+    pub(crate) fn canvas_raster_shape(&self, id: WidgetId) -> Option<String> {
+        let drawing = self.drawings.get(&id)?;
+        let (rw, rh) = self.raster_target(id, drawing);
+        let (vw, vh) = drawing.viewbox;
+        let close = |a: f64, b: f64| (a - b).abs() < 0.5;
+        Some(match self.canvas_tracks.get(&id).copied() {
+            Some((tw, th)) if close(rw, tw) && close(rh, th) => "track".to_owned(),
+            Some((tw, th)) if close(rw, vw) && close(rh, vh) => {
+                let _ = (tw, th);
+                "viewbox".to_owned()
+            }
+            Some((tw, th)) => format!(
+                "neither: {rw}x{rh} raster, {vw}x{vh} viewbox, {tw}x{th} track"
+            ),
+            None => "no track reported".to_owned(),
+        })
     }
 
     /// The backend reports the window's scale and appearance; the core
@@ -6420,6 +6633,229 @@ mod tests {
             .filter(|op| matches!(op, ApplyOp::SetProp { prop: Prop::A11yLabel, .. }))
             .count();
         assert_eq!(labels, 2, "both a11y labels should reach the backend");
+    }
+
+    // ------------------------------------------------------------------
+    // THE SIZE POLICY (docs/canvas-plan.md §3.2.1). Every clause here is
+    // something NO SCENE CAN ASSERT: the mailbox's drop, the refusal, and
+    // the exact size an occurrence carries all live between the backend's
+    // report and the guest's answer, where no observable reaches.
+    // ------------------------------------------------------------------
+
+    /// A canvas plus one drawing, ready for a track report.
+    fn canvas_scene(policy: Option<u32>) -> Scene {
+        let mut scene = Scene::new();
+        let mut ops = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Canvas },
+            TxOp::SetDrawing {
+                widget: WidgetId(1),
+                viewbox: (100.0, 50.0),
+                path: Vec::new(),
+                ops: vec![
+                    Value::I64(crate::wire::DRAW_MOVE_TO), Value::F64(10.0), Value::F64(10.0),
+                    Value::I64(crate::wire::DRAW_LINE_TO), Value::F64(90.0), Value::F64(40.0),
+                    Value::I64(crate::wire::DRAW_STROKE),
+                    Value::I64(crate::wire::PAINT_AXIS),
+                    Value::F64(2.0),
+                ],
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ];
+        if let Some(p) = policy {
+            ops.insert(1, TxOp::SetSizePolicy { widget: WidgetId(1), policy: p });
+        }
+        scene.apply(ops);
+        scene
+    }
+
+    fn raster_size(ops: &[ApplyOp]) -> Option<(u32, u32)> {
+        ops.iter().rev().find_map(|op| match op {
+            ApplyOp::SetDrawing { width, height, .. } => Some((*width, *height)),
+            _ => None,
+        })
+    }
+
+    /// `scale` RE-RASTERS AT THE TRACK — the stretch defect's own
+    /// assertion, one layer under the scene (docs/deferred.md). Before
+    /// the size policy the buffer was the viewbox's size at every track
+    /// and the BACKEND stretched it.
+    #[test]
+    fn a_scale_canvas_re_rasters_at_the_reported_track() {
+        let mut scene = canvas_scene(None);
+        let (ops, asks) = scene.set_canvas_track(WidgetId(1), (400.0, 100.0));
+        assert_eq!(raster_size(&ops), Some((400, 100)), "the buffer IS the track");
+        assert!(asks.is_empty(), "a constant mode needs no round trip");
+        assert_eq!(scene.canvas_raster_shape(WidgetId(1)).as_deref(), Some("track"));
+        // AND AN UNCHANGED REPORT EMITS NOTHING: the backends report on
+        // every layout pass, and a re-raster per pass would be the cost
+        // with none of the correction.
+        assert!(scene.set_canvas_track(WidgetId(1), (400.0, 100.0)).0.is_empty());
+        // ...deduped at HALF A POINT, because the raster rounds to whole
+        // device pixels and the backend reports the blit's box back. Exact
+        // equality would let that fraction re-raster forever.
+        assert!(scene.set_canvas_track(WidgetId(1), (400.3, 100.0)).0.is_empty());
+        assert!(!scene.set_canvas_track(WidgetId(1), (401.0, 100.0)).0.is_empty());
+    }
+
+    /// `fixed` NEVER ADAPTS. Same report, same drawing, and the buffer
+    /// stays the viewbox's — which is the whole observable difference
+    /// between the two constant modes.
+    #[test]
+    fn a_fixed_canvas_keeps_its_viewbox_under_any_track() {
+        let mut scene = canvas_scene(Some(crate::wire::SIZE_POLICY_FIXED));
+        let (ops, asks) = scene.set_canvas_track(WidgetId(1), (400.0, 100.0));
+        assert!(ops.is_empty(), "nothing to re-raster: the size did not change");
+        assert!(asks.is_empty());
+        assert_eq!(scene.canvas_raster_shape(WidgetId(1)).as_deref(), Some("viewbox"));
+        // The declaration itself still rasters, at the viewbox.
+        let mut fresh = Scene::new();
+        let ops = fresh.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Canvas },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::SetDrawing {
+                widget: WidgetId(1),
+                viewbox: (100.0, 50.0),
+                path: Vec::new(),
+                ops: vec![
+                    Value::I64(crate::wire::DRAW_MOVE_TO), Value::F64(0.0), Value::F64(0.0),
+                    Value::I64(crate::wire::DRAW_LINE_TO), Value::F64(100.0), Value::F64(50.0),
+                    Value::I64(crate::wire::DRAW_STROKE),
+                    Value::I64(crate::wire::PAINT_AXIS),
+                    Value::F64(1.0),
+                ],
+            },
+        ]);
+        assert_eq!(raster_size(&ops), Some((100, 50)));
+    }
+
+    /// `redraw` IS ASKED, at the size the backend reported, and the
+    /// guest's answer is rastered at that size 1:1.
+    #[test]
+    fn a_redraw_canvas_is_asked_at_the_track_it_was_given() {
+        let mut scene = canvas_scene(Some(crate::wire::SIZE_POLICY_REDRAW));
+        let (_, asks) = scene.set_canvas_track(WidgetId(1), (400.0, 100.0));
+        assert_eq!(
+            asks,
+            vec![Occurrence::DrawRequested { id: WidgetId(1), size: (400.0, 100.0) }]
+        );
+        // The guest answers with a drawing whose viewbox IS that size.
+        let ops = scene.apply(vec![TxOp::SetDrawing {
+            widget: WidgetId(1),
+            viewbox: (400.0, 100.0),
+            path: Vec::new(),
+            ops: vec![
+                Value::I64(crate::wire::DRAW_MOVE_TO), Value::F64(0.0), Value::F64(0.0),
+                Value::I64(crate::wire::DRAW_LINE_TO), Value::F64(400.0), Value::F64(100.0),
+                Value::I64(crate::wire::DRAW_STROKE),
+                Value::I64(crate::wire::PAINT_AXIS),
+                Value::F64(1.0),
+            ],
+        }]);
+        assert_eq!(raster_size(&ops), Some((400, 100)));
+        assert!(scene.take_asks().is_empty(), "the guest caught up; nothing to re-ask");
+        assert_eq!(scene.canvas_raster_shape(WidgetId(1)).as_deref(), Some("track"));
+    }
+
+    /// LATEST-WINS MAILBOX, AND FRAME DROPPING (§3.2.1). NO SCENE CAN
+    /// SEE THIS: a drag-resize storm collapses to the newest size, and
+    /// the sizes in between are dropped rather than drawn late — the
+    /// buffer-stuffing defect Android's frame pacing library exists to
+    /// name. The proof is that a SECOND and THIRD report while a request
+    /// is outstanding queue nothing, and that the re-ask carries the
+    /// LAST of them and not the first.
+    #[test]
+    fn a_resize_storm_collapses_to_the_newest_size() {
+        let mut scene = canvas_scene(Some(crate::wire::SIZE_POLICY_REDRAW));
+        let (_, first) = scene.set_canvas_track(WidgetId(1), (400.0, 100.0));
+        assert_eq!(first.len(), 1, "the first report asks");
+        for size in [(410.0, 100.0), (420.0, 100.0), (430.0, 100.0)] {
+            let (_, more) = scene.set_canvas_track(WidgetId(1), size);
+            assert!(more.is_empty(), "a request is outstanding: {size:?} queues nothing");
+        }
+        // The guest answers the FIRST size — it never saw the others.
+        scene.apply(vec![TxOp::SetDrawing {
+            widget: WidgetId(1),
+            viewbox: (400.0, 100.0),
+            path: Vec::new(),
+            ops: Vec::new(),
+        }]);
+        assert_eq!(
+            scene.take_asks(),
+            vec![Occurrence::DrawRequested { id: WidgetId(1), size: (430.0, 100.0) }],
+            "the re-ask is the NEWEST size; 410 and 420 were dropped, not queued"
+        );
+    }
+
+    /// A TICK CARRIES THE TRACK AND THE PLATFORM'S TIME, and only
+    /// ticking canvases get one. Wall clock reaches none of this: the
+    /// caller supplies the number.
+    #[test]
+    fn a_frame_reaches_only_the_ticking_canvases() {
+        let mut scene = canvas_scene(Some(crate::wire::SIZE_POLICY_TICK));
+        // A second canvas, left on the default `scale`.
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Canvas },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+        ]);
+        scene.set_canvas_track(WidgetId(2), (10.0, 10.0));
+        // BEFORE ANY TRACK REPORT there is no size to hand over, so a
+        // frame asks nothing rather than asking about a size nobody has.
+        assert!(scene.frame(0.5).is_empty());
+        scene.set_canvas_track(WidgetId(1), (400.0, 100.0));
+        assert_eq!(
+            scene.frame(1.0 / 60.0),
+            vec![Occurrence::Tick {
+                id: WidgetId(1),
+                size: (400.0, 100.0),
+                time: 1.0 / 60.0,
+            }],
+            "only the ticking canvas, at its own track and the given time"
+        );
+    }
+
+    /// A POLICY DECLARED AFTER THE TRACK IS ALREADY KNOWN still gets
+    /// asked. Without this a guest that turns a canvas into a redraw one
+    /// in a later transaction waits for a resize that may never come.
+    #[test]
+    fn a_late_policy_asks_immediately() {
+        let mut scene = canvas_scene(None);
+        scene.set_canvas_track(WidgetId(1), (400.0, 100.0));
+        scene.apply(vec![TxOp::SetSizePolicy {
+            widget: WidgetId(1),
+            policy: crate::wire::SIZE_POLICY_REDRAW,
+        }]);
+        assert_eq!(
+            scene.take_asks(),
+            vec![Occurrence::DrawRequested { id: WidgetId(1), size: (400.0, 100.0) }]
+        );
+    }
+
+    /// THE TEMPLATE ZONE IS REFUSED BY NAME, not half-implemented
+    /// (docs/deferred.md's size-policy entry). A canvas inside a row
+    /// template keeps `scale`, which is the default and correct.
+    #[test]
+    #[should_panic(expected = "LIVE-ZONE declaration")]
+    fn a_template_node_size_policy_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetSizePolicy {
+                widget: WidgetId(1),
+                policy: crate::wire::SIZE_POLICY_FIXED,
+            },
+        ]);
+    }
+
+    /// AND A NUMBER OUTSIDE THE VOCABULARY, which is what a hand-written
+    /// C floor can send.
+    #[test]
+    #[should_panic(expected = "is not a canvas size policy")]
+    fn an_unknown_size_policy_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Canvas },
+            TxOp::SetSizePolicy { widget: WidgetId(1), policy: 9 },
+        ]);
     }
 
     #[test]

@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface windowed canvas"
+DEPTH_SCENES="typeface windowed canvas sizepolicy"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1186,6 +1186,15 @@ run canvas-rust-swiftui env KAYA_SELFTEST=canvas "$RUST_GUESTS"/canvas
 # the machine's own setting, so the dark arm is a leg on a light desk.
 run canvasdark-rust-swiftui env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
     "$RUST_GUESTS"/canvas
+drain
+
+# The size-policy scene (docs/canvas-plan.md §3.2.1): what a canvas does
+# with a track that is not its viewbox. RUST ONLY and MAC ONLY for now —
+# it is a depth slice, and the three backends that report no canvas
+# track hold `depth_stub("sizepolicy")` (docs/deferred.md).
+KAYA_SELFTEST_SCRIPT="$(scene_script sizepolicy)"
+export KAYA_SELFTEST_SCRIPT
+run sizepolicy-rust-swiftui env KAYA_SELFTEST=sizepolicy "$RUST_GUESTS"/sizepolicy
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome

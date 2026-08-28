@@ -47,6 +47,11 @@ pub const REC_PASTED: u16 = 16;
 pub const REC_UNDONE: u16 = 17;
 pub const REC_REDONE: u16 = 18;
 pub const REC_SORT_REQUESTED: u16 = 19;
+/// THE CANVAS'S TWO ASKS (docs/canvas-plan.md §3.2.1): the core hands a
+/// redraw canvas the size it was assigned and takes back a drawing, and
+/// hands a ticking one the same size plus the frame's time.
+pub const REC_DRAW_REQUESTED: u16 = 20;
+pub const REC_TICK: u16 = 21;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

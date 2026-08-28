@@ -78,7 +78,9 @@ leg runs — no more, no less — plus the trailing settle.
       android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk   rc=0
    ```
     tools/build-id.sh --verify \
+   ```
       android/milestone2go/src/main/jniLibs/arm64-v8a/libkaya.so            rc=0
+   ```
 
 Both carry the id of the CURRENT sources (tree clean at 0254879), so no
 rebuild was needed and none was done — this is a RUN-ONLY charge and the

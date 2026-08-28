@@ -932,6 +932,77 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// THIS CANVAS REFUSES COERCION: it draws at its viewbox and is
+    /// placed in whatever track layout gives it, never adapting to it
+    /// (docs/canvas-plan.md §3.2.1, ruling 2).
+    ///
+    /// The ONE TRUE PROPERTY of the size policy, because it ASSERTS
+    /// something about the drawing rather than providing a capability:
+    /// the content is not a function of the assigned track. What that
+    /// buys is exactly three things — an intrinsic size from the viewbox,
+    /// a blit that is strictly 1:1 (tools/check-canvas-blit.sh holds it),
+    /// and NO promise of raster-once: a display-scale or appearance
+    /// change re-runs the same display list like every other canvas.
+    ///
+    /// The other two policies are HANDLERS, not properties
+    /// ([`Messages::on_draw`], [`Messages::on_tick`]), and a canvas that
+    /// declares nothing is `scale`.
+    pub fn fixed(self) -> Self {
+        self.tx.size_policy(self.id, crate::wire::SIZE_POLICY_FIXED);
+        self
+    }
+
+    /// THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core hands it
+    /// the size layout assigned and takes back what `f` draws for that
+    /// size (docs/canvas-plan.md §3.2.1). PROVIDING THE HANDLER IS THE
+    /// DECLARATION — that is what `redraw` means — so this registers the
+    /// closure AND puts the policy on the wire in one act.
+    ///
+    /// `f` draws in the size it is handed, which becomes its viewbox:
+    /// the coordinates are the assigned points, so a chart re-lays-out
+    /// for the width instead of scaling its old pixels.
+    ///
+    /// THE BINDING OPENS THE TRANSACTION, not the guest
+    /// (tools/check-ambient-tx.sh): [`Messages::next`] answers the
+    /// request and keeps looping, so this never surfaces as a message.
+    ///
+    /// LATEST-WINS: a size the guest never caught up with is dropped
+    /// rather than drawn late, so a drag-resize storm cannot queue.
+    pub fn on_draw<M>(
+        self,
+        msgs: &Messages<M>,
+        f: impl Fn(&mut Draw, Viewbox) + 'static,
+    ) -> Self {
+        msgs.register_draw(
+            self.id,
+            crate::wire::SIZE_POLICY_REDRAW,
+            Box::new(move |d, size, _| f(d, size)),
+        );
+        self.tx.size_policy(self.id, crate::wire::SIZE_POLICY_REDRAW);
+        self
+    }
+
+    /// The same, on the platform's FRAME CLOCK: `f` is handed the
+    /// assigned size and the frame's time in seconds (§15.4). `on_tick`
+    /// is `on_draw` plus that drive — an animating canvas answers the
+    /// same drawing-at-this-size question, once a frame.
+    ///
+    /// THE TIME IS THE PLATFORM'S. A guest that reads its own clock
+    /// re-imports exactly the jitter Choreographer's frame time and
+    /// CADisplayLink's `targetTimestamp` were built to remove. Under the
+    /// harness it is the core's deterministic step, advanced by a verb,
+    /// so a leg's frame count is part of the scene and never a fact
+    /// about the machine's load.
+    pub fn on_tick<M>(
+        self,
+        msgs: &Messages<M>,
+        f: impl Fn(&mut Draw, Viewbox, f64) + 'static,
+    ) -> Self {
+        msgs.register_draw(self.id, crate::wire::SIZE_POLICY_TICK, Box::new(f));
+        self.tx.size_policy(self.id, crate::wire::SIZE_POLICY_TICK);
+        self
+    }
+
     /// What this widget accepts from a paste. A SET, so a kind cannot be
     /// named twice: the root refuses a duplicate rather than letting one
     /// silently win.
@@ -2093,6 +2164,14 @@ impl<'a> Tx<'a> {
         // handler does not repeat it.
         self.ctx.viewboxes.borrow_mut().insert(w.0, viewbox);
         Widget { id: w, out: (), tx: self }
+    }
+
+    /// WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+    /// (docs/canvas-plan.md §3.2.1) — the dynamic path behind
+    /// [`Widget::fixed`] and behind [`Messages::on_draw`]/[`Messages::on_tick`],
+    /// which is where a guest declares this rather than here.
+    pub fn size_policy(&mut self, w: WidgetId, policy: u32) {
+        self.ops.push(TxOp::SetSizePolicy { widget: w, policy });
     }
 
     /// DECLARE the whole drawing on a canvas, replacing whatever was
@@ -3418,6 +3497,14 @@ pub struct Messages<M> {
     /// times as the user likes, and the ledger is per window.
     undone: RefCell<HashMap<u64, Box<dyn Fn(String, crate::protocol::UndoDelta) -> M>>>,
     redone: RefCell<HashMap<u64, Box<dyn Fn(String, crate::protocol::UndoDelta) -> M>>>,
+    /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
+    /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
+    /// [`Messages::next`] answers them itself and keeps looping rather
+    /// than handing the guest an occurrence to re-declare from. The
+    /// second argument is the frame's time in seconds, 0 for a plain
+    /// redraw.
+    #[allow(clippy::type_complexity)]
+    draws: RefCell<HashMap<u64, (u32, Box<dyn Fn(&mut Draw, Viewbox, f64)>)>>,
 }
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
@@ -3444,7 +3531,23 @@ impl<M> Messages<M> {
             clip_reads: RefCell::new(HashMap::new()),
             undone: RefCell::new(HashMap::new()),
             redone: RefCell::new(HashMap::new()),
+            draws: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// The registration half of [`Widget::on_draw`] and
+    /// [`Widget::on_tick`]. NOT PUBLIC on purpose: registering the
+    /// closure and declaring the policy on the wire are ONE act — a
+    /// guest that could do the first without the second would have a
+    /// handler nothing ever calls, which is the "one more thing to keep
+    /// consistent" the ruling refused (docs/canvas-plan.md §3.2.1).
+    fn register_draw(
+        &self,
+        canvas: WidgetId,
+        policy: u32,
+        f: Box<dyn Fn(&mut Draw, Viewbox, f64)>,
+    ) {
+        self.draws.borrow_mut().insert(canvas.0, (policy, f));
     }
 
     /// A click means this message (cloned per fire).
@@ -3847,6 +3950,39 @@ impl<M> Messages<M> {
             let occ = ctx.next();
             let mapped = match &occ {
                 Occurrence::Shutdown => return None,
+                // THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER
+                // MAPPED (docs/canvas-plan.md §3.2.1): the guest
+                // registered a drawing-as-a-function-of-size, so this
+                // draws it, submits the one record, and keeps looping.
+                // A guest opening its own transaction inside a handler
+                // is the camouflage tools/check-ambient-tx.sh refuses;
+                // the binding has already opened this one.
+                Occurrence::DrawRequested { id, size }
+                | Occurrence::Tick { id, size, .. } => {
+                    let time = match &occ {
+                        Occurrence::Tick { time, .. } => *time,
+                        _ => 0.0,
+                    };
+                    let box_ = Viewbox(size.0, size.1);
+                    // The closure is taken OUT while it runs: it may
+                    // itself declare against the same canvas, and a
+                    // RefCell held across that would panic.
+                    let handler = self.draws.borrow_mut().remove(&id.0);
+                    if let Some((policy, f)) = handler {
+                        ctx.apply(|tx| {
+                            tx.ctx.viewboxes.borrow_mut().insert(id.0, box_);
+                            tx.draw(*id, |d| f(d, box_, time));
+                        });
+                        self.draws.borrow_mut().insert(id.0, (policy, f));
+                    }
+                    None
+                }
+                // A stamped copy's canvas is never asked: the size policy
+                // is a live-zone declaration in this slice, and the core
+                // refuses a template-node one by name (docs/deferred.md).
+                Occurrence::InstanceDrawRequested { .. } | Occurrence::InstanceTick { .. } => {
+                    unreachable!("the core asks only live canvases: {occ:?}")
+                }
                 Occurrence::ButtonClicked { id }
                 | Occurrence::TextChanged { id, .. }
                 | Occurrence::Toggled { id, .. }
@@ -6682,7 +6818,11 @@ mod tests {
                     | Occurrence::Undone { .. }
                     | Occurrence::Redone { .. }
                     | Occurrence::SortRequested { .. }
-                    | Occurrence::InstanceSortRequested { .. } => {}
+                    | Occurrence::InstanceSortRequested { .. }
+                    | Occurrence::DrawRequested { .. }
+                    | Occurrence::InstanceDrawRequested { .. }
+                    | Occurrence::Tick { .. }
+                    | Occurrence::InstanceTick { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

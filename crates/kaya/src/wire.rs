@@ -88,6 +88,9 @@ pub const TX_SET_COLUMN_HEADERS: u16 = 45;
 /// The whole drawing on a canvas, one atomic declaration
 /// (docs/canvas-plan.md §3.1).
 pub const TX_SET_DRAWING: u16 = 46;
+/// WHAT A CANVAS DOES WITH A TRACK BIGGER THAN ITS VIEWBOX
+/// (docs/canvas-plan.md §3.2.1).
+pub const TX_SET_SIZE_POLICY: u16 = 47;
 /// `sorted`'s no-column sentinel (alert_choice's cancel precedent).
 pub const SORT_NONE: u32 = u32::MAX;
 /// `direction`'s two values, read only when `sorted` names a column.
@@ -194,6 +197,17 @@ pub const PAINT_GROUND: i64 = 5;
 pub const FILL_NONZERO: i64 = 0;
 pub const FILL_EVEN_ODD: i64 = 1;
 
+// The size policy (§3.2.1): what a canvas does when layout gives it a
+// track that is not its viewbox. `scale` is the default — the mode a
+// guest that declares nothing gets — and the other three are what the
+// guest's declaration means: `fixed` is the one true property, `redraw`
+// is an on_draw handler, `tick` is an on_tick handler (redraw plus the
+// frame drive).
+pub const SIZE_POLICY_SCALE: u32 = 0;
+pub const SIZE_POLICY_FIXED: u32 = 1;
+pub const SIZE_POLICY_REDRAW: u32 = 2;
+pub const SIZE_POLICY_TICK: u32 = 3;
+
 // SVG's text-anchor and dominant-baseline.
 pub const TEXT_ALIGN_START: i64 = 0;
 pub const TEXT_ALIGN_MIDDLE: i64 = 1;
@@ -230,6 +244,16 @@ pub const PAINTS: &[(i64, &str)] = &[
 ];
 
 pub const FILL_RULES: &[(i64, &str)] = &[(FILL_NONZERO, "nonzero"), (FILL_EVEN_ODD, "even_odd")];
+
+/// The size policy's (value, name) table — the same second spelling the
+/// five draw vocabularies have, and read by the core's own refusal when
+/// a guest sends a number outside it.
+pub const SIZE_POLICIES: &[(i64, &str)] = &[
+    (SIZE_POLICY_SCALE as i64, "scale"),
+    (SIZE_POLICY_FIXED as i64, "fixed"),
+    (SIZE_POLICY_REDRAW as i64, "redraw"),
+    (SIZE_POLICY_TICK as i64, "tick"),
+];
 
 pub const TEXT_ALIGNS: &[(i64, &str)] = &[
     (TEXT_ALIGN_START, "start"),
@@ -1209,6 +1233,12 @@ pub fn decode_transaction_with_blobs(
                 let ops = flat.split_off(path_len);
                 TxOp::SetDrawing { widget, viewbox: (vb_w, vb_h), path: flat, ops }
             }
+            TX_SET_SIZE_POLICY => {
+                let widget = WidgetId(r.u64());
+                let policy = r.u32();
+                let _reserved = r.u32();
+                TxOp::SetSizePolicy { widget, policy }
+            }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -1879,6 +1909,65 @@ pub fn sort_body(tag: &[u8], column: u32) -> Vec<u8> {
     let mut b = tag.to_vec();
     b[12..16].copy_from_slice(&column.to_le_bytes());
     b
+}
+
+// THE TWO CANVAS OCCURRENCES (docs/canvas-plan.md §3.2.1). Both are a
+// click tag with the size the core is asking about appended as tagged
+// values — { u64 id; u32 path_len; u32 reserved; path_len keys; w; h }
+// and the same with a third value, the FRAME'S TIME. The tag shape is
+// reused rather than invented so a stamped copy is addressed exactly as
+// every other occurrence addresses one.
+pub fn draw_body(id: u64, path: &[Value], size: (f64, f64), time: Option<f64>) -> Vec<u8> {
+    let mut b = click_tag(id, path);
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::F64(size.0), &mut blobs);
+    write_value(&mut b, &Value::F64(size.1), &mut blobs);
+    if let Some(t) = time {
+        write_value(&mut b, &Value::F64(t), &mut blobs);
+    }
+    b
+}
+
+/// `draw_body`'s inverse: the id, the copy's key path, the size, and the
+/// frame time when there is one.
+///
+/// TEST-ONLY, and the module's own division says why: "encoding for the
+/// pump and for tests", decoding for FOREIGN guests — which decode these
+/// bodies in their own languages off the ring. The Rust API never sees a
+/// body at all; its sink carries the `Occurrence` itself.
+#[cfg(test)]
+fn read_draw_body(body: &[u8], ticking: bool) -> (u64, Path, (f64, f64), f64) {
+    let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    let num = |v: Value, which: &str| match v {
+        Value::F64(n) => n,
+        other => panic!("kaya: a canvas {which} occurrence carries {other:?}, wanted f64"),
+    };
+    let w = num(r.value(), "size");
+    let h = num(r.value(), "size");
+    let t = if ticking { num(r.value(), "frame time") } else { 0.0 };
+    (id, path, (w, h), t)
+}
+
+#[cfg(test)]
+pub fn decode_draw_requested(body: &[u8]) -> Occurrence {
+    let (id, path, size, _) = read_draw_body(body, false);
+    if path.is_empty() {
+        Occurrence::DrawRequested { id: WidgetId(id), size }
+    } else {
+        Occurrence::InstanceDrawRequested { node: TemplateNodeId(id), path, size }
+    }
+}
+
+#[cfg(test)]
+pub fn decode_tick(body: &[u8]) -> Occurrence {
+    let (id, path, size, time) = read_draw_body(body, true);
+    if path.is_empty() {
+        Occurrence::Tick { id: WidgetId(id), size, time }
+    } else {
+        Occurrence::InstanceTick { node: TemplateNodeId(id), path, size, time }
+    }
 }
 
 pub fn decode_sort_tag(tag: &[u8], column: u32) -> Occurrence {
@@ -2618,6 +2707,13 @@ impl Writer {
                     for op in ops {
                         write_value(b, op, blobs);
                     }
+                })
+            }
+            TxOp::SetSizePolicy { widget, policy } => {
+                self.record(TX_SET_SIZE_POLICY, |b, _| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&policy.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
                 })
             }
             TxOp::SelectRange { widget, range } => self.record(TX_SELECT_RANGE, |b, _| {
@@ -3374,6 +3470,64 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    /// THE SIZE POLICY'S RECORD AND ITS TWO ASKS, out and back
+    /// (docs/canvas-plan.md §3.2.1). The two occurrence bodies differ by
+    /// ONE TRAILING VALUE, which is exactly the shape where a decoder
+    /// reading the wrong one gets a plausible number rather than an
+    /// error: a tick read as a draw request drops its time silently, and
+    /// a draw request read as a tick reads past the end.
+    #[test]
+    fn the_size_policy_and_its_asks_round_trip() {
+        let ops = vec![
+            TxOp::SetSizePolicy { widget: WidgetId(3), policy: SIZE_POLICY_FIXED },
+            TxOp::SetSizePolicy { widget: WidgetId(4), policy: SIZE_POLICY_TICK },
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let decoded = decode_transaction(&w.into_bytes());
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+
+        let live = draw_body(7, &[], (400.5, 120.0), None);
+        assert_eq!(
+            decode_draw_requested(&live),
+            Occurrence::DrawRequested { id: WidgetId(7), size: (400.5, 120.0) }
+        );
+        let ticked = draw_body(7, &[], (400.5, 120.0), Some(0.05));
+        assert_eq!(
+            decode_tick(&ticked),
+            Occurrence::Tick { id: WidgetId(7), size: (400.5, 120.0), time: 0.05 }
+        );
+        // The tick's body is the draw request's plus one value, and
+        // reading it as a draw request would silently lose the time.
+        assert!(ticked.len() > live.len());
+        assert_eq!(&ticked[..live.len()], &live[..]);
+        // The stamped shapes, which the core does not emit today but the
+        // grammar carries: keys first, then the numbers.
+        let keys = [Value::from("row"), Value::I64(2)];
+        assert_eq!(
+            decode_tick(&draw_body(9, &keys, (10.0, 20.0), Some(1.0))),
+            Occurrence::InstanceTick {
+                node: TemplateNodeId(9),
+                path: keys.to_vec(),
+                size: (10.0, 20.0),
+                time: 1.0,
+            }
+        );
+        assert_eq!(
+            decode_draw_requested(&draw_body(9, &keys, (10.0, 20.0), None)),
+            Occurrence::InstanceDrawRequested {
+                node: TemplateNodeId(9),
+                path: keys.to_vec(),
+                size: (10.0, 20.0),
+            }
+        );
     }
 
     /// BOTH DIALOG REQUESTS, out and back, because what can break is the

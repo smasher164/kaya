@@ -124,6 +124,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceMenuValueChanged { .. } => {}
             Occurrence::Undone { .. } | Occurrence::Redone { .. } => {}
             Occurrence::SortRequested { .. } | Occurrence::InstanceSortRequested { .. } => {}
+            // This scene's canvases are `scale`, which asks for nothing
+            // (docs/canvas-plan.md §3.2.1) — in fact it has none.
+            Occurrence::DrawRequested { .. }
+            | Occurrence::InstanceDrawRequested { .. }
+            | Occurrence::Tick { .. }
+            | Occurrence::InstanceTick { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

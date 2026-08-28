@@ -907,7 +907,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x2f62f356091de5b6uL
+    private const val SPEC_HASH: ULong = 0x1cd31581dd9eb228uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -6841,6 +6841,15 @@ object KayaCompose {
                             failures.add("drawing $measured, wanted $want")
                         }
                     }
+                    // THE SIZE POLICY'S TWO VERBS (docs/canvas-plan.md
+                    // §3.2.1). Nothing here reports a canvas's assigned
+                    // track yet, so `expect_raster` would answer "no
+                    // track reported" for every canvas and `frame`
+                    // would advance a clock no canvas is watching —
+                    // both refuse where check-stubs and check-steps can
+                    // see it.
+                    "expect_raster" -> depthStub("sizepolicy")
+                    "frame" -> depthStub("sizepolicy")
                     // THE BLIT, sampled off the window's own rendered
                     // pixels (§7.2) — the one canvas read that fails
                     // when the buffer never reached the platform's image
@@ -7715,14 +7724,14 @@ object KayaCompose {
  * app's own paste hook crosses as a REPRESENTATION, and the mac and
  * GTK arms hand it over unnormalized too.
  */
-// THIS BACKEND STUBS NOTHING TODAY, so it carries no depthStub: an
-// unused private function fails tools/check-detekt.sh. The next depth
-// slice writes it back in as a CALL, never a sentence —
-// tools/check-stubs.sh reads the call, and its silence is bought by an
-// OPEN entry in docs/deferred.md (tools/lib/stub-ledger.py):
-//
-//     private fun depthStub(scene: String): Nothing =
-//         error("kaya: the $scene scene is not yet materialized on android")
+// A depth stub is a CALL, never a sentence — tools/check-stubs.sh reads
+// it, and its silence is bought by an OPEN entry in docs/deferred.md
+// (tools/lib/stub-ledger.py).
+private fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on android — " +
+            "it is a depth slice; see CLAUDE.md's sequencing",
+    )
 
 /**
  * THE BLIT'S BYTES (docs/canvas-plan.md §8): the core's premultiplied

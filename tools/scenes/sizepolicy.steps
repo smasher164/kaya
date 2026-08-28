@@ -1,0 +1,99 @@
+# The canvas SIZE-POLICY scene (docs/canvas-plan.md §3.2.1): what a
+# canvas does when layout gives it a track that is not its viewbox.
+#
+# A DRAWING IS A FUNCTION OF SIZE, and the three policies are what a
+# guest says about that function. `scale` (the default, declared by
+# writing nothing) says it is CONSTANT and lets the core re-rasterize
+# the display list it already holds, fitted uniformly into the track and
+# centred. `fixed` says it is constant AND refuses to adapt at all.
+# `redraw` provides the function — an on_draw handler — and `tick` is
+# the same on the platform's frame clock.
+#
+# ALL FOUR CANVASES GROW. An ungrown canvas is its natural size, which
+# is content-is-the-floor, so its track IS its viewbox and all three
+# policies agree — which is why no scene in the tree could reach this
+# before, and why the stretch defect shipped under green lanes for a
+# whole milestone (docs/deferred.md).
+#
+# THE HASH AND THE INK BOUNDS ARE POLICY-BLIND, deliberately: both come
+# from the CANONICAL raster, which is taken at the viewbox by
+# definition (§7.1), so a canvas that stretched a viewbox-sized buffer
+# into its track answers them identically to one that re-rasterized at
+# the track. `expect_raster` is the verb that can tell them apart, and
+# it compares two numbers made on opposite sides of the boundary: the
+# TRACK the backend measured and reported, and the VIEWBOX the guest
+# declared.
+#
+# No opening settle: the first expect's bounded retry IS the
+# scene-ready wait.
+#
+# --- scale, the default -----------------------------------------------
+# THE STRETCH DEFECT'S OWN ASSERTION. Before the size policy this canvas
+# rastered at its viewbox and the backend stretched the picture into the
+# track; now the core re-rasters at the track and the blit is 1:1.
+expect_raster canvas@fit "track"
+# The figure is the same drawing at any size, so its stream is a pure
+# function of the declaration and §7.1's primary observable survives —
+# which is exactly why the DEFAULT had to be a constant mode. Derived
+# by crates/kaya/src/canvas.rs's
+# the_size_policy_scene_expectations_are_derived, never typed from a
+# platform's read.
+expect_drawing canvas@fit "12/5,0,95,100"
+expect_drawing_hash canvas@fit "8185fc030ee419b6"
+# THE CENTRE, and only the centre. A `scale` canvas letterboxes its
+# figure inside the track and a `fixed` one is centred inside it by the
+# backend, so an edge probe lands in margin on one and in ink on the
+# other; the centre is inside the figure for all four canvases. Both
+# modes named, each compared within ±1 per channel (§7.2).
+expect_ink canvas@fit "50,50 = light D2E3F7 dark 212A35"
+#
+# --- fixed, the one true property -------------------------------------
+# REFUSING COERCION: the same figure, the same grow, and the raster is
+# still the VIEWBOX's size. This is the whole observable difference
+# between the two constant modes, and the pair above and below is what
+# makes either of them mean anything.
+expect_raster canvas@mark "viewbox"
+expect_drawing canvas@mark "12/5,0,95,100"
+expect_drawing_hash canvas@mark "8185fc030ee419b6"
+expect_ink canvas@mark "50,50 = light D2E3F7 dark 212A35"
+#
+# --- redraw, the primitive --------------------------------------------
+# The guest was handed the assigned size and drew for it, so the raster
+# is the track's and the viewbox is the track. NO FROZEN HASH HERE and
+# the scene says so deliberately rather than discovering it on five
+# lanes: this stream is a function of the track, the platforms
+# legitimately assign different tracks, and no care makes a
+# track-dependent stream hash to one string (§7.1's amendment). What it
+# asserts instead is §7.2's pair — the bounds, which are fractions of
+# the canvas's own box and survive a per-platform track, and the ink.
+expect_raster canvas@live "track"
+expect_drawing canvas@live "12/5,0,95,100"
+expect_ink canvas@live "50,50 = light D2E3F7 dark 212A35"
+#
+# --- tick, the frame drive --------------------------------------------
+# A LEG'S FRAME COUNT IS PART OF THE SCENE, never the machine's load.
+# The bar's right edge IS the frame number — 35 hundredths plus ten per
+# frame — so these two lines pin exactly which frames were driven.
+frame
+# AND THIS IS THE DETERMINISM NEGATIVE, in the scene rather than in a
+# gate: two tenths of a second is twelve frames at 60Hz, so a tick
+# driven by wall clock instead of by the verb would be at frame 13 by
+# the time the next line runs, and the bar would be off the right edge
+# of its box. The verb is the only thing that moves this clock under
+# the harness.
+settle 200
+expect_drawing canvas@clock "6/25,0,45,100"
+frame 2
+expect_drawing canvas@clock "6/25,0,65,100"
+# AND THE TICKING CANVAS IS A REDRAW CANVAS: it was handed the track and
+# drew in it, so its raster is the track's too.
+expect_raster canvas@clock "track"
+#
+# NO `expect_ax` HERE, and the omission is structural rather than an
+# oversight: check-steps' ax_bus clause requires every ax-asserting
+# scene to have a LINUX leg going through tools/linux/a11y-leg.sh, and
+# this scene has no linux leg at all while GTK holds
+# depth_stub("sizepolicy"). A canvas being an image to an assistive
+# client is asserted by tools/scenes/canvas.steps, on a scene that IS
+# wired there (§9); the size policy changes what is drawn and at what
+# size, and nothing about what a canvas is.

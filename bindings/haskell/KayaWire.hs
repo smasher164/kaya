@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x2f62f356091de5b6
+specHash = 0x1cd31581dd9eb228
 
 valueBool :: Word32
 valueBool = 1
@@ -104,6 +104,14 @@ fillRuleNonzero :: Word32
 fillRuleNonzero = 0
 fillRuleEvenOdd :: Word32
 fillRuleEvenOdd = 1
+sizePolicyScale :: Word32
+sizePolicyScale = 0
+sizePolicyFixed :: Word32
+sizePolicyFixed = 1
+sizePolicyRedraw :: Word32
+sizePolicyRedraw = 2
+sizePolicyTick :: Word32
+sizePolicyTick = 3
 textAlignStart :: Word32
 textAlignStart = 0
 textAlignMiddle :: Word32
@@ -404,6 +412,8 @@ txKindSetColumnHeaders :: Word16
 txKindSetColumnHeaders = 45
 txKindSetDrawing :: Word16
 txKindSetDrawing = 46
+txKindSetSizePolicy :: Word16
+txKindSetSizePolicy = 47
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -514,6 +524,10 @@ occKindRedone :: Word16
 occKindRedone = 18
 occKindSortRequested :: Word16
 occKindSortRequested = 19
+occKindDrawRequested :: Word16
+occKindDrawRequested = 20
+occKindTick :: Word16
+occKindTick = 21
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -729,6 +743,10 @@ txSetColumnHeaders widgetId sorted direction count pathLen titles = wireRecord t
 -- DECLARE the whole drawing on a canvas widget, replacing whatever was declared before (docs/canvas-plan.md §3.1). `ops` holds `path_len` KEY values FIRST, then `count` op values — set_column_headers' convention verbatim, and what lets a canvas live inside a For row template: path_len 0 with a live widget id is the flat case, path_len 0 with a template node id declares the drawing for every stamped copy, path_len > 0 re-declares one copy's.  THE OP STREAM IS A FLAT RUN OF TAGGED VALUES: an i64 `draw_op` opcode followed by its operands (§3.3). `vb_w`/`vb_h` are the VIEWBOX — the coordinate system the guest draws in AND the canvas's natural size in device-independent points — which is what keeps one op stream identical on five platforms (§3.2, invariant 6).  ONE RECORD FOR THE WHOLE DRAWING, never a patch, on set_column_headers' reasoning: a half-updated chart is the same defect as new titles under a stale indicator. NOT UNDOABLE: a drawing renders app state, it is not state.  THE CORE RASTERIZES AND THE BACKEND BLITS (ruling 1). No backend interprets an op, so every refusal in §3.5 happens in the only place that draws.
 txSetDrawing :: Word64 -> Value -> Value -> Word32 -> Word32 -> [Value] -> Builder
 txSetDrawing widgetId vbW vbH count pathLen ops = wireRecord txKindSetDrawing (word64LE widgetId <> encodeValue vbW <> encodeValue vbH <> word32LE count <> word32LE pathLen <> encodeValues ops)
+
+-- WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry).
+txSetSizePolicy :: Word64 -> Word32 -> Builder
+txSetSizePolicy widgetId policy = wireRecord txKindSetSizePolicy (word64LE widgetId <> word32LE policy <> word32LE 0)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1404,7 +1422,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

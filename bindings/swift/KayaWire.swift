@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x2f62f356091de5b6
+let kayaSpecHash: UInt64 = 0x1cd31581dd9eb228
 
 struct KayaTx {
     var bytes = Data()
@@ -502,6 +502,15 @@ struct KayaTx {
         self.u32(count)
         self.u32(pathLen)
         self.values(ops)
+        self.end(kayaAt)
+    }
+
+    /// WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry).
+    mutating func setSizePolicy(_ widgetId: UInt64, _ policy: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SIZE_POLICY))
+        self.u64(widgetId)
+        self.u32(policy)
+        self.u32(0)
         self.end(kayaAt)
     }
 
@@ -1588,6 +1597,8 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_UNDONE)
             || kind == UInt16(KAYA_OCCURRENCE_REDONE)
             || kind == UInt16(KAYA_OCCURRENCE_SORT_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DRAW_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_TICK)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {

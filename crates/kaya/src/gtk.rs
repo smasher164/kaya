@@ -2353,6 +2353,13 @@ fn drain_transactions() {
                 for op in core.scene.apply(tx) {
                     apply(core, op);
                 }
+                // A canvas that became a redraw one with its track
+                // already known (docs/canvas-plan.md §3.2.1). Empty on
+                // this backend while it holds depth_stub("sizepolicy"),
+                // because nothing here reports a track.
+                for occ in core.scene.take_asks() {
+                    core.occurrences.send(occ);
+                }
             }
             // A transaction can be an undo GROUP, and a group is a ledger
             // entry: Edit>Undo's enablement moved with it.
@@ -9824,6 +9831,9 @@ impl crate::harness::Stage for GtkStage {
                         for op in core.scene.apply(tx) {
                             apply(core, op);
                         }
+                        for occ in core.scene.take_asks() {
+                            core.occurrences.send(occ);
+                        }
                         n += 1;
                     }
                     if n > 0 {
@@ -11468,6 +11478,19 @@ impl crate::harness::Stage for GtkStage {
                 .canvas_probe(core.canvas_ids[i])
                 .unwrap_or_else(|| "<the core holds no drawing for this canvas>".to_owned())
         })
+    }
+
+    /// THE SIZE POLICY IS NOT ON THIS BACKEND YET (docs/canvas-plan.md
+    /// §3.2.1): nothing here reports a canvas's assigned track, so the
+    /// core can only ever raster at the viewbox and this read would
+    /// answer "no track reported" for every canvas — a sentence a scene
+    /// could not tell from a broken one.
+    fn canvas_raster_shape(&self, _target: crate::harness::Target) -> String {
+        crate::depth_stub("sizepolicy")
+    }
+
+    fn frame(&self) {
+        crate::depth_stub("sizepolicy")
     }
 
     /// THE BLIT, sampled off the window's OWN RENDERED PIXELS through the

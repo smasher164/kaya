@@ -1278,6 +1278,32 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   backend interprets an op, so every refusal in §3.5 happens \
                   in the only place that draws.",
         },
+        Record {
+            kind: 47,
+            name: "set_size_policy",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("policy", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX \
+                  (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a \
+                  FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands \
+                  the canvas the size it was assigned, through \
+                  draw_requested/tick, and rasterizes what comes back at that \
+                  size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, \
+                  which is what lets the core answer a size change by itself — \
+                  `scale` re-rasterizes the held display list under a UNIFORM \
+                  FIT with a letterbox, `fixed` never adapts at all.\n\n\
+                  NOT SENT FOR `scale`: it is the default a guest that \
+                  declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — \
+                  the binding lowers `fixed` (the one true property) and the \
+                  presence of an on_draw/on_tick handler; a canvas with no \
+                  policy record is `scale`.\n\n\
+                  LIVE CANVASES ONLY in this slice: a template node is refused \
+                  by name (docs/deferred.md's template-zone size policy entry).",
+        },
     ],
     apply: &[
         Record {
@@ -2236,6 +2262,54 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   configuration and stays silent (the echo doctrine). \
                   Unclaimed, it drops like any unhandled occurrence.",
         },
+        Record {
+            kind: 20,
+            name: "draw_requested",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("size", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "A `redraw` canvas is asked for its drawing AT THE SIZE IT \
+                  WAS ASSIGNED (docs/canvas-plan.md §3.2.1). path_len key \
+                  values follow, then WIDTH and HEIGHT as two f64 values in \
+                  device-independent points; identity reads as in \
+                  button_clicked. The size is the guest's next viewbox: it \
+                  answers with set_drawing and the core rasterizes that \
+                  stream at that size, 1:1.\n\n\
+                  LATEST-WINS MAILBOX. The pending request is a SINGLE ENTRY \
+                  that a newer size REPLACES rather than queues behind, and \
+                  sizes the guest never caught up with are DROPPED, not drawn \
+                  late — Vulkan's word for exactly this shape, and the \
+                  alternative is the buffer-stuffing defect Android's frame \
+                  pacing library exists to name (§15).",
+        },
+        Record {
+            kind: 21,
+            name: "tick",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("frame", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "A FRAME for a canvas with an on_tick handler: \
+                  draw_requested's body plus a third f64 value, the frame's \
+                  TIME in seconds.\n\n\
+                  THE TIME IS THE PLATFORM'S, never the guest's own clock. \
+                  Android documents that Choreographer.doFrame's frame time \
+                  \"should be used instead of uptimeMillis() or nanoTime()\" \
+                  because it is fixed at schedule time, and CADisplayLink \
+                  exposes targetTimestamp; a guest reading its own clock \
+                  re-imports exactly the jitter both platforms removed \
+                  (§15.4). Under the harness the clock is the CORE'S OWN \
+                  deterministic step, advanced by a verb, so a leg's frame \
+                  count is part of the scene and never a fact about the \
+                  machine's load.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -2318,6 +2392,26 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         EnumSpec {
             name: "fill_rule",
             variants: &[("nonzero", 0), ("even_odd", 1)],
+        },
+        EnumSpec {
+            // WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
+            // (docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF
+            // SIZE; `scale` and `fixed` are declarations that the
+            // function is CONSTANT, which is what licenses the core to
+            // answer a size change by itself.
+            //
+            // `scale` is 0 because it is what a guest that declares
+            // nothing gets: the mode that needs least from the app is
+            // the one that must be free, and a default of `redraw`
+            // would make the no-handler case undefined rather than
+            // simple.
+            //
+            // `tick` IS `redraw` PLUS THE FRAME DRIVE, not a fourth
+            // geometry: an on_tick canvas answers the same
+            // drawing-at-this-size question, on the platform's frame
+            // clock (§15.4).
+            name: "size_policy",
+            variants: &[("scale", 0), ("fixed", 1), ("redraw", 2), ("tick", 3)],
         },
         EnumSpec {
             // SVG's `text-anchor`, deliberately: it is the established
@@ -2686,6 +2780,7 @@ mod tests {
             ("set_app_identity", wire::TX_SET_APP_IDENTITY),
             ("set_column_headers", wire::TX_SET_COLUMN_HEADERS),
             ("set_drawing", wire::TX_SET_DRAWING),
+            ("set_size_policy", wire::TX_SET_SIZE_POLICY),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2763,6 +2858,8 @@ mod tests {
                 ("undone", crate::ring::REC_UNDONE),
                 ("redone", crate::ring::REC_REDONE),
                 ("sort_requested", crate::ring::REC_SORT_REQUESTED),
+                ("draw_requested", crate::ring::REC_DRAW_REQUESTED),
+                ("tick", crate::ring::REC_TICK),
             ]
         );
     }
@@ -2963,6 +3060,7 @@ mod tests {
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
                     ("text_align", _) => canvas_pin(wire::TEXT_ALIGNS, name),
                     ("text_baseline", _) => canvas_pin(wire::TEXT_BASELINES, name),
+                    ("size_policy", _) => canvas_pin(wire::SIZE_POLICIES, name),
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,
@@ -3085,7 +3183,7 @@ mod tests {
         u32::try_from(*value).expect("a canvas enum value is a small non-negative number")
     }
 
-    /// The five canvas vocabularies are each spelled TWICE — the spec's
+    /// The six canvas vocabularies are each spelled TWICE — the spec's
     /// enum and wire.rs's (value, name) table, which is what the core's
     /// refusals and every canvas diagnostic print from. enums_match_wire
     /// pins the VALUES through canvas_pin; this pins the NAMES and the
@@ -3100,6 +3198,7 @@ mod tests {
             ("fill_rule", wire::FILL_RULES),
             ("text_align", wire::TEXT_ALIGNS),
             ("text_baseline", wire::TEXT_BASELINES),
+            ("size_policy", wire::SIZE_POLICIES),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC
@@ -3121,6 +3220,7 @@ mod tests {
             (wire::FILL_RULES, &[-1, 2, 3]),
             (wire::TEXT_ALIGNS, &[-1, 3, 4]),
             (wire::TEXT_BASELINES, &[-1, 4, 5]),
+            (wire::SIZE_POLICIES, &[-1, 4, 5]),
         ] {
             for value in outside {
                 assert_eq!(wire::vocab_name(table, *value), None, "{value} resolved");

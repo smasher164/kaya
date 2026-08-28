@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x2f62f356091de5b6L
+let spec_hash = 0x1cd31581dd9eb228L
 
 let value_bool = 1
 let value_i64 = 2
@@ -56,6 +56,10 @@ let paint_axis = 4
 let paint_ground = 5
 let fill_rule_nonzero = 0
 let fill_rule_even_odd = 1
+let size_policy_scale = 0
+let size_policy_fixed = 1
+let size_policy_redraw = 2
+let size_policy_tick = 3
 let text_align_start = 0
 let text_align_middle = 1
 let text_align_end = 2
@@ -206,6 +210,7 @@ let tx_kind_set_brand_typeface = 43
 let tx_kind_set_app_identity = 44
 let tx_kind_set_column_headers = 45
 let tx_kind_set_drawing = 46
+let tx_kind_set_size_policy = 47
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -261,6 +266,8 @@ let occ_kind_pasted = 16
 let occ_kind_undone = 17
 let occ_kind_redone = 18
 let occ_kind_sort_requested = 19
+let occ_kind_draw_requested = 20
+let occ_kind_tick = 21
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -636,6 +643,13 @@ let tx_set_drawing widget_id vb_w vb_h count path_len ops =
       Buffer.add_int32_le b (Int32.of_int count);
       Buffer.add_int32_le b (Int32.of_int path_len);
       encode_values b ops)
+
+(* WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry). *)
+let tx_set_size_policy widget_id policy =
+  finish tx_kind_set_size_policy (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int policy);
+      Buffer.add_int32_le b 0l)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -1509,7 +1523,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in

@@ -79,6 +79,12 @@ pub const KAYA_OCCURRENCE_REDONE: u16 = 18;
 /// 0-based index in the declared order. A request; the guest sorts
 /// (docs/tables-plan.md).
 pub const KAYA_OCCURRENCE_SORT_REQUESTED: u16 = 19;
+/// THE CANVAS'S TWO ASKS (docs/canvas-plan.md §3.2.1): { u64 id; u32
+/// path_len; u32 reserved; path_len values; width; height } for a redraw,
+/// and the same with a third f64 value — the frame's time in seconds —
+/// for a tick. Identity as in button_clicked.
+pub const KAYA_OCCURRENCE_DRAW_REQUESTED: u16 = 20;
+pub const KAYA_OCCURRENCE_TICK: u16 = 21;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -100,6 +106,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_UNDONE == ring::REC_UNDONE
         && KAYA_OCCURRENCE_REDONE == ring::REC_REDONE
         && KAYA_OCCURRENCE_SORT_REQUESTED == ring::REC_SORT_REQUESTED
+        && KAYA_OCCURRENCE_DRAW_REQUESTED == ring::REC_DRAW_REQUESTED
+        && KAYA_OCCURRENCE_TICK == ring::REC_TICK
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -253,6 +261,11 @@ const _: () = assert!(KAYA_TX_SET_COLUMN_HEADERS == wire::TX_SET_COLUMN_HEADERS)
 /// (docs/canvas-plan.md §3.1).
 pub const KAYA_TX_SET_DRAWING: u16 = 46;
 const _: () = assert!(KAYA_TX_SET_DRAWING == wire::TX_SET_DRAWING);
+/// What a canvas does with a track that is not its viewbox
+/// (docs/canvas-plan.md §3.2.1): { u64 widget_id; u32 policy; u32 pad }.
+/// Never sent for `scale`, which is what a canvas with no record is.
+pub const KAYA_TX_SET_SIZE_POLICY: u16 = 47;
+const _: () = assert!(KAYA_TX_SET_SIZE_POLICY == wire::TX_SET_SIZE_POLICY);
 /// `sorted`'s no-column sentinel, and `direction`'s two values.
 pub const KAYA_SORT_NONE: u32 = u32::MAX;
 pub const KAYA_SORT_ASC: u32 = 0;
@@ -755,7 +768,7 @@ const _: () = assert!(
 // KAYA_OCCURRENCE_* silently lacked it. A new spec occurrence trips this
 // count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 19,
+    crate::spec::SPEC.occurrence.len() == 21,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -3203,6 +3216,114 @@ pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
     })
 }
 
+/// THE TRACK LAYOUT ASSIGNED ONE CANVAS, in device-independent points,
+/// reported by the backend exactly as `kaya_window_moved` reports a For's
+/// visible band (docs/canvas-plan.md §3.2.1). This is the report the
+/// stretch defect was missing: without it the core could only ever raster
+/// at the viewbox and leave the backend to stretch the picture.
+///
+/// What happens next is the canvas's SIZE POLICY: `scale` re-rasterizes
+/// the held display list under a uniform fit, `redraw` and `tick` are
+/// asked for a drawing at this size, and `fixed` records the number and
+/// changes nothing. A report that changes nothing emits nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_canvas_track(widget: u64, width: f64, height: f64) {
+    let asks = with_window_scene("reporting a canvas's assigned track", |scene| {
+        let (ops, asks) =
+            scene.set_canvas_track(crate::protocol::WidgetId(widget), (width, height));
+        (ops, asks)
+    });
+    send_occurrences(asks);
+}
+
+/// A FRAME, at the platform's own frame time in seconds (§15.4): every
+/// `tick` canvas is handed the size it was assigned and that time.
+///
+/// THE TIME IS THE PLATFORM'S — CADisplayLink's `targetTimestamp`,
+/// Choreographer's frame time — never one the core or a guest reads for
+/// itself, because both are fixed at schedule time and a clock read in
+/// the callback re-imports the jitter they removed.
+/// MONOTONE, AND THAT IS WHAT MAKES ONE DRIVER PER CANVAS SAFE: the
+/// backends attach a frame source to each canvas rather than reading a
+/// policy they are not told, so N canvases hand the SAME frame's
+/// timestamp in N times. Only the first advances anything.
+static LAST_FRAME: Mutex<f64> = Mutex::new(f64::NEG_INFINITY);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_frame(time: f64) {
+    if !time.is_finite() {
+        return;
+    }
+    {
+        let mut last = LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner());
+        if time <= *last {
+            return;
+        }
+        *last = time;
+    }
+    drive_frame(time);
+}
+
+fn drive_frame(time: f64) {
+    let ticks = with_window_scene("driving a frame", |scene| (Vec::new(), scene.frame(time)));
+    send_occurrences(ticks);
+}
+
+/// The harness clock's rate. ONE NUMBER, in the core, and that is the
+/// point: three harnesses keeping three counters is the
+/// hand-copied-constant class one surface over
+/// (tools/check-file-modes.sh's trap), and a leg's frame count is part
+/// of the scene.
+pub const HARNESS_FRAME_HZ: f64 = 60.0;
+static HARNESS_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// THE HARNESS'S FRAME CLOCK: advance by exactly one frame at
+/// `HARNESS_FRAME_HZ` and drive it. Wall clock never reaches a tick
+/// under the harness, so a leg's frame count is what the scene's `frame`
+/// verbs advanced and not a fact about the machine's load.
+///
+/// BYPASSES `kaya_frame`'s MONOTONE GUARD deliberately: this clock
+/// starts at one sixtieth while a platform's starts at a timestamp
+/// decades wide, so a stray platform frame would silence every harness
+/// frame for the rest of the run. Under the harness no platform driver
+/// is attached, so the two clocks never both run — and this counter is
+/// monotone on its own.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_harness_frame() {
+    let n = HARNESS_FRAMES.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    drive_frame(n as f64 / HARNESS_FRAME_HZ);
+}
+
+/// Presentation-side occurrences the core produced rather than a user
+/// gesture: the Rust API's mpsc where one is installed, the byte ring
+/// otherwise. One helper because the canvas has three senders and each
+/// spelling of this fallback is a place the ring and the mpsc can drift.
+fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
+    if occurrences.is_empty() {
+        return;
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        for occ in occurrences {
+            sink.send(occ);
+        }
+        return;
+    }
+    let state = state();
+    for occ in occurrences {
+        match occ {
+            crate::protocol::Occurrence::DrawRequested { id, size } => state.ring.push_record(
+                ring::REC_DRAW_REQUESTED,
+                &crate::wire::draw_body(id.0, &[], size, None),
+            ),
+            crate::protocol::Occurrence::Tick { id, size, time } => state.ring.push_record(
+                ring::REC_TICK,
+                &crate::wire::draw_body(id.0, &[], size, Some(time)),
+            ),
+            other => unreachable!("send_occurrences carries only the canvas asks: {other:?}"),
+        }
+    }
+}
+
 /// WHAT THE HARNESS READS BACK ABOUT ONE CANVAS: the CANONICAL raster's
 /// hash and the two legible facts, as one ASCII line
 /// `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (docs/canvas-plan.md §7.1, §7.2).
@@ -3224,6 +3345,43 @@ pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
 pub unsafe extern "C" fn kaya_canvas_probe(widget: u64, out: *mut u8, cap: usize) -> usize {
     let answer = with_window_scene("probing a canvas", |scene| {
         (Vec::new(), scene.canvas_probe(crate::protocol::WidgetId(widget)))
+    });
+    let Some(answer) = answer else { return 0 };
+    let bytes = answer.as_bytes();
+    if out.is_null() || cap < bytes.len() {
+        return 0;
+    }
+    // SAFETY: the caller promises `cap` writable bytes and the length
+    // was just checked against it.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len()) };
+    bytes.len()
+}
+
+/// WHICH SIZE ONE CANVAS'S RASTER IS — `expect_raster`'s observation
+/// (docs/canvas-plan.md §3.2.1). `"track"` when it is the size the
+/// BACKEND reported, `"viewbox"` when it is the one the GUEST declared,
+/// and on disagreement all three numbers rather than a guess about which
+/// is wrong (invariant 3: a diagnostic prints what it measured).
+///
+/// This is the only canvas read the size policy can move. `kaya_canvas_probe`
+/// rasterizes at the viewbox by definition — that is what makes its hash
+/// one string on five platforms — so the hash and the ink bounds are
+/// policy-blind, and a canvas that stretched its buffer instead of
+/// re-rastering at the track would answer both of them identically.
+///
+/// Writes at most `cap` bytes to `out` and returns how many it wrote; 0
+/// means `widget` names no canvas that has been drawn.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_canvas_raster_shape(
+    widget: u64,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    let answer = with_window_scene("reading a canvas's raster shape", |scene| {
+        (Vec::new(), scene.canvas_raster_shape(crate::protocol::WidgetId(widget)))
     });
     let Some(answer) = answer else { return 0 };
     let bytes = answer.as_bytes();
@@ -3310,6 +3468,13 @@ pub unsafe extern "C" fn kaya_next_commands(batch: *mut *const u8) -> usize {
             continue;
         };
         ops.extend(resolved);
+        // A transaction that turned a canvas into a redraw one when its
+        // track was already known leaves a draw request behind
+        // (docs/canvas-plan.md §3.2.1). Drained under the scene lock and
+        // sent after it, because the sink is a different lock.
+        let asks = scene_slot.as_mut().unwrap().take_asks();
+        drop(scene_slot);
+        send_occurrences(asks);
         if !ops.is_empty() {
             break ops;
         }
@@ -3641,6 +3806,7 @@ mod tests {
             ("set_app_identity", KAYA_TX_SET_APP_IDENTITY),
             ("set_column_headers", KAYA_TX_SET_COLUMN_HEADERS),
             ("set_drawing", KAYA_TX_SET_DRAWING),
+            ("set_size_policy", KAYA_TX_SET_SIZE_POLICY),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
