@@ -11677,8 +11677,11 @@ impl crate::harness::Stage for GtkStage {
         } else {
             eprintln!("{verdict}");
         }
-        // request_exit reads the main thread's CORE; hop before asking.
-        Self::on_main(move |_| request_exit(code));
+        // THE HOP IS THE EXIT — one rule with the WinUI arm (the
+        // measured reason: docs/traps.md "exit() is not final on
+        // Windows"); the grace machinery stays as the wall for a hop
+        // that never lands (the linux N=6000 wedge).
+        Self::on_main(move |_| crate::harness::harness_exit(code));
     }
 }
 

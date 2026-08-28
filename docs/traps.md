@@ -5635,3 +5635,63 @@ not: it reads `NSApp.effectiveAppearance` while the reporter reads
 SwiftUI's `\.colorScheme`, and only a view can read the latter. They were
 measured AGREEING here, which is the evidence for the claim rather than
 the claim itself, and the comment now says so.
+
+## exit() is not final on Windows: a wedged teardown holds the process past the grace (2026-08-27)
+
+The harness's exit grace fired on time and the process still lived 40
+more seconds. On Windows, Rust's `std::process::exit` IS `ExitProcess`:
+it runs loader shutdown — DLL_PROCESS_DETACH and FLS callbacks under
+the loader lock — and a wedged dialog/COM thread holds exactly that,
+so the LAST-RESORT EXIT ITSELF was the hostage. What ExitProcess does
+NOT run is CRT atexit: the first unit negative wedged atexit and the
+guest falsified it (the hostage child exited clean), which would also
+have made the escapes test vacuous — both primitives escape a wedge
+neither runs. The proven wedge is an FLS callback (`FlsAlloc`),
+loader-shutdown work ExitProcess runs and TerminateProcess skips. Measured on the windows lane's dialog legs: verdict in the out
+file at +24s, grace fired at +27s, process gone at +64s, all seven
+dialog legs pinned at ~64s total (the captor's own timeout, not ours).
+The out file grew INCREMENTALLY during the run, so "the verdict is in
+the file" proves publish time; the gap to EXIT= is all teardown.
+
+AND THE SECOND HALF, measured when the first fix changed nothing: a
+THREAD-BASED grace cannot enforce anything once the orderly exit
+starts, because ExitProcess TERMINATES ALL OTHER THREADS FIRST and
+only then runs the loader shutdown it wedges in — the watchdog and the
+grace-sleeping harness thread are the first casualties of the exit
+they guard, which is why no held leg's log ever carried the grace
+sentence. So under the harness THE EXIT HOP IS THE EXIT: the UI-thread
+closure that used to request orderly teardown calls `harness_exit`
+directly (winui and gtk finish arms) — the verdict is out, nothing
+orderly is owed, and there is no window in which the enforcement can
+be murdered.
+
+AND THE FINAL LAYER, measured by waypoint prints when even that
+changed nothing: TERMINATION ITSELF CANNOT RIP A THREAD OUT OF AN
+UNCOMPLETED KERNEL WAIT. The instrumented leg printed "exit hop
+handler entered" at +2.3s — TerminateProcess CALLED — and the process
+stayed in tasklist until +63s, because a thread sat in a synchronous
+kernel IO the captor released on its own clock. No user-mode exit
+primitive shortens that; the process is the documented
+unkillable-terminating-state class until the IO completes. So the
+RUNNER stopped waiting for the corpse: wait-exit.ps1 returns at
+verdict + a short grace under a KAYA_LINGER line, and run_one_suite
+takes the verdict text as the authority it already declared it was.
+
+THE RULE: a fire path that must end the process uses a primitive that
+skips teardown — `harness_exit` (TerminateProcess) in harness.rs, the
+SwiftUI arm's `_exit(`, Compose's `.halt(` — it runs ON A THREAD THE
+EXIT CANNOT KILL FIRST (post-publish that means the exit hop itself) —
+and NOTHING WAITS ON PROCESS DEATH FOR A VERDICT THE FILE ALREADY
+HOLDS. `std::process::exit` is for orderly paths only. harness.rs's
+`win_exit_tests` holds the primitive's halves on the windows guest:
+harness_exit escapes a real FLS wedge, and the primitive it replaced
+is measured still held by it.
+
+Two side lessons from the same afternoon. Quoting `$` through
+`ssh … powershell -Command` is unwinnable across three shells — use
+`powershell -EncodedCommand` with the script base64'd as UTF-16LE, which
+carries no quoting at all. And a cleanup census measures an INSTANT: a
+background task that can restart makes that instant unrepresentative,
+so TaskStop/monitor teardown comes BEFORE the process census, never
+after (an agent's "0 leftover processes" was true when measured and
+false 79 seconds later).

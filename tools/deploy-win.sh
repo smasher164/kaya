@@ -939,15 +939,27 @@ else
     shasum -a 256 "${DEPLOY_ARTIFACTS[@]}" >"$LEGS_DIR/local.sums"
     run_ssh 'cmd /c type C:\kaya\deploy.manifest' 2>/dev/null \
         | tr -d '\r' >"$LEGS_DIR/remote.manifest" || true
+    # THE MANIFEST MAY ONLY VOUCH FOR FILES THE GUEST STILL LISTS: it is
+    # a cache of guest state, and a file deleted guest-side after the
+    # deploy that wrote it left every later deploy skipping the ship —
+    # run-hidden-args.vbs was missing for a day while the manifest said
+    # it was held, the flight recorder's two windows tasks popped a
+    # wscript error dialog ON THE DESKTOP at every lane start, and its
+    # lane sampler and at-fail collector silently never ran (2026-08-27).
+    run_ssh 'cmd /c dir /b C:\kaya' 2>/dev/null \
+        | tr -d '\r' >"$LEGS_DIR/remote.listing" || true
     python3 - "$LEGS_DIR/local.sums" "$LEGS_DIR/remote.manifest" \
-        "$LEGS_DIR/deploy.manifest" >"$LEGS_DIR/ship.list" <<'PYEOF'
+        "$LEGS_DIR/deploy.manifest" "$LEGS_DIR/remote.listing" >"$LEGS_DIR/ship.list" <<'PYEOF'
 import os, sys
-local, remote, manifest = sys.argv[1:4]
+local, remote, manifest, listing = sys.argv[1:5]
+present = {line.strip() for line in open(listing, errors="replace") if line.strip()}
 held = {}
 for line in open(remote, errors="replace"):
     parts = line.split(None, 1)
     if len(parts) == 2:
-        held[parts[1].strip()] = parts[0]
+        name = parts[1].strip()
+        if name in present:
+            held[name] = parts[0]
 want = {}
 for line in open(local):
     sha, path = line.split(None, 1)
@@ -1210,6 +1222,14 @@ PY
     guest_unit_module "$ROOT/crates/kaya/src/winui/mod.rs" tests winui::tests \
         "the brand dictionary's crossed stops, the a11y role ladder, and the typeface blob route read back off its own file" \
         "This is the WinUI backend measured against the real DirectWrite on this guest: a per-app font file written under the app root and read back through its name table, the system font collection's answer for a bare family, and the pure lowerings beside them." ||
+        ran=1
+    # THE EXIT GRACE IS FINAL ON THIS OS: harness_exit must end a process
+    # whose CRT teardown is wedged, and the primitive it replaced must
+    # still be measured hostage (harness.rs's win_exit_tests; the 64s
+    # dialog legs of 2026-08-27, docs/traps.md).
+    guest_unit_module "$ROOT/crates/kaya/src/harness.rs" win_exit_tests harness::win_exit_tests \
+        "the exit grace escaping a wedged loader shutdown, and std::process::exit measured hostage to it" \
+        "This is the grace's last-resort exit measured against a real wedged loader shutdown on this OS: an FLS callback that never returns holds ExitProcess exactly as the 2026-08-27 dialog legs' captor held it ~40s past the grace, and TerminateProcess is what makes the invariant true. (atexit is NOT the hook: ExitProcess never runs it — the guest falsified that draft.)" ||
         ran=1
     # The binary goes whatever the verdict is: it is a transient of this
     # phase, not a deployed artifact, and one left behind would be the
@@ -1537,7 +1557,10 @@ run_one_suite() {
     # keepalive (ServerAlive on SSH_MUX) rather than hanging it.
     local out
     out=$(run_ssh "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\kaya\\wait-exit.ps1 out_$name.txt 290")
-    if ! grep -q "EXIT=" <<<"$out"; then
+    # KAYA_LINGER is liveness, not a hang: the verdict is out and only
+    # the kernel-held termination is pending (wait-exit.ps1). Reading it
+    # as a timeout killed a leg that had already passed.
+    if ! grep -qE "EXIT=|KAYA_LINGER:" <<<"$out"; then
         # A guest that never writes EXIT= is hung: kill it so it
         # cannot hold kaya.dll into the next suite or deploy, and
         # fail this leg loudly.
@@ -1592,6 +1615,15 @@ run_one_suite() {
     # still exited 0 and the leg reported PASS.
     if grep -q "KAYA_SELFTEST: FAILED" <<<"$out"; then
         return 1
+    fi
+    # KAYA_LINGER: the guest published its verdict and its process is
+    # kernel-held in termination (wait-exit.ps1's grace; docs/traps.md
+    # "exit() is not final on Windows"). EXIT= never landed, so the
+    # verdict text alone decides — which is the doctrine above; the
+    # corroborating code exists only when the process managed to die.
+    if grep -q "KAYA_LINGER:" <<<"$out"; then
+        grep -q "KAYA_SELFTEST: OK" <<<"$out"
+        return
     fi
     grep -q "EXIT=0" <<<"$out"
 }

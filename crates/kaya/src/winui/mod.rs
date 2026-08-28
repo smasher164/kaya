@@ -17761,10 +17761,15 @@ impl crate::harness::Stage for WinUiStage {
         } else {
             eprintln!("{verdict}");
         }
-        // request_exit reads the UI thread's APP; hop before asking.
-        Self::on_ui(move |_| {
-            request_exit(code);
-            Ok(())
+        // THE HOP IS THE EXIT (docs/traps.md "exit() is not final on
+        // Windows"): the orderly path is ExitProcess, which TERMINATES
+        // the grace's own threads before the loader shutdown it then
+        // wedges in — seven dialog legs held ~60s past their verdict
+        // with no grace sentence, the watchdog dead by the exit it
+        // guarded (2026-08-27). The verdict is out; nothing orderly is
+        // owed. request_exit stays the non-harness close path.
+        Self::on_ui(move |_| -> windows_core::Result<()> {
+            crate::harness::harness_exit(code)
         });
     }
 }

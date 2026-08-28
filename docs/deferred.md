@@ -6608,6 +6608,41 @@ ceiling move or scheduler change. Whole-host contention, thermal state
 and unrelated applications were uncontrolled variables, not measured
 causes.
 
+## WATCH — a windows dialog leg's process is held ~60s from ITS OWN START, intermittently (2026-08-27)
+KEY: dialog leg 64s, TerminateProcess, harness_exit, exit grace hostage,
+FileChoose stall, loader lock, DLL_PROCESS_DETACH, win_exit_tests,
+windows duration anomaly
+
+First seen in the 12:28 matrix and in every windows lane run through the
+afternoon: all seven dialog-family legs (filedialog x5, save_rust,
+editor_go) pinned at 64s where the morning run had them at 43s COMBINED,
+every other leg unchanged, host load uncorrelated (the fastest run
+carried the highest load). Probe runs of one leg, sampled at 1s from the
+host: (1) 64s total — out file growing incrementally, scene done at
++24s including a 20.8s stall between FileChoose and the "reading" label,
+process alive doing nothing until +64.4s; (2) same shape; (3) minutes
+later, CLEAN — 1.4s scene, prompt exit. So the captor is intermittent,
+holds a fresh process ~60s from ITS START (not from the verdict), and
+can also surface mid-scene in the picked-file read. Network was clean at
+sample time (DNS 478ms, TCP 457ms); no Defender scan; guest session was
+11.5 days up.
+
+WHAT IT COSTS NOW: ~verdict+6s per affected leg, not 64 — not because
+any exit primitive wins (waypoint-measured: TerminateProcess was CALLED
+at +2.3s and the kernel held the terminating process to +63s; the
+captor is below user mode) but because the RUNNER stopped waiting for
+the corpse: wait-exit.ps1's verdict grace and run_one_suite's
+KAYA_LINGER arm (docs/traps.md "exit() is not final on Windows"). The
+20.8s mid-scene stall class remains uncapped by that and fits inside
+the step ceiling.
+
+NEXT SIGHTING: the discriminating read is the held process's THREAD WAIT
+STATES and module list, taken mid-hang via `powershell -EncodedCommand`
+(bare -Command quoting eats $ through ssh; docs/traps.md). Check the
+WebClient/WebDAV service state and shell cloud-file endpoints beside it.
+A sighting where the wait sits in LdrShutdownProcess confirms the
+loader-lock half; one where it sits in a network wait names the captor.
+
 ## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive
 retap, KAYA_SIMDRIVE_LOG, ios-simdrive-logs, LocalStorage, FP -1005,

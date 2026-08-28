@@ -107,7 +107,7 @@ RUNNERS = {
 }
 # The arm, the publish, and what the fire path leaves with.
 SHAPES = {
-    "harness.rs": (r"watch\.enter\(([^)]*)\)", r"watch\.published\(", r"std::process::exit\("),
+    "harness.rs": (r"watch\.enter\(([^)]*)\)", r"watch\.published\(", r"harness_exit\("),
     "KayaSwiftUI.swift": (r"watchdog\.enter\(([^)]*)\)", r"watchdog\.published\(", r"_exit\("),
     "KayaCompose.kt": (r"watchdog\.enter\(([^)]*)\)", r"watchdog\.published\(", r"\.halt\("),
 }

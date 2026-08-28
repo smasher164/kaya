@@ -2597,7 +2597,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
             use std::io::Write;
             let _ = std::io::stderr().flush();
             let _ = std::io::stdout().flush();
-            std::process::exit(1);
+            harness_exit(1);
         }
         // AND THE VERDICT IS FINAL EVEN IF NOTHING CAN SHUT DOWN. An
         // app thread that never returns cannot participate in shutdown,
@@ -2607,10 +2607,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
         // verdict where it does not.
         let code = outcome.unwrap_or(1);
         std::thread::sleep(EXIT_GRACE);
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
-        let _ = std::io::stdout().flush();
-        std::process::exit(code);
+        harness_exit(code);
     });
 }
 
@@ -2630,7 +2627,7 @@ fn preflight_fail(stage: impl Stage, verdict: String) {
     stage.finish(1, &verdict);
     watch.clear();
     std::thread::sleep(EXIT_GRACE);
-    std::process::exit(1);
+    harness_exit(1);
 }
 
 /// Recording handshake: when the runner exports KAYA_HARNESS_GATE, it
@@ -4182,6 +4179,34 @@ pub const STEP_CEILING: Duration = Duration::from_secs(60);
 /// from outside at the bench's 120s cap.
 pub const EXIT_GRACE: Duration = Duration::from_secs(3);
 
+/// The exit every fire path leaves by. On Windows `std::process::exit`
+/// is `ExitProcess`, which runs LOADER SHUTDOWN — DLL_PROCESS_DETACH
+/// and FLS callbacks under the loader lock — and a wedged dialog/COM
+/// thread holds EXIT ITSELF hostage past the grace (measured
+/// 2026-08-27: verdict at +24s, grace fired at +27s, process gone at
+/// +64s — docs/traps.md; it does NOT run CRT atexit, which the guest
+/// falsified). TerminateProcess skips that shutdown, which is the
+/// invariant's own sentence; the SwiftUI arm's `_exit(` is this same
+/// choice. `win_exit_tests` proves both halves on the windows guest
+/// (tools/deploy-win.sh's unit phase).
+pub(crate) fn harness_exit(code: i32) -> ! {
+    use std::io::Write;
+    let _ = std::io::stderr().flush();
+    let _ = std::io::stdout().flush();
+    #[cfg(windows)]
+    unsafe {
+        TerminateProcess(GetCurrentProcess(), code as u32);
+    }
+    std::process::exit(code)
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn TerminateProcess(process: *mut core::ffi::c_void, code: u32) -> i32;
+    fn GetCurrentProcess() -> *mut core::ffi::c_void;
+}
+
 fn step_ceiling() -> Duration {
     match std::env::var("KAYA_STEP_CEILING_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
         Some(ms) if ms > 0 => Duration::from_millis(ms),
@@ -4247,10 +4272,7 @@ impl StepWatchdog {
                             EXIT_GRACE.as_secs()
                         ),
                     }
-                    use std::io::Write;
-                    let _ = std::io::stderr().flush();
-                    let _ = std::io::stdout().flush();
-                    std::process::exit(code);
+                    harness_exit(code);
                 }
                 std::thread::sleep(POLL_INTERVAL);
             }
@@ -6849,5 +6871,98 @@ mod tests {
             assert_eq!(code, 1, "{verdict}");
             assert!(verdict.contains("not a context_open target"), "{verdict}");
         }
+    }
+}
+
+/// Runs ONLY on the windows guest (tools/deploy-win.sh's unit phase, a
+/// guest_unit_module census); no unix build compiles it. The wedge is
+/// teardown that never returns, armed on a hook `ExitProcess` RUNS and
+/// `TerminateProcess` skips. NOT atexit: Rust's `std::process::exit`
+/// on this OS is `ExitProcess`, which never runs CRT atexit handlers —
+/// the first draft wedged atexit and the guest FALSIFIED it (the
+/// hostage child exited clean in 4s), which would also have made the
+/// escapes test vacuous, both primitives escaping a wedge neither
+/// runs. An FLS callback is loader-shutdown work, the same family as
+/// the DLL_PROCESS_DETACH the lane's real captor held.
+#[cfg(all(test, windows))]
+mod win_exit_tests {
+    use std::time::{Duration, Instant};
+
+    unsafe extern "system" fn wedge(_: *mut core::ffi::c_void) {
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+
+    fn arm_wedge() {
+        // Function scope: a module-level extern ships into kaya.h
+        // (gates.sh's stale-header refusal caught exactly that).
+        unsafe extern "system" {
+            fn FlsAlloc(
+                cb: Option<unsafe extern "system" fn(*mut core::ffi::c_void)>,
+            ) -> u32;
+            fn FlsSetValue(index: u32, value: *mut core::ffi::c_void) -> i32;
+        }
+        unsafe {
+            let idx = FlsAlloc(Some(wedge));
+            assert_ne!(idx, u32::MAX, "FlsAlloc failed");
+            // The callback fires at loader shutdown only for a
+            // non-null slot value.
+            assert_ne!(FlsSetValue(idx, 1 as *mut core::ffi::c_void), 0);
+        }
+    }
+
+    fn child(mode: &str) -> std::process::Child {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["harness::win_exit_tests::child_body", "--exact", "--test-threads=1", "--nocapture"])
+            .env("KAYA_TEST_WEDGE", mode)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    #[test]
+    fn child_body() {
+        let Ok(mode) = std::env::var("KAYA_TEST_WEDGE") else {
+            return;
+        };
+        arm_wedge();
+        match mode.as_str() {
+            "harness" => super::harness_exit(7),
+            "std" => std::process::exit(7),
+            other => panic!("unknown wedge mode {other}"),
+        }
+    }
+
+    #[test]
+    fn harness_exit_escapes_wedged_teardown() {
+        let t0 = Instant::now();
+        let mut c = child("harness");
+        let deadline = t0 + Duration::from_secs(10);
+        loop {
+            if let Some(status) = c.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(7), "wrong exit code");
+                assert!(t0.elapsed() < Duration::from_secs(5), "took {:?}", t0.elapsed());
+                return;
+            }
+            if Instant::now() > deadline {
+                let _ = c.kill();
+                panic!("harness_exit did not end the wedged child within 10s");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn std_exit_is_the_hostage() {
+        // The negative that keeps harness_exit honest: the primitive it
+        // replaced really is held by the same wedge.
+        let mut c = child("std");
+        std::thread::sleep(Duration::from_secs(4));
+        let held = c.try_wait().unwrap().is_none();
+        let _ = c.kill();
+        let _ = c.wait();
+        assert!(held, "std::process::exit escaped the atexit wedge — the platform changed; re-derive harness_exit");
     }
 }
