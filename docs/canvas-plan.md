@@ -1638,7 +1638,9 @@ supposed to stay red while half the work is outstanding.
    and, on Android, the window background resolved out of the `-night`
    theme together with `LocalConfiguration`'s night bits (NOT
    `UiModeManager.setApplicationNightMode`, which relaunches the activity
-   and kills the process — see the ledger) — so a real dark window opens
+   to say one word about the appearance — see the ledger's mount entry,
+   which closed the crash that relaunch used to cause) — so a real dark
+   window opens
    on a light desk and no host setting is written. That is also what
    retires the `-AppleInterfaceStyle Dark` dead end the measurement
    recorded: the argument domain does not feed `NSApp.appearance`.

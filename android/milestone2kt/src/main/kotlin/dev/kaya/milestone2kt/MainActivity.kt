@@ -90,7 +90,11 @@ class MainActivity : ComponentActivity() {
             "panels" -> Panels::app
             else -> Milestone2::app
         }
-        Thread(scene, "kaya-app").start()
+        // KAYA STARTS THE APP THREAD, not this shell: a configuration
+        // change re-runs onCreate in the same process, and a shell that
+        // spawned its own would run the guest's whole entry again
+        // (KayaRing.startGuest, docs/deferred.md's mount entry).
+        KayaRing.startGuest(scene)
     }
 
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =

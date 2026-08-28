@@ -11,7 +11,8 @@ import dev.kaya.KayaRing
 /**
  * The Go guest's shell. The JVM cannot call a Go function, so the
  * guest's own library is asked to start its thread ([KayaGo.attach])
- * where the JVM shell would call `Thread(scene).start()`.
+ * where a JVM shell calls [KayaRing.startGuest]. Every tier's app
+ * thread is kaya's, started once per process.
  *
  * [KayaRing.attach] and not `Kaya.attach`: Go consumes the occurrence
  * ring directly through the C ABI, and `Kaya.attach` would replace the

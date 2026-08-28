@@ -14,6 +14,39 @@ import android.app.Activity
  */
 object KayaRing {
     @JvmStatic external fun attach(activity: Activity)
+
+    /**
+     * START THE JVM GUEST, once per process. THE LIBRARY OWNS THE APP
+     * THREAD on every Android tier — the Rust guest's is spawned by
+     * `crates/kaya/src/android.rs`, the Go guest's by
+     * `bindings/go/android.go`, and this is the JVM's (ruled
+     * 2026-08-27, docs/deferred.md's mount entry). A shell that spawned
+     * its own would re-run the guest's whole entry on every relaunch,
+     * which is the crash that ruling closed.
+     *
+     * THE SHELL'S FOUR LINES, IN ORDER, none of them optional:
+     *
+     * ```
+     * System.loadLibrary("kaya")
+     * KayaRing.attach(this)        // the core and the ring natives
+     * KayaCompose.mount(this)      // the interpreter and its pump
+     * KayaRing.startGuest(scene)   // the app thread; once per process
+     * ```
+     *
+     * A LATER onCreate IS A NO-OP HERE, which is what makes recreation
+     * invisible to a guest: `scene` is not run again, and the surviving
+     * one keeps serving the re-attached surface.
+     */
+    @JvmStatic
+    fun startGuest(scene: Runnable) {
+        if (guestStarted) return
+        guestStarted = true
+        Thread(scene, "kaya-app").start()
+    }
+
+    /** onCreate runs on the one UI thread, so no lock. */
+    private var guestStarted = false
+
     /** One transaction as packed records (KAYA_TX_*), applied atomically. */
     @JvmStatic external fun submit(records: ByteArray)
     @JvmStatic external fun dataAddress(): Long

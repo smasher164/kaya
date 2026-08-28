@@ -1,8 +1,9 @@
 // ONE ID SPACE, Java arm: a template node draws from the WIDGET counter,
 // so an app hands out one number sequence and the core's two "already
 // exists" walls can never fire on an id this binding minted (DESIGN.md,
-// Binding conventions). Run from AbortCheck, first, so the run starts
-// at 1.
+// Binding conventions). Run from AbortCheck, on ITS app and FIRST, so
+// the run starts at 1 — one App per process is the rule KayaApp's
+// constructor holds, so this fixture cannot make one of its own.
 //
 // IN PACKAGE dev.kaya because Widget.id and Node.id are package-private
 // and this is the only thing that reads them; AbortCheck itself stays in
@@ -14,8 +15,7 @@ import java.util.function.Consumer;
 public final class IdSpaceCheck {
     private IdSpaceCheck() {}
 
-    public static void run() {
-        KayaApp app = new KayaApp();
+    public static void run(KayaApp app) {
         long[] ids = new long[4];
         // Pure JVM, this fixture's rule: a mutating transaction may never
         // commit, and a minted id is spent whether or not its tx ships.

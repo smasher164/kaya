@@ -33,9 +33,11 @@ import (
 // presentGuest mirrors PRESENT_GUEST in crates/kaya/src/android.rs.
 const presentGuest int32 = 1
 
-// Written once from an init(), read once from the UI thread inside
-// attach, so no lock: Go finishes every package init while the library
-// is loading, and loadLibrary happens-before the onCreate that attaches.
+// androidApp is written once from an init(); androidAttached is the
+// build-once latch, read and written inside attach. No lock either way:
+// Go finishes every package init while the library is loading,
+// loadLibrary happens-before the onCreate that attaches, and every
+// onCreate runs on the one UI thread.
 var (
 	androidApp      func()
 	androidAttached bool
@@ -98,11 +100,12 @@ func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
 			"one main.go, no build tags)")
 	}
 	if androidAttached {
-		// Reachable by rotating the device (onCreate re-runs); a second
-		// guest would consume the single-consumer ring from two threads.
-		panic("kaya: already attached — onCreate ran twice (a configuration " +
-			"change recreates the Activity); the shell must not attach a " +
-			"second time")
+		// A LATER onCreate RE-ATTACHES ONLY (docs/deferred.md's mount
+		// entry, ruled 2026-08-27): the guest is the PROCESS's and the
+		// Activity is only the current window. This used to panic, which
+		// killed the process on every rotation; the presentation was
+		// re-attached by KayaCompose.mount before this ran.
+		return presentGuest
 	}
 	// The stale-artifact guard rides kaya_run on the desktops and so
 	// never runs here; the APK's jniLibs only ever accumulates.

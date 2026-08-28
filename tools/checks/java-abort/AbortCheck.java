@@ -24,10 +24,11 @@ import java.util.function.Consumer;
 
 public final class AbortCheck {
     public static void main(String[] args) {
-        // First, on its own app, so the id run starts at 1.
-        dev.kaya.IdSpaceCheck.run();
-
+        // ONE APP, and the id run first so it starts at 1: a second
+        // App in one process is refused (KayaApp's constructor).
         KayaApp app = new KayaApp();
+        dev.kaya.IdSpaceCheck.run(app);
+
         KayaApp.Collection[] todos = new KayaApp.Collection[1];
 
         // Abort mid-transaction after mutating: the boundary must

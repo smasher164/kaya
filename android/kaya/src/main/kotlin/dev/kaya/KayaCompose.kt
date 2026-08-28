@@ -15,6 +15,8 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.PersistableBundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
@@ -1278,15 +1280,39 @@ object KayaCompose {
     internal const val CLIP_CUSTOM = 16
 
     /**
-     * Start the pump and mount the interpreter. Call from onCreate when
-     * [Kaya.attach] returns [Kaya.PRESENT_GUEST].
+     * The Activity this process is currently presenting into, or null
+     * between a destroy and the next mount. SWAPPED, never re-created:
+     * every activity-needing verb reads it fresh, so a picker or a
+     * clipboard call in the gap refuses through its own null check
+     * instead of touching a destroyed one.
      */
     @JvmStatic
     private var mountedActivity: ComponentActivity? = null
 
     /**
+     * THE BUILD-ONCE LATCH (docs/deferred.md's mount entry, ruled
+     * 2026-08-27). Android relaunches an activity for any configuration
+     * change it does not declare — night mode, rotation, locale, font
+     * scale, density — and a back-out-and-reopen recreates it under a
+     * living process whatever the manifest says. So `onCreate` runs
+     * again in ONE process, and everything that is per-PROCESS (the
+     * pump, the guest, the harness thread) is taken once here while
+     * everything that is per-WINDOW is re-applied.
+     */
+    private var mounted = false
+
+    /**
+     * The pump's hop to the UI thread. A main-looper Handler and NOT a
+     * captured `activity.runOnUiThread`: the pump outlives every
+     * activity, and a captured one posts into a destroyed window's
+     * handler after a recreation.
+     */
+    private val mainThread = Handler(Looper.getMainLooper())
+
+    /**
      * The forced appearance for this process, or null. Read by
-     * `KayaAppearance` below; written once, before `setContent`.
+     * `KayaAppearance` below; written before every `setContent`, so a
+     * fresh composition after a relaunch reads the same answer.
      */
     internal var appearanceOverride: String? = null
 
@@ -1302,24 +1328,11 @@ object KayaCompose {
      * MEASURED, not preferred. That call is the framework's app-level
      * night mode and it was this knob's first mechanism; it changes the
      * app's resource configuration, which makes Android RELAUNCH the
-     * activity. The relaunch runs `onCreate` TWICE IN ONE PROCESS, so the
-     * guest builds its scene twice into a core that is process-global and
-     * the core dies on the duplicate:
-     *
-     *     wm_relaunch_resume_activity … MainActivity
-     *     wm_on_create_called  performCreate      <- mount #1
-     *     wm_on_destroy_called performDestroy
-     *     E kaya log_panics: 'kaya: widget id … already exists'
-     *     wm_on_create_called  performCreate      <- mount #2, dead
-     *     ActivityManager: Process dev.kaya.milestone2 has died
-     *
-     * (measured on the android lane 2026-08-27; the kept buffers are
-     * target/validate-failures/android-canvasdark-compose-buffers.log).
-     * That kaya's mount is not re-entrant across an activity relaunch is
-     * a REAL gap this knob merely exposed — any config change reaches it,
-     * rotation included — and it is filed in docs/deferred.md rather than
-     * fixed here, because making mount re-entrant changes lifecycle
-     * semantics for every kaya app and is not one leg's call to make.
+     * activity, and the relaunch runs `onCreate` TWICE IN ONE PROCESS.
+     * The second mount no longer dies — [mount] is re-entrant since
+     * 2026-08-27 (docs/deferred.md's mount entry) — but a knob whose
+     * mechanism relaunches the window would still tear down and rebuild
+     * every leg's surface to say one word about it.
      *
      * SO BOTH HALVES ARE MOVED DIRECTLY, WITHOUT A RELAUNCH, and both are
      * required: `isSystemInDarkTheme()` alone would leave the MANIFEST
@@ -1348,13 +1361,40 @@ object KayaCompose {
         val background = attrs.getDrawable(0) ?: ColorDrawable(attrs.getColor(0, 0))
         attrs.recycle()
         activity.window.setBackgroundDrawable(background)
+        appearanceAppliedTo = activity
     }
+
+    /**
+     * The window the override's background write last landed on. The
+     * composition half is a process global and a fresh composition picks
+     * it up for free, but this half is per-WINDOW and a re-created one
+     * carries the manifest theme's background again — so `kayaRecreate`
+     * reads this back, which is the only witness there is (no scene can
+     * see a window background, tools/check-appearance.sh holds the rest).
+     */
+    private var appearanceAppliedTo: ComponentActivity? = null
 
     internal fun nightBits(want: String): Int =
         if (want == "dark") Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
 
+    /**
+     * Mount the interpreter into `activity`. Call from onCreate when
+     * [Kaya.attach] returns [Kaya.PRESENT_GUEST].
+     *
+     * RE-ENTRANT ACROSS A RELAUNCH, and the split is what `mounted`
+     * decides: a later onCreate RE-ATTACHES ONLY — swap the activity,
+     * re-apply the appearance to the new window, re-observe its
+     * lifecycle, re-materialize the title, `setContent`. The core is not
+     * resynced: KayaSceneModel is process-global and a fresh composition
+     * re-projects the whole of it by construction.
+     */
     fun mount(activity: ComponentActivity) {
+        val first = !mounted
+        mounted = true
         mountedActivity = activity
+        // PER WINDOW, so it runs on every attach: the override's second
+        // half is a window-background write and the new window has the
+        // manifest theme's again (tools/check-appearance.sh).
         applyAppearanceOverride(activity)
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
         // (KayaHarnessAccessibility.dismiss): a dialog activity on top
@@ -1365,24 +1405,38 @@ object KayaCompose {
         // accessibility window list, which lags in both directions
         // (docs/deferred.md's WATCH entry on the dialog family).
         activity.lifecycle.addObserver(
-            LifecycleEventObserver { _, event ->
+            LifecycleEventObserver { source, event ->
                 when (event) {
                     Lifecycle.Event.ON_RESUME -> KayaHarnessAccessibility.appResumed = true
                     Lifecycle.Event.ON_PAUSE -> KayaHarnessAccessibility.appResumed = false
+                    // IDENTITY-GUARDED: the newcomer's onCreate can
+                    // precede the incumbent's onDestroy, and clearing
+                    // the slot then would blind every verb for the rest
+                    // of the run.
+                    Lifecycle.Event.ON_DESTROY ->
+                        if (mountedActivity === source) mountedActivity = null
                     else -> Unit
                 }
             },
         )
-        KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
-        val host = KayaPresent.specHash()
-        check(host.toULong() == SPEC_HASH) {
-            "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
+        if (first) {
+            KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
+            val host = KayaPresent.specHash()
+            check(host.toULong() == SPEC_HASH) {
+                "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
+            }
+            startPump()
         }
-        startPump(activity)
+        // THE TITLE IS MATERIALIZED ON THE ACTIVITY (expect_title reads
+        // `activity.title`), so a re-created one carries the MANIFEST
+        // label until the model is written back onto it.
+        refreshNavTitle()
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
         activity.setContent { KayaAppearance { KayaTheme { KayaRoot() } } }
-        if (System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
+        // ONCE PER PROCESS: a second admission starts a second script
+        // runner, and two harness threads race one scene to two verdicts.
+        if (first && System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
     }
 
     /** The visible title: the top entry's while the stack is covered
@@ -1448,7 +1502,7 @@ object KayaCompose {
         return mods.toString() + key
     }
 
-    private fun startPump(activity: ComponentActivity) {
+    private fun startPump() {
         thread(name = "kaya-compose-pump") {
             while (true) {
                 // THE CORE SIZES THE BATCH (KayaPresent.nextCommands).
@@ -1459,7 +1513,7 @@ object KayaCompose {
                 // here, on the pump thread, within the batch; the bytes
                 // travel with it.
                 val blobs = collectBlobs(batch)
-                activity.runOnUiThread { apply(batch, blobs) }
+                mainThread.post { apply(batch, blobs) }
             }
         }
     }
@@ -2427,8 +2481,27 @@ object KayaCompose {
             Runtime.getRuntime().halt(1)
             return
         }
-        thread(name = "kaya-selftest") { runScript(activity, script) }
+        thread(name = "kaya-selftest") { runScript(script) }
     }
+
+    /**
+     * THE ACTIVITY THE HARNESS IS TALKING TO RIGHT NOW — a getter and
+     * not a captured value, which is the whole of what makes `runScript`
+     * survive a relaunch. A recreation swaps `mountedActivity` under a
+     * script that is still running; a captured one would keep hopping
+     * into a destroyed window's view tree, and every read after the
+     * relaunch would answer about a surface nobody can see
+     * (docs/deferred.md's mount entry).
+     *
+     * `runScript` and the reads it drives name this and never a
+     * parameter, so a verb added later gets the current one for free.
+     * Every OTHER caller keeps its own `mountedActivity ?: <refusal>`,
+     * because those run off the harness thread and the gap between a
+     * destroy and the next mount is theirs to answer for.
+     */
+    private val activity: ComponentActivity
+        get() = mountedActivity
+            ?: error("kaya: the harness has no mounted activity")
 
     private fun <T> onUi(activity: ComponentActivity, f: () -> T): T {
         var out: T? = null
@@ -5340,6 +5413,108 @@ object KayaCompose {
         System.getenv("KAYA_STEP_CEILING_MS")?.toLongOrNull()?.takeIf { it > 0 } ?: STEP_CEILING_MS
 
     /**
+     * ANDROID'S ONE EXTRA HARNESS KNOB: `KAYA_RECREATE_AFTER=<n>` drives
+     * a REAL Activity recreation after the n-th statement, and the rest
+     * of the scene then runs against the re-attached surface.
+     *
+     * NOT A `.steps` VERB, deliberately — recreation exists on no other
+     * platform and a shared verb would need four stubs (docs/deferred.md's
+     * mount entry, "the recreation PROOF is android-only"). The lane wires
+     * it as an intent extra beside KAYA_SELFTEST_SCRIPT.
+     *
+     * The statement it fired after is LOGGED WITH ITS TEXT, and
+     * tools/android/run-emulator.sh greps for that exact sentence: a
+     * scene edit that shifts the count then fails naming both sides
+     * instead of silently recreating somewhere harmless.
+     */
+    private fun recreateAfter(): Int =
+        System.getenv("KAYA_RECREATE_AFTER")?.toIntOrNull()?.takeIf { it > 0 } ?: 0
+
+    /** How long the harness waits for the re-created Activity to mount. */
+    private const val REMOUNT_CEILING_MS = 20_000L
+
+    /**
+     * Drive the platform's own relaunch (`wm_on_destroy` + `wm_on_create`
+     * in ONE process) and wait for the new Activity to mount and draw.
+     * Returns null on success, or the sentence to fail the leg with.
+     */
+    private fun kayaRecreate(after: Int, line: String): String? {
+        val old = mountedActivity ?: return "recreate: no activity is mounted"
+        Log.i("kaya", "KAYA_REMOUNT: recreating after step $after ($line)")
+        old.runOnUiThread { old.recreate() }
+        val deadline = System.nanoTime() + REMOUNT_CEILING_MS * 1_000_000
+        while (System.nanoTime() < deadline) {
+            val now = mountedActivity
+            // IDENTITY, never null-ness: the destroy and the create are
+            // two events and the gap between them is not the answer.
+            if (now != null && now !== old) {
+                // The first draw of the new surface, so the step after
+                // this one reads a laid-out tree rather than racing it.
+                val drawn = System.nanoTime() + REMOUNT_CEILING_MS * 1_000_000
+                while (System.nanoTime() < drawn) {
+                    if (onUi(now) { kayaComposeRoot(now.window.decorView) != null }) {
+                        val twins = kayaSecondMountThreads()
+                        if (twins != null) return twins
+                        if (appearanceOverride != null && appearanceAppliedTo !== now) {
+                            return "recreate: KAYA_APPEARANCE=$appearanceOverride but the " +
+                                "override's window background was never applied to the " +
+                                "re-created window — it is per-window, and this one " +
+                                "carries the manifest theme's"
+                        }
+                        Log.i("kaya", "KAYA_REMOUNT: re-attached")
+                        return null
+                    }
+                    Thread.sleep(RETRY_PERIOD_MS)
+                }
+                return "recreate: the re-created activity mounted but never drew " +
+                    "within ${REMOUNT_CEILING_MS / 1000}s"
+            }
+            Thread.sleep(RETRY_PERIOD_MS)
+        }
+        return "recreate: no new activity mounted within ${REMOUNT_CEILING_MS / 1000}s " +
+            "(the process still holds ${if (mountedActivity === old) "the old one" else "none"})"
+    }
+
+    /**
+     * THE SECOND-MOUNT WITNESS, and the reason it counts THREADS. A
+     * re-attach that started a second pump or a second script runner is
+     * invisible to every assertion a scene can make: two pumps drain the
+     * one core and apply the same batches, and two runners publish the
+     * same green verdict of which the lane reads the first (measured
+     * 2026-08-27 — the unfixed tree printed two `KAYA_HARNESS: epoch`
+     * lines and the leg would still have read OK). So the process's own
+     * thread table is the witness.
+     *
+     * BOUNDED-SETTLE, not a snapshot: a thread on its way out is not the
+     * defect, and the re-attach does not wait for anything to finish
+     * leaving. A twin still there when the settle runs out is.
+     */
+    private fun kayaSecondMountThreads(): String? {
+        val singletons = listOf("kaya-compose-pump", "kaya-selftest", "kaya-app")
+        val deadline = System.nanoTime() + REMOUNT_SETTLE_MS * 1_000_000
+        while (true) {
+            val names = Thread.getAllStackTraces().keys.filter { it.isAlive }.map { it.name }
+            // EVERY offender, not the last one found: a re-attach that
+            // doubled two things would otherwise send the next reader
+            // after one of them.
+            val twins = singletons
+                .map { it to names.count { name -> name == it } }
+                .filter { it.second > 1 }
+            if (twins.isEmpty()) return null
+            if (System.nanoTime() >= deadline) {
+                val said = twins.joinToString(", ") { "${it.second} named ${it.first}" }
+                return "recreate: ${REMOUNT_SETTLE_MS}ms after the re-attach this process " +
+                    "still has $said — the second mount started one of each, and no scene " +
+                    "can see it"
+            }
+            Thread.sleep(RETRY_PERIOD_MS)
+        }
+    }
+
+    /** How long a re-attach's leftover threads have to finish leaving. */
+    private const val REMOUNT_SETTLE_MS = 2_000L
+
+    /**
      * The sentence a wedged step ends its run with — harness.rs's
      * `wedge_verdict` and KayaSwiftUI.swift's `kayaWedgeVerdict` are the
      * same text. It prints only what it measured (which step, how long
@@ -5419,7 +5594,7 @@ object KayaCompose {
         }
     }
 
-    private fun runScript(activity: ComponentActivity, script: String) {
+    private fun runScript(script: String) {
         // Watched, before any step (crates/kaya/src/fault.rs; the fault
         // census holds all three runners to this call).
         KayaPresent.faultWatch()
@@ -5435,6 +5610,9 @@ object KayaCompose {
         // `failures`, so the sweep after the loop cannot report the same
         // one twice.
         var reportedFault = false
+        // The android-only recreation phase (see `recreateAfter`).
+        val remountAfter = recreateAfter()
+        var statements = 0
         // Labelled for the one thing that ends a script early: the core
         // latching a fault (KayaPresent.fault).
         scriptLines@ for (rawLine in script.split('\n')) {
@@ -7448,6 +7626,15 @@ object KayaCompose {
                     }
                 }
                 }
+                statements++
+                if (statements == remountAfter) {
+                    val stuck = kayaRecreate(statements, line)
+                    if (stuck != null) {
+                        failures.add(stuck)
+                        Log.e("kaya", "KAYA_HARNESS: step-failed $stuck")
+                        break@scriptLines
+                    }
+                }
             }
         }
         // THE LAST STEP CAN FAULT TOO, and a fault must never leave a
@@ -7461,6 +7648,15 @@ object KayaCompose {
         }
         if (failures.isEmpty() && observed.isEmpty()) {
             failures.add("script has no expects")
+        }
+        // A recreation phase that never recreated is a GREEN LEG THAT
+        // TESTED NOTHING — the count outran the script, or the run ended
+        // early. Refused here as well as in the runner's grep.
+        if (remountAfter > 0 && statements < remountAfter) {
+            failures.add(
+                "KAYA_RECREATE_AFTER=$remountAfter but the script ran only " +
+                    "$statements statements, so nothing was recreated",
+            )
         }
         // A recorded leg must outlive its last sample time — see
         // harness.rs's record_linger; same contract, same constant.
@@ -7496,8 +7692,11 @@ object KayaCompose {
         // may be answering nothing; the grace leaves under the verdict
         // either way.
         watchdog.published(code)
-        activity.runOnUiThread {
-            activity.finishAndRemoveTask()
+        // READ ONCE, and nullable: a relaunch may be in flight, and the
+        // halt is what ends this process either way.
+        val leaving = mountedActivity
+        mainThread.post {
+            leaving?.finishAndRemoveTask()
             Runtime.getRuntime().halt(code)
         }
     }
@@ -10768,6 +10967,13 @@ fun KayaRoot() {
     val presentationDark = isSystemInDarkTheme()
     LaunchedEffect(presentationScale, presentationDark) {
         KayaSceneModel.presentationDark = presentationDark
+        // ONE LINE PER REPORT, and the recreation leg COUNTS THEM
+        // (tools/android/run-emulator.sh): a relaunch builds a fresh
+        // composition, and if this effect did not run again the core
+        // would keep rasterizing at the OLD scale and appearance after a
+        // rotation. Nothing observable would move — the core latches the
+        // last report — so the count is the only witness.
+        Log.i("kaya", "KAYA_PRESENTATION: scale=$presentationScale dark=$presentationDark")
         KayaPresent.presentation(presentationScale, presentationDark)
     }
     // The size class, from the platform's own width in dp against the

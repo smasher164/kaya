@@ -27,6 +27,38 @@ public final class KayaApp {
     private final Object postLock = new Object();
     private List<Consumer<Tx>> posted = new ArrayList<>();
 
+    /** One App per process; see the constructor. */
+    private static final java.util.concurrent.atomic.AtomicBoolean BUILT =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * ONE APP PER PROCESS, EVERYWHERE, and a second one is the guest's
+     * own bug: kaya's core is a process-global singleton, so two Apps
+     * mint ids from two counters into one scene and the core dies on the
+     * first collision — a crash three removes from the mistake.
+     *
+     * <p>THIS IS A BACKSTOP AND NOT THE ANDROID MOUNT RULE. kaya owns
+     * the app thread on every Android tier ({@link KayaRing#startGuest},
+     * {@code crates/kaya/src/android.rs}, {@code bindings/go/android.go})
+     * and starts it once per process, so a relaunch never re-enters a
+     * guest's entry and nothing here fires from the platform's side
+     * (ruled 2026-08-27, docs/deferred.md's mount entry). What it still
+     * catches is an app that spawns a second entry itself, on any
+     * platform — which is what the JVM shell used to do here, dying in
+     * {@link #requireAppThread} with an uncaught IllegalStateException
+     * that named a thread rather than the cause.
+     */
+    public KayaApp() {
+        if (BUILT.getAndSet(true)) {
+            throw new IllegalStateException(
+                    "kaya: a second App in this process — kaya's core is a process-global"
+                            + " singleton and two Apps would both write it. One process, one"
+                            + " App, built once and served with run(); on Android kaya starts"
+                            + " the app thread itself and a relaunch never runs your entry"
+                            + " again.");
+        }
+    }
+
     /** The closed standard-command vocabulary (DESIGN.md, Menus):
      * macOS places this one in the application menu, and every other
      * host leaves the item where the app declared it. */

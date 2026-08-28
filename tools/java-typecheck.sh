@@ -386,4 +386,122 @@ else
     exit 1
 fi
 
+# ONE APP PER PROCESS, AND THE REFUSAL MADE TO PRINT (docs/deferred.md's
+# mount entry). kaya's core is a process-global singleton, so two Apps
+# mint ids from two counters into one scene and the core dies on the
+# first collision — a crash three removes from the mistake. NOTHING ELSE
+# REACHES IT: no guest builds two, and on Android kaya starts the app
+# thread itself (KayaRing.startGuest), so the platform's own relaunch can
+# no longer produce a second entry either — the shape this replaced, where
+# the JVM shell spawned the thread, died in requireAppThread naming a
+# THREAD rather than the cause (measured on the android lane 2026-08-27).
+mkdir -p "$TMP/once"
+cat >"$TMP/once/BuildOnceCheck.java" <<'PROBE'
+import dev.kaya.KayaApp;
+
+/** A second App in one process is refused, and the sentence says why.
+ * Compiled and RUN by tools/java-typecheck.sh. */
+public final class BuildOnceCheck {
+    private static void check(boolean ok, String what) {
+        if (!ok) {
+            System.out.println("build-once: FAIL — " + what);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        new KayaApp();
+        try {
+            new KayaApp();
+            check(false, "a second App in one process was accepted");
+        } catch (IllegalStateException e) {
+            check(e.getMessage() != null
+                            && e.getMessage().contains("a second App in this process"),
+                    "the refusal did not name a second App: " + e.getMessage());
+        }
+        System.out.println("build-once: OK — a second App is refused, by its own sentence");
+    }
+
+    private BuildOnceCheck() {}
+}
+PROBE
+
+if run_javac -encoding UTF-8 -cp "$TMP/classes" -d "$TMP/onceclasses" \
+        "$TMP/once/BuildOnceCheck.java"; then
+    :
+else
+    echo "java-typecheck: FAIL — the build-once exerciser did not compile."
+    exit 1
+fi
+
+if run_java -cp "$TMP/classes:$TMP/onceclasses" BuildOnceCheck; then
+    :
+else
+    echo "java-typecheck: FAIL — a second KayaApp in one process was not refused," \
+        "or was refused by a sentence that does not name the cause. kaya's core is" \
+        "a process-global singleton (docs/deferred.md's mount entry); two Apps mint" \
+        "ids from two counters and the core dies on the first collision."
+    exit 1
+fi
+
+# ITS WATCHED NEGATIVE, the ceiling clause's shape one file over: the
+# latch is removed from a COPY of the binding — never the tree — the
+# substitution is COUNTED, and the same exerciser is required to report
+# that a second App got through. Without this the clause above only shows
+# that the probe runs.
+mkdir -p "$TMP/unlatched"
+cp bindings/java/dev/kaya/*.java "$TMP/unlatched/"
+appbefore="$(shasum -a 256 bindings/java/dev/kaya/KayaApp.java)"
+unlatched=$(python3 - "$TMP/unlatched/KayaApp.java" <<'PY'
+import io
+import re
+import sys
+
+path = sys.argv[1]
+src = io.open(path, encoding="utf-8").read()
+src, n = re.subn(r"if \(BUILT\.getAndSet\(true\)\) \{", "if (false) {", src)
+io.open(path, "w", encoding="utf-8").write(src)
+print(n)
+PY
+)
+echo "java-typecheck: build-once negative unlatched $unlatched constructor(s)"
+if [ "$unlatched" != "1" ]; then
+    echo "java-typecheck: FAIL — the build-once negative unlatched $unlatched" \
+        "constructors, not 1. It rewrites KayaApp's BUILT test in a copy; if that" \
+        "latch moved, the refusal above has been watched by NOTHING."
+    exit 1
+fi
+
+if run_javac -encoding UTF-8 -d "$TMP/unlatchedclasses" \
+        bindings/java-desktop/dev/kaya/KayaRing.java "$TMP/unlatched"/*.java; then
+    :
+else
+    echo "java-typecheck: FAIL — the unlatched KayaApp copy did not compile."
+    exit 1
+fi
+
+if run_java -cp "$TMP/unlatchedclasses:$TMP/onceclasses" BuildOnceCheck \
+        >"$TMP/unlatched.log" 2>&1; then
+    echo "java-typecheck: FAIL — the build-once exerciser PASSED against a KayaApp" \
+        "whose latch was removed. It is therefore not exercising the latch, and the" \
+        "clause above is green for some other reason."
+    exit 1
+fi
+if grep -q "a second App in one process was accepted" "$TMP/unlatched.log"; then
+    :
+else
+    echo "java-typecheck: FAIL — the unlatched copy failed, but NOT by accepting a" \
+        "second App, so the negative did not watch the latch. What it printed:"
+    cat "$TMP/unlatched.log"
+    exit 1
+fi
+
+if printf '%s\n' "$appbefore" | shasum -a 256 -c --status; then
+    :
+else
+    echo "java-typecheck: FAIL — bindings/java/dev/kaya/KayaApp.java changed during" \
+        "the build-once negative. It must only ever doctor the copy in \$TMP."
+    exit 1
+fi
+
 echo "java-typecheck: OK"

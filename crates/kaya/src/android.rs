@@ -35,15 +35,30 @@ static JVM: std::sync::OnceLock<jni::JavaVM> = std::sync::OnceLock::new();
 static PRESENT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
-/// dev.kaya.KayaAssets and the Activity, taken at attach for the same
-/// reason: an asset is read from the APP THREAD, which resolves classes
-/// through the system class loader. The Activity is held for the
-/// process's life — kaya's Activity IS the process, and
-/// getApplicationContext would cost a JNI round trip per asset read.
+/// dev.kaya.KayaAssets and the Context an asset read needs, taken at
+/// attach for the same reason: an asset is read from the APP THREAD,
+/// which resolves classes through the system class loader.
+///
+/// THE APPLICATION CONTEXT AND NOT THE ACTIVITY (docs/deferred.md's
+/// mount entry). Both reach the same AssetManager, but a configuration
+/// change recreates the Activity while this ref is a `OnceLock` — so the
+/// process would hold the FIRST, destroyed one for its whole life. The
+/// round trip is paid once, here.
 static ASSETS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
-static ACTIVITY: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
+static APP_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
 
+/// THE BUILD-ONCE LATCH, this side of the JNI boundary
+/// (docs/deferred.md's mount entry, ruled 2026-08-27): a second
+/// `onCreate` in one process re-attaches the presentation and NEVER
+/// spawns a second guest. `KayaCompose.mount` holds the other half.
+static ATTACHED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// True on the FIRST call in this process, false ever after.
+fn claim_attach() -> bool {
+    !ATTACHED.swap(true, std::sync::atomic::Ordering::SeqCst)
+}
 
 fn init_logging() {
     android_logger::init_once(
@@ -64,6 +79,12 @@ pub fn attach(
 ) -> i32 {
     init_logging();
     remember_context(&mut env, &activity);
+    // A LATER onCreate RE-ATTACHES ONLY: the guest, its thread and the
+    // core are the PROCESS's, and the Activity that runs this is only
+    // the current window (docs/deferred.md's mount entry).
+    if !claim_attach() {
+        return PRESENT_GUEST;
+    }
 
     let (occ_tx, occ_rx) = mpsc::channel();
     let ctx = AppCtx::new(occ_rx, crate::capi::presentation_tx_sender(), occ_tx.clone());
@@ -92,6 +113,12 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     // The JVM and Go tiers attach HERE and never through `attach` above,
     // so an asset read on those tiers has no Context unless this runs.
     remember_context(&mut env, &activity);
+    // Nothing below is per-window, and RegisterNatives on a second
+    // onCreate would only rewrite the same table (docs/deferred.md's
+    // mount entry).
+    if !claim_attach() {
+        return;
+    }
     crate::jvm::register_ring_natives(&mut env)
         .expect("kaya: registering KayaRing natives failed");
     register_present_natives(&mut env)
@@ -99,7 +126,7 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
 }
 
 /// Remember what an asset read will need and cannot go and find: the
-/// Activity (the Context whose AssetManager holds this APK's assets) and
+/// APPLICATION Context (whose AssetManager holds this APK's assets) and
 /// dev.kaya.KayaAssets, both resolved HERE on the Activity's own thread.
 ///
 /// Failure is silent on purpose — mounting a window needs no asset — and
@@ -109,8 +136,25 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
     if let Ok(vm) = env.get_java_vm() {
         let _ = JVM.set(vm);
     }
-    if let Ok(global) = env.new_global_ref(activity) {
-        let _ = ACTIVITY.set(global);
+    let context = env
+        .call_method(activity, "getApplicationContext", "()Landroid/content/Context;", &[])
+        .and_then(|v| v.l());
+    match context {
+        Ok(context) if !context.is_null() => {
+            if let Ok(global) = env.new_global_ref(&context) {
+                let _ = APP_CONTEXT.set(global);
+            }
+        }
+        _ => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            log::warn!(
+                "kaya: the Activity answered no application Context; this process \
+                 cannot read its own APK's assets"
+            );
+        }
     }
     match env.find_class("dev/kaya/KayaAssets") {
         Ok(class) => {
@@ -133,7 +177,7 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
 /// Whether an asset read can reach this APK at all — the guard on
 /// `Place::Apk` (crates/kaya/src/assets.rs). All three refs or none.
 pub(crate) fn apk_assets_reachable() -> bool {
-    JVM.get().is_some() && ACTIVITY.get().is_some() && ASSETS_CLASS.get().is_some()
+    JVM.get().is_some() && APP_CONTEXT.get().is_some() && ASSETS_CLASS.get().is_some()
 }
 
 /// The three refs plus an attached env, or `None`. None of this may
@@ -146,21 +190,21 @@ fn assets_env() -> Option<(
 )> {
     let vm = JVM.get()?;
     let class = ASSETS_CLASS.get()?;
-    let activity = ACTIVITY.get()?;
+    let context = APP_CONTEXT.get()?;
     let env = vm.attach_current_thread().ok()?;
-    Some((env, class, activity))
+    Some((env, class, context))
 }
 
 /// Read one asset out of this APK. `None` covers absent AND unreadable:
 /// an entry inside an APK has no `ENOENT` to tell them apart.
 pub(crate) fn apk_asset_read(name: &str) -> Option<Vec<u8>> {
-    let (mut env, class, activity) = assets_env()?;
+    let (mut env, class, context) = assets_env()?;
     let name_arg = env.new_string(name).ok()?;
     let called = env.call_static_method(
         class,
         "read",
         "(Landroid/content/Context;Ljava/lang/String;)[B",
-        &[(activity.as_obj()).into(), (&name_arg).into()],
+        &[(context.as_obj()).into(), (&name_arg).into()],
     );
     if env.exception_check().unwrap_or(false) {
         let _ = env.exception_describe();
@@ -182,14 +226,14 @@ pub(crate) fn apk_asset_read(name: &str) -> Option<Vec<u8>> {
 /// which is why the sentence upstream says "nothing this process could
 /// list" and not "carries nothing".
 pub(crate) fn apk_asset_list() -> Vec<String> {
-    let Some((mut env, class, activity)) = assets_env() else {
+    let Some((mut env, class, context)) = assets_env() else {
         return Vec::new();
     };
     let called = env.call_static_method(
         class,
         "list",
         "(Landroid/content/Context;)[Ljava/lang/String;",
-        &[(activity.as_obj()).into()],
+        &[(context.as_obj()).into()],
     );
     if env.exception_check().unwrap_or(false) {
         let _ = env.exception_describe();

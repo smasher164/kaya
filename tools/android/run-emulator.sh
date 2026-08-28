@@ -829,6 +829,32 @@ run_apk() {
     done
 }
 
+# A RECREATION LEG: the ordinary leg with the Activity relaunched
+# mid-scene (docs/deferred.md's mount entry). `step` counts the scene's
+# non-comment statements and `expected` is the sentence the harness
+# prints naming the statement it recreated after — so a scene edit that
+# shifts the count fails naming both sides instead of recreating
+# somewhere harmless. The variable is cleared on the way out: left set,
+# every later leg on this run would demand a remount and say so.
+run_apk_remount() { # name apk component script step expected [extras...]
+    local name="$1" apk="$2" component="$3" script="$4" step="$5" expected="$6"
+    shift 6
+    KAYA_REMOUNT_EXPECT="$expected" run_apk "$name" "$apk" "$component" "$script" \
+        --es KAYA_RECREATE_AFTER "$step" "$@"
+    KAYA_REMOUNT_EXPECT=
+}
+
+# THE SCENE THE RECREATION LEGS DRIVE, and the statement they cut in
+# half. `todos` because the model it re-projects is EARNED — a row
+# inserted, a derived label, a walk through the undo history — and every
+# statement after the cut (menu enablement, two menu activations, a
+# field-level toggle) is an interaction with the NEW view tree over the
+# OLD process's model. The cut is after `expect_focused`, which is the
+# last statement that reads view-local state.
+REMOUNT_SCENE=todos
+REMOUNT_STEP=6
+REMOUNT_LINE='KAYA_REMOUNT: recreating after step 6 (expect_focused entry#0)'
+
 run_apk_tablet() {
     local name="$1"
     leg_names+=("$name")
@@ -1173,6 +1199,39 @@ run_apk_on() {
     local out
     out=$(timeout 60 adb -s "$serial" logcat -s kaya:* -e 'KAYA_SELFTEST: (OK|FAILED)' -m 1) || true
     printf '%s\n' "$out"
+    # THE RECREATION LEG'S OWN PROOF (docs/deferred.md's mount entry).
+    # A green verdict does not say the relaunch happened: a count that
+    # outran the script, or a knob nothing read, leaves a leg that tested
+    # nothing and passed. Both sentences come out of the SAME process's
+    # harness thread, so the pair is the whole claim — two onCreates, one
+    # process, the scene's remaining expects green after the second.
+    if [ -n "${KAYA_REMOUNT_EXPECT:-}" ]; then
+        local remount_log
+        remount_log=$(adb -s "$serial" logcat -d -s kaya:* 2>/dev/null | tr -d '\r' || true)
+        if ! grep -qF "$KAYA_REMOUNT_EXPECT" <<<"$remount_log"; then
+            echo "$name: the recreation never fired — the log carries no"
+            echo "  \"$KAYA_REMOUNT_EXPECT\""
+            echo "  (KAYA_RECREATE_AFTER counts non-comment statements; a scene edit moves it)"
+            failed=1
+        fi
+        if ! grep -qF "KAYA_REMOUNT: re-attached" <<<"$remount_log"; then
+            echo "$name: the re-created activity never re-attached in this process"
+            failed=1
+        fi
+        # AND THE PRESENTATION RE-REPORTED. The core LATCHES the last
+        # scale and appearance, so a composition that never reports again
+        # moves nothing observable — after a rotation it would raster
+        # every canvas at the old size with every lane still green. The
+        # count is the only witness there is.
+        local reports
+        reports=$(grep -c "KAYA_PRESENTATION:" <<<"$remount_log" || true)
+        if [ "${reports:-0}" -lt 2 ]; then
+            echo "$name: the presentation was reported $reports time(s) across two"
+            echo "  compositions — a re-attached surface must report its own scale and"
+            echo "  appearance (KayaRoot's LaunchedEffect)"
+            failed=1
+        fi
+    fi
     if [ -n "${KAYA_RECORD:-}" ]; then
         local dir="$ROOT/target/recordings/android/$name"
         mkdir -p "$dir"
@@ -1657,6 +1716,29 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity todos \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
+    # THE RECREATION LEG (docs/deferred.md's mount entry). The rust
+    # guest's tier: Kaya.attach spawns the app thread, so this is the
+    # leg that proves the native attach builds ONCE PER PROCESS.
+    run_apk_remount remount-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity "$REMOUNT_SCENE" \
+        "$REMOUNT_STEP" "$REMOUNT_LINE" \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script $REMOUNT_SCENE)'"
+    # THE PER-WINDOW HALF, which `todos` cannot reach. `nav` asserts the
+    # title, and a title is MATERIALIZED ON THE ACTIVITY here
+    # (expect_title reads `activity.title`), so a re-created window
+    # answers with the MANIFEST LABEL until the model is written back
+    # onto it — cut after `expect_entries 1` so the very next statement
+    # is a title read with no navigation in between. And KAYA_APPEARANCE
+    # makes the override's window-background write, the one piece of the
+    # appearance that is per-window rather than per-process, something
+    # the re-attach has to do again.
+    run_apk_remount remount-nav-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity nav \
+        4 'KAYA_REMOUNT: recreating after step 4 (expect_entries 1)' \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script nav)'" \
+        --es KAYA_APPEARANCE dark
     run_apk reorder-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity reorder \
@@ -1685,10 +1767,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script canvas)'"
     # The same script under the other appearance. The AVDs boot `notnight`
     # and every leg before this one ran light; KAYA_APPEARANCE rides the
-    # extras-to-env bridge in MainActivity and moves THIS APP's night mode
-    # (UiModeManager.setApplicationNightMode), never the device's setting,
-    # so no AVD state is touched and the dark arm costs one leg instead of
-    # a whole lane re-run.
+    # extras-to-env bridge in MainActivity and moves THIS APP's window
+    # background and LocalConfiguration night bits, never the device's
+    # setting and never through a relaunch, so no AVD state is touched and
+    # the dark arm costs one leg instead of a whole lane re-run.
     run_apk canvasdark-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity canvas \
@@ -2000,6 +2082,13 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity todos \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
+    # The JVM tier's recreation leg: KayaRing.startGuest is the latch
+    # this one reaches (docs/deferred.md's mount entry).
+    run_apk_remount remount-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity "$REMOUNT_SCENE" \
+        "$REMOUNT_STEP" "$REMOUNT_LINE" \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script $REMOUNT_SCENE)'"
     run_apk reorder-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity reorder \
@@ -2274,6 +2363,13 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity todos \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
+    # The Go tier's recreation leg: KayaGo.attach is the latch this one
+    # reaches (docs/deferred.md's mount entry).
+    run_apk_remount remount-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity "$REMOUNT_SCENE" \
+        "$REMOUNT_STEP" "$REMOUNT_LINE" \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script $REMOUNT_SCENE)'"
     run_apk reorder-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity reorder \

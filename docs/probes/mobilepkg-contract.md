@@ -229,15 +229,15 @@ rather than silently running milestone2 (`:158-161`).
 |---|---|
 | 1. same env-var mapping | `MainActivity.kt:16-23` |
 | 2. `System.loadLibrary("kaya")` — kaya's own cdylib, not a guest lib | `:29` |
-| 3. `KayaRing.attach(this)` → `Java_dev_kaya_KayaRing_attach`, which registers the **KayaRing** natives (jvm.rs) *and* the **KayaPresent** natives, and takes no core ends | `:30`; `android.rs:105-118`; `KayaRing.kt:22-30` |
+| 3. `KayaRing.attach(this)` → `Java_dev_kaya_KayaRing_attach`, which registers the **KayaRing** natives (jvm.rs) *and* the **KayaPresent** natives, and takes no core ends | `:30`; `android.rs:105-118`; `KayaRing.kt:16` |
 | 4. `KayaCompose.mount(this)` — same interpreter, same pump | `:35` |
 | 5. scene selected from `System.getenv("KAYA_SELFTEST")` in a `when` | `:36-89` |
-| 6. **the Activity spawns the app thread itself**: `Thread(scene, "kaya-app").start()` | `:90` |
+| 6. **kaya spawns the app thread**: `KayaRing.startGuest(scene)`, once per process (it was `Thread(scene, "kaya-app").start()` in the Activity when this probe was taken; ruled 2026-08-27, docs/deferred.md's mount entry) | `:97` |
 
-So the difference between the two Android compositions is *who spawns the app
-thread and where the guest code lives*: the Rust path spawns it inside
-`android::attach` from native code; the JVM path leaves the core ends in place
-and the Activity starts a plain Java thread that consumes the ring
+So the difference between the two Android compositions is *where the guest code
+lives*: the Rust path spawns the app thread inside `android::attach` from native
+code; the JVM path leaves the core ends in place and `KayaRing.startGuest` starts
+a plain Java thread that consumes the ring
 (`android.rs:96-104` spells this out). `[D]`
 
 ### 2.4 The one asymmetry that matters for a new language
@@ -338,8 +338,8 @@ Stated once in DESIGN.md:2332-2343 and enforced in the code:
    design (DESIGN.md:2379-2381). Either side may provide it: Rust's
    `kaya::run`/`android::attach` spawn `kaya-app`
    (`lib.rs:144-147`, `android.rs:85-89`); the Swift binding spawns its
-   `dispatchLoop` thread (`KayaApp.swift:1532-1533`); the Kotlin Activity
-   spawns `Thread(scene, "kaya-app")` (`MainActivity.kt:90`).
+   `dispatchLoop` thread (`KayaApp.swift:1532-1533`); the JVM tier's is
+   spawned by `KayaRing.startGuest` (`KayaRing.kt:41-45`).
 5. `kaya_next_occurrence` must be called **from a single app thread**, and not
    mixed with direct ring access (`kaya.h:1338-1339`).
 6. Only `kaya_wake` (`kaya.h:1370`) and `kaya_open_picked` (`kaya.h:1460-1461`)

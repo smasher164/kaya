@@ -502,9 +502,13 @@ in docs/deferred.md.
    demands both plus the absence of the mechanism they replaced:
    `UiModeManager.setApplicationNightMode` moves the app's resource
    configuration, which RELAUNCHES the activity — `onCreate` then runs
-   twice in ONE process and the second mount dies on a duplicate widget
-   id, measured on the android lane 2026-08-27 (the leg died at ~63s with
-   no verdict). So Compose sets the window background out of the SAME
+   twice in ONE process, which is how that call cost the dark leg three
+   deaths at ~63s with no verdict, measured on the android lane
+   2026-08-27. The second mount survives now (KayaCompose.mount is
+   re-entrant, and the android lane's `remount-*` legs hold it), but a
+   knob that relaunches the window to say one word about the appearance
+   still rebuilds every leg's surface. So Compose sets the window
+   background out of the SAME
    `-night` theme the system would have picked, and provides
    `LocalConfiguration` with the night bits forced; either half alone is
    the measured half-dark app D1 exists to have fixed.

@@ -3023,7 +3023,7 @@ count, so the saving is measured rather than assumed.
   already shipped.
   KEY: palette-look, plot ground, raised, recessed, card, well,
   KAYA_APPEARANCE, check-table-card
-- **kaya's Android mount is not re-entrant across an activity relaunch,
+- ~~**kaya's Android mount is not re-entrant across an activity relaunch,
   and the second mount kills the process** (measured 2026-08-27 on the
   android lane, while landing `KAYA_APPEARANCE`). Android relaunches an
   activity for any configuration change the activity does not declare —
@@ -3108,7 +3108,102 @@ count, so the saving is measured rather than assumed.
   activity-scoped.
   KEY: mount, re-entrant, relaunch, onCreate, configChanges, rotation,
   already exists, scene.rs, KayaCompose.mount, am_proc_died, build-once
-  latch, activity.recreate
+  latch, activity.recreate~~
+  CLOSED 2026-08-27, as ruled and then as ruled again. The guest starts
+  ONCE PER PROCESS behind a latch taken on the first Activity
+  `onCreate`, in four places and never in a shell:
+  `KayaCompose.mount`'s `mounted`, `crates/kaya/src/android.rs`'s
+  `claim_attach()` (both `attach` and `Java_dev_kaya_KayaRing_attach`),
+  `bindings/go/android.go`'s `androidAttached` — whose PANIC became a
+  quiet `return presentGuest` — and `KayaRing.startGuest`'s
+  `guestStarted`. A later onCreate re-attaches only: swap
+  `mountedActivity` (identity-guarded, nulled on that activity's
+  ON_DESTROY), re-apply the appearance override to the NEW window,
+  re-observe the lifecycle, re-materialize the title onto the new
+  Activity (`expect_title` reads `activity.title`, which comes back as
+  the MANIFEST LABEL otherwise), `setContent`. The pump's captured
+  `runOnUiThread` is a main-looper Handler; the harness's captured
+  activity is a getter, so its ~150 reads follow the swap and a verb
+  added later gets the current one for free. No core resync: a fresh
+  composition re-projects `KayaSceneModel`, and its presentation
+  `LaunchedEffect` re-reports scale and appearance by construction.
+  THE JVM TIER TOOK A SECOND RULING, 2026-08-27, and it is the reason
+  all three tiers now read alike. That shell used to start the guest
+  itself (`Thread(scene, "kaya-app").start()`), so no kaya call stood
+  between the second onCreate and the second `Todos.app()`; the first
+  implementation kept the shell's shape and absorbed the second entry at
+  the first binding call instead, which put an Android rule inside
+  `KayaApp` and left one tier's semantics different from the other two.
+  THE MAINTAINER TOOK THE LIBRARY CALL: `KayaRing.startGuest(scene)`
+  replaces the shell's `Thread(...)`, kaya owns the app thread on every
+  Android tier, and a guest's entry is NEVER RE-ENTERED anywhere — so
+  "absorbed at the first binding call" is retired along with
+  `KayaRing.reentersGuestEntry()`, which existed only to name the
+  platforms that needed absorbing.
+  WHAT SURVIVES IN `KayaApp` IS A BACKSTOP WITH ONE SENTENCE: a second
+  App in one process throws, on every platform, because the core is a
+  process-global singleton and two Apps mint ids from two counters into
+  one scene — a crash three removes from the mistake. Nothing on the
+  platform's side can reach it now; what it catches is an app that
+  spawns a second entry itself. It cost one fixture: AbortCheck built a
+  second App on purpose so `IdSpaceCheck`'s run would start at 1, and
+  now takes the process's one App as an argument and runs first.
+  THE AUDIT FOUND ONE THING: `android.rs` held the ACTIVITY in a
+  `OnceLock` "for the process's life" as the Context for an asset read,
+  so after a recreation the process kept the FIRST, destroyed one
+  forever. It stores `getApplicationContext()` now (`APP_CONTEXT`).
+  Everything else attach retains — the JavaVM and two class global refs —
+  was already application-scoped.
+  THE MANIFEST DOES NOT ABSORB, and the number is why. Re-attach costs
+  78ms (compose), 91ms (go), 91ms (jvm), measured end to end on the
+  android lane 2026-08-27 — `KAYA_REMOUNT: recreating` to `re-attached`,
+  destroy plus create plus first draw, same pid. Absorption is an
+  optimization on a correctness floor that now exists, and it is not a
+  free one: `android:configChanges="uiMode"` stops the platform
+  re-resolving the manifest theme's `windowBackground`, which is the
+  half-dark app D1 exists to have fixed, so absorbing means re-applying
+  the window background on every absorbed change and a check-appearance
+  clause to hold it. 80ms on a rotation does not buy that. REOPEN IT if
+  a real app is ever measured losing something visible across a
+  re-attach; the ecosystem's flag lists (Flutter 11, SDL 13, Godot 11)
+  are in the research file, and Google's own "It is impossible to
+  entirely disable Activity recreation" is why they are optimizations
+  there too.
+  THE PROOF RUNS ON EVERY ANDROID LANE, not behind a flag:
+  `remount-compose`, `remount-jvm` and `remount-go` run `todos` with
+  `KAYA_RECREATE_AFTER=6`, so `Activity.recreate()` fires mid-scene and
+  the remaining eight statements — menu enablement, two menu
+  activations, a field-level toggle and four label reads — run against
+  the NEW view tree over the OLD process's model, once per guest tier.
+  `remount-nav-compose` is the PER-WINDOW half beside them, which
+  `todos` cannot reach: `nav` under `KAYA_APPEARANCE=dark`, cut so a
+  title read is the very next statement, because a title is materialized
+  ON the Activity here (`expect_title` reads `activity.title`) and a
+  re-created one answers "Aurora Notes" — the manifest label — until the
+  model is written back onto it, measured.
+  `run_apk_on` greps the harness's two sentences (the one naming the
+  statement it cut after, which is how a scene edit that shifts the
+  count fails naming both sides) and counts `KAYA_PRESENTATION` at two
+  or more, since the core latches the last report and a composition that
+  never re-reports moves nothing observable. Beside them two witnesses
+  inside the harness's own recreate: `kayaSecondMountThreads`, because a
+  second pump or a second script runner is invisible to every assertion
+  a scene can make (two pumps drain one core and two runners publish the
+  same green verdict, of which the lane reads the first); and
+  `appearanceAppliedTo`, because the override's window-background write
+  is the one half of the appearance that is per-window, and no scene can
+  see a window background at all.
+  WATCHED FAILING, all six, on a device: the rust latch removed ->
+  `kaya: menu item id MenuItemId(1) already exists`; the go latch removed
+  -> the second goroutine's app-thread panic; `KayaRing.startGuest`'s
+  latch removed -> a second `Todos.app()` and the FATAL EXCEPTION this
+  entry was filed for, now naming the cause (`a second App in this
+  process`) instead of a thread; the per-process work un-gated -> "2
+  named kaya-compose-pump, 2 named kaya-selftest"; `refreshNavTitle`
+  removed -> `title "Aurora Notes", wanted "detail"`; the appearance
+  install moved into the first-mount branch -> the per-window refusal.
+  `tools/java-typecheck.sh` runs the KayaApp backstop off-device on every
+  gate sweep, watched failing against a copy with the latch removed.
 - A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
   assigned track (found while landing the depth slice 2026-08-26). The
   core rasters at the VIEWBOX times the reported scale, and the backend
