@@ -144,14 +144,30 @@ the pure-Python kaya binding and the guest scenes in the app tree
 (`<Resources>/app` on iOS, `assets/python/.../site-packages` on
 Android). iOS extension modules go through the artifact's own
 "Process Python libraries" phase — the `.fwork` conversion and
-per-module codesign are its job, not ours.
+per-module codesign are its job, not ours. THE SIMULATOR LANE IS
+EXEMPT from that shape: tools/ios/run-sim.sh builds hand-rolled
+bundles with swiftc (no Xcode project), and the frameworks-only rule is an App
+Store submission rule, not a simulator runtime rule — so the depth
+slice stages the stdlib and lib-dynload as plain directories,
+MEASURES that an in-place `.so` imports on the sim before relying on
+it, and the `.fwork` conversion becomes real work only when a DEVICE
+artifact does (docs/deferred.md's iOS-identity entry is the
+precedent for simulator-only proof).
 
 ### D6 — sequencing: prove the one unproven measurement first
 
-0. **The force_load proof on the simulator.** The research measured
-   `CDLL(None)`-reaches-static-archive on macOS; the same Mach-O/dyld
-   claim on a real simulator run is step zero, before any plan step
-   stands on it.
+0. **The force_load proof on the simulator.** PROVEN 2026-08-28, the
+   day the plan was ratified: a 25-line C probe doing exactly what
+   ctypes does — `dlopen(NULL, RTLD_NOW)` + `dlsym("kaya_spec_hash")`
+   — was compiled twice against the lane's own verified
+   `target/aarch64-apple-ios-sim/debug/libkaya.a`
+   (`xcrun -sdk iphonesimulator clang -target
+   arm64-apple-ios17.0-simulator`, the frameworks the swift guests
+   link) and run on a booted pool simulator via `simctl spawn`. Plain
+   link: `dlsym = NULL`, silently, nothing else wrong. With
+   `-Wl,-force_load`: the symbol resolved AND called, answering
+   `1cd31581dd9eb228` — byte-identical to the python binding's
+   `wire.SPEC_HASH`. Both directions on the real platform; D3 stands.
 1. iOS depth slice: interpreter into the existing sim app,
    `portfolio-python` leg green on the sim lane, startup cost
    measured (invariant 8 — if source-compilation or extraction
