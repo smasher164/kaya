@@ -259,6 +259,41 @@ def census(src):
             f"with no verdict)"
         )
 
+    # --- A5. The ink verb reads the SURFACE's mode, never the ambient. ---
+    # `UITraitCollection.current` is defined only inside a UIKit trait
+    # callback or a view update; kayaCanvasAppearance runs on the HARNESS
+    # thread with no view in hand, so what it reads there is whatever
+    # traits UIKit last pushed on the main thread — with a WINDOW-scoped
+    # override that is the SYSTEM's appearance, not the app's. Measured on
+    # the ios lane 2026-08-27: the raster was dark and the verb compared
+    # against the light half, per-boot stable.
+    # The other two ambient reads in this file are LEGITIMATE and
+    # deliberately not covered: kayaBrandTint and kayaPlatformFont are
+    # reached only from view bodies, where `.current` is exactly what
+    # SwiftUI has set.
+    start = swift.find("func kayaCanvasAppearance()")
+    if start < 0:
+        out.append(
+            f"{MAC}: no `func kayaCanvasAppearance()` — this clause is blind"
+        )
+    else:
+        body = swift[start:start + 900]
+        if "UITraitCollection.current" in body:
+            out.append(
+                f"{MAC}: kayaCanvasAppearance reads UITraitCollection.current "
+                f"— that ambient value is undefined off a trait callback, and "
+                f"the harness thread is exactly that; it reported the SYSTEM's "
+                f"mode while the raster used the window's (ios lane, "
+                f"2026-08-27). Read the window's own traitCollection"
+            )
+        if "traitCollection.userInterfaceStyle" not in body:
+            out.append(
+                f"{MAC}: kayaCanvasAppearance no longer reads a window's own "
+                f"traitCollection — the mode must come from the surface whose "
+                f"pixels the verb reports on, and it must stay a TOOLKIT "
+                f"read-back so the dark leg cannot become self-fulfilling"
+            )
+
     # --- B2. SwiftUI may not use .preferredColorScheme for this. ---------
     # It moves \.colorScheme and leaves NSApp.effectiveAppearance on the
     # host's — the two-reading divergence kayaCanvasAppearance warns of.
@@ -380,7 +415,14 @@ g.negative(
         "tools/deploy-win.sh", r"run_suite canvasdark_rust", "run_suite canvas_rust", "N10")),
     want="the windows lane has no dark canvas leg",
 )
-g.negatives_ran(12)
+g.negative(
+    "N11 the ink verb back on the ambient trait collection",
+    lambda: census(without(
+        MAC, r"window\.traitCollection\.userInterfaceStyle == \.dark",
+        "UITraitCollection.current.userInterfaceStyle == .dark", "N11")),
+    want="reads UITraitCollection.current",
+)
+g.negatives_ran(13)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

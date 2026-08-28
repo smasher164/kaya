@@ -512,7 +512,23 @@ in docs/deferred.md.
    `-night` theme the system would have picked, and provides
    `LocalConfiguration` with the night bits forced; either half alone is
    the measured half-dark app D1 exists to have fixed.
-   Twelve watched negatives, counts printed. The runtime halves are the legs:
+   AND THE READ'S SCOPE MUST MATCH THE OVERRIDE'S, which is the iOS
+   clause and the rule the other three obey for free: macOS overrides
+   `NSApp.appearance` and reads `NSApp.effectiveAppearance`, both APP
+   scope, so they cannot drift — while iOS overrides per WINDOW and
+   `kayaCanvasAppearance` read `UITraitCollection.current`, a
+   process-ambient value UIKit defines only inside a trait callback or a
+   view update. That function runs on the HARNESS THREAD with no view in
+   hand, so it reported the SYSTEM's light while the raster used the
+   window's dark: `ink light 16181C/2B3B4F`, stable across a boot rather
+   than flickering, green for many runs and then red twice (ios lane,
+   2026-08-27). It reads the window's own `traitCollection` now, which is
+   still a toolkit read-back. The gate refuses `.current` inside that one
+   function and demands the window read; the file's two OTHER ambient
+   reads are deliberately untouched and audited, since `kayaBrandTint`
+   and `kayaPlatformFont` are reached only from view bodies where
+   `.current` is exactly what SwiftUI set.
+   Thirteen watched negatives, counts printed. The runtime halves are the legs:
    `canvas-*` is the unset proof and `canvasdark-*` the set proof, on all
    five lanes),
    `tools/check-abort.sh` (uniform abort

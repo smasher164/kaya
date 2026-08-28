@@ -10621,12 +10621,49 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
 /// palettes; the raster's own mode is the one in `kaya_presentation`.
 @MainActor func kayaCanvasAppearance() -> String {
     #if os(macOS)
+        // APP SCOPE ON BOTH SIDES, which is why this one cannot drift: the
+        // override sets `NSApp.appearance` and this reads
+        // `NSApp.effectiveAppearance`, which returns it.
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     #else
-        let dark = UITraitCollection.current.userInterfaceStyle == .dark
+        // NOT `UITraitCollection.current`, and the rule it broke is worth
+        // stating: THE READ'S SCOPE MUST MATCH THE OVERRIDE'S. On iOS the
+        // override is per-WINDOW (`overrideUserInterfaceStyle`) while
+        // `.current` is a process-ambient value UIKit defines only inside a
+        // trait callback or a view update. This function runs on the
+        // HARNESS THREAD with no view in hand, so `.current` was whatever
+        // traits UIKit last pushed — the SYSTEM's light — while the raster
+        // used the window's dark. Measured on the ios lane 2026-08-27:
+        // `ink light 16181C/2B3B4F`, the dark palette reported as light,
+        // stable across a boot rather than flickering per read.
+        // The window's own `traitCollection` is a TOOLKIT read-back, so the
+        // dark leg stays a real proof (tools/check-appearance.sh's
+        // self-fulfilling clause) rather than an echo of the variable.
+        guard let window = kayaHarnessWindow() else {
+            return "<no window to read an appearance from>"
+        }
+        let dark = window.traitCollection.userInterfaceStyle == .dark
     #endif
     return dark ? "dark" : "light"
 }
+
+#if !os(macOS)
+    /// The window the ink verb's pixels belong to: the key window, or the
+    /// first window of the first scene when nothing is key yet.
+    ///
+    /// Returning nil rather than guessing is deliberate — the caller turns
+    /// it into a bracketed answer that fails the comparison loudly, which
+    /// is what a mode nobody could measure should do. A silent "light"
+    /// would be the same defect this replaced.
+    @MainActor func kayaHarnessWindow() -> UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            if let key = scene.windows.first(where: { $0.isKeyWindow }) { return key }
+        }
+        return scenes.first?.windows.first
+    }
+#endif
 
 /// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance.
 ///
