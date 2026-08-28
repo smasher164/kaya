@@ -806,3 +806,40 @@ Measured locally on this machine, 2026-08-28 (macOS, Apple Silicon):
   plain `-lfoo` link, callable with `-Wl,-force_load`.
 - `ctypes.CDLL(None).Py_GetVersion()` returned `b'3.14.7 ...'` under a `python3`
   whose only `otool -L` entry is `libSystem.B.dylib`.
+
+
+---
+
+## Addendum (2026-08-28, same day): can nixpkgs supply the TARGET interpreter too?
+
+Asked by the maintainer after the flake pin landed; answered from
+primary sources rather than assumption.
+
+- **The cpython derivation has no mobile arm.** Read at the exact
+  nixpkgs rev flake.lock pins (391b592e):
+  `pkgs/development/interpreters/python/cpython/default.nix` mentions
+  neither iOS nor Android nor bionic nor PEP 730/738 anywhere, and its
+  `meta.platforms` is `lib.platforms.linux ++ darwin ++ windows ++
+  freebsd`. Its only cross arms are MinGW and FreeBSD.
+- **The pkgsCross road those targets would need is documented broken.**
+  `pkgsCross.iphone64` cannot build `hello` today: "Unsupported sdk"
+  (https://github.com/NixOS/nixpkgs/issues/361934), missing C headers
+  (https://github.com/NixOS/nixpkgs/issues/171537), infinite recursion
+  cross-building to the simulator from darwin
+  (https://github.com/NixOS/nixpkgs/issues/177557). A from-source iOS
+  CPython derivation would stand on that base AND need Xcode inside the
+  sandboxed build, to reproduce an artifact CPython's own CI builds and
+  tests.
+- **Android is the same shape**: `pkgsCross.aarch64-android` serves
+  C-level NDK builds, but cpython does not build for bionic in nixpkgs,
+  and python-for-android/Chaquopy exist because that build is
+  specialized (renamed sonames, the assets/jniLibs split — §4).
+- **What nixpkgs DOES supply**: the HOST interpreter, and `python315`
+  exists at the locked rev as 3.15.0rc1 — patch-identical to the
+  target artifact today — which is what makes the fan-out host bump
+  (plan §D1) a one-line alignment.
+
+Conclusion: nix pins both halves; nixpkgs compiles one of them.
+python.org's binaries enter the flake the way apple-sdk_26 and the
+Android SDK already do — a prebuilt vendor artifact as a pinned,
+content-addressed input.

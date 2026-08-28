@@ -80,7 +80,17 @@ shell's own python3 moves to 3.15 from the same pinned nixpkgs, so
 the three desktop lanes and the two mobile lanes format every scene
 string under ONE interpreter version. Not before — a shell bump moves
 the fingerprint and reruns every gate for lanes that do not exist
-yet.
+yet. FROM THEN ON THE TWO PINS MOVE TOGETHER — the flake's fetchurl
+version and the shell's pythonXX attribute in one edit — and the
+byte-compared scene strings are the standing detector of a skew
+nobody noticed. The maintainer asked whether nixpkgs could supply
+BOTH halves and the answer is measured, not assumed
+(docs/probes/mobilepkg-cpython-2026.md, addendum): the cpython
+derivation at the locked rev declares linux/darwin/windows/freebsd
+and nothing mobile, and the pkgsCross.iphone64 road is documented
+broken upstream — so nixpkgs compiles the HOST bytes, python.org
+compiles the TARGET bytes, and the flake pins both, exactly as it
+already does for apple-sdk_26 and the Android SDK.
 
 ### D2 — the entry point: the Go ruling, generalized (docs/go-mobile-plan.md §D5)
 
