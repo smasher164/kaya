@@ -3313,20 +3313,26 @@ count, so the saving is measured rather than assumed.
     JVM's readers report the mirrored space for the life of the
     process, so dropping the correction reds it (docs/traps.md holds
     the full measurement).
-  - **THE PORTFOLIO'S DRAWN MARK IS IMPLEMENTED AND HELD, awaiting the
-    maintainer's visual ruling.** The wave delivered it (a 28x28 `fixed`
-    sparkline chip with frozen drawing, hash and ink) and its own
-    capture showed the scene-blind failure: inserted as a column child
-    it took a share of the column's leftover, so the chip floats
-    centred in empty space and the chart moved to the column's bottom —
-    every assertion green, the dashboard's face rearranged. Visuals are
-    the maintainer's, so the whole change is held as the coordinator's
-    `mark-held.patch` (guest block + scene expectations) rather than
-    shipped ugly. The wave's original blocker — no GTK/WinUI track
-    reports — closed in this same merge, so when the placement is
-    ruled the scene can also take `expect_raster canvas@mark "viewbox"`
-    (portable: `fixed` rasters at the viewbox everywhere) and the
-    declaration stops being inert.
+  - ~~**THE PORTFOLIO'S DRAWN MARK IS IMPLEMENTED AND HELD, awaiting the
+    maintainer's visual ruling.**~~ — CLOSED 2026-08-28, placement ruled
+    INLINE WITH THE TITLE: the 28x28 `fixed` chip sits in a hugging row
+    before label#0, where it can take no share of the column's leftover
+    (as a bare column child it did — the chip floated centred in empty
+    space with the chart pushed to the column's bottom, every assertion
+    green, which is why the wave held it for the ruling instead of
+    shipping ugly). Applied with the draw ops INLINED at the call site
+    per the maintainer's preference — `draw_mark` existed only to ape
+    `draw_chart`, which is a function because it re-runs per Day tick;
+    the mark never redraws. The wave's hope that the scene could take
+    `expect_raster canvas@mark "viewbox"` once the backends reported
+    tracks was WRONG, and the line was tried and measured failing: an
+    ungrown chip's track IS its viewbox, both answers are true at once,
+    and the core's precedence (scene.rs's canvas_raster_shape) says
+    "track" — a policy is observable only where track and viewbox
+    differ, which is why sizepolicy.steps' canvases all grow and why
+    that scene keeps `fixed`'s assertion. The mark carries drawing,
+    hash and ink — the wave's frozen strings, since placement moves no
+    pixel of the drawing itself.
   - ~~**DEPTH STUB: sizepolicy on gtk**~~ — LANDED 2026-08-28: the GTK
     arm reports each canvas's allocation to `Scene::set_canvas_track` off
     the window's own `GtkTickCallback` and drives the frame clock from

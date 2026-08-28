@@ -203,13 +203,11 @@ def on_positions_sort(account, column):
 # everything below is ordinary python over the price history, spoken to
 # the core as the op vocabulary of §3.3 in the paint roles of §3.4.
 #
-# THE CANVAS IS AT ITS NATURAL SIZE — no grow, in a hugging column — and
-# that is deliberate. The size policy's `scale`/`fixed`/`redraw`
-# declaration (ruling 12) is not built: no prop exists in the spec, the
-# core rasterizes at the viewbox and every backend still stretches that
-# image into its track. At the natural size the three modes coincide, so
-# this chart is exact and unstretched on all three desktop lanes today
-# and needs no re-look when the declaration lands.
+# THE CHART IS AT ITS NATURAL SIZE — no grow, in a hugging column — where
+# `scale` (the default, declared by writing nothing) and every other
+# policy coincide, because an ungrown canvas's track IS its viewbox
+# (docs/canvas-plan.md §3.2.1). The mark below is the other half of that
+# ruling: the one canvas here whose track is NOT its viewbox.
 CHART_BOX = (280.0, 180.0)
 # The plot rect inside the box: a left gutter for the money labels, a
 # bottom gutter for the dates. INSET ON PURPOSE — a drawing that filled
@@ -219,6 +217,20 @@ PLOT = (44.0, 12.0, 274.0, 150.0)
 CHART_DAYS = 90
 # Half the last point's marker square.
 MARK = 2.5
+
+# THE DRAWN MARK beside the dashboard's title, `fixed`'s forcing artifact
+# (docs/canvas-plan.md §3.2.1, ruling 3): this drawing is 28x28 and does
+# not adapt to whatever track layout hands it. Ungrown because a title
+# chip is its natural size by design — where track and viewbox coincide,
+# every policy agrees, and `expect_raster` cannot see this declaration
+# (the scene's comment carries the measurement); the declaration is the
+# app saying the true thing about the drawing, and its forcing assertion
+# rides tools/scenes/sizepolicy.steps, whose canvases grow.
+MARK_BOX = (28.0, 28.0)
+# The mark's rising line in MARK_BOX units, closed down to a baseline for
+# the filled area under it — the chart's own grammar at glyph size.
+MARK_LINE = [(2.0, 13.0), (9.0, 7.0), (16.0, 11.0), (26.0, 3.0)]
+MARK_AREA = MARK_LINE + [(26.0, 26.0), (2.0, 26.0)]
 
 
 def axis_band(low, high):
@@ -515,7 +527,24 @@ with app.window(title="portfolio", width=900, height=600):
     book_size = kaya.signal(f"Transactions: {len(txns)}")
     with kaya.row():
         with kaya.column():
-            kaya.label(bind=portfolio_value)  # label#0
+            # THE DRAWN MARK, inline with the title (the placement ruling,
+            # 2026-08-28): a row hugs its content, so the chip can take no
+            # share of the column's leftover — as a bare column child it
+            # did, floating centred in empty space with the chart pushed
+            # to the column's bottom and every assertion green.
+            with kaya.row(align="center"):
+                mark = kaya.canvas(MARK_BOX, fixed=True)
+                mark.a11y_id("mark").a11y_label("kaya portfolio mark")
+                with mark.draw() as d:
+                    # The ground mound under the translucent series fill
+                    # is what makes the centre opaque — expect_ink samples
+                    # hundredths of the canvas's own box, and a
+                    # translucent probe point would read the compositor's
+                    # ground instead of the palette's.
+                    d.polyline(MARK_AREA).close().fill("ground")
+                    d.polyline(MARK_AREA).close().fill("series_fill")
+                    d.polyline(MARK_LINE).stroke("series", width=2)
+                kaya.label(bind=portfolio_value)  # label#0
             kaya.label(bind=book_size)  # label#1
             # THE CHART, beside the account tables in a column that hugs,
             # so the canvas is laid out at the natural size its viewbox

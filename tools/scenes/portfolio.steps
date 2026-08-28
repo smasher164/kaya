@@ -83,6 +83,29 @@ expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2E3F7 dark 16181C/212A35"
 # byte, because the series' last point is the live book — the same
 # discipline the ledger's `label@net` carries on the other screen.
 expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10026.50"
+# THE DRAWN MARK beside the title, `fixed`'s forcing artifact
+# (docs/canvas-plan.md §3.2.1, ruling 3). NO `expect_raster` HERE, and
+# now for the structural reason: this chip is ungrown, so its track IS
+# its viewbox, both of the verb's answers are true at once, and the
+# core's own precedence (scene.rs's canvas_raster_shape) says "track" —
+# measured, not argued, when the line was tried 2026-08-28. A policy is
+# observable only where track and viewbox differ, which is why every
+# canvas in tools/scenes/sizepolicy.steps GROWS; that scene carries
+# `fixed`'s assertion, this one carries the drawing.
+# Derived by crates/kaya/src/canvas.rs's
+# the_portfolio_mark_expectations_are_derived, never typed from a
+# platform's read: the op count and the ink bounds, then the byte-exact
+# hash that says this lane's libkaya drew the same pixels as the other
+# two.
+expect_drawing canvas@mark "21/4,7,96,93"
+expect_drawing_hash canvas@mark "29abce8483ccc343"
+# THE CENTRE, and only the centre: this verb samples hundredths of the
+# canvas's own BOX, and the day the mark grows, a `fixed` drawing sits
+# centred in a track it does not fill — an edge probe would land in the
+# margin then and say nothing about the mark. The colours are the pair
+# the chart's filled region freezes, and necessarily: the same two
+# paints, `series_fill` composited over `ground` (§7.2, ±1 per channel).
+expect_ink canvas@mark "50,50 = light D2E3F7 dark 212A35"
 expect_window_size 900x600
 expect_aligned column@detail "stretch"
 expect_aligned column@accounts "stretch"
