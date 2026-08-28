@@ -1022,6 +1022,14 @@ roles of §3.4 resolve to kaya's own colours for light mode and dark
 mode; only the MODE BIT crosses from the platform. The core re-rasters
 on an appearance change, the same way it re-rasters on a scale change.
 
+RULED 2026-08-27, off mocked captures: the DARK series fill runs at
+alpha 0x1E where light keeps 0x33 — at the light-derived alpha the wash
+under the line read as a drop shadow against the near-black well at
+phone size, and the maintainer picked the half-strength version from a
+three-way capture (full, half, none). The dark ink string moved with it
+(fill probe 2B3B4F -> 212A35), derived by canvas.rs's own unit test as
+always, never typed from a platform read.
+
 This is flagged rather than ruled because it is a sub-choice inside
 ruling 1 that the maintainer has not personally decided. The alternative
 is sub-option (i): the backend resolves platform role colours and hands

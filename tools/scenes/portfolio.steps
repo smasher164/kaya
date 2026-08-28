@@ -76,7 +76,7 @@ expect_drawing_hash canvas@chart "98ad246fcf87c572"
 # rasterizes and prints for both modes. Never retyped from a platform's
 # read; this verb alone compares within ±1 per channel, because a macOS
 # window's backing store carries the display's profile (§7.2).
-expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F"
+expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2E3F7 dark 16181C/212A35"
 # A DRAWING IS AN IMAGE to every platform's accessibility tree, and the
 # numbers a screen reader is told are the app's own (§9). This line is
 # also the chart's TIE-OUT said out loud: `now` is label#0's money to the

@@ -81,7 +81,7 @@ expect_drawing_hash canvas@chart "e5ac8a2c0b240633"
 # prints both pixels of each), never from a platform's read — the dark
 # pair was guessed wrong by one on each of two channels before it was
 # derived.
-expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F"
+expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/212A35"
 # AND THE CANVAS IS A WIDGET, with a widget's universal props: a drawing
 # is an IMAGE to every platform's accessibility tree and the app authors
 # the spoken name (§9). Nothing here builds a semantics tree out of the

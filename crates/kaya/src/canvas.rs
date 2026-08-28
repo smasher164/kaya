@@ -402,7 +402,7 @@ const PALETTE_LIGHT: [(i64, u32); 5] = [
 
 const PALETTE_DARK: [(i64, u32); 5] = [
     (wire::PAINT_SERIES, 0x6EA8F0FF),
-    (wire::PAINT_SERIES_FILL, 0x6EA8F03D),
+    (wire::PAINT_SERIES_FILL, 0x6EA8F01E),
     (wire::PAINT_GRID, 0x2C313AFF),
     (wire::PAINT_AXIS, 0xA9B1BFFF),
     (wire::PAINT_GROUND, 0x16181CFF),
@@ -958,7 +958,7 @@ mod tests {
         };
         assert_eq!(
             format!("{} {}", ink(Mode::Light, "light"), ink(Mode::Dark, "dark")),
-            "light FFFFFF/D2E3F7 dark 16181C/2B3B4F",
+            "light FFFFFF/D2E3F7 dark 16181C/212A35",
             "tools/scenes/canvas.steps freezes exactly this string, and expect_ink \
              allows each channel ±1 around EACH MODE's half"
         );

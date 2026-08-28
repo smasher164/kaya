@@ -2962,7 +2962,7 @@ count, so the saving is measured rather than assumed.
   CLOSED 2026-08-27, by the second of the two routes this entry named —
   the scene carries both modes' strings:
 
-      expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/2B3B4F"
+      expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/212A35"
 
   The RHS is alternating mode word and colour run; each harness selects
   the half its own appearance names (`ink_for_mode` in harness.rs,
