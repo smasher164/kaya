@@ -1179,6 +1179,27 @@ guest's transactions have not arrived yet at that point, so the scene
 legitimately looks empty. On the failure path it also cannot
 false-positive on a scene that mounts late.
 
+## A hand-run resize_window poisons the NEXT python leg on macOS
+
+2026-08-29. A mac lane came back with one failure, `grow-python-swiftui`
+— "root hugs (240x640pt inside 208x640pt)" — in a scene that has no
+table, no resize and nothing to do with the change under test. Run
+alone, the same leg passed.
+
+The cause was outside the lane: minutes earlier I had driven the
+PORTFOLIO guest by hand with `resize_window 240x700` to measure column
+positions. Every python leg on this lane runs as the same executable and
+therefore the same app identity, so macOS restored that 240pt frame for
+the next python guest that opened a window, and the scene's
+`expect_root_fills` correctly reported a root that no longer filled it.
+
+So a hand-run resize is not free: it leaves state the lane inherits, and
+it lands on a DIFFERENT leg from the one you were probing, which is what
+makes it read as a regression in the change under test. Re-run the lane
+before believing a single unexplained geometry failure that follows
+hand-driven resizing, and prefer probing a scene whose guest is not
+python if the lane is going to run afterwards.
+
 ## A stamped half-extracted Python tree never repairs itself
 
 2026-08-28. The pyhost extracts assets/python into filesDir behind a

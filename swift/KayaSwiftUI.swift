@@ -8995,7 +8995,21 @@ private struct KayaNativeTable: View {
             tableView.headerView = header
             scrollView.documentView = tableView
             scrollView.hasVerticalScroller = true
-            scrollView.hasHorizontalScroller = false
+            // A TABLE WIDER THAN ITS TRACK SCROLLS (docs/tables-plan.md,
+            // ruled 2026-08-29). `noColumnAutoresizing` above is
+            // content-is-the-floor, so the document view is simply WIDER
+            // than the clip view when the columns do not fit — with the
+            // scroller off, those columns were unreachable rather than
+            // absent, which is the silent clip this ruling ends.
+            //
+            // OVERLAY, stated rather than inherited, for the reason
+            // gtk.rs states at its own table body: a scroller that takes
+            // space takes it from the body and not the header, and the
+            // edge reader calls that content underfill. Overlay takes
+            // none, so a table that FITS is byte-identical to before.
+            scrollView.hasHorizontalScroller = true
+            scrollView.scrollerStyle = .overlay
+            scrollView.autohidesScrollers = true
             scrollView.drawsBackground = true
             scrollView.automaticallyAdjustsContentInsets = false
             // ZERO, deliberately: the 5pt above the first row is the
