@@ -8696,7 +8696,17 @@ container layout recorded". TWO consequences, one fixed and one held:
   only one.
   KEY: pyhost extraction, kaya-stamp, importlib, extractPython
 
-- **GAP — the mac native table cannot yet be REACHED when it overflows**
+- **GAP — the mac NATIVE table cannot yet be reached when it overflows**
+  (the iOS SYNTHESIZED tier was the same gap and CLOSED 2026-08-29: its
+  layout answers `min(total, proposal)`, places every column at an offset
+  the view owns, clips, and takes a drag; the columns' axis got its OWN
+  registry because an ungrown table has no scroll proxy and putting it in
+  kayaTableWindows made expect_window read a row window it does not have;
+  and the track it records is the CARD'S INTERIOR, not the layout's box —
+  reporting the outer width said "content 290 in viewport 290" for a table
+  whose cells were convicted of standing 11pt outside a 279pt viewport.
+  Proven on the simulator both ways: "short of end (content bottom 258 vs
+  viewport 290)" before the scroll, reached after.)
   (found 2026-08-29, building the table-overflow ruling)
   KEY: mac table reachability, minWidth idealWidth, sizeThatFits,
   hasHorizontalScroller, documentVisibleRect, clip parks at trailing edge,
@@ -8742,6 +8752,14 @@ container layout recorded". TWO consequences, one fixed and one held:
   viewport", "a resized table refreshes its viewport and assigned track:
   got false", and both generation clauses. Reverted.
 
+  THE MAC IS THE ONE TIER LEFT, and four attempts say why. The chain
+  above it proposes concretely — KayaCell places its child with
+  `ProposedViewSize(width: bounds.width, ...)` — so the squeeze does
+  reach the table's door; what it meets there is `.frame(minWidth:
+  contentWidth)`, which answers the CONTENT to every proposal and so
+  widens every container above it. Measured: a 430pt table arrives as a
+  430pt PROPOSAL inside a 320pt window.
+
   A THIRD ATTEMPT, and the one that says where the real problem is
   (2026-08-29): answer the two wants PER PROPOSAL, in the
   representable's own `sizeThatFits` — content for an unspecified width
@@ -8762,9 +8780,36 @@ container layout recorded". TWO consequences, one fixed and one held:
   AppKit, and it is where the next attempt should start — NOT at another
   frame or wrapper on the table itself.
 
-  So the wrapper work, when it happens, is: the wrapper records the
-  VIEWPORT (its own size) and the table records the CONTENT (its frame),
-  and every clause that reads a viewport reads the wrapper's. That is a refactor of this tier's
+  A FOURTH ATTEMPT CLOSED THE LOOP AND FOUND THE REAL BLOCKER. Answering
+  per proposal in the representable's `sizeThatFits` — content for an
+  unspecified width, the offer for a concrete one — plus capping the HUG
+  so it never exceeds the window, makes the mac scroll: the wide scene
+  passes both halves and the columns are reachable. Apple's own contract
+  says this is the only lever there is: "Returning a value of `nil`
+  indicates that the system should use the default sizing algorithm" and
+  "one of the values returned from this function will always be used as
+  the actual size" — and Apple never defines that default, which is where
+  the undocumented 430 came from (docs/probes/swiftui-sizing-2026.md).
+
+  WHAT IT COLLIDES WITH is ruling A's own guard, and this is the
+  maintainer's call rather than a bug: check-table-tier asks the hug
+  inside a 200pt window and requires `clip >= content`, which in a window
+  that cannot widen MEANS "the table overflows its window" — the exact
+  answer the overflow ruling replaces with scrolling. At 200pt the two
+  rulings say opposite things. Moving the probe to a window with ROOM and
+  asking for the ideal with `fixedSize` keeps its teeth (a tier that
+  publishes no content width answers ~10pt there) and lets both rulings
+  hold, but it AMENDS A RULED GUARD, so it waits.
+
+  A CAP IN KayaFlex INSTEAD IS NOT THE ANSWER, measured: it changes what a
+  PHONE renders — content that used to run off-screen now fits, and the
+  varied scene's frozen band moved from 150 rows to 147 on iOS while every
+  other platform still reads 150. One shared scene cannot hold two numbers.
+
+  So the wrapper work, if it is ever wanted instead, is: the wrapper
+  records the VIEWPORT (its own size) and the table records the CONTENT
+  (its frame), and every clause that reads a viewport reads the
+  wrapper's. That is a refactor of this tier's
   instrumentation rather than a layout tweak — and it PAYS FOR ITSELF,
   because `expect_overflow` then compares kaya's own recorded pair
   instead of reaching into AppKit, which is the reading the SYNTHESIZED

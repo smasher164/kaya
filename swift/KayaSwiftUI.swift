@@ -5955,14 +5955,17 @@ private func kayaRunScript(_ script: String) {
                             failures.append(
                                 "\(parts[1]) cells start at \(Int(inside.rounded()))pt inside a "
                                     + "\(Int(viewport.width.rounded()))pt viewport")
-                        } else if !kayaTableFramesFitHorizontally(frames, inside: viewport),
+                        } else if !kayaTableFramesFitHorizontally(
+                            frames, inside: viewport,
+                            reach: kayaTableColumnsReach(parts[1])),
                             let bounds = kayaTableBounds(frames)
                         {
                             failures.append(
                                 "\(parts[1]) cells occupy "
                                     + "\(Int(bounds.minX.rounded()))...\(Int(bounds.maxX.rounded()))pt "
                                     + "outside viewport "
-                                    + "\(Int(viewport.minX.rounded()))...\(Int(viewport.maxX.rounded()))pt")
+                                    + "\(Int(viewport.minX.rounded()))...\(Int(viewport.maxX.rounded()))pt "
+                                    + "that scrolls \(Int(kayaTableColumnsReach(parts[1]).rounded()))pt")
                         } else {
                             observed.append("\(parts[1]) column edges \(want)")
                         }
@@ -6415,11 +6418,20 @@ private func kayaRunScript(_ script: String) {
                         return
                     }
                     // The table arm, expect_overflow's rule: the columns.
+                    guard let table = kayaTarget(parts[1], "column", kayaScene.columns)
+                    else { return }
                     #if os(macOS)
-                        if let node = kayaTarget(parts[1], "column", kayaScene.columns) {
-                            kayaTableDrivers[node.id]?.scrollToTrailingEdge()
+                        if let driver = kayaTableDrivers[table.id] {
+                            driver.scrollToTrailingEdge()
+                            return
                         }
                     #endif
+                    if let window = kayaTableColumnAxes[table.id] {
+                        window.columnsOffset = max(
+                            0,
+                            window.placement.columnsContent
+                                - window.placement.columnsViewport)
+                    }
                 }
             case "expect_at_end":
                 // The content's bottom edge coincides with the
@@ -8373,28 +8385,38 @@ func kayaCurrentTableTrackWidth(_ table: KayaNode) -> Double? {
 /// the fan-out, and until it lands the verbs say that rather than claiming
 /// the target does not exist.
 func kayaTableHorizontal(_ spec: Substring) -> (content: Double, viewport: Double)? {
+    guard let node = kayaTarget(spec, "column", kayaScene.columns) else { return nil }
     #if os(macOS)
-        guard let node = kayaTarget(spec, "column", kayaScene.columns),
-            let driver = kayaTableDrivers[node.id]
-        else { return nil }
-        return driver.horizontalExtents()
-    #else
-        _ = spec
-        return nil
+        if let driver = kayaTableDrivers[node.id] { return driver.horizontalExtents() }
     #endif
+    // The SYNTHESIZED tier's own pair, measured by its layout into the
+    // placement box (docs/tables-plan.md, ruled 2026-08-29).
+    guard let window = kayaTableColumnAxes[node.id], window.placement.columnsViewport > 0
+    else { return nil }
+    return (Double(window.placement.columnsContent),
+            Double(window.placement.columnsViewport))
+}
+
+/// The columns' granted scroll for a table target: what `expect_column_edges`
+/// must forgive before it convicts cells of standing outside the viewport.
+func kayaTableColumnsReach(_ spec: Substring) -> CGFloat {
+    guard let pair = kayaTableHorizontal(spec) else { return 0 }
+    return CGFloat(max(0, pair.content - pair.viewport))
 }
 
 func kayaTableTrailing(_ spec: Substring) -> (Double, Double)? {
+    guard let node = kayaTarget(spec, "column", kayaScene.columns) else { return nil }
     #if os(macOS)
-        guard let node = kayaTarget(spec, "column", kayaScene.columns),
-            let driver = kayaTableDrivers[node.id]
-        else { return nil }
-        let edges = driver.trailingEdges()
-        return (edges.visible, edges.content)
-    #else
-        _ = spec
-        return nil
+        if let driver = kayaTableDrivers[node.id] {
+            let edges = driver.trailingEdges()
+            return (edges.visible, edges.content)
+        }
     #endif
+    guard let window = kayaTableColumnAxes[node.id], window.placement.columnsViewport > 0
+    else { return nil }
+    // Where the visible trailing edge sits against the content's.
+    return (Double(window.columnsOffset + window.placement.columnsViewport),
+            Double(window.placement.columnsContent))
 }
 
 func kayaTableContentTrack(_ track: Double, pad: CGFloat, synthesized: Bool) -> Double {
@@ -8464,12 +8486,18 @@ func kayaTableBounds(_ frames: [CGRect]) -> CGRect? {
     return frames.dropFirst().reduce(first) { $0.union($1) }
 }
 
+/// CELLS PAST THE VIEWPORT ARE A DEFECT ONLY IF THEY CANNOT BE REACHED
+/// (docs/tables-plan.md, ruled 2026-08-29) — gtk.rs's `ContentUnreachable`
+/// and Compose's `ColumnsUnreachable` in this file's spelling. `reach` is
+/// the surface's own granted scroll, MEASURED rather than derived from
+/// content minus viewport, which would make the clause agree with itself.
 func kayaTableFramesFitHorizontally(
-    _ frames: [CGRect], inside viewport: CGRect, tolerance: CGFloat = 2
+    _ frames: [CGRect], inside viewport: CGRect, reach: CGFloat = 0,
+    tolerance: CGFloat = 2
 ) -> Bool {
     guard let bounds = kayaTableBounds(frames) else { return false }
-    return bounds.minX >= viewport.minX - tolerance
-        && bounds.maxX <= viewport.maxX + tolerance
+    return bounds.minX >= viewport.minX - reach - tolerance
+        && bounds.maxX <= viewport.maxX + reach + tolerance
 }
 
 func kayaTableViewportMatchesTrack(
@@ -8783,6 +8811,11 @@ private struct KayaNativeTable: View {
             // read in the body so a re-floor re-evaluates it, and declared
             // the same way — which is what widens a hugging container
             // instead of ellipsizing inside it.
+            //
+            // WHY THIS TIER STILL DOES NOT SCROLL ITS COLUMNS: this one
+            // declaration is where ruling A and the overflow ruling collide,
+            // and docs/deferred.md's mac-table-reachability entry records
+            // four measured attempts at reconciling them.
             let contentWidth = node.tableContentWidth
             KayaMacNativeTable(
                 node: node, generation: generation, columns: node.tableColumns,
@@ -8957,6 +8990,7 @@ private struct KayaNativeTable: View {
         static func dismantleNSView(_ view: NSScrollView, coordinator: KayaTableDriver) {
             coordinator.dismantle()
         }
+
     }
 
     /// The scroll view that says when it laid out. NSViewRepresentable
@@ -9721,6 +9755,14 @@ private struct KayaTableLayout: Layout {
         rows.reduce(0, +) + rowGap * CGFloat(windowed ? rows.count : max(0, rows.count - 1))
     }
 
+    /// The columns' scroll offset, passed in as a VALUE: a Layout is a pure
+    /// function, so the view owns the number and this only reads it. Clamped
+    /// here rather than reset from here — a write during layout invalidates
+    /// the pass that made it, which cost the varied scene two rows of its
+    /// band (measured 2026-08-29; Compose states the same rule at its own
+    /// settleColumns).
+    var offsetX: CGFloat = 0
+
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
@@ -9728,7 +9770,12 @@ private struct KayaTableLayout: Layout {
         let (headerH, dividerH, rows) = rowHeights(subviews)
         let height =
             headerH + rowGap + dividerH + rowGap + top + rowsExtent(rows) + bottom
-        return CGSize(width: total, height: height)
+        // ACCEPT THE OFFER (docs/tables-plan.md, ruled 2026-08-29). Answering
+        // `total` past a narrower proposal is what put a too-wide table
+        // outside its parent's box with the columns unreachable; it takes
+        // the track it was given and scrolls inside it. An unspecified width
+        // still answers the content, which is the hug.
+        return CGSize(width: min(total, proposal.width ?? total), height: height)
     }
 
     func placeSubviews(
@@ -9737,7 +9784,9 @@ private struct KayaTableLayout: Layout {
         let (widths, _) = columnWidths(subviews, proposal)
         let (headerH, dividerH, rows) = rowHeights(subviews)
         var colX = [CGFloat](repeating: 0, count: cols)
-        var acc = bounds.minX
+        let content = widths.reduce(0, +) + colGap * CGFloat(max(0, cols - 1))
+        let reach = max(0, content - bounds.width)
+        var acc = bounds.minX - min(offsetX, reach)
         for c in 0..<cols {
             colX[c] = acc
             acc += widths[c] + colGap
@@ -9759,6 +9808,19 @@ private struct KayaTableLayout: Layout {
             placement.bandOffset = top
             placement.bandTop = y - bounds.minY
             placement.rowPitches = rows.map { $0 + rowGap }
+            // THE COLUMNS' PAIR, in the same plain box as the band numbers:
+            // what they needed and what the track gave. The view clamps its
+            // offset from these and the harness reads them.
+            //
+            // THE TRACK IS THE CARD'S INTERIOR, not this layout's own box:
+            // the edge instrument measures cells against the cells' box
+            // (kayaTableCellsBox subtracts kayaTableCardPad), so reporting
+            // the outer width here said "content 290 in viewport 290" for a
+            // table whose cells were convicted of standing 11pt outside a
+            // 279pt viewport — one overflow, two numbers (measured
+            // 2026-08-29).
+            placement.columnsContent = content
+            placement.columnsViewport = max(0, bounds.width - 2 * kayaTableCardInsetX)
             placed?()
         }
         let cells = Array(subviews.dropFirst(cols + 1))
@@ -9773,10 +9835,49 @@ private struct KayaTableLayout: Layout {
     }
 }
 
+/// THE FINGER IS THIS TIER'S COLUMN SCROLL (docs/tables-plan.md, ruled
+/// 2026-08-29). A drag rather than a ScrollView for the reason Compose
+/// reaches for `scrollable` over `horizontalScroll`: a scroll container
+/// proposes an unbounded width, and the layout would lose the track it
+/// distributes leftover across — every table that FITS would stop
+/// spanning its viewport.
+///
+/// IT WRITES ONLY FROM THE GESTURE. The reach is read from the plain
+/// placement box the layout filled; nothing here runs during layout.
+private struct KayaColumnsDrag: ViewModifier {
+    @Binding var offset: CGFloat
+    let placement: KayaTablePlacement
+    @State private var start: CGFloat = 0
+
+    private var reach: CGFloat {
+        max(0, placement.columnsContent - placement.columnsViewport)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .clipped()
+            .gesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { value in
+                        let limit = reach
+                        guard limit > 0 else { return }
+                        if value.translation.width == 0 { start = offset }
+                        offset = Swift.min(
+                            Swift.max(start - value.translation.width, 0), limit)
+                    }
+                    .onEnded { _ in start = offset })
+    }
+}
+
 /// Every live SYNTHESIZED table's window, by container widget id — the
 /// mac driver's twin (kayaTableDrivers, one tier over): how the harness
 /// verbs reach the tier that drew. Main thread only, like every other
 /// registry here.
+/// A synthesized table's COLUMNS' axis, by container id — the row
+/// window's sibling, separate because a table can have columns to scroll
+/// and no row window at all (docs/tables-plan.md, ruled 2026-08-29).
+nonisolated(unsafe) var kayaTableColumnAxes: [UInt64: KayaSynthesizedWindow] = [:]
+
 nonisolated(unsafe) var kayaTableWindows: [UInt64: KayaSynthesizedWindow] = [:]
 
 /// The scroll container's coordinate space: the content's frame in it IS
@@ -9796,6 +9897,12 @@ private struct KayaRowAnchor: Hashable {
 /// a SwiftUI invalidation raised during a layout pass is fatal (the mac
 /// tier's EXC_BREAKPOINT, docs/traps.md).
 final class KayaTablePlacement {
+    /// The columns' axis (docs/tables-plan.md, ruled 2026-08-29): what they
+    /// needed and what the track gave. A PLAIN box, deliberately not
+    /// observable — the layout writes it, and observable state written
+    /// during layout invalidates the pass that wrote it.
+    var columnsContent: CGFloat = 0
+    var columnsViewport: CGFloat = 0
     var bandFirst = 0
     var bandOffset: CGFloat = 0
     var bandTop: CGFloat = 0
@@ -9830,6 +9937,12 @@ typealias KayaTablePlaced = () -> Void
     var total = 0
 
     @ObservationIgnored let placement = KayaTablePlacement()
+    /// THE COLUMNS' SCROLL OFFSET (docs/tables-plan.md, ruled 2026-08-29).
+    /// On the window rather than the view's own @State for the reason
+    /// Compose puts it on the node: `scroll_end` has to drive it, and the
+    /// harness reaches a synthesized table through kayaTableWindows.
+    /// Written by the DRAG and by that verb — never during layout.
+    var columnsOffset: CGFloat = 0
     @ObservationIgnored private var proxy: ScrollViewProxy?
     /// The scroll container's own box, in the space the harness compares
     /// in. The report records it through the ONE writer, exactly as the
@@ -9860,8 +9973,19 @@ typealias KayaTablePlaced = () -> Void
 
     /// The scroll container appeared or resized: the viewport this window
     /// is a window ON.
+    /// THE COLUMNS' AXIS HAS ITS OWN REGISTRY, and must: an UNGROWN table
+    /// has no scroll proxy and so never reaches `attach`, but putting it in
+    /// kayaTableWindows to fix that made `expect_window` read this tier's
+    /// ROW window for a table that has none — "0 0" where the core's
+    /// unwindowed answer is "0 12" (measured 2026-08-29). Rows and columns
+    /// are separate questions and now separate maps.
+    func registerColumns(_ node: KayaNode) {
+        kayaTableColumnAxes[node.id] = self
+    }
+
     func attach(_ node: KayaNode, proxy: ScrollViewProxy, viewport: CGRect) {
         kayaTableWindows[node.id] = self
+        kayaTableColumnAxes[node.id] = self
         self.proxy = proxy
         viewportRect = viewport
         viewportHeight = Double(viewport.height)
@@ -9870,6 +9994,9 @@ typealias KayaTablePlaced = () -> Void
 
     func detach(_ node: KayaNode) {
         if kayaTableWindows[node.id] === self { kayaTableWindows.removeValue(forKey: node.id) }
+        if kayaTableColumnAxes[node.id] === self {
+            kayaTableColumnAxes.removeValue(forKey: node.id)
+        }
     }
 
     /// The content moved inside the container: a scroll, or a resize.
@@ -10241,7 +10368,8 @@ private struct KayaSynthesizedTable: View {
             cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing,
             windowed: window.windowed, top: window.top, bottom: window.bottom,
             first: window.first, placement: window.placement,
-            placed: { window.placed(node) }
+            placed: { window.placed(node) },
+            offsetX: window.columnsOffset
         ) {
             ForEach(Array(node.tableColumns.enumerated()), id: \.offset) { col, title in
                 Text(headerText(col, title))
@@ -10268,6 +10396,12 @@ private struct KayaSynthesizedTable: View {
                 }
             }
         }
+        .modifier(
+            KayaColumnsDrag(
+                offset: Binding(
+                    get: { window.columnsOffset },
+                    set: { window.columnsOffset = $0 }),
+                placement: window.placement))
     }
 
     var body: some View {
@@ -10321,6 +10455,7 @@ private struct KayaSynthesizedTable: View {
                         KayaTableViewportReporter(
                             node: node, generation: generation, synthesized: true))
                     .modifier(KayaTableCardFace())
+                    .onAppear { window.registerColumns(node) }
             }
         }
         // A TABLE BOUNDS ITS OWN EXTENT — this tier's spelling of it.

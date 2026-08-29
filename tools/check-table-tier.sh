@@ -163,7 +163,10 @@ if edges_case is not None:
         "kayaTableColumnAlignment(columns)",
         "kayaTableColumnRepresentativesIncrease(representatives)",
         "kayaTableViewportMatchesTrack(viewport, track: track)",
-        "kayaTableFramesFitHorizontally(frames, inside: viewport)",
+        # The reach joined this call when tables learned to scroll their
+        # columns (docs/tables-plan.md, ruled 2026-08-29): cells past the
+        # viewport are a defect only if they cannot be reached.
+        "kayaTableFramesFitHorizontally(",
     )
     if any(item not in edges_case for item in required):
         bad.append(f"{path}: expect_column_edges must read current cell geometry, compare "

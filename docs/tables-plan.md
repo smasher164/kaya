@@ -273,15 +273,34 @@ answer to `expect_window` and `scroll_to_row` — the target's kind decides
 the axis and no verb needs an axis word. harness.rs admits
 `Scroll | Column` for all three.
 
-STILL OPEN, both recorded in docs/deferred.md: the macOS NATIVE tier
-(three attempts measured, and the finding is that nothing in kaya's own
-flex chain above it ever proposes a width smaller than the content, so
-the squeeze never arrives), and the iOS SYNTHESIZED tier (an attempt
-that worked in isolation cost the varied scene two rows of its band by
-writing observable state inside the layout phase — the mistake Compose's
-own settleColumns warns about — and was reverted). The shared conformance
-scene waits on those two: a scene forces a leg on every runner, and a
-leg that cannot pass is not a leg.
+AND THE iOS SYNTHESIZED TIER, 2026-08-29: its layout answers
+`min(total, proposal)` so it takes the track it is given, places every
+column at an offset the VIEW owns (a Layout is a pure function, and
+observable state written during layout invalidates the pass that wrote
+it — that mistake cost the varied scene two rows of its band before it
+was understood), clips, and takes a drag. Two things it needed that the
+other tiers did not: the columns' axis has its OWN registry, because an
+ungrown table has no scroll proxy and registering it as a row window made
+`expect_window` answer "0 0" for a table that has none; and the track it
+records is the CARD'S INTERIOR rather than the layout's own box, since
+the edge instrument measures cells against that interior — the outer
+width reported "content 290 in viewport 290" for a table whose cells
+stood 11pt outside a 279pt viewport, one overflow with two numbers.
+
+STILL OPEN: the macOS NATIVE tier alone. A fix that works is measured
+(answer per proposal in the representable's sizeThatFits, capping the hug
+at the window), and it COLLIDES with ruling A's own guard, which asks the
+hug inside a 200pt window and requires the table to overflow it — at that
+width the two rulings say opposite things. Amending that probe to ask the
+hug where there is room keeps its teeth and lets both hold, but it amends
+a RULED guard, so it waits for the maintainer. docs/deferred.md carries
+all four attempts and their measurements;
+docs/probes/swiftui-sizing-2026.md carries Apple's own contract, which
+says the composite size is whatever `sizeThatFits` returns and never
+defines the default the nil case falls back to.
+
+The shared conformance scene waits on that one tier: a scene forces a leg
+on every runner, and a leg that cannot pass is not a leg.
 
 `axis` IS REFUSED ON A TABLE, both orderings (set the axis then declare
 columns, or the reverse). A flip would render the rows as a plain row and
