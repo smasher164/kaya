@@ -59,6 +59,34 @@ inexpressible without it; and the harness observable is the property
 
 ### D3 — adaptive switching: a core-evaluated breakpoint applying property setters
 
+D3'S DEPTH LANDED 2026-08-28, the axis increment's same evening:
+`TxOp::CreateBreakpoint` (wire kind 48 — window, threshold, setter
+list), the scene evaluating on `kaya_window_metrics` reports with the
+width LATCHED (a breakpoint declared before any report applies at the
+first — the phone that never resizes), same-width reports emitting
+nothing, and the revert restoring the GUEST-AUTHORED value
+(`authored_axis`, written only by guest SetProperty) or the creation
+kind's own. The setter list is axis-only at the root until D6.2 rules
+wider, with the refusal unit-watched. Reporters: SwiftUI through the
+vtable (`window_metrics` beside `canvas_track` — a flat-namespace call
+was measured unresolvable, the vtable IS the interpreters' contract),
+whole-window beside the form-factor recorder; GTK into ITS OWN scene
+(canvas_track_report's route — the capi presentation slot belongs to
+the interpreters, and a report there reaches a scene the widget
+backend never reads), scheduled past held CORE borrows. Rust surface:
+`Tx::breakpoint_below(width, |bp| bp.axis(..))`. The adaptive scene's
+breakpoint half asserts apply AND auto-revert across resize_window on
+the desktops; the iOS leg cuts at resize_window and asserts its
+always-narrow truth as a per-leg EXTRA — each side proven where it
+naturally occurs (§2's sentence, running). Unit-walked in
+`breakpoint_applies_and_reverts_around_the_threshold` + the wire
+round-trip. TWO MEASURED TRAPS from the lanes: a GTK harness read may
+not pump the main context once an idle can trigger relayouts
+(gtk.rs's 1630 rule — the x11 abort), and polled assertions cannot
+serve as stale-value negatives (expecting the old value wins the race
+by construction; the valid negative expects a state that never
+arrives).
+
 The mechanism is one wire record: a width threshold plus a list of
 (node, prop, value) setters, applied when the window crosses down,
 auto-reverted crossing back (the diff-against-base rule). THE CORE

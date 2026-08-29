@@ -426,6 +426,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::CreateCollection { .. } => UndoVerdict::Refused("create_collection"),
         // The header bar is not state; the order underneath it already
         // rides collection_move's undo run (docs/tables-plan.md).
+        TxOp::CreateBreakpoint { .. } => UndoVerdict::Refused("create_breakpoint"),
         TxOp::SetColumnHeaders { .. } => UndoVerdict::Refused("set_column_headers"),
         // A drawing renders app state, it is not state
         // (docs/canvas-plan.md ruling 10, set_column_headers' reasoning).
@@ -515,6 +516,18 @@ pub(crate) struct Scene {
     /// entry -> the (widget, property, field) triples its record feeds.
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
+    /// Declared breakpoints (docs/adaptive-layout-plan.md D3), evaluated
+    /// by THE CORE against the latest reported width, in declaration
+    /// order. `applied` is the hysteresis bit.
+    breakpoints: Vec<BreakpointState>,
+    /// The last content width each window reported (kaya_window_metrics).
+    /// Latched like the presentation: a breakpoint declared before the
+    /// first report evaluates when it arrives.
+    window_widths: HashMap<WindowId, f64>,
+    /// The last GUEST-AUTHORED axis per widget — what a reverting
+    /// breakpoint restores (falling back to the creation kind's own).
+    /// Breakpoint applies deliberately do not write here.
+    authored_axis: HashMap<WidgetId, i64>,
     template_nodes: HashMap<u64, WidgetKind>,
     collections: HashMap<CollectionId, CollDecl>,
     coll_instances: HashMap<(CollectionId, PathKey), CollInstance>,
@@ -638,6 +651,14 @@ pub(crate) struct Scene {
 /// index, value_changed on user picks only), different chrome.
 fn is_choice(kind: WidgetKind) -> bool {
     matches!(kind, WidgetKind::Select | WidgetKind::Radio)
+}
+
+/// One declared breakpoint (docs/adaptive-layout-plan.md D3).
+struct BreakpointState {
+    window: WindowId,
+    below: f64,
+    setters: Vec<(WidgetId, Prop, Value)>,
+    applied: bool,
 }
 
 fn check_prop(kind: WidgetKind, prop: Prop) {
@@ -1339,6 +1360,61 @@ fn check_type(current: &Value, incoming: &Value, what: &str) {
 }
 
 impl Scene {
+    /// The window's content width, reported by the backend
+    /// (kaya_window_metrics). THE CORE EVALUATES the declared
+    /// breakpoints here — one arithmetic, every platform
+    /// (docs/adaptive-layout-plan.md D3). A report that changes
+    /// nothing emits nothing.
+    pub(crate) fn set_window_metrics(&mut self, window: WindowId, width: f64) -> Vec<ApplyOp> {
+        let previous = self.window_widths.insert(window, width);
+        if previous == Some(width) {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for i in 0..self.breakpoints.len() {
+            if self.breakpoints[i].window == window {
+                out.append(&mut self.evaluate_breakpoint(i, width));
+            }
+        }
+        out
+    }
+
+    /// One breakpoint against one width: apply crossing below, revert
+    /// crossing back — the revert restoring the guest-authored value or
+    /// the creation kind's own default (diff-against-base).
+    fn evaluate_breakpoint(&mut self, index: usize, width: f64) -> Vec<ApplyOp> {
+        let below = width < self.breakpoints[index].below;
+        if below == self.breakpoints[index].applied {
+            return Vec::new();
+        }
+        self.breakpoints[index].applied = below;
+        let setters = self.breakpoints[index].setters.clone();
+        let mut out = Vec::new();
+        for (widget, prop, value) in setters {
+            let value = if below {
+                value
+            } else {
+                match prop {
+                    Prop::Axis => {
+                        let base = self.authored_axis.get(&widget).copied().unwrap_or_else(|| {
+                            match self.widgets.get(&widget) {
+                                Some(WidgetKind::Column) => 1,
+                                _ => 0,
+                            }
+                        });
+                        Value::I64(base)
+                    }
+                    // The setter list is axis-only (the arm above
+                    // enforces it); a second prop arrives with its own
+                    // base rule when D6 widens the list.
+                    _ => unreachable!("breakpoint setters are axis-only"),
+                }
+            };
+            out.push(ApplyOp::SetProp { id: widget, prop, value });
+        }
+        out
+    }
+
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -1512,6 +1588,14 @@ impl Scene {
                                          index {idx} is out of range (add options \
                                          before selecting)"
                                     );
+                                }
+                            }
+                            // The guest-authored axis is what a reverting
+                            // breakpoint restores; only guest writes land
+                            // here (breakpoint applies bypass this arm).
+                            if prop == Prop::Axis {
+                                if let Value::I64(mode) = &v {
+                                    self.authored_axis.insert(widget, *mode);
                                 }
                             }
                             out.push(ApplyOp::SetProp {
@@ -2342,6 +2426,39 @@ impl Scene {
                     key,
                     before,
                 } => self.move_entry(id, path, key, before, &mut out),
+                TxOp::CreateBreakpoint { window, below, setters } => {
+                    assert!(
+                        below.is_finite() && below > 0.0,
+                        "kaya: a breakpoint threshold must be a positive width, got {below}"
+                    );
+                    for (widget, prop, value) in &setters {
+                        let kind = *self.widgets.get(widget).unwrap_or_else(|| {
+                            panic!("kaya: breakpoint setter on unknown widget {widget:?}")
+                        });
+                        // THE RULED SETTER LIST (docs/adaptive-layout-plan.md
+                        // D6.2): axis alone until the maintainer widens it.
+                        assert!(
+                            *prop == Prop::Axis,
+                            "kaya: breakpoint setters may set `axis` only for now \
+                             (docs/adaptive-layout-plan.md D6), got {prop:?}"
+                        );
+                        check_prop(kind, *prop);
+                        check_prop_value(kind, *prop, value);
+                    }
+                    self.breakpoints.push(BreakpointState {
+                        window,
+                        below,
+                        setters,
+                        applied: false,
+                    });
+                    // Evaluate NOW against the latched width: a phone that
+                    // never resizes must still apply.
+                    let n = self.breakpoints.len() - 1;
+                    if let Some(width) = self.window_widths.get(&window).copied() {
+                        let mut ops = self.evaluate_breakpoint(n, width);
+                        out.append(&mut ops);
+                    }
+                }
                 TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                     // The header bar's three addressings, spec doc order
                     // (docs/tables-plan.md, dynamic tables): a live For's
@@ -6093,6 +6210,80 @@ mod tests {
     /// E2, the one that shipped: the `When` container is created at
     /// ambient parent 0 (app.rs:1239 emits no AddChild there), the column
     /// never claims it, and it renders nowhere while answering every read.
+    /// The declared breakpoint's whole contract in one walk
+    /// (docs/adaptive-layout-plan.md D3): apply crossing below the
+    /// threshold, auto-revert crossing back — to the GUEST-AUTHORED
+    /// value where one exists and the creation kind's own otherwise —
+    /// with a same-width report emitting nothing, and a breakpoint
+    /// declared before any report applying at the first one.
+    #[test]
+    fn breakpoint_applies_and_reverts_around_the_threshold() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 520.0,
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]);
+        // Declared before any report: the FIRST report applies it —
+        // the phone that never resizes.
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 400.0);
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(1) }]
+            ),
+            "first narrow report must apply the setter, got {ops:?}"
+        );
+        // Same width again: nothing.
+        assert!(scene.set_window_metrics(DEFAULT_WINDOW, 400.0).is_empty());
+        // Crossing back with NO authored value: the creation kind's own
+        // (a Row is horizontal).
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0);
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(0) }]
+            ),
+            "the revert must restore the kind's own axis, got {ops:?}"
+        );
+        // A guest-authored vertical, then a full crossing: the revert
+        // restores the AUTHORED value, not the kind default.
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Axis,
+            value: PropValue::Const(Value::I64(1)),
+        }]);
+        scene.set_window_metrics(DEFAULT_WINDOW, 400.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0);
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(1) }]
+            ),
+            "the revert must restore the guest-authored axis, got {ops:?}"
+        );
+    }
+
+    /// The ruled setter list (D6.2): anything but axis dies at the root.
+    #[test]
+    #[should_panic(expected = "breakpoint setters may set `axis` only")]
+    fn a_breakpoint_setter_off_the_ruled_list_fails_the_batch() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 520.0,
+                setters: vec![(WidgetId(1), Prop::Grow, Value::F64(1.0))],
+            },
+        ]);
+    }
+
     #[test]
     #[should_panic(expected = "not reachable from any mounted root")]
     fn a_when_container_never_parented_fails_the_batch() {

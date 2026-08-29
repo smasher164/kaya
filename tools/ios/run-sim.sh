@@ -1365,14 +1365,20 @@ run_swiftui_on() {
     rec_start "$name" "$slot"
     local script
     if [ -n "$cut" ]; then
-        script=$(python3 - "$ROOT/tools/scenes/$scene.steps" "$cut" "$keep" <<'PY'
+        script=$(python3 - "$ROOT/tools/scenes/$scene.steps" "$cut" "$keep" \
+            "$extra" <<'PY'
 import pathlib
 import sys
 
-path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
+path, cut, keep, extra = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 # A CUT WITHOUT A `keep` IS AN UNGUARDED CUT: naming what the cut may
 # not take is the price of cutting at all. A LIST, because one scene's
 # tail can be below more than one thing the leg exists to assert.
+# `verb` holds every assertion of that verb above the cut; `verb=target`
+# holds the ones on that TARGET, for the scene whose same observable is
+# width-dependent below the cut (adaptive's breakpoint half) — and a
+# targeted keep buys the same-verb drop only if the leg's EXTRA
+# re-asserts that verb in its always-true-here form.
 keeps = keep.split()
 if not keeps:
     sys.exit(f"run-sim: cutting {path} at `{cut}` with no `keep` verb — say "
@@ -1389,22 +1395,31 @@ at = verbs.index(cut)
 prefix, dropped = lines[:at], lines[at:]
 
 
-def asserted(seq, verb):
+def asserted(seq, verb, target=None):
     """The distinct `verb` steps in seq, whitespace-normalized."""
     return {" ".join(line.split()) for line in seq
-            if (line.split() or [""])[0] == verb}
+            if (p := line.split()) and p[0] == verb
+            and (target is None or (len(p) > 1 and p[1] == target))}
 
 
-for verb in keeps:
-    whole, kept = asserted(lines, verb), asserted(prefix, verb)
+extra_verbs = {(line.split() or [""])[0] for line in extra.splitlines()}
+for tok in keeps:
+    verb, _, target = tok.partition("=")
+    whole = asserted(lines, verb, target or None)
+    kept = asserted(prefix, verb, target or None)
     if not kept:
-        sys.exit(f"run-sim: cutting {path} at `{cut}` leaves no `{verb}` step "
+        sys.exit(f"run-sim: cutting {path} at `{cut}` leaves no `{tok}` step "
                  f"at all — the leg would pass without asserting the thing it "
                  f"exists for")
     if kept != whole:
         sys.exit(f"run-sim: cutting {path} at `{cut}` drops "
                  f"{sorted(whole - kept)} — the cut may not take an assertion "
-                 f"of `{verb}` with it")
+                 f"of `{tok}` with it")
+    if target and asserted(dropped, verb) and verb not in extra_verbs:
+        sys.exit(f"run-sim: cutting {path} at `{cut}` takes `{verb}` "
+                 f"assertions the targeted keep `{tok}` does not hold, and "
+                 f"the leg's extra asserts no `{verb}` — re-assert it there "
+                 f"or hold them with the keep")
 print("\n".join(f"run-sim: NOT RUN on this host (after `{cut}`): {line}"
                 for line in dropped if line.strip()), file=sys.stderr)
 print("\n".join(prefix))
@@ -2364,8 +2379,20 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example adaptive
     APP=$(make_bundle adaptivers-swiftui dev.kaya.adaptiveswiftui "$TARGET_DIR/examples/adaptive")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    # The phone-expressible cut at resize_window (a phone does not
+    # command its own window size), keeping expect_axis; the EXTRA step
+    # asserts the phone's own side of the SAME breakpoint — an
+    # always-narrow window applies at its first report, no resize ever.
+    # The first cut whose kept verb spans BOTH sides: the handler half's
+    # expect_axis asserts (row@dash, column@steady) are phone-true and
+    # held by targeted keeps; the breakpoint half's (row@narrow) are
+    # width-dependent — the panes-band shape — so the cut takes them and
+    # the extra asserts the always-narrow truth this host CAN express
+    # (docs/adaptive-layout-plan.md §2).
     queue_leg run_swiftui_on adaptive-swiftui "$APP" dev.kaya.adaptiveswiftui \
-        adaptive-swiftui adaptive adaptive
+        adaptive-swiftui adaptive adaptive \
+        'expect_axis row@narrow "vertical"' resize_window \
+        'expect_axis=row@dash expect_axis=column@steady'
 
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and

@@ -902,6 +902,21 @@ impl Axis {
     }
 }
 
+/// The setters one breakpoint applies (docs/adaptive-layout-plan.md
+/// D3), recorded by [`Tx::breakpoint_below`]'s build closure. Axis
+/// alone until the ruled list widens (the root enforces it).
+pub struct BreakpointSetters {
+    setters: Vec<(WidgetId, Prop, Value)>,
+}
+
+impl BreakpointSetters {
+    /// Set this container's axis while the breakpoint holds.
+    pub fn axis(&mut self, widget: WidgetId, axis: Axis) {
+        self.setters
+            .push((widget, Prop::Axis, Value::I64(axis.wire())));
+    }
+}
+
 /// A just-built widget: the chain handle every live-zone constructor
 /// returns. It reborrows the transaction, so it lives at most to the end
 /// of its statement — chain construction props on it and end with
@@ -1937,6 +1952,27 @@ impl<'a> Tx<'a> {
     /// axis says today. See [`Prop::Axis`].
     pub fn axis(&mut self, widget: WidgetId, axis: Axis) {
         self.set(widget, Prop::Axis, axis.wire());
+    }
+
+    /// A DECLARED BREAKPOINT on the primary window
+    /// (docs/adaptive-layout-plan.md D3): when the window's content
+    /// width is below `width` points, the setters recorded by `build`
+    /// apply; crossing back they auto-revert to the last guest-authored
+    /// value or the creation kind's own default. THE CORE evaluates —
+    /// the same arithmetic on every platform, and a phone that never
+    /// resizes still applies at its first report.
+    pub fn breakpoint_below(
+        &mut self,
+        width: f64,
+        build: impl FnOnce(&mut BreakpointSetters),
+    ) {
+        let mut setters = BreakpointSetters { setters: Vec::new() };
+        build(&mut setters);
+        self.ops.push(TxOp::CreateBreakpoint {
+            window: crate::protocol::DEFAULT_WINDOW,
+            below: width,
+            setters: setters.setters,
+        });
     }
 
     /// This widget's accessibility IDENTIFIER: a stable authored key,

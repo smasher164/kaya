@@ -212,6 +212,8 @@
  */
 #define TX_SET_SIZE_POLICY 47
 
+#define TX_CREATE_BREAKPOINT 48
+
 /**
  * `sorted`'s no-column sentinel (alert_choice's cancel precedent).
  */
@@ -1871,6 +1873,12 @@ typedef struct KayaHostApi {
    * can move.
    */
   void (*canvas_track)(uint64_t, double, double);
+  /**
+   * The window's content size (docs/adaptive-layout-plan.md D3): the
+   * fact every declared breakpoint evaluates against, reported
+   * whenever it changes.
+   */
+  void (*window_metrics)(uint64_t, double, double);
   void (*frame)(double);
   void (*harness_frame)(void);
   uintptr_t (*canvas_raster_shape)(uint64_t, uint8_t*, uintptr_t);
@@ -2485,7 +2493,16 @@ void kaya_presentation(double scale, bool dark);
  * the held display list under a uniform fit, `redraw` and `tick` are
  * asked for a drawing at this size, and `fixed` records the number and
  * changes nothing. A report that changes nothing emits nothing.
+ * THE WINDOW'S CONTENT SIZE in device-independent points, reported by
+ * the backend whenever it changes — the fact every declared breakpoint
+ * evaluates against (docs/adaptive-layout-plan.md D3). THE CORE does
+ * the one comparison, so the switch point is identical arithmetic on
+ * every platform; a report that changes nothing emits nothing. Height
+ * rides along for the day a height threshold is ruled; nothing reads
+ * it yet.
  */
+void kaya_window_metrics(uint64_t window, double width, double height);
+
 void kaya_canvas_track(uint64_t widget, double width, double height);
 
 void kaya_frame(double time);

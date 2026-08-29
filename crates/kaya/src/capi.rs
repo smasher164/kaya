@@ -3234,6 +3234,24 @@ pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
 /// the held display list under a uniform fit, `redraw` and `tick` are
 /// asked for a drawing at this size, and `fixed` records the number and
 /// changes nothing. A report that changes nothing emits nothing.
+/// THE WINDOW'S CONTENT SIZE in device-independent points, reported by
+/// the backend whenever it changes — the fact every declared breakpoint
+/// evaluates against (docs/adaptive-layout-plan.md D3). THE CORE does
+/// the one comparison, so the switch point is identical arithmetic on
+/// every platform; a report that changes nothing emits nothing. Height
+/// rides along for the day a height threshold is ruled; nothing reads
+/// it yet.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_window_metrics(window: u64, width: f64, height: f64) {
+    let _ = height;
+    if !width.is_finite() || width <= 0.0 {
+        return;
+    }
+    with_window_scene("reporting a window's content size", |scene| {
+        (scene.set_window_metrics(crate::protocol::WindowId(window), width), ())
+    });
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_canvas_track(widget: u64, width: f64, height: f64) {
     let asks = with_window_scene("reporting a canvas's assigned track", |scene| {

@@ -1709,6 +1709,45 @@ fn presentation_report(core: &mut CoreState) {
 /// A canvas GTK has not laid out yet is SKIPPED rather than reported as
 /// zero: the core would refuse the number anyway, and sending it would be
 /// this backend saying something it has not measured.
+/// The window's content size into the scene's breakpoint evaluation
+/// (docs/adaptive-layout-plan.md D3) — canvas_track_report's shape: the
+/// scene answers with the setter/revert ops and they apply right here.
+fn window_metrics_report(core: &mut CoreState) {
+    use gtk4::prelude::GtkWindowExt;
+    let (width, _height) = core.window.default_size();
+    if width <= 0 {
+        return;
+    }
+    let scene = &mut core.scene;
+    let Some(ops) = crate::fault::guard("reporting the window's content size", || {
+        scene.set_window_metrics(crate::protocol::WindowId(0), f64::from(width))
+    }) else {
+        return;
+    };
+    for op in ops {
+        apply(core, op);
+    }
+}
+
+/// Deferred past whatever holds CORE (the notify can fire inside
+/// resize_window's on_main); busy means one more idle, the
+/// run_scheduled_report rule.
+fn schedule_window_metrics() {
+    glib::idle_add_local_once(|| {
+        CORE.with(|slot| {
+            let Ok(mut core) = slot.try_borrow_mut() else {
+                glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(8),
+                    schedule_window_metrics,
+                );
+                return;
+            };
+            let Some(core) = core.as_mut() else { return };
+            window_metrics_report(core);
+        });
+    });
+}
+
 fn canvas_track_report(core: &mut CoreState) {
     let canvases: Vec<(KayaCanvas, WidgetId)> =
         core.canvases.iter().cloned().zip(core.canvas_ids.iter().copied()).collect();
@@ -8581,6 +8620,20 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             .default_width(540)
             .default_height(330)
             .build();
+        // THE BREAKPOINT CHANNEL (docs/adaptive-layout-plan.md D3): the
+        // window's content size, reported into THIS BACKEND'S OWN scene
+        // (canvas_track_report's route — the capi presentation slot is
+        // the interpreters', and a report there reaches a scene this
+        // backend never reads). SCHEDULED, never inline: the notify
+        // fires inside resize_window's on_main with CORE borrowed, the
+        // schedule_presentation_report rule. The scene ignores a report
+        // that changes nothing, so notify-noise costs nothing.
+        {
+            use gtk4::prelude::GtkWindowExt;
+            window.connect_default_width_notify(|_| schedule_window_metrics());
+            window.connect_default_height_notify(|_| schedule_window_metrics());
+            schedule_window_metrics();
+        }
         // The normalized root inset: 16 units INSIDE the root, via the CSS box
         // (padding sits inside the allocation, so the root still fills its
         // window and expect_root_fills holds). Stamped in the Mount arm.
@@ -10961,7 +11014,10 @@ impl crate::harness::Stage for GtkStage {
                 return "<no such target>".to_string();
             };
             let container = &registry[i];
-            while glib::MainContext::default().iteration(false) {}
+            // NO PUMP HERE (the 1630 rule): the deferred axis idle runs
+            // between the harness's polls on the loop's own turns, and a
+            // pump under this borrow dispatches relayout handlers that
+            // hard-borrow CORE — measured as the x11 leg's abort.
             if container.width() <= 0 && container.height() <= 0 {
                 return "no container layout recorded".to_owned();
             }

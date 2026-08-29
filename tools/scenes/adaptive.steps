@@ -1,11 +1,11 @@
 # The adaptive conformance scene, depth half
 # (docs/adaptive-layout-plan.md §2): the arrangement axis is a PROPERTY
-# on one node with two constructor spellings. A HANDLER flips row#0
+# on one node with two constructor spellings. A HANDLER flips row@dash
 # vertical and back — D2's user-driven toggle, the breakpoint
 # mechanism's effect without its trigger (the breakpoint record is the
 # milestone's next increment and drives this same prop).
 #
-# THE SUBJECT STAYS `row#0` THROUGH BOTH STATES: identity is the
+# THE SUBJECT STAYS `row@dash` THROUGH BOTH STATES: identity is the
 # creation kind, presentation is the prop — which is what keeps every
 # other scene's addressing stable while an app adapts.
 #
@@ -14,10 +14,24 @@
 # back), never the model's field — a backend that ignored the write
 # must fail, the expect_aligned rule one prop over.
 expect label#0 "alpha"
-expect_axis row#0 "horizontal"
+expect_axis row@dash "horizontal"
 expect_axis column@steady "vertical"
 click button#0
-expect_axis row#0 "vertical"
+expect_axis row@dash "vertical"
 # And BACK — the revert half a one-way flip would leave unproven.
 click button#0
-expect_axis row#0 "horizontal"
+expect_axis row@dash "horizontal"
+# THE BREAKPOINT HALF (docs/adaptive-layout-plan.md D3): row@narrow's axis
+# is DECLARED data — below 520 points it is vertical — and THE CORE
+# does the one comparison, so this is the same arithmetic on every
+# platform. Every assert here sits AFTER a resize because the initial
+# state is width-dependent (the panes-band rule): the desktop legs
+# cross the threshold both ways, and the phone leg CUTS at
+# resize_window and asserts its own always-narrow truth as a per-leg
+# extra step (tools/ios/run-sim.sh's adaptive entry).
+resize_window 480x400
+expect_axis row@narrow "vertical"
+# Crossing back AUTO-REVERTS — the diff-against-base rule, no second
+# declaration anywhere.
+resize_window 900x600
+expect_axis row@narrow "horizontal"

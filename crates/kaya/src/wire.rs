@@ -91,6 +91,7 @@ pub const TX_SET_DRAWING: u16 = 46;
 /// WHAT A CANVAS DOES WITH A TRACK BIGGER THAN ITS VIEWBOX
 /// (docs/canvas-plan.md §3.2.1).
 pub const TX_SET_SIZE_POLICY: u16 = 47;
+pub const TX_CREATE_BREAKPOINT: u16 = 48;
 /// `sorted`'s no-column sentinel (alert_choice's cancel precedent).
 pub const SORT_NONE: u32 = u32::MAX;
 /// `direction`'s two values, read only when `sorted` names a column.
@@ -1183,6 +1184,32 @@ pub fn decode_transaction_with_blobs(
                     (false, _) => None,
                 };
                 TxOp::SetAppIdentity(crate::protocol::AppIdentity { name, icon })
+            }
+            TX_CREATE_BREAKPOINT => {
+                let window = WindowId(r.u64());
+                let below = f64::from_bits(r.u64());
+                let n = r.u32() as usize;
+                let mut widgets = Vec::with_capacity(n);
+                for _ in 0..n {
+                    widgets.push(WidgetId(r.u64()));
+                }
+                let mut props = Vec::with_capacity(n);
+                for _ in 0..n {
+                    props.push(prop(r.u32()));
+                }
+                let values = r.record();
+                assert!(
+                    values.len() == n,
+                    "kaya: create_breakpoint declares {n} setters but carries {} values",
+                    values.len()
+                );
+                let setters = widgets
+                    .into_iter()
+                    .zip(props)
+                    .zip(values)
+                    .map(|((w, p), v)| (w, p, v))
+                    .collect();
+                TxOp::CreateBreakpoint { window, below, setters }
             }
             TX_SET_COLUMN_HEADERS => {
                 let widget = WidgetId(r.u64());
@@ -2677,6 +2704,24 @@ impl Writer {
                     }
                 })
             }
+            TxOp::CreateBreakpoint { window, below, setters } => {
+                self.record(TX_CREATE_BREAKPOINT, |b, blobs| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&below.to_bits().to_le_bytes());
+                    b.extend_from_slice(&(setters.len() as u32).to_le_bytes());
+                    for (w, _, _) in setters {
+                        b.extend_from_slice(&w.0.to_le_bytes());
+                    }
+                    for (_, p, _) in setters {
+                        b.extend_from_slice(&prop_raw(*p).to_le_bytes());
+                    }
+                    b.extend_from_slice(&(setters.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for (_, _, v) in setters {
+                        write_value(b, v, blobs);
+                    }
+                })
+            }
             TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                 self.record(TX_SET_COLUMN_HEADERS, |b, blobs| {
                     b.extend_from_slice(&widget.0.to_le_bytes());
@@ -3235,6 +3280,11 @@ mod tests {
                 widget: WidgetId(3),
                 prop: Prop::Text,
                 value: PropValue::Signal(SignalId(1)),
+            },
+            TxOp::CreateBreakpoint {
+                window: WindowId(0),
+                below: 520.0,
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
             TxOp::AddChild {
                 parent: WidgetId(1),

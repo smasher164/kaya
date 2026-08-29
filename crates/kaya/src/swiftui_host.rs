@@ -253,6 +253,10 @@ pub struct KayaHostApi {
     /// the raster is, which is the only canvas observable a size policy
     /// can move.
     pub canvas_track: extern "C" fn(u64, f64, f64),
+    /// The window's content size (docs/adaptive-layout-plan.md D3): the
+    /// fact every declared breakpoint evaluates against, reported
+    /// whenever it changes.
+    pub window_metrics: extern "C" fn(u64, f64, f64),
     pub frame: extern "C" fn(f64),
     pub harness_frame: extern "C" fn(),
     pub canvas_raster_shape: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
@@ -374,6 +378,7 @@ pub(crate) fn run() -> i32 {
         presentation: crate::capi::kaya_presentation,
         canvas_probe: crate::capi::kaya_canvas_probe,
         canvas_track: crate::capi::kaya_canvas_track,
+        window_metrics: crate::capi::kaya_window_metrics,
         frame: crate::capi::kaya_frame,
         harness_frame: crate::capi::kaya_harness_frame,
         canvas_raster_shape: crate::capi::kaya_canvas_raster_shape,

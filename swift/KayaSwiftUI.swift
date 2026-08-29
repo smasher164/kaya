@@ -3083,6 +3083,10 @@ enum KayaHost {
     /// backend measured, going the other way from every apply record.
     /// The core decides what to do with it — re-raster, ask the guest, or
     /// nothing at all — which is the size policy.
+    static func windowMetrics(_ window: UInt64, _ size: CGSize) {
+        api.window_metrics(window, Double(size.width), Double(size.height))
+    }
+
     static func canvasTrack(_ widget: UInt64, _ size: CGSize) {
         guard api != nil else { return }
         api.canvas_track(widget, Double(size.width), Double(size.height))
@@ -14769,6 +14773,30 @@ struct KayaContextMenuItems: View {
 /// It also stamps the window's live FORM FACTOR, once, for everyone: the
 /// platform's own size class where there is one, and the window's OWN WIDTH
 /// against the same 600 boundary GTK, WinUI and Compose draw where there is not.
+/// The window's content size, reported to the CORE whenever it changes
+/// (kaya_window_metrics) — the fact every declared breakpoint evaluates
+/// against (docs/adaptive-layout-plan.md D3). Whole-window, outside the
+/// arm chain, for the form factor's reason: the reading must not depend
+/// on which arm rendered.
+struct KayaWindowMetricsReporter: ViewModifier {
+    let windowId: UInt64
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear {
+                            KayaHost.windowMetrics(windowId, geo.size)
+                        }
+                        .onChange(of: geo.size) { _, size in
+                            KayaHost.windowMetrics(windowId, size)
+                        }
+                }
+            )
+    }
+}
+
 struct KayaFormFactorRecorder: ViewModifier {
     let windowId: UInt64
     #if !os(macOS)
@@ -16831,6 +16859,9 @@ struct KayaRoot: View {
         // so the reading does not depend on which arm rendered — the arm depends
         // on the reading, never the reverse.
         .modifier(KayaFormFactorRecorder(windowId: 0))
+        // The breakpoint channel (docs/adaptive-layout-plan.md D3), the
+        // form factor's sibling for the same whole-window reason.
+        .modifier(KayaWindowMetricsReporter(windowId: 0))
         // The canvas's scale and appearance channel, outside the arm
         // chain for the form factor's reason.
         .modifier(KayaPresentationReporter())
