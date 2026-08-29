@@ -528,6 +528,11 @@ pub(crate) struct Scene {
     /// breakpoint restores (falling back to the creation kind's own).
     /// Breakpoint applies deliberately do not write here.
     authored_axis: HashMap<WidgetId, i64>,
+    /// Live containers that DECLARED COLUMNS — a table is a column whose
+    /// header bar makes it one, and that same declaration is what gives
+    /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
+    /// axis refusal below can be stated in both orderings.
+    tables: std::collections::HashSet<WidgetId>,
     template_nodes: HashMap<u64, WidgetKind>,
     collections: HashMap<CollectionId, CollDecl>,
     coll_instances: HashMap<(CollectionId, PathKey), CollInstance>,
@@ -1594,6 +1599,7 @@ impl Scene {
                             // breakpoint restores; only guest writes land
                             // here (breakpoint applies bypass this arm).
                             if prop == Prop::Axis {
+                                Self::refuse_axis_on_table(&self.tables, widget);
                                 if let Value::I64(mode) = &v {
                                     self.authored_axis.insert(widget, *mode);
                                 }
@@ -2435,6 +2441,7 @@ impl Scene {
                         let kind = *self.widgets.get(widget).unwrap_or_else(|| {
                             panic!("kaya: breakpoint setter on unknown widget {widget:?}")
                         });
+                        Self::refuse_axis_on_table(&self.tables, *widget);
                         // THE RULED SETTER LIST (docs/adaptive-layout-plan.md
                         // D6.2): axis alone until the maintainer widens it.
                         assert!(
@@ -2483,6 +2490,18 @@ impl Scene {
                     };
                     if let Some(site) = live {
                         Self::validate_row_arity(&site.bodies, count);
+                        // THE OTHER ORDERING of the refusal below: a
+                        // container that was flipped and then declared
+                        // columns is the same illegal widget, reached the
+                        // other way round.
+                        assert!(
+                            !self.authored_axis.contains_key(&widget),
+                            "kaya: {widget:?} declared an axis and now declares columns — a \
+                             table's arrangement IS its columns, so the two cannot both be \
+                             authored (docs/tables-plan.md). A table wider than its track \
+                             scrolls; it does not stack."
+                        );
+                        self.tables.insert(widget);
                         // A LIVE FOR BECOMES WINDOWED-CAPABLE HERE: this
                         // is the declaration all four windowing tiers
                         // read, and on a declared backend it seeds the
@@ -5371,6 +5390,24 @@ impl Scene {
     }
 
     /// Every variant's row template fits the declared arity.
+    /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29). A table is a column
+    /// whose declared columns make it one, so a flip renders the rows as a
+    /// plain row and drops the header — silently, on every backend. The
+    /// same declaration is what gives a table its overflow behaviour, which
+    /// is why no separate property exists to collide with this one.
+    ///
+    /// `stack_below` lowers to a breakpoint whose only setter is `axis`, so
+    /// this one refusal covers both spellings.
+    fn refuse_axis_on_table(tables: &std::collections::HashSet<WidgetId>, widget: WidgetId) {
+        assert!(
+            !tables.contains(&widget),
+            "kaya: `axis` is refused on {widget:?}, which declared columns — a table's \
+             arrangement IS its columns, and flipping it would render the rows as a plain \
+             row and drop the header (docs/tables-plan.md). A table wider than its track \
+             scrolls; it does not stack."
+        );
+    }
+
     fn validate_row_arity(bodies: &[std::sync::Arc<TplBody>], count: u32) {
         for body in bodies {
             let roots = &body.roots;
@@ -6282,6 +6319,79 @@ mod tests {
                 setters: vec![(WidgetId(1), Prop::Grow, Value::F64(1.0))],
             },
         ]);
+    }
+
+    /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29), reached all three
+    /// ways a guest can reach it: the dynamic setter, the breakpoint
+    /// `stack_below` lowers to, and the two declarations in the other
+    /// order. WidgetId(4) is the For's container, which the core registers
+    /// as a Column — so `axis` is legal on it by kind, and only the
+    /// declared columns make it refusable.
+    fn declared_table() -> Transaction {
+        let mut tx = table_scene(2);
+        tx.push(set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0));
+        tx
+    }
+
+    #[test]
+    #[should_panic(expected = "`axis` is refused")]
+    fn axis_on_a_table_fails_the_batch() {
+        let mut scene = Scene::new();
+        scene.apply(declared_table());
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(4),
+            prop: Prop::Axis,
+            value: PropValue::Const(Value::I64(0)),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "`axis` is refused")]
+    fn stack_below_on_a_table_fails_the_batch() {
+        let mut scene = Scene::new();
+        scene.apply(declared_table());
+        scene.apply(vec![TxOp::CreateBreakpoint {
+            window: DEFAULT_WINDOW,
+            below: 520.0,
+            setters: vec![(WidgetId(4), Prop::Axis, Value::I64(1))],
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "declared an axis and now declares columns")]
+    fn columns_on_a_flipped_container_fails_the_batch() {
+        let mut scene = Scene::new();
+        let mut tx = table_scene(2);
+        tx.push(TxOp::SetProperty {
+            widget: WidgetId(4),
+            prop: Prop::Axis,
+            value: PropValue::Const(Value::I64(0)),
+        });
+        tx.push(set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0));
+        scene.apply(tx);
+    }
+
+    /// The declaration order the refusal must NOT catch: a plain container
+    /// that flips, with no columns anywhere near it.
+    #[test]
+    fn axis_on_a_plain_container_still_applies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let ops = scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(1),
+            prop: Prop::Axis,
+            value: PropValue::Const(Value::I64(1)),
+        }]);
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(1) }]
+            ),
+            "a plain container's axis must still lower, got {ops:?}"
+        );
     }
 
     /// Every chained binding puts `stack_below` on the generic widget

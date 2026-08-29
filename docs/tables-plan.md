@@ -215,6 +215,47 @@ is a separate admission if a real app ever needs one).
    claiming one. iOS ungrown native metrics stay unpinned until a scene
    exercises one.
 
+## Overflow: what a table does when its columns do not fit (ruled 2026-08-29)
+
+THE DECLARATION THAT MAKES A TABLE IS THE ONE THAT ANSWERS THIS. Columns
+are declared on the For's container (decision 1), which is a Column — so
+"has a header bar" is already the state that separates a table from a
+plain container, and it carries the overflow rule with it. No property, no
+wire record, no enum value is added, which is the point: an app cannot
+forget the keyword, and there is no new knob for `axis` to collide with.
+
+THE RULE: a table whose columns need more width than its track gets
+SCROLLS HORIZONTALLY, header locked to the body. It does not compress
+(content is the floor, ruled 2026-08-26) and it does not clip.
+
+KEYED ON THE FACT, NOT THE PLATFORM. The trigger is "the columns do not
+fit", not "this is a phone" — a narrow pane on a desktop reaches it too
+(measured on macOS at a 240pt window, where the four portfolio columns
+hold their positions and simply overflow), one shared scene must not get
+two answers, and a fact-keyed rule can be driven from the DESKTOP lanes
+with resize_window, where a platform-keyed one would be observable only
+on the two phones.
+
+WHY NOT THE ALTERNATIVES. Compressing contradicts the content-is-the-floor
+ruling. Clipping is what iOS does today, silently, and it lies about what
+the user is seeing. Dropping columns is SwiftUI's own answer on iPhone
+("the table automatically hides headers and all columns after the first")
+and it is the one answer kaya cannot take: the same shared scene would
+observe a different column count per width, which is the panes-band
+problem again. Every column stays present here, so `expect_columns` reads
+the same titles at 320dp and at 900dp. The survey behind all of this is
+docs/probes/table-overflow-2026.md, and WCAG 1.4.10 excepts data tables
+by name from the no-two-dimensional-scrolling rule.
+
+`axis` IS REFUSED ON A TABLE, both orderings (set the axis then declare
+columns, or the reverse). A flip would render the rows as a plain row and
+drop the header, silently, on every backend — legal until this ruling
+because a For's container is a Column and `axis` is legal on Columns.
+`stack_below` lowers to a breakpoint whose only setter is `axis`, so one
+refusal covers both spellings; the sentence says what a table does
+instead. Three watched negatives in scene.rs, plus one that holds a plain
+container still flipping.
+
 ## The wire (append-only ids)
 
 - TX 45 `set_column_headers` (renamed from set_columns mid-slice: the
