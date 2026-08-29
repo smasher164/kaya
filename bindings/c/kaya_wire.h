@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xa10b712b34b3546fULL
+#define KAYA_SPEC_HASH 0xb1f68943daa4f9e6ULL
 
 
 /* Create a signal holding `initial`. */
@@ -619,6 +619,17 @@ static inline void kaya_tx_set_size_policy(KayaTx *tx, uint64_t widget_id, uint3
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, policy);
     kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. */
+static inline void kaya_tx_create_breakpoint(KayaTx *tx, uint64_t window, KayaVal below, uint32_t count, const KayaVal *setters, uint32_t setters_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_BREAKPOINT);
+    kaya_wire_u64(tx, window);
+    kaya_wire_value(tx, below);
+    kaya_wire_u32(tx, count);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, setters, setters_len);
     kaya_wire_end(tx, kaya_at);
 }
 

@@ -1187,27 +1187,40 @@ pub fn decode_transaction_with_blobs(
             }
             TX_CREATE_BREAKPOINT => {
                 let window = WindowId(r.u64());
-                let below = f64::from_bits(r.u64());
+                let below = match r.value() {
+                    Value::F64(n) => n,
+                    other => {
+                        panic!("kaya: create_breakpoint's threshold is {other:?}, wanted f64")
+                    }
+                };
                 let n = r.u32() as usize;
-                let mut widgets = Vec::with_capacity(n);
-                for _ in 0..n {
-                    widgets.push(WidgetId(r.u64()));
-                }
-                let mut props = Vec::with_capacity(n);
-                for _ in 0..n {
-                    props.push(prop(r.u32()));
-                }
-                let values = r.record();
+                let _reserved = r.u32();
+                let flat = r.record();
                 assert!(
-                    values.len() == n,
+                    flat.len() == n * 3,
                     "kaya: create_breakpoint declares {n} setters but carries {} values",
-                    values.len()
+                    flat.len()
                 );
-                let setters = widgets
-                    .into_iter()
-                    .zip(props)
-                    .zip(values)
-                    .map(|((w, p), v)| (w, p, v))
+                // Widgets, then props, then values — thirds by position,
+                // the encode's contract.
+                let setters = (0..n)
+                    .map(|i| {
+                        let w = match &flat[i] {
+                            Value::I64(x) => WidgetId(*x as u64),
+                            other => panic!(
+                                "kaya: create_breakpoint setter {i}'s widget is {other:?}, \
+                                 wanted i64"
+                            ),
+                        };
+                        let p = match &flat[n + i] {
+                            Value::I64(x) => prop(*x as u32),
+                            other => panic!(
+                                "kaya: create_breakpoint setter {i}'s prop is {other:?}, \
+                                 wanted i64"
+                            ),
+                        };
+                        (w, p, flat[2 * n + i].clone())
+                    })
                     .collect();
                 TxOp::CreateBreakpoint { window, below, setters }
             }
@@ -2707,16 +2720,19 @@ impl Writer {
             TxOp::CreateBreakpoint { window, below, setters } => {
                 self.record(TX_CREATE_BREAKPOINT, |b, blobs| {
                     b.extend_from_slice(&window.0.to_le_bytes());
-                    b.extend_from_slice(&below.to_bits().to_le_bytes());
-                    b.extend_from_slice(&(setters.len() as u32).to_le_bytes());
-                    for (w, _, _) in setters {
-                        b.extend_from_slice(&w.0.to_le_bytes());
-                    }
-                    for (_, p, _) in setters {
-                        b.extend_from_slice(&prop_raw(*p).to_le_bytes());
-                    }
+                    write_value(b, &Value::F64(*below), blobs);
                     b.extend_from_slice(&(setters.len() as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&((setters.len() * 3) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    // Widgets, then props, then values — thirds by
+                    // position, the decode's contract.
+                    for (w, _, _) in setters {
+                        write_value(b, &Value::I64(w.0 as i64), blobs);
+                    }
+                    for (_, p, _) in setters {
+                        write_value(b, &Value::I64(prop_raw(*p) as i64), blobs);
+                    }
                     for (_, _, v) in setters {
                         write_value(b, v, blobs);
                     }

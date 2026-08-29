@@ -34,7 +34,7 @@ timing() {
 # THE scene list: the mechanical per-scene surfaces below derive from
 # it — one registration per new scene; the leg blocks stay explicit
 # because they encode per-language coverage decisions.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets sizepolicy"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets sizepolicy adaptive"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface windowed canvas adaptive"
+DEPTH_SCENES="typeface windowed canvas"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1124,12 +1124,26 @@ export KAYA_SELFTEST_SCRIPT
 run windowed-rust-swiftui env KAYA_SELFTEST=windowed "$RUST_GUESTS"/windowed
 drain
 
-# THE ADAPTIVE SCENE, depth half (docs/adaptive-layout-plan.md §2):
-# the arrangement axis as a property, flipped by a handler and read
-# back from the render. Rust alone until the milestone's fan-out.
+# THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2): the arrangement
+# axis as a property, flipped by a handler and by a core-evaluated width
+# breakpoint, read back from the render. All eight languages — the
+# bindings wave closed the same evening the depth landed.
+#
+# No C floor guest: the floor's roster is guests/c/Makefile's SCENES,
+# which check-steps' sweep_c_floor reads from the other side.
 KAYA_SELFTEST_SCRIPT="$(scene_script adaptive)"
 export KAYA_SELFTEST_SCRIPT
 run adaptive-rust-swiftui env KAYA_SELFTEST=adaptive "$RUST_GUESTS"/adaptive
+run adaptive-python-swiftui env KAYA_SELFTEST=adaptive python3 guests/python/adaptive.py
+run adaptive-go-swiftui env KAYA_SELFTEST=adaptive target/go-guests/kaya-go
+run adaptive-csharp-swiftui env KAYA_SELFTEST=adaptive KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run adaptive-ocaml-swiftui env KAYA_SELFTEST=adaptive KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/adaptive.exe
+run adaptive-haskell-swiftui env KAYA_SELFTEST=adaptive "$(hs_bin adaptive)"
+run adaptive-swift-swiftui env KAYA_SELFTEST=adaptive target/swift-guests/adaptive
+run adaptive-java-swiftui env KAYA_SELFTEST=adaptive KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 
 # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two

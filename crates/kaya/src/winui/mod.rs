@@ -381,6 +381,11 @@ struct CoreState {
     /// structural change, so late arrivals are covered by the same
     /// path that keeps Grid indices honest.
     aligns: HashMap<WidgetId, i64>,
+    /// Axis overrides (prop 18, docs/adaptive-layout-plan.md D2): the
+    /// creation kind names the default and `effective_vertical` folds
+    /// this over it — reindex, spacing and the harness read all key on
+    /// the fold, never the variant alone.
+    axes: HashMap<WidgetId, i64>,
     /// Container spacing as KAYA declared it (default 8) — what
     /// container_fills sums with, deliberately NOT the Grid's own
     /// RowSpacing/ColumnSpacing: reading the toolkit back mirrors the
@@ -1197,6 +1202,10 @@ thread_local! {
     /// Whether the platform's frame drive is attached
     /// (`attach_frame_drive`). UI thread only, like CORE.
     static FRAME_DRIVE_ATTACHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A window-metrics report is already queued for this turn
+    /// (`schedule_window_metrics`) — CANVAS_TRACKS_DUE's shape, for the
+    /// same per-pass LayoutUpdated fan.
+    static WINDOW_METRICS_DUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The UI thread's dispatcher, for waking it from other threads.
@@ -1431,6 +1440,56 @@ fn report_canvas_tracks(core: &mut CoreState) {
             core.occurrences.send(occ);
         }
     }
+}
+
+/// Every window's content width, reported to the core for breakpoint
+/// evaluation (docs/adaptive-layout-plan.md D3). A same-width report is
+/// silent in the core, so re-asking on every layout pass is free — the
+/// canvas report's rule, one report over.
+fn report_window_metrics(core: &mut CoreState) {
+    let windows: Vec<u64> = core.mounted_roots.keys().copied().collect();
+    for window in windows {
+        let Some(width) = window_client_width(core, window) else {
+            continue;
+        };
+        if width <= 0.0 {
+            continue;
+        }
+        let reported = crate::fault::guard("reporting the window's content size", || {
+            core.scene.set_window_metrics(crate::protocol::WindowId(window), width)
+        });
+        let Some(ops) = reported else { continue };
+        for op in ops {
+            let what = op_head(&op);
+            if let Err(e) = apply(core, op) {
+                crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+                return;
+            }
+        }
+    }
+}
+
+/// `schedule_canvas_tracks`' shape for the window report, and for the
+/// same reason: the report applies ops, which must not run inside the
+/// layout pass that provoked it.
+fn schedule_window_metrics() {
+    if WINDOW_METRICS_DUE.replace(true) {
+        return;
+    }
+    let Some(dispatcher) = DISPATCHER.get() else {
+        WINDOW_METRICS_DUE.set(false);
+        return;
+    };
+    let handler = DispatcherQueueHandler::new(move || {
+        WINDOW_METRICS_DUE.set(false);
+        CORE.with_borrow_mut(|core| {
+            if let Some(core) = core.as_mut() {
+                report_window_metrics(core);
+            }
+        });
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
 }
 
 /// The report, coalesced onto the dispatcher — `schedule_report`'s shape
@@ -2105,13 +2164,23 @@ fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
 /// instead of calling this, because running it per child is N^2
 /// (winui/order.rs). The one other caller is Mount's Loaded one-shot,
 /// which re-measures the baseline containers with live metrics.
+/// A container's rendered direction: the creation kind's default under
+/// any axis override (prop 18). Every direction decision below keys on
+/// this fold — a variant-keyed read would call a flipped row a row.
+fn effective_vertical(core: &CoreState, id: WidgetId) -> bool {
+    core.axes.get(&id).map_or_else(
+        || matches!(core.widgets.get(&id), Some(NativeWidget::Column(_))),
+        |a| *a == 1,
+    )
+}
+
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
-    let (grid, vertical) = match core.widgets.get(&parent) {
-        Some(NativeWidget::Column(g)) => (g.clone(), true),
-        Some(NativeWidget::Row(g)) => (g.clone(), false),
+    let grid = match core.widgets.get(&parent) {
+        Some(NativeWidget::Column(g)) | Some(NativeWidget::Row(g)) => g.clone(),
         // Destroyed, or never a container: nothing to place.
         _ => return Ok(()),
     };
+    let vertical = effective_vertical(core, parent);
     let order = core.child_order.children(parent);
     // A DECLARED TABLE OWNS THREE TRACKS OF ITS OWN — the header, the
     // rule and the scroll host — and its rows are placed inside the
@@ -2160,6 +2229,10 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
             def.SetHeight(spacer(*bottom))?;
             defs.Append(&def)?;
         } else {
+            // The OTHER side's tracks are cleared on every pass: after an
+            // axis flip the old direction's definitions would otherwise
+            // survive and place children on both grids at once.
+            grid.ColumnDefinitions()?.Clear()?;
             let defs = grid.RowDefinitions()?;
             defs.Clear()?;
             for child in order {
@@ -2169,6 +2242,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
             }
         }
     } else {
+        grid.RowDefinitions()?.Clear()?;
         let defs = grid.ColumnDefinitions()?;
         defs.Clear()?;
         for child in order {
@@ -2188,10 +2262,14 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // kaya creates is one.
         let element: FrameworkElement = widget.element()?.cast()?;
         let track = track_of(index, head);
+        // Both attached indices, so a flip leaves no stale placement on
+        // the axis that no longer has tracks.
         if vertical {
             Grid::SetRow(&element, track)?;
+            Grid::SetColumn(&element, 0)?;
         } else {
             Grid::SetColumn(&element, track)?;
+            Grid::SetRow(&element, 0)?;
         }
         // A WINDOWED ROW'S TRACK IS ITS PITCH: the gap rides the row's
         // own bottom margin, uniformly (an odd last row would report a
@@ -2232,10 +2310,8 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // (the 2026-08-22 ruling; docs/deferred.md "Two breadth
         // asymmetries the stretch ruling left open", and container_fills'
         // breadth clause is what holds it).
-        let crossing = matches!(
-            (widget, vertical),
-            (NativeWidget::Row(_), true) | (NativeWidget::Column(_), false)
-        );
+        let crossing = matches!(widget, NativeWidget::Row(_) | NativeWidget::Column(_))
+            && effective_vertical(core, *child) != vertical;
         // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
         // track renders identically (track = desired), a star track is
         // the grower's box, and a declared Width/Height still outranks
@@ -12392,13 +12468,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Progress(bar), Prop::Indeterminate, Value::Bool(on)) => {
                     bar.SetIsIndeterminate(on)?;
                 }
-                (NativeWidget::Column(grid), Prop::Spacing, Value::F64(gap)) => {
-                    // A column's children stack as rows; the gap is the
-                    // row spacing. The DECLARED value is stored beside
-                    // the write — expect_fills sums with the declaration,
-                    // never the toolkit's read-back.
+                (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
+                    // The gap rides the STACKING axis, which the fold
+                    // decides, not the variant. The DECLARED value is
+                    // stored beside the write — expect_fills sums with
+                    // the declaration, never the toolkit's read-back.
                     core.spacings.insert(id, gap);
-                    grid.SetRowSpacing(gap)?;
+                    if effective_vertical(core, id) {
+                        grid.SetRowSpacing(gap)?;
+                        grid.SetColumnSpacing(0.0)?;
+                    } else {
+                        grid.SetColumnSpacing(gap)?;
+                        grid.SetRowSpacing(0.0)?;
+                    }
                 }
                 (
                     NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Grid2D(_),
@@ -12414,22 +12496,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.container_insets.insert(id, pad);
                     stamp_container_padding(core, id)?;
                 }
-                (NativeWidget::Column(_), Prop::Axis, Value::I64(_))
-                | (NativeWidget::Row(_), Prop::Axis, Value::I64(_)) => {
-                    // The axis-state pass is this backend's breadth debt
-                    // (docs/adaptive-layout-plan.md D1): reindex derives
-                    // direction from the widget VARIANT, so honoring the
-                    // prop needs state threading no depth slice carries.
-                    crate::depth_stub("adaptive");
+                (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Axis, Value::I64(v)) => {
+                    // The axis-state pass (docs/adaptive-layout-plan.md
+                    // D2): store the override, move the gap onto the new
+                    // stacking axis, and let reindex rebuild the tracks.
+                    core.axes.insert(id, v);
+                    let gap = core.spacings.get(&id).copied().unwrap_or(8.0);
+                    if v == 1 {
+                        grid.SetRowSpacing(gap)?;
+                        grid.SetColumnSpacing(0.0)?;
+                    } else {
+                        grid.SetColumnSpacing(gap)?;
+                        grid.SetRowSpacing(0.0)?;
+                    }
+                    core.child_order.mark(id);
                 }
                 (NativeWidget::Column(_), Prop::Align, Value::I64(mode))
                 | (NativeWidget::Row(_), Prop::Align, Value::I64(mode)) => {
                     core.aligns.insert(id, mode);
                     core.child_order.mark(id);
-                }
-                (NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
-                    core.spacings.insert(id, gap);
-                    grid.SetColumnSpacing(gap)?;
                 }
                 (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
                     slider.SetMinimum(v)?;
@@ -12688,6 +12773,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     })
                 });
                 panel.Loaded(&loaded)?;
+                // The width report's trigger: this backend projects no
+                // SizeChanged, so the mounted root's LayoutUpdated is
+                // where a resize is seen — coalesced, same-width silent.
+                let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                    schedule_window_metrics();
+                    Ok(())
+                });
+                panel.LayoutUpdated(&laid)?;
+                schedule_window_metrics();
             }
             // The target is a SURFACE: a navigation entry presents
             // in-window (the push already stacked it; the mount fills
@@ -14107,6 +14201,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             child_order: ChildOrder::default(),
             grow: HashMap::new(),
             aligns: HashMap::new(),
+            axes: HashMap::new(),
             spacings: HashMap::new(),
             window,
             aux_windows: HashMap::new(),
@@ -16571,12 +16666,11 @@ impl crate::harness::Stage for WinUiStage {
 
     fn container_axis(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            // BREADTH DEBT, on the record (docs/adaptive-layout-plan.md D1):
-            // this backend's layout derives direction from the widget
-            // VARIANT (reindex), so until the axis-state pass lands here the
-            // honest answer is the creation kind's own axis — the value the
-            // layout actually uses. The adaptive scene rides DEPTH_SCENES
-            // and does not reach this lane until that pass exists.
+            // The RENDERED axis, read out of the Grid's own definitions:
+            // reindex builds tracks on exactly one side and clears the
+            // other, so the populated side IS the direction the layout
+            // used — never the model's axis map, which would echo the
+            // apply arm back (docs/adaptive-layout-plan.md §2).
             let from_columns = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if from_columns { &core.columns } else { &core.rows };
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
@@ -16587,7 +16681,14 @@ impl crate::harness::Stage for WinUiStage {
             if grid.ActualWidth()? <= 0.0 && grid.ActualHeight()? <= 0.0 {
                 return Ok("no container layout recorded".to_owned());
             }
-            Ok(if from_columns { "vertical" } else { "horizontal" }.to_owned())
+            let rows = grid.RowDefinitions()?.Size()?;
+            let cols = grid.ColumnDefinitions()?.Size()?;
+            Ok(match (rows > 0, cols > 0) {
+                (true, false) => "vertical".to_owned(),
+                (false, true) => "horizontal".to_owned(),
+                (false, false) => "no container layout recorded".to_owned(),
+                (true, true) => format!("<both axes have tracks: {rows} rows, {cols} columns>"),
+            })
         })
         .unwrap_or_else(|e| format!("<winui read failed: {e:?}>"))
     }

@@ -266,6 +266,11 @@ const _: () = assert!(KAYA_TX_SET_DRAWING == wire::TX_SET_DRAWING);
 /// Never sent for `scale`, which is what a canvas with no record is.
 pub const KAYA_TX_SET_SIZE_POLICY: u16 = 47;
 const _: () = assert!(KAYA_TX_SET_SIZE_POLICY == wire::TX_SET_SIZE_POLICY);
+/// A width breakpoint on a window (docs/adaptive-layout-plan.md D3):
+/// { u64 window; value below(f64); u32 count; u32 pad; values setters } —
+/// count triples flat, widgets then props then values, thirds by position.
+pub const KAYA_TX_CREATE_BREAKPOINT: u16 = 48;
+const _: () = assert!(KAYA_TX_CREATE_BREAKPOINT == wire::TX_CREATE_BREAKPOINT);
 /// `sorted`'s no-column sentinel, and `direction`'s two values.
 pub const KAYA_SORT_NONE: u32 = u32::MAX;
 pub const KAYA_SORT_ASC: u32 = 0;
@@ -3842,6 +3847,7 @@ mod tests {
             ("set_column_headers", KAYA_TX_SET_COLUMN_HEADERS),
             ("set_drawing", KAYA_TX_SET_DRAWING),
             ("set_size_policy", KAYA_TX_SET_SIZE_POLICY),
+            ("create_breakpoint", KAYA_TX_CREATE_BREAKPOINT),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),

@@ -525,7 +525,13 @@ app = kaya.App()
 with app.window(title="portfolio", width=900, height=600):
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
     book_size = kaya.signal(f"Transactions: {len(txns)}")
-    with kaya.row():
+    # THE DASHBOARD'S TWO COLUMNS STACK ON A PHONE
+    # (docs/adaptive-layout-plan.md D3): side by side they are ~900 points
+    # wide, so on a 393-point screen the detail column ran off the right
+    # edge — SwiftUI clipped it, Compose gave it a zero-width track and the
+    # tables recorded no geometry at all. One keyword, evaluated in the
+    # core against the window's own width.
+    with kaya.row(stack_below=700):
         with kaya.column():
             # THE DRAWN MARK, inline with the title (the placement ruling,
             # 2026-08-28): a row hugs its content, so the chip can take no

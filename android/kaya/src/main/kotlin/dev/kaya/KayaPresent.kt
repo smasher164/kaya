@@ -277,6 +277,14 @@ object KayaPresent {
     @JvmStatic external fun canvasTrack(widget: Long, width: Double, height: Double)
 
     /**
+     * THE WINDOW'S CONTENT SIZE in dp — breakpoint evaluation's report
+     * channel (docs/adaptive-layout-plan.md D3). The core latches the
+     * width and a same-width report moves nothing, so re-reporting on
+     * recomposition is free. kaya_window_metrics's JNI spelling.
+     */
+    @JvmStatic external fun windowMetrics(window: Long, width: Double, height: Double)
+
+    /**
      * A FRAME at the platform's own frame time in seconds (§15.4).
      * Choreographer fixes that timestamp at schedule time — which is
      * what `withFrameNanos` hands back — so it is passed through rather

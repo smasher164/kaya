@@ -924,7 +924,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xa10b712b34b3546fuL
+    private const val SPEC_HASH: ULong = 0xb1f68943daa4f9e6uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -11179,6 +11179,15 @@ fun KayaRoot() {
     // draws, taken directly so the interpreter needs no extra artifact.
     KayaSceneModel.formFactor =
         if (LocalConfiguration.current.screenWidthDp >= 600) "regular" else "compact"
+    // The window's content size, reported for breakpoint evaluation
+    // (docs/adaptive-layout-plan.md D3) — a composition local, so a
+    // rotation re-reports for free; the core latches and same-width
+    // reports are silent.
+    val metricsWidth = LocalConfiguration.current.screenWidthDp.toDouble()
+    val metricsHeight = LocalConfiguration.current.screenHeightDp.toDouble()
+    LaunchedEffect(metricsWidth, metricsHeight) {
+        KayaPresent.windowMetrics(0, metricsWidth, metricsHeight)
+    }
     // THE SOFT KEYBOARD IS AN INSET THIS SURFACE CONSUMES. Without it
     // the system PANS the whole window up for a focused field low in
     // it: measured 2026-08-10 on the editor scene with the find bar

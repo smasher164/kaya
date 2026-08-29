@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xa10b712b34b3546f
+let kayaSpecHash: UInt64 = 0xb1f68943daa4f9e6
 
 struct KayaTx {
     var bytes = Data()
@@ -511,6 +511,17 @@ struct KayaTx {
         self.u64(widgetId)
         self.u32(policy)
         self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
+    mutating func createBreakpoint(_ window: UInt64, _ below: KayaValue, _ count: UInt32, _ setters: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_BREAKPOINT))
+        self.u64(window)
+        self.value(below)
+        self.u32(count)
+        self.u32(0)
+        self.values(setters)
         self.end(kayaAt)
     }
 

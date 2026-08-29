@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xa10b712b34b3546f
+	SpecHash uint64 = 0xb1f68943daa4f9e6
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -213,6 +213,7 @@ const (
 	txSetColumnHeaders = 45
 	txSetDrawing = 46
 	txSetSizePolicy = 47
+	txCreateBreakpoint = 48
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -771,6 +772,17 @@ func TxSetSizePolicy(widgetId uint64, policy uint32) []byte {
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = binary.LittleEndian.AppendUint32(b, policy)
 	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxCreateBreakpoint: A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
+func TxCreateBreakpoint(window uint64, below any, count uint32, setters []any) []byte {
+	b := beginRecord(txCreateBreakpoint)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = encodeValue(b, below)
+	b = binary.LittleEndian.AppendUint32(b, count)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, setters)
 	return endRecord(b)
 }
 

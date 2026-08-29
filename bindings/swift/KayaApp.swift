@@ -157,6 +157,14 @@ enum KayaAlign: Int64 {
     case baseline = 4
 }
 
+/// A container's ARRANGEMENT AXIS: identity is the creation kind
+/// (`row#N` stays `row#N` whatever this says), presentation is the prop
+/// (docs/adaptive-layout-plan.md D1/D2).
+enum KayaAxis: Int64 {
+    case horizontal = 0
+    case vertical = 1
+}
+
 /// A canvas's coordinate system AND its natural size in
 /// device-independent points (docs/canvas-plan.md §3.2). The op stream is
 /// written in these units on every platform and in every language, so a
@@ -411,6 +419,21 @@ enum KayaSymbol: Int64 {
 struct KayaWidget {
     let id: UInt64
 
+    /// Stack this row's children vertically while the window is narrower
+    /// than `width` logical points, reverting on the way back up — ONE
+    /// core-evaluated breakpoint record, the container-riding spelling
+    /// (docs/adaptive-layout-plan.md D3). The root refuses a
+    /// non-container target at batch.
+    @discardableResult
+    func stackBelow(_ width: Double) -> KayaWidget {
+        let (_, tx) = kayaDeclaring()
+        // Widgets, then props, then values — thirds by position.
+        tx.tx.createBreakpoint(
+            0, .f64(width), 1,
+            [.i64(Int64(id)), .i64(Int64(KAYA_PROP_AXIS)), .i64(Int64(KAYA_AXIS_VERTICAL))])
+        return self
+    }
+
     /// THIS CANVAS REFUSES COERCION: it draws at its viewbox and is placed
     /// in whatever track layout gives it, never adapting to it
     /// (docs/canvas-plan.md §3.2.1, ruling 2). The one true PROPERTY of the
@@ -463,21 +486,25 @@ struct KayaWidget {
 
 /// A template node: a blueprint entry, stamped per collection entry.
 ///
-/// NO `fixed`/`onDraw`/`onTick` HERE, and the compiler is the refusal:
-/// the size policy is a live-zone declaration in this slice, so a canvas
-/// inside a row template keeps `scale` (docs/deferred.md, the
-/// template-zone size policy entry, which says what closing it costs).
+/// NO `stackBelow`/`fixed`/`onDraw`/`onTick` HERE, and the compiler is
+/// the refusal: a breakpoint's setters name LIVE widgets and a template
+/// row is a blueprint stamped per entry
+/// (docs/adaptive-layout-plan.md D3), and the size policy is a live-zone
+/// declaration in this slice, so a canvas inside a row template keeps
+/// `scale` (docs/deferred.md, the template-zone size policy entry, which
+/// says what closing it costs).
 struct KayaNodeHandle {
     let id: UInt64
 }
 
-/// The app and the open transaction a size-policy declaration needs:
-/// the registry the handler joins, and the batch the policy record rides
+/// The app and the open transaction a chained live-zone declaration
+/// needs: the registry a handler joins, and the batch the record rides
 /// (KayaSignal.derive's guard, one handle type over).
 private func kayaDeclaring() -> (app: KayaApp, tx: KayaAppTx) {
     guard let app = KayaApp.ambient, let tx = app.currentTx else {
         preconditionFailure(
-            "kaya: a canvas's size policy is declared inside a transaction (build or handler)")
+            "kaya: a canvas's size policy and stackBelow are declared inside a "
+                + "transaction (build or handler)")
     }
     return (app, tx)
 }
@@ -2360,6 +2387,14 @@ final class KayaAppTx {
     /// rows-only — the scene rejects misuse at the root.
     func setAlign(_ w: KayaWidget, _ align: KayaAlign) {
         tx.setAlign(w.id, align.rawValue)
+    }
+
+    /// A container's arrangement axis. The creation kind is its
+    /// declarative spelling and this is the dynamic path — a handler's
+    /// flip, keyed on nothing about the window
+    /// (docs/adaptive-layout-plan.md D2). Containers only.
+    func setAxis(_ w: KayaWidget, _ axis: KayaAxis) {
+        tx.setAxis(w.id, axis.rawValue)
     }
 
     /// A widget's SEMANTIC EMPHASIS: destructive/prominent on buttons,

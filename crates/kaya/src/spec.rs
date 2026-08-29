@@ -1312,6 +1312,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   LIVE CANVASES ONLY in this slice: a template node is refused \
                   by name (docs/deferred.md's template-zone size policy entry).",
         },
+        Record {
+            kind: 48,
+            name: "create_breakpoint",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("below", FieldTy::Value),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("setters", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "A width breakpoint on a window: when the window's width \
+                  drops below the f64 threshold (logical points), the core \
+                  applies the setter list; crossing back it restores the \
+                  guest-authored value, or the widget's own default where the \
+                  guest never wrote one — the adaptation is a DIFF against \
+                  the base declaration (docs/adaptive-layout-plan.md D3).\n\n\
+                  THE CORE EVALUATES THE CONDITION, never the platform's \
+                  breakpoint machinery and never a guest round trip: the \
+                  width is LATCHED from the backend's metrics reports, a \
+                  breakpoint declared before any report applies at the \
+                  first — the phone that never resizes — and a same-width \
+                  report moves nothing.\n\n\
+                  `setters` is count triples flat: widgets (i64), then props \
+                  (i64), then values, thirds by position. Setters may name \
+                  `axis` only until the settable-prop ruling widens the list; \
+                  anything else fails the batch by name.",
+        },
     ],
     apply: &[
         Record {
@@ -2799,6 +2827,7 @@ mod tests {
             ("set_column_headers", wire::TX_SET_COLUMN_HEADERS),
             ("set_drawing", wire::TX_SET_DRAWING),
             ("set_size_policy", wire::TX_SET_SIZE_POLICY),
+            ("create_breakpoint", wire::TX_CREATE_BREAKPOINT),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {

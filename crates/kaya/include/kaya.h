@@ -1000,6 +1000,13 @@
 #define KAYA_TX_SET_SIZE_POLICY 47
 
 /**
+ * A width breakpoint on a window (docs/adaptive-layout-plan.md D3):
+ * { u64 window; value below(f64); u32 count; u32 pad; values setters } —
+ * count triples flat, widgets then props then values, thirds by position.
+ */
+#define KAYA_TX_CREATE_BREAKPOINT 48
+
+/**
  * `sorted`'s no-column sentinel, and `direction`'s two values.
  */
 #define KAYA_SORT_NONE UINT32_MAX

@@ -6284,6 +6284,24 @@ mod tests {
         ]);
     }
 
+    /// Every chained binding puts `stack_below` on the generic widget
+    /// handle, so the wall that a setter targets a CONTAINER is the
+    /// core's — check_prop's axis domain, at batch.
+    #[test]
+    #[should_panic(expected = "has no property Axis")]
+    fn a_breakpoint_setter_on_a_non_container_fails_the_batch() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 520.0,
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]);
+    }
+
     #[test]
     #[should_panic(expected = "not reachable from any mounted root")]
     fn a_when_container_never_parented_fails_the_batch() {

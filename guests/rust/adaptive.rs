@@ -49,18 +49,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // core-evaluated: below 520 points of window width its
                 // axis goes vertical, and crossing back it reverts to
                 // the creation kind's own. The handler never touches it.
-                let narrow = tx
-                    .row(|tx| {
-                        let one = tx.signal("one");
-                        let two = tx.signal("a wider two");
-                        tx.label(one); // label#3
-                        tx.label(two); // label#4
-                    })
-                    .a11y_id("narrow")
-                    .id();
-                tx.breakpoint_below(520.0, |bp| {
-                    bp.axis(narrow, kaya::Axis::Vertical);
-                });
+                tx.row(|tx| {
+                    let one = tx.signal("one");
+                    let two = tx.signal("a wider two");
+                    tx.label(one); // label#3
+                    tx.label(two); // label#4
+                })
+                .a11y_id("narrow")
+                .stack_below(520.0);
             })
             .id();
         tx.mount(root);

@@ -622,6 +622,19 @@ let align_wire = function
 
 let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
 
+(* A container's ARRANGEMENT AXIS — one node, two constructor spellings
+   (docs/adaptive-layout-plan.md D1/D2): identity is the creation kind,
+   presentation is this prop, so a widget built by [row] stays
+   addressable as [row#N] whatever its axis says today. No constructor
+   spells it; the runtime toggle and a breakpoint's setters do. *)
+type axis = Horizontal | Vertical
+
+let axis_wire = function
+  | Horizontal -> Int64.of_int Kaya_wire.axis_horizontal
+  | Vertical -> Int64.of_int Kaya_wire.axis_vertical
+
+let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wire a))
+
 (* SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
    never how it looks. [Destructive] and [Prominent] are an ACTION's
    emphasis — what pressing it does to the user's data, and which of a
@@ -1205,9 +1218,30 @@ let column ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset children =
 let scroll ?grow ?a11y_id ?a11y_label children =
   container ?grow ?a11y_id ?a11y_label Kaya_wire.kind_scroll children
 
-let row ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset children =
-  container ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset Kaya_wire.kind_row
-    children
+(* [~stack_below] stacks this row's children vertically while the window
+   is narrower than that many logical points, reverting on the way back
+   up — a core-evaluated width breakpoint, the one-prop sugar over
+   [Kaya_wire.tx_create_breakpoint] (docs/adaptive-layout-plan.md D3).
+   LIVE ONLY: [Tpl.row] carries no such label, so a blueprint cannot ask
+   for one — a breakpoint's setters name live widgets, and a template
+   row is stamped per entry. *)
+let row ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset ?stack_below children () =
+  let parent =
+    container ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset Kaya_wire.kind_row
+      children ()
+  in
+  Option.iter
+    (fun width ->
+      let (Widget id) = parent in
+      emit (the_tx ())
+        (Kaya_wire.tx_create_breakpoint 0L (Kaya_wire.F64 width) 1
+           [
+             Kaya_wire.I64 id;
+             Kaya_wire.I64 (Int64.of_int Kaya_wire.prop_axis);
+             Kaya_wire.I64 (Int64.of_int Kaya_wire.axis_vertical);
+           ]))
+    stack_below;
+  parent
 
 (* An existing widget as a child: [w field] wraps an already-realized
    handle in an inert thunk, so a widget created earlier (because

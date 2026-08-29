@@ -938,6 +938,20 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// Stack this row's children vertically while the window is
+    /// narrower than `width` logical points — the container-riding
+    /// spelling of [`Tx::breakpoint_below`], which remains the
+    /// multi-setter path (docs/adaptive-layout-plan.md D3). The root
+    /// refuses a non-container target at batch; on a column it sets
+    /// what the kind already is.
+    pub fn stack_below(self, width: f64) -> Self {
+        let id = self.id;
+        self.tx.breakpoint_below(width, |bp| {
+            bp.axis(id, Axis::Vertical);
+        });
+        self
+    }
+
     /// This container's inter-child gap — the chained spelling of
     /// [`Tx::spacing`], which remains the dynamic path.
     pub fn spacing(self, gap: f64) -> Self {

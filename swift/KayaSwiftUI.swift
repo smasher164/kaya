@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xa10b712b34b3546f
+let kayaSpecHash: UInt64 = 0xb1f68943daa4f9e6
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2

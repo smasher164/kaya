@@ -114,6 +114,23 @@ public final class KayaApp {
     }
 
     /**
+     * A container's arrangement axis (docs/adaptive-layout-plan.md
+     * D1/D2): row and column are ONE node this parameterizes, and the
+     * prop is mutable, so a breakpoint diff or a handler toggle is an
+     * ordinary property write. A widget stays addressable by its
+     * CREATION kind whatever its axis says today.
+     */
+    public enum Axis {
+        HORIZONTAL(KayaWire.AXIS_HORIZONTAL), VERTICAL(KayaWire.AXIS_VERTICAL);
+
+        final long wire;
+
+        Axis(long wire) {
+            this.wire = wire;
+        }
+    }
+
+    /**
      * SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
      * never how it looks. Each variant fits one kind, and the ROOT
      * refuses the misfits at declare time.
@@ -2104,6 +2121,26 @@ public final class KayaApp {
             return this;
         }
 
+        /**
+         * Stack this container's children vertically while the window is
+         * narrower than {@code width} logical points, reverting crossing
+         * back — one core-evaluated width breakpoint
+         * (docs/adaptive-layout-plan.md D3).
+         *
+         * <p>LIVE ZONE ONLY: a breakpoint's setters name live widgets,
+         * and a template row is a blueprint stamped per entry — the
+         * template zone has no spelling for it.
+         */
+        public Widget stackBelow(double width) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: stackBelow on a widget outside its build transaction"
+                    + " — a breakpoint is declared where the container is built");
+            }
+            tx.stackBelow(id, width);
+            return this;
+        }
+
         /** This container's inter-child gap at construction:
          * tx.column(() -> {...}).spacing(12). */
         public Widget spacing(double gap) {
@@ -3384,6 +3421,30 @@ public final class KayaApp {
          */
         public void setAlign(Widget w, Align align) {
             emit(KayaWire.txSetAlign(w.id, align.wire));
+        }
+
+        /**
+         * A container's arrangement axis (the creation kind's own is the
+         * default — row horizontal, column vertical). Containers only.
+         * The dynamic path AND the declarative spelling, as with
+         * {@link #setGrow}; the widget stays addressable by its creation
+         * kind (docs/adaptive-layout-plan.md D2).
+         */
+        public void setAxis(Widget w, Axis axis) {
+            emit(KayaWire.txSetAxis(w.id, axis.wire));
+        }
+
+        /**
+         * The one-prop breakpoint {@link Widget#stackBelow} declares, on
+         * the primary window: setters are count triples flat — widgets,
+         * then props, then values, thirds by position.
+         *
+         * <p>PRIVATE, like {@link #sizePolicy}: a guest names a
+         * container and a width, never the prop number the core diffs.
+         */
+        private void stackBelow(long widget, double width) {
+            emit(KayaWire.txCreateBreakpoint(0, width, 1, new Object[] {
+                widget, (long) KayaWire.PROP_AXIS, (long) KayaWire.AXIS_VERTICAL }));
         }
 
         /**

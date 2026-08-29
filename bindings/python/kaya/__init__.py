@@ -635,6 +635,15 @@ class Widget(_Handle):
         rejects it anywhere else; baseline is rows-only."""
         _records().append(wire.tx_set_align(self.id, _align_value(mode)))
 
+    def axis(self, mode):
+        """Set this container's arrangement direction (see kaya.Axis;
+        strings accepted) — the user-driven orientation toggle
+        (docs/adaptive-layout-plan.md D2). Row/column only — the scene
+        rejects it anywhere else. The widget stays what its constructor
+        made it: identity is the creation kind, presentation is the
+        prop."""
+        _records().append(wire.tx_set_axis(self.id, _axis_value(mode)))
+
     def spacing(self, gap):
         """Set this container's inter-child gap (main axis, DIP; the
         normalized default is 8). Containers only — the scene rejects
@@ -2709,6 +2718,34 @@ _ALIGN_NAMES = {
 }
 
 
+class Axis:
+    """The axis enum: a container's arrangement direction — row and
+    column are one node whose constructor names the initial value
+    (docs/adaptive-layout-plan.md D1). `Widget.axis` also accepts these
+    names as plain strings — `axis("vertical")` — the Pythonic
+    spelling."""
+
+    HORIZONTAL = wire.AXIS_HORIZONTAL
+    VERTICAL = wire.AXIS_VERTICAL
+
+
+_AXIS_NAMES = {
+    "horizontal": wire.AXIS_HORIZONTAL,
+    "vertical": wire.AXIS_VERTICAL,
+}
+
+
+def _axis_value(axis):
+    if isinstance(axis, str):
+        try:
+            return _AXIS_NAMES[axis]
+        except KeyError:
+            raise ValueError(
+                f"axis must be one of {sorted(_AXIS_NAMES)}, got {axis!r}"
+            ) from None
+    return int(axis)
+
+
 def _align_value(align):
     if isinstance(align, str):
         try:
@@ -2973,11 +3010,31 @@ def button(text=None, bind=None, on_click=None, grow=None):
     return handle
 
 
-def row(grow=None, spacing=None, align=None, inset=None):
+def row(grow=None, spacing=None, align=None, inset=None, stack_below=None):
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
-    `inset` its own padding."""
+    `inset` its own padding.
+
+    `stack_below` stacks the children vertically while the window is
+    narrower than that many logical points — a core-evaluated width
+    breakpoint, reverting on the way back up
+    (docs/adaptive-layout-plan.md D3)."""
     handle = _widget(wire.KIND_ROW)
+    if stack_below is not None:
+        if _tpl_depth > 0:
+            raise TypeError(
+                "kaya: stack_below is live-only — a breakpoint's setters "
+                "name live widgets, and a template row is a blueprint "
+                "stamped per entry (docs/adaptive-layout-plan.md D3)"
+            )
+        _records().append(
+            wire.tx_create_breakpoint(
+                0,
+                float(stack_below),
+                1,
+                [handle.id, wire.PROP_AXIS, wire.AXIS_VERTICAL],
+            )
+        )
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_align(handle, align)

@@ -1358,18 +1358,22 @@ scene_script() { grep -v '^#' "$ROOT/tools/scenes/$1.steps" | tr '\n' ';'; }
 # THIS IS THE iOS LANE'S SHAPE, deliberately: the two mobile lanes meet
 # the same tail on the same scene, and two answers to one question is
 # how lanes drift.
-scene_script_cut() { # scene cut-verb keep-verb
-    python3 - "$ROOT/tools/scenes/$1.steps" "$2" "$3" <<'PY'
+scene_script_cut() { # scene cut-verb keep-verb [extra]
+    python3 - "$ROOT/tools/scenes/$1.steps" "$2" "$3" "${4:-}" <<'PY'
 import pathlib
 import sys
 
-path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
+path, cut, keep, extra = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 # A CUT WITHOUT A `keep` IS AN UNGUARDED CUT, and an optional guard is
 # the kind that is quietly not passed.
 #
 # A LIST, because one scene's tail can be below more than one thing the
-# leg exists to assert. THE iOS LANE TAKES THE SAME LIST — two mobile
-# lanes, one question, and two answers is how lanes drift.
+# leg exists to assert. `verb=target` holds one HANDLE's assertions, for
+# the scene whose same observable is width-dependent below the cut, and
+# buying the same-verb drop costs an EXTRA that re-asserts the verb in
+# its always-true-here form. THE iOS LANE TAKES THE SAME LIST AND THE
+# SAME GRAMMAR — two mobile lanes, one question, and two answers is how
+# lanes drift.
 keeps = keep.split()
 if not keeps:
     sys.exit(f"run-emulator: cutting {path} at `{cut}` with no `keep` verb — "
@@ -1386,22 +1390,31 @@ at = verbs.index(cut)
 prefix, dropped = lines[:at], lines[at:]
 
 
-def asserted(seq, verb):
+def asserted(seq, verb, target=None):
     """The distinct `verb` steps in seq, whitespace-normalized."""
     return {" ".join(line.split()) for line in seq
-            if (line.split() or [""])[0] == verb}
+            if (p := line.split()) and p[0] == verb
+            and (target is None or (len(p) > 1 and p[1] == target))}
 
 
-for verb in keeps:
-    whole, kept = asserted(lines, verb), asserted(prefix, verb)
+extra_verbs = {(line.split() or [""])[0] for line in extra.splitlines()}
+for tok in keeps:
+    verb, _, target = tok.partition("=")
+    whole = asserted(lines, verb, target or None)
+    kept = asserted(prefix, verb, target or None)
     if not kept:
-        sys.exit(f"run-emulator: cutting {path} at `{cut}` leaves no `{verb}` "
+        sys.exit(f"run-emulator: cutting {path} at `{cut}` leaves no `{tok}` "
                  f"step at all — the leg would pass without asserting the thing "
                  f"it exists for")
     if kept != whole:
         sys.exit(f"run-emulator: cutting {path} at `{cut}` drops "
                  f"{sorted(whole - kept)} — the cut may not take an assertion of "
-                 f"`{verb}` with it")
+                 f"`{tok}` with it")
+    if target and asserted(dropped, verb) and verb not in extra_verbs:
+        sys.exit(f"run-emulator: cutting {path} at `{cut}` takes `{verb}` "
+                 f"assertions the targeted keep `{tok}` does not hold, and the "
+                 f"leg's extra asserts no `{verb}` — re-assert it there or hold "
+                 f"them with the keep")
 print("\n".join(f"run-emulator: NOT RUN on this host (after `{cut}`): {line}"
                 for line in dropped), file=sys.stderr)
 print(";".join(prefix) + ";")
@@ -1478,6 +1491,18 @@ PY
 # refused cut must kill the lane, not run an empty script — measured
 # 2026-08-16, three legs green-on-nothing ("script has no expects").
 SECTIONS_CUT="$(scene_script_cut sections expect_windows "expect_section expect_section_symbol")" || exit 1
+
+# The adaptive scene's phone half (docs/adaptive-layout-plan.md §2): the
+# handler flip runs here, the breakpoint's resize does not — a phone does
+# not command its own width. The targeted keeps hold the two phone-true
+# axis reads above the cut, and the EXTRA asserts what this host CAN say
+# about the breakpoint: an emulator narrower than the threshold has
+# already applied it, which is the first-report arm. Assigned HERE for
+# SECTIONS_CUT's reason.
+ADAPTIVE_CUT="$(scene_script_cut adaptive resize_window \
+    "expect_axis=row@dash expect_axis=column@steady" \
+    'expect_axis row@narrow "vertical"')" || exit 1
+ADAPTIVE_CUT="${ADAPTIVE_CUT}expect_axis row@narrow \"vertical\";"
 
 # The identity scene's one desktop-only step, dropped for every suite
 # rather than per block: all three guests ask the core
@@ -1859,6 +1884,14 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity sizepolicy \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script sizepolicy)'"
+    # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2): the axis as a
+    # property under this backend's own derivation, and the width report
+    # that drives the breakpoint (KayaPresent.windowMetrics). The cut and
+    # its extra are ADAPTIVE_CUT above.
+    run_apk adaptive-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity adaptive \
+        --es KAYA_SELFTEST_SCRIPT "'$ADAPTIVE_CUT'"
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \
@@ -2372,12 +2405,11 @@ ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
 # tables record no live geometry and the scene cannot answer. It
 # wires with the adaptive-layout milestone
 # (docs/adaptive-layout-plan.md), whose axis flip removes the
-# overflow — docs/deferred.md carries the entry. `adaptive` is that
-# milestone's own depth scene, rust-only: this lane's rust artifact is
-# the milestone2 APK and its scene roster is a fan-out question, so the
-# leg wires with the breadth slice.
+# overflow — docs/deferred.md carries the entry. `adaptive` itself
+# wired with that milestone's breadth slice (adaptive-compose, the
+# handler half plus the breakpoint's first-report arm).
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-ANDROID_UNWIRED_SCENES="portfolio adaptive"
+ANDROID_UNWIRED_SCENES="portfolio"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"

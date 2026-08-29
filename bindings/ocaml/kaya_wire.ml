@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xa10b712b34b3546fL
+let spec_hash = 0xb1f68943daa4f9e6L
 
 let value_bool = 1
 let value_i64 = 2
@@ -214,6 +214,7 @@ let tx_kind_set_app_identity = 44
 let tx_kind_set_column_headers = 45
 let tx_kind_set_drawing = 46
 let tx_kind_set_size_policy = 47
+let tx_kind_create_breakpoint = 48
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -653,6 +654,15 @@ let tx_set_size_policy widget_id policy =
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int policy);
       Buffer.add_int32_le b 0l)
+
+(* A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. *)
+let tx_create_breakpoint window below count setters =
+  finish tx_kind_create_breakpoint (fun b ->
+      Buffer.add_int64_le b window;
+      encode_value b below;
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b 0l;
+      encode_values b setters)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =

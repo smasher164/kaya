@@ -383,7 +383,7 @@ timing vm-ready
 # because they encode per-language coverage decisions. The class this
 # kills: four hand-maintained lists in this file, where a forgotten
 # entry shipped every artifact except the one a leg needed.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend
 # can be validated before nine guests exist — the deploy-win twin of
@@ -2151,6 +2151,17 @@ case "$SUITE" in
         run_suite panes_go
         run_suite panes_csharp
         run_suite panes_java
+        drain_suites
+        # The adaptive scene (docs/adaptive-layout-plan.md): the axis as a
+        # property, moved by a handler and by a core-evaluated width
+        # breakpoint. In THIS block, beside split and panes, because its
+        # second half drives resize_window — the real window resize, whose
+        # reported width is what the breakpoint reads.
+        run_suite adaptive_rust
+        run_suite adaptive_python
+        run_suite adaptive_go
+        run_suite adaptive_csharp
+        run_suite adaptive_java
         drain_suites
         run_suite listdetail_rust
         run_suite listdetail_python

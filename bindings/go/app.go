@@ -710,6 +710,23 @@ func (w Widget) Grow(weight float64) Widget {
 	return w
 }
 
+// StackBelow stacks this row's children vertically while the window is
+// narrower than width logical points, reverting crossing back — the
+// container-riding spelling of a core-evaluated width breakpoint
+// (docs/adaptive-layout-plan.md D3). Same transaction discipline as
+// Grow. Live zone only: a template row is a blueprint stamped per
+// entry, and Node carries no chain to spell this on.
+func (w Widget) StackBelow(width float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: StackBelow on a widget outside its build transaction — a breakpoint's setters name live widgets, so it belongs in the build expression that created the row")
+	}
+	// Setters flat: widgets, then props, then values — thirds by
+	// position, the encode's contract.
+	w.tx.emit(TxCreateBreakpoint(0, width, 1,
+		[]any{int64(w.id), int64(PropAxis), int64(AxisVertical)}))
+	return w
+}
+
 // SetAlign sets a container's cross-axis child placement — one of the
 // generated align constants. Containers only; baseline is rows-only,
 // and the root rejects misuse. The chain is the declarative spelling.
@@ -725,6 +742,16 @@ func (w Widget) Align(mode int64) Widget {
 	}
 	w.tx.SetAlign(w, mode)
 	return w
+}
+
+// SetAxis sets a container's arrangement axis — AxisHorizontal or
+// AxisVertical. One node, two constructor spellings: a widget created
+// as a row stays addressable as row#N whatever its axis says today
+// (docs/adaptive-layout-plan.md D1, D2). No constructor spells it, so
+// this is the only path; the declarative width-driven one is
+// Widget.StackBelow.
+func (tx *Tx) SetAxis(w Widget, axis int64) {
+	tx.emit(TxSetAxis(w.id, axis))
 }
 
 // SetSpacing sets a container's inter-child gap (main axis, DIP;

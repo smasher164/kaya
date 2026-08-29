@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xa10b712b34b3546fL;
+    public static final long SPEC_HASH = 0xb1f68943daa4f9e6L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -212,6 +212,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_COLUMN_HEADERS = 45;
     public static final short TX_KIND_SET_DRAWING = 46;
     public static final short TX_KIND_SET_SIZE_POLICY = 47;
+    public static final short TX_KIND_CREATE_BREAKPOINT = 48;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -789,6 +790,17 @@ public final class KayaWire {
         b.putLong(widgetId);
         b.putInt(policy);
         b.putInt(0);
+        return finish(b);
+    }
+
+    /** A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. */
+    public static byte[] txCreateBreakpoint(long window, Object below, int count, Object[] setters) {
+        Enc b = begin(TX_KIND_CREATE_BREAKPOINT);
+        b.putLong(window);
+        encodeValue(b, below);
+        b.putInt(count);
+        b.putInt(0);
+        encodeValues(b, setters);
         return finish(b);
     }
 

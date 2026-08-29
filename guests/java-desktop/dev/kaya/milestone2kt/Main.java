@@ -145,6 +145,9 @@ public final class Main {
             case "sizepolicy":
                 app = SizePolicy::app;
                 break;
+            case "adaptive":
+                app = Adaptive::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

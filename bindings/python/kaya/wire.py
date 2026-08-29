@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xa10b712b34b3546f
+SPEC_HASH = 0xb1f68943daa4f9e6
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -210,6 +210,7 @@ TX_SET_APP_IDENTITY = 44
 TX_SET_COLUMN_HEADERS = 45
 TX_SET_DRAWING = 46
 TX_SET_SIZE_POLICY = 47
+TX_CREATE_BREAKPOINT = 48
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -503,6 +504,10 @@ def tx_set_drawing(widget_id, vb_w, vb_h, count, path_len, ops):
 def tx_set_size_policy(widget_id, policy):
     """WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry)."""
     return record(TX_SET_SIZE_POLICY, struct.pack("<Q", widget_id) + struct.pack("<I", policy) + struct.pack("<I", 0))
+
+def tx_create_breakpoint(window, below, count, setters):
+    """A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name."""
+    return record(TX_CREATE_BREAKPOINT, struct.pack("<Q", window) + _enc.value(below) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(setters))
 
 
 def tx_set_text(widget_id, text):

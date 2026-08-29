@@ -469,6 +469,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_canvas_track as *mut _,
             },
             NativeMethod {
+                name: "windowMetrics".into(),
+                sig: "(JDD)V".into(),
+                fn_ptr: present_window_metrics as *mut _,
+            },
+            NativeMethod {
                 name: "frame".into(),
                 sig: "(D)V".into(),
                 fn_ptr: present_frame as *mut _,
@@ -850,6 +855,19 @@ extern "system" fn present_canvas_track(
     height: jni::sys::jdouble,
 ) {
     crate::capi::kaya_canvas_track(widget as u64, width, height);
+}
+
+/// KayaPresent.windowMetrics: the window's content size in dp —
+/// breakpoint evaluation's report channel
+/// (docs/adaptive-layout-plan.md D3).
+extern "system" fn present_window_metrics(
+    _env: JNIEnv,
+    _class: JClass,
+    window: jlong,
+    width: jni::sys::jdouble,
+    height: jni::sys::jdouble,
+) {
+    crate::capi::kaya_window_metrics(window as u64, width, height);
 }
 
 /// KayaPresent.frame: the platform's own frame time in seconds, which is

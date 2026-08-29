@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xa10b712b34b3546f
+specHash = 0xb1f68943daa4f9e6
 
 valueBool :: Word32
 valueBool = 1
@@ -420,6 +420,8 @@ txKindSetDrawing :: Word16
 txKindSetDrawing = 46
 txKindSetSizePolicy :: Word16
 txKindSetSizePolicy = 47
+txKindCreateBreakpoint :: Word16
+txKindCreateBreakpoint = 48
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -753,6 +755,10 @@ txSetDrawing widgetId vbW vbH count pathLen ops = wireRecord txKindSetDrawing (w
 -- WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX (`size_policy`; docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF SIZE and `redraw`/`tick` say so: the core hands the canvas the size it was assigned, through draw_requested/tick, and rasterizes what comes back at that size. `scale` and `fixed` DECLARE THE FUNCTION CONSTANT, which is what lets the core answer a size change by itself — `scale` re-rasterizes the held display list under a UNIFORM FIT with a letterbox, `fixed` never adapts at all.  NOT SENT FOR `scale`: it is the default a guest that declares nothing gets. THE GUEST NEVER SPELLS THIS NUMBER — the binding lowers `fixed` (the one true property) and the presence of an on_draw/on_tick handler; a canvas with no policy record is `scale`.  LIVE CANVASES ONLY in this slice: a template node is refused by name (docs/deferred.md's template-zone size policy entry).
 txSetSizePolicy :: Word64 -> Word32 -> Builder
 txSetSizePolicy widgetId policy = wireRecord txKindSetSizePolicy (word64LE widgetId <> word32LE policy <> word32LE 0)
+
+-- A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
+txCreateBreakpoint :: Word64 -> Value -> Word32 -> [Value] -> Builder
+txCreateBreakpoint window below count setters = wireRecord txKindCreateBreakpoint (word64LE window <> encodeValue below <> word32LE count <> word32LE 0 <> encodeValues setters)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

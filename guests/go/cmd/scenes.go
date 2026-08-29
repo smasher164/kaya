@@ -14,6 +14,7 @@ import (
 
 	"dev.kaya/guests/go/a11y"
 	"dev.kaya/guests/go/a11yrows"
+	"dev.kaya/guests/go/adaptive"
 	"dev.kaya/guests/go/align"
 	"dev.kaya/guests/go/assets"
 	"dev.kaya/guests/go/background"
@@ -69,6 +70,7 @@ var scenes = map[string]func() *kaya.App{
 	"1":          milestone2.App,
 	"a11y":       a11y.App,
 	"a11yrows":   a11yrows.App,
+	"adaptive":   adaptive.App,
 	"align":      align.App,
 	"assets":     assets.App,
 	"background": background.App,

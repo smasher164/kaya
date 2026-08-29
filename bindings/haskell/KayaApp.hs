@@ -132,11 +132,14 @@ module KayaApp
     setSpacing,
     setInset,
     setAlign,
+    setAxis,
+    stackBelow,
     setA11yId,
     setA11yLabel,
     setA11yHint,
     setRole,
     Align (..),
+    Axis (..),
     Role (..),
     Attr (..),
     WClass (..),
@@ -1941,6 +1944,43 @@ alignWire AlignBaseline = 4
 setAlign :: Widget -> Align -> Build ()
 setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
 
+-- | A container's arrangement direction: row and column are ONE node
+-- this parameterizes, and the creation kind's own is the default
+-- (docs\/adaptive-layout-plan.md D1).
+data Axis
+  = AxisHorizontal
+  | AxisVertical
+  deriving (Eq, Show)
+
+axisWire :: Axis -> Int64
+axisWire AxisHorizontal = fromIntegral W.axisHorizontal
+axisWire AxisVertical = fromIntegral W.axisVertical
+
+-- | The user-driven orientation toggle (docs\/adaptive-layout-plan.md
+-- D2). Row\/column only. No constructor spells it: the widget stays what
+-- its creation kind made it and only its presentation moves.
+setAxis :: Widget -> Axis -> Build ()
+setAxis (Widget w) a = emitB (W.txSetAxis w (axisWire a))
+
+-- | Stack this row's children vertically while the window is narrower
+-- than @width@ logical points, reverting on the way back up — ONE
+-- core-evaluated breakpoint record (docs\/adaptive-layout-plan.md D3).
+-- The declarative spelling is the 'StackBelow' attr; taking a 'Widget'
+-- is the template zone's refusal, since a breakpoint's setters name live
+-- widgets and a template row is a blueprint stamped per entry.
+stackBelow :: Widget -> Double -> Build ()
+stackBelow (Widget w) width =
+  emitB
+    ( W.txCreateBreakpoint
+        0
+        (W.VF64 width)
+        1
+        [ W.VI64 (fromIntegral w),
+          W.VI64 (fromIntegral W.propAxis),
+          W.VI64 (fromIntegral W.axisVertical)
+        ]
+    )
+
 -- | The role vocabulary (docs/styling-plan.md D4): SEMANTIC EMPHASIS — what a
 -- widget MEANS, never how it looks.
 data Role
@@ -1993,6 +2033,10 @@ data Attr (c :: WClass) where
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
   Align :: Align -> Attr 'BoxW
+  -- | Stack this row's children vertically while the window is narrower
+  -- than this many logical points. Containers only, and LIVE ZONE ONLY —
+  -- 'TplAttr' has no counterpart.
+  StackBelow :: Double -> Attr 'BoxW
   -- | This widget's accessibility identifier — any widget class, like
   -- 'Grow': the two accessibility props are universal, so the index
   -- must not narrow them.
@@ -2016,6 +2060,7 @@ applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
+applyAttr (StackBelow width) w = stackBelow w width
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yLabel l) w = setA11yLabel w l
 applyAttr (A11yHint h) w = setA11yHint w h

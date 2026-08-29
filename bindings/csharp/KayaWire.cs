@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xa10b712b34b3546f;
+    public const ulong SpecHash = 0xb1f68943daa4f9e6;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -211,6 +211,7 @@ static class KayaWire
     public const ushort TxKindSetColumnHeaders = 45;
     public const ushort TxKindSetDrawing = 46;
     public const ushort TxKindSetSizePolicy = 47;
+    public const ushort TxKindCreateBreakpoint = 48;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -809,6 +810,18 @@ static class KayaWire
         w.Write(policy);
         w.Write(0u);
         return Finish(stream, w, TxKindSetSizePolicy);
+    }
+
+    /// A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
+    public static byte[] TxCreateBreakpoint(ulong window, object below, uint count, object[] setters)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        EncodeValue(w, below);
+        w.Write(count);
+        w.Write(0u);
+        EncodeValues(w, setters);
+        return Finish(stream, w, TxKindCreateBreakpoint);
     }
 
     /// set_property with a constant text value.

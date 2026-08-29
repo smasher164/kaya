@@ -111,6 +111,9 @@ mod canvas;
 #[path = "sizepolicy.rs"]
 mod sizepolicy;
 
+#[path = "adaptive.rs"]
+mod adaptive;
+
 /// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
 /// hold that.
@@ -169,6 +172,10 @@ fn app(ctx: kaya::AppCtx) {
         // figure is drawn in fractions of the box it is handed and the
         // redraw canvas has no frozen hash.
         Ok("sizepolicy") => sizepolicy::app(ctx),
+        // The adaptive scene (docs/adaptive-layout-plan.md): the
+        // handler flip, plus the breakpoint's first-report arm — this
+        // emulator is narrower than the threshold and never resizes.
+        Ok("adaptive") => adaptive::app(ctx),
         // The typeface scene asks for the vendored font BY ASSET NAME
         // and does not read a path or an environment variable at all
         // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE

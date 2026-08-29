@@ -31,7 +31,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests. `windowed` is rust BY DESIGN, not by depth
 # (docs/virtualization-plan.md §6.3): it is the compiled windowing scene
@@ -43,7 +43,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # (docs/canvas-plan.md §3.2). `sizepolicy` is rust-only because it is a
 # depth slice: the seven other bindings have no `fixed`/`on_draw`/`on_tick`
 # spelling yet (docs/deferred.md's size-policy entry).
-DEPTH_SCENES="windowed canvas sizepolicy adaptive"
+DEPTH_SCENES="windowed canvas sizepolicy"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1028,11 +1028,21 @@ for proto in x11 wayland; do
     # windowing scene the mobile lanes can run too.
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
-    # THE ADAPTIVE SCENE, depth half (docs/adaptive-layout-plan.md §2):
-    # GTK's axis is its own orientable, so this backend carries the
-    # feature from the depth slice. Rust alone until the fan-out.
+    # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2): GTK's axis is
+    # its own orientable and its width report rides the window's notify,
+    # so this backend carries both halves. All eight languages.
     run "$proto" adaptive-rust env KAYA_SELFTEST=adaptive \
         "$CARGO_TARGET_DIR/debug/examples/adaptive"
+    run "$proto" adaptive-python env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
+        python3 guests/python/adaptive.py
+    run "$proto" adaptive-go env KAYA_SELFTEST=adaptive /tmp/go-guests/kaya-go
+    run "$proto" adaptive-csharp env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" adaptive-ocaml env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/adaptive.exe
+    run "$proto" adaptive-haskell env KAYA_SELFTEST=adaptive "$(hs_bin adaptive)"
+    run "$proto" adaptive-java env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
     # this backend blits a GdkMemoryTexture. The hash is the SAME frozen
     # string every other lane asserts — the raster comes out of this

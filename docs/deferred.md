@@ -8651,12 +8651,14 @@ container layout recorded". TWO consequences, one fixed and one held:
   keyword removes the overflow, both models then agree, and the leg
   wires — which also makes the crash clamp's repro a lane leg.
 
-- **DEPTH STUB: adaptive on winui** — the axis prop's honor needs an
-  axis-state pass this backend does not have: reindex derives direction
-  from the widget VARIANT (Column vs Row), so a mutable axis means a
-  `core.axes` map consulted at every variant-derived-direction site
-  (reindex and its siblings), threaded like `core.aligns`. Closes with
-  the adaptive milestone's breadth slice, which lands the pass, wires
-  the windows adaptive leg, and deletes the stub — striking this line
-  in the same edit.
+- ~~**DEPTH STUB: adaptive on winui**~~ — CLOSED 2026-08-28 by the
+  adaptive milestone's breadth slice, exactly as this entry described:
+  `core.axes` holds the override, `effective_vertical` folds it over the
+  creation kind, and every direction decision reads the fold — reindex
+  (which now clears the OTHER axis's definitions and stamps both attached
+  indices, so a flip leaves no stale placement), the merged spacing arm
+  (the gap rides the stacking axis), and the crossing test. The harness
+  read answers from the Grid's OWN definitions rather than the variant,
+  which is what makes it a render read. The stub is deleted and the
+  windows leg wired (deploy-win's resize block, five languages).
   KEY: adaptive winui, axis-state pass, reindex vertical, depth stub adaptive

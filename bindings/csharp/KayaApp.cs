@@ -375,6 +375,17 @@ enum Align : long
     Baseline = 4,
 }
 
+/// A container's arrangement axis (docs/adaptive-layout-plan.md D1/D2):
+/// row and column are ONE node this parameterizes, and the prop is
+/// mutable, so a breakpoint diff or a handler toggle is an ordinary
+/// property write. A widget stays addressable by its CREATION kind
+/// whatever the axis says today.
+enum Axis : long
+{
+    Horizontal = KayaWire.AxisHorizontal,
+    Vertical = KayaWire.AxisVertical,
+}
+
 /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
 /// never how it looks. Each variant belongs to one kind, and the root
 /// refuses the misfits at declare time — which is why `role:` appears
@@ -1612,6 +1623,13 @@ sealed class Tx
     public void SetAlign(Widget w, Align align) =>
         Records.Add(KayaWire.TxSetAlign(w.Id, (long)align));
 
+    /// A container's arrangement axis (the creation kind's own is the
+    /// default — row horizontal, column vertical). Containers only; the
+    /// widget stays addressable by its creation kind whatever this says
+    /// (docs/adaptive-layout-plan.md D2).
+    public void SetAxis(Widget w, Axis axis) =>
+        Records.Add(KayaWire.TxSetAxis(w.Id, (long)axis));
+
     /// A widget's accessibility IDENTIFIER: a stable authored key that
     /// assistive tooling and UI automation address it by, and which is
     /// NEVER spoken. Universal — every kind carries one.
@@ -1946,10 +1964,14 @@ sealed class Tx
         double? inset = null) =>
         ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset);
 
+    /// `stackBelow:` stacks this row's children vertically while the
+    /// window is narrower than that many logical points — a
+    /// core-evaluated width breakpoint, reverting on the way back up
+    /// (docs/adaptive-layout-plan.md D3).
     public Widget Row(
         Action body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset);
+        double? inset = null, double? stackBelow = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackBelow);
 
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport
@@ -1985,18 +2007,30 @@ sealed class Tx
 
     Widget ContainerOf(
         uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null)
+        double? inset = null, double? stackBelow = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (align is Align a) SetAlign(parent, a);
         if (inset is double pad) SetInset(parent, pad);
+        if (stackBelow is double below) StackBelow(parent, below);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);
         return parent;
     }
+
+    // One breakpoint on the primary window carrying one setter: the
+    // setter list is count triples flat, widgets then props then values
+    // (KayaWire.TxCreateBreakpoint). LIVE ZONE ONLY — a breakpoint's
+    // setters name live widgets, and Tpl's Row hands back a Node, so the
+    // template zone is refused by type.
+    void StackBelow(Widget w, double width) =>
+        Records.Add(KayaWire.TxCreateBreakpoint(0, width, 1, new object[]
+        {
+            (long)w.Id, (long)KayaWire.PropAxis, (long)KayaWire.AxisVertical,
+        }));
 
     /// A For as a child: ForEach whose body keeps no handles.
     public Widget Each(Collection c, Action<Tpl> body) => ForEach(c, body);
