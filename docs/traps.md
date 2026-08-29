@@ -5982,3 +5982,54 @@ re-issued cannot stay wedged past its own timeout while a stream can
 wedge for the whole ceiling. Same family as the dropped one-shot
 `ime set` (entry above): on this pool, a single long-lived adb
 operation is a bet, and a re-issued short one is a measurement.
+
+## A correction above the viewport moves the SCROLL OFFSET too, so an offset-only test calls it the reader's scroll (2026-08-29)
+
+The synthesized tier parks a row: `scroll_to_row` names a row, and every
+layout pass re-issues the scroll until the viewport's first visible row
+IS that row. It is anchored to ROW IDENTITY on purpose — a row above the
+viewport being measured taller or shorter must move the scrollbar and
+NOT the content under the reader's eyes.
+
+A park has to yield to the reader, though, or a real app drags them back
+to the anchor forever. The test for "the reader scrolled" was the scroll
+offset moving after the park landed. THAT TEST CANNOT TELL THE TWO
+APART, because a correction above the viewport moves the offset as well:
+the content above the anchor got shorter, so the same row now sits at a
+smaller offset. Measured on the ios lane, `varied-python`, with two
+temporary kayaDiag lines in the tier:
+
+    park landed anchor=150 at=15450
+    win first=149 drawn=144 scrollTop=15450 bandTop=14826   <- correction, offset still
+    park reissue anchor=150 measured=149                       -> right call
+    win first=150 drawn=144 scrollTop=15450 bandTop=14826
+    park landed anchor=150 at=15450
+    win first=148 drawn=142 scrollTop=15336 bandTop=14656   <- band grew UPWARD two rows
+    park YIELD anchor=150 measured=148 scrollTop=15336 landedAt=15450
+
+bandTop fell 170pt and the offset fell 114pt WITH IT. Nothing scrolled.
+The anchor was dropped, and the window then free-ran between 145 and 147
+for fifteen seconds until the step's retry budget expired — which is what
+the leg reported: `column@varied windows "145 300", wanted "150 300"`.
+
+THE DISCRIMINATOR THAT WORKS: a reader's scroll moves the offset INSIDE
+a placement that did not move; a correction moves both. The tier keeps
+the previous pass's `(bandTop, drawnFirst)` beside the previous offset
+and yields only when the offset moved and the placement did not. The
+`landedAt != nil` precondition stays, so a park still in flight is never
+cancelled by the scroll the tier itself issued to get there.
+
+WHY NO LANE COULD SEE THE CAUSE: the verdict names a number three short
+and nothing else, and the step's retry means the failure is a TIMEOUT on
+a condition that was briefly true — `park landed anchor=150` appears in
+the failing log, twice, before the yield. Six lane runs told us only that
+it alternates.
+
+HOW TO INSTRUMENT IT AGAIN (twenty minutes, not a session): two
+`kayaDiag` lines in `KayaTableWindow` — one in `publish` when
+`first`/`total` move, one where `visible = measured` is assigned,
+carrying `drawnFirst`, `scrollTop`, `placement.bandTop` and `anchorRow` —
+and the park's three decisions. Then loop `tools/ios/run-sim.sh python`,
+which is two legs and 35 seconds, not the seven-minute lane. Both lines
+were removed again once the fix landed: they print once per band change,
+which during a scroll is every pass.

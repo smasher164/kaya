@@ -8696,8 +8696,8 @@ container layout recorded". TWO consequences, one fixed and one held:
   only one.
   KEY: pyhost extraction, kaya-stamp, importlib, extractPython
 
-- **GAP — two iOS legs are INTERMITTENT (found 2026-08-29, characterised
-  the same day)**
+- **GAP — one iOS leg is INTERMITTENT (found 2026-08-29; the OTHER of the
+  two, `varied-python`, was FIXED the same day — see the diagnosis below)**
   KEY: ios flaky, varied-python band, adaptive-swiftui row@narrow,
   column@varied windows 147, first metrics report
 
@@ -8735,6 +8735,27 @@ container layout recorded". TWO consequences, one fixed and one held:
   was computed from. Those two lines are the next increment, and the
   recorder is the pipe they should go into.
   KEY: flightrec ios, run-sim journal, intermittent leg evidence
+
+  `varied-python` IS FIXED (2026-08-29), and the fix came off the pipe
+  above within twenty minutes of it existing: two temporary kayaDiag
+  lines in the synthesized tier — one per band publish, one per computed
+  `visible` — plus the park's own decisions, then `tools/ios/run-sim.sh
+  python`, which is TWO legs and 35 seconds, looped until red. THE
+  ARITHMETIC IT CAUGHT is in docs/traps.md; in one line, a correction
+  above the viewport moves the scroll offset as well as the band, and the
+  park read that as the reader scrolling and abandoned its anchor. Ten
+  further runs, eight of them consecutive after the fix (the loop's own
+  ceiling stopped it, not a failure), zero yields, and the anchoring step
+  costs ~880ms where the failing run burned 15,790ms of retry budget.
+  The two high-volume diag lines came back OUT; the trap says where to
+  put them again.
+
+  WHAT IS STILL OPEN is `adaptive-swiftui` alone. The metrics diagnostic
+  STAYED IN for it — `KAYA_DIAG ... metrics window=<id> <w>x<h>` at
+  KayaHost.windowMetrics, the one chokepoint both reporters funnel
+  through — so the next sighting says when the first report landed and
+  what width it carried. A `swift` suite run is that leg's own fast loop.
+  KEY: adaptive-swiftui narrow, first metrics report, KAYA_DIAG metrics
 
 - ~~**GAP — the mac NATIVE table cannot be reached when it overflows**~~ —
   CLOSED 2026-08-29, and the iOS SYNTHESIZED tier with it, so all five

@@ -3083,7 +3083,14 @@ enum KayaHost {
     /// backend measured, going the other way from every apply record.
     /// The core decides what to do with it — re-raster, ask the guest, or
     /// nothing at all — which is the size policy.
+    /// THE WIDTH A BREAKPOINT WAITS ON, and when it arrived. A phone
+    /// never resizes, so the FIRST report is the only one a breakpoint
+    /// gets, and `adaptive-swiftui` fails intermittently with its row
+    /// still horizontal (docs/deferred.md's ios-flaky entry). Both
+    /// reporters funnel through here, so one line covers appear and
+    /// change both; the recorder keeps it on a failing leg now.
     static func windowMetrics(_ window: UInt64, _ size: CGSize) {
+        kayaDiag("metrics window=\(window) \(Int(size.width))x\(Int(size.height))")
         api.window_metrics(window, Double(size.width), Double(size.height))
     }
 
@@ -10035,6 +10042,12 @@ typealias KayaTablePlaced = () -> Void
     /// the offset the park arrived at, nil while it is still in flight.
     @ObservationIgnored private var anchorRow: Int?
     @ObservationIgnored private var landedAt: Double?
+    /// The previous pass's offset and the placement it was read against.
+    /// A READER'S SCROLL MOVES THE OFFSET INSIDE A PLACEMENT THAT DID
+    /// NOT MOVE; a correction above the viewport moves both, which is
+    /// why the offset alone cannot tell them apart (`repark`).
+    @ObservationIgnored private var lastScrollTop: Double?
+    @ObservationIgnored private var lastPlacement: (top: Double, first: Int)?
     @ObservationIgnored private var scheduled = false
     /// Consecutive passes that found an input missing. BOUNDED because
     /// the re-arm below hops the main queue: a table that never gets
@@ -10210,8 +10223,16 @@ typealias KayaTablePlaced = () -> Void
             reported = claim
             KayaHost.windowMoved(node.id, claim.first, claim.count)
         }
+        let placementMoved = lastPlacement.map {
+            $0.top != Double(placement.bandTop) || $0.first != drawnFirst
+        } ?? true
+        let offsetMoved = lastScrollTop.map { abs(scrollTop - $0) > 0.5 } ?? false
+        lastPlacement = (Double(placement.bandTop), drawnFirst)
+        lastScrollTop = scrollTop
         measure(node, first: drawnFirst, pitches: pitches)
-        repark(node, drawnFirst: drawnFirst, measured: measured)
+        repark(
+            node, drawnFirst: drawnFirst, measured: measured,
+            readerScrolled: offsetMoved && !placementMoved)
     }
 
     /// The verify half (§2.2): the extents this tier laid the band's rows
@@ -10238,14 +10259,23 @@ typealias KayaTablePlaced = () -> Void
     /// An offset that MOVED after the park landed is the reader's own
     /// scroll, and the park yields to it.
     private func repark(
-        _ node: KayaNode, drawnFirst: Int, measured: (first: Int, count: Int)
+        _ node: KayaNode, drawnFirst: Int, measured: (first: Int, count: Int),
+        readerScrolled: Bool
     ) {
         guard let anchor = anchorRow, let proxy else { return }
         if measured.first == anchor {
             if landedAt == nil { landedAt = scrollTop }
             return
         }
-        if let landed = landedAt, abs(scrollTop - landed) > 0.5 {
+        // ONLY THE READER'S OWN SCROLL CANCELS A PARK, and the offset
+        // alone cannot name one: a correction above the viewport moves
+        // the offset TOO. Measured 2026-08-29 on the ios lane — the park
+        // landed on r150 at 15450, the band then grew upward by two rows,
+        // bandTop fell 14826 -> 14656 and the offset fell 15450 -> 15336
+        // with it, an offset-only test called that a scroll and dropped
+        // the anchor, and the window free-ran at 145..147 until the step's
+        // retry budget expired (docs/traps.md).
+        if landedAt != nil, readerScrolled {
             anchorRow = nil
             landedAt = nil
             return
