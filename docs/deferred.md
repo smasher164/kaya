@@ -8695,6 +8695,42 @@ container layout recorded". TWO consequences, one fixed and one held:
   only one.
   KEY: pyhost extraction, kaya-stamp, importlib, extractPython
 
+- **GAP — the mac native table cannot yet be REACHED when it overflows**
+  (found 2026-08-29, building the table-overflow ruling)
+  KEY: mac table reachability, minWidth idealWidth, hasHorizontalScroller,
+  documentVisibleRect, clip parks at trailing edge, KayaMacNativeTable
+
+  The ruling (docs/tables-plan.md, 2026-08-29) is that a table wider than
+  its track scrolls. On macOS the scroller is now ON (overlay,
+  autohiding) but it is INERT, and the measurements say why:
+
+  - Under ruling A's `.frame(minWidth: contentWidth)` the scroll view is
+    as wide as its own content — doc and clip BOTH 280pt inside a 240pt
+    window — so it has nothing to scroll. The clip happens in the
+    ANCESTOR, which is why the columns are unreachable rather than
+    absent.
+  - Changing that one word to `idealWidth` does make the scroll view the
+    clip (doc 432 against clip 280, and `expect_overflow` then reports
+    the overflow correctly) — and it LOSES THE HUG. check-table-tier's
+    runtime probe caught it by name: "a hugging container widens to the
+    native table's content: got false, wanted true". Reverted; the
+    measurement is recorded at the declaration.
+
+  So content-is-the-floor and shrink-to-scroll are in tension at that one
+  frame, and the naive resolution trades a ruled property away. What is
+  probably wanted is a declaration that gives a HUGGING parent the
+  content width and a CONSTRAINED one the offer — measured per proposal
+  rather than declared once.
+
+  AND A SECOND FINDING, which is why no scene asserts reachability yet:
+  `expect_at_end` on a table can pass VACUOUSLY. With doc 432 in a 280
+  clip the clip view is already parked at its trailing edge, so the
+  assertion is true before anything scrolls (watched: the same script
+  without `scroll_end` still reported "at end"). A leading-edge reset on
+  re-layout would make the negative observable — a table that has just
+  been laid out should show its FIRST column — and that is the piece the
+  scene waits on.
+
 - ~~**DEPTH STUB: adaptive on winui**~~ — CLOSED 2026-08-28 by the
   adaptive milestone's breadth slice, exactly as this entry described:
   `core.axes` holds the override, `effective_vertical` folds it over the

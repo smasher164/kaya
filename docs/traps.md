@@ -1188,10 +1188,20 @@ alone, the same leg passed.
 
 The cause was outside the lane: minutes earlier I had driven the
 PORTFOLIO guest by hand with `resize_window 240x700` to measure column
-positions. Every python leg on this lane runs as the same executable and
-therefore the same app identity, so macOS restored that 240pt frame for
-the next python guest that opened a window, and the scene's
-`expect_root_fills` correctly reported a root that no longer filled it.
+positions. THE FRAME IS SAVED IN THE INTERPRETER'S OWN PREFERENCE
+DOMAIN, not the guest's — `kaya-swiftui-mac`, key `NSWindow Frame
+main.KayaRoot-1-AppWindow-1` — so it is shared by EVERY mac guest of
+every language, and macOS restored my 240pt frame for the next leg
+whose guest declares no window size of its own. That is why the lane is
+normally immune: almost every guest calls `.size(...)`, which outranks
+the restored frame. `grow` does not, so it inherits whatever the last
+hand-run left, and `expect_root_fills` correctly reported a root that no
+longer filled its window.
+
+    defaults read kaya-swiftui-mac | grep 'NSWindow Frame'
+    defaults delete kaya-swiftui-mac 'NSWindow Frame main.KayaRoot-1-AppWindow-1'
+
+is the check and the cure.
 
 So a hand-run resize is not free: it leaves state the lane inherits, and
 it lands on a DIFFERENT leg from the one you were probing, which is what

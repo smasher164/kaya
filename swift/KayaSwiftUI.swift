@@ -6380,7 +6380,15 @@ private func kayaRunScript(_ script: String) {
                     return kayaTarget(parts[1], "scroll", kayaScene.scrolls)
                         .map { ($0.scrollContentH, $0.scrollViewportH) }
                 }
-                if let (content, viewport) = got {
+                // A TABLE TARGET READS ITS COLUMNS' AXIS (docs/tables-plan.md,
+                // ruled 2026-08-29): a table's rows already answer to
+                // expect_window and scroll_to_row, so the target's kind
+                // decides the axis and no verb needs an axis word.
+                let wide = got ?? DispatchQueue.main.sync { () -> (Double, Double)? in
+                    guard kayaTarget(parts[1], "column", kayaScene.columns) != nil else { return nil }
+                    return kayaTableHorizontal(parts[1]).map { ($0.content, $0.viewport) }
+                }
+                if let (content, viewport) = wide {
                     if content > viewport + 2 {
                         observed.append("\(parts[1]) overflows")
                     } else {
@@ -6388,16 +6396,30 @@ private func kayaRunScript(_ script: String) {
                             "\(parts[1]) fits (content \(Int(content)) in viewport \(Int(viewport)))")
                     }
                 } else {
-                    failures.append("no such target \(parts[1])")
+                    let isTable = DispatchQueue.main.sync {
+                        kayaTarget(parts[1], "column", kayaScene.columns) != nil
+                    }
+                    failures.append(
+                        isTable
+                            ? "\(parts[1]) records no columns' axis on this tier"
+                            : "no such target \(parts[1])")
                 }
             case "scroll_end":
                 // The REAL scrolling API: the reader proxy animates to
                 // the content's bottom anchor. Silent, like click.
                 DispatchQueue.main.sync {
-                    guard let node = kayaTarget(parts[1], "scroll", kayaScene.scrolls),
+                    if let node = kayaTarget(parts[1], "scroll", kayaScene.scrolls),
                         let proxy = kayaScrollProxies[node.id]
-                    else { return }
-                    proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: .bottom)
+                    {
+                        proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: .bottom)
+                        return
+                    }
+                    // The table arm, expect_overflow's rule: the columns.
+                    #if os(macOS)
+                        if let node = kayaTarget(parts[1], "column", kayaScene.columns) {
+                            kayaTableDrivers[node.id]?.scrollToTrailingEdge()
+                        }
+                    #endif
                 }
             case "expect_at_end":
                 // The content's bottom edge coincides with the
@@ -6407,15 +6429,25 @@ private func kayaRunScript(_ script: String) {
                     kayaTarget(parts[1], "scroll", kayaScene.scrolls)
                         .map { ($0.scrollContentMaxY, $0.scrollViewportH) }
                 }
-                if let (maxY, viewport) = got {
-                    if abs(maxY - viewport) <= 2 {
+                let wideEnd = got ?? DispatchQueue.main.sync { () -> (Double, Double)? in
+                    guard kayaTarget(parts[1], "column", kayaScene.columns) != nil else { return nil }
+                    return kayaTableTrailing(parts[1])
+                }
+                if let (reached, edge) = wideEnd {
+                    if abs(reached - edge) <= 2 {
                         observed.append("\(parts[1]) at end")
                     } else {
                         failures.append(
-                            "\(parts[1]) short of end (content bottom \(Int(maxY)) vs viewport \(Int(viewport)))")
+                            "\(parts[1]) short of end (content bottom \(Int(reached)) vs viewport \(Int(edge)))")
                     }
                 } else {
-                    failures.append("no such target \(parts[1])")
+                    let isTable = DispatchQueue.main.sync {
+                        kayaTarget(parts[1], "column", kayaScene.columns) != nil
+                    }
+                    failures.append(
+                        isTable
+                            ? "\(parts[1]) records no columns' axis on this tier"
+                            : "no such target \(parts[1])")
                 }
             case "expect_file_dialog":
                 // The REAL panel, read over accessibility: the directory it is
@@ -8336,6 +8368,35 @@ func kayaCurrentTableTrackWidth(_ table: KayaNode) -> Double? {
 ///
 /// `pad` is a parameter rather than a read, so the mac probe can drive the
 /// padded case on a host whose own constant is zero (check-table-tier).
+/// A TABLE'S COLUMNS' AXIS, off the real scroll view (docs/tables-plan.md,
+/// ruled 2026-08-29). macOS only for now: the SYNTHESIZED tier's reading is
+/// the fan-out, and until it lands the verbs say that rather than claiming
+/// the target does not exist.
+func kayaTableHorizontal(_ spec: Substring) -> (content: Double, viewport: Double)? {
+    #if os(macOS)
+        guard let node = kayaTarget(spec, "column", kayaScene.columns),
+            let driver = kayaTableDrivers[node.id]
+        else { return nil }
+        return driver.horizontalExtents()
+    #else
+        _ = spec
+        return nil
+    #endif
+}
+
+func kayaTableTrailing(_ spec: Substring) -> (Double, Double)? {
+    #if os(macOS)
+        guard let node = kayaTarget(spec, "column", kayaScene.columns),
+            let driver = kayaTableDrivers[node.id]
+        else { return nil }
+        let edges = driver.trailingEdges()
+        return (edges.visible, edges.content)
+    #else
+        _ = spec
+        return nil
+    #endif
+}
+
 func kayaTableContentTrack(_ track: Double, pad: CGFloat, synthesized: Bool) -> Double {
     synthesized ? track - 2 * Double(pad) : track
 }
@@ -8735,6 +8796,14 @@ private struct KayaNativeTable: View {
             .frame(
                 height: node.grow > 0 ? nil : kayaNativeTableContentHeight(node),
                 alignment: .top)
+            // THE FLOOR STAYS A FLOOR (ruling A, 2026-08-26): a hugging
+            // container widens to the table's content, which
+            // tools/check-table-tier.sh holds with a runtime probe.
+            // MEASURED 2026-08-29: `idealWidth` here — the obvious way to
+            // let a squeezed parent shrink this and make the scroll view
+            // the clip — loses that hug, and the probe says so. The two
+            // wants are in tension at this one declaration; see
+            // docs/deferred.md's mac-table-reachability entry.
             .frame(minWidth: contentWidth > 0 ? contentWidth : nil, alignment: .leading)
         #else
             KayaTableColumns(node: node, generation: generation)
@@ -9025,6 +9094,31 @@ private struct KayaNativeTable: View {
             kayaTableDrivers[node.id] = self
             syncColumns()
             return scrollView
+        }
+
+        /// THE COLUMNS' AXIS, read off the REAL scroll view: the document
+        /// is the table's own width and the clip is what the track gave it
+        /// (docs/tables-plan.md, ruled 2026-08-29). A table's ROWS answer to
+        /// expect_window/scroll_to_row, so these three read the columns.
+        func horizontalExtents() -> (content: Double, viewport: Double) {
+            (Double(scrollView.documentView?.frame.width ?? 0),
+             Double(scrollView.contentView.bounds.width))
+        }
+
+        /// The toolkit's own scrolling, like scroll_end's reader proxy one
+        /// tier over — never a frame written by hand.
+        func scrollToTrailingEdge() {
+            guard let document = scrollView.documentView else { return }
+            let x = max(0, document.frame.width - scrollView.contentView.bounds.width)
+            scrollView.contentView.scroll(to: NSPoint(x: x, y: scrollView.contentView.bounds.origin.y))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
+        /// Where the visible rect's trailing edge sits against the
+        /// document's — the reading `expect_at_end` convicts on.
+        func trailingEdges() -> (visible: Double, content: Double) {
+            (Double(scrollView.documentVisibleRect.maxX),
+             Double(scrollView.documentView?.frame.maxX ?? 0))
         }
 
         func dismantle() {
