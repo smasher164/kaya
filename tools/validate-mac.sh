@@ -45,7 +45,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # assets both did). Which scenes carry a C FLOOR guest is
 # guests/c/Makefile's SCENES, read from the other side by check-steps'
 # sweep_c_floor.
-DEPTH_SCENES="typeface windowed canvas"
+DEPTH_SCENES="typeface windowed canvas adaptive"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1122,6 +1122,14 @@ drain
 KAYA_SELFTEST_SCRIPT="$(scene_script windowed)"
 export KAYA_SELFTEST_SCRIPT
 run windowed-rust-swiftui env KAYA_SELFTEST=windowed "$RUST_GUESTS"/windowed
+drain
+
+# THE ADAPTIVE SCENE, depth half (docs/adaptive-layout-plan.md §2):
+# the arrangement axis as a property, flipped by a handler and read
+# back from the render. Rust alone until the milestone's fan-out.
+KAYA_SELFTEST_SCRIPT="$(scene_script adaptive)"
+export KAYA_SELFTEST_SCRIPT
+run adaptive-rust-swiftui env KAYA_SELFTEST=adaptive "$RUST_GUESTS"/adaptive
 drain
 
 # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two

@@ -367,6 +367,11 @@ pub enum Step {
     /// rather than reading the prop back: a backend that ignored the
     /// write while the model still carried it must fail here.
     ExpectAligned(Target, String),
+    /// The container's ARRANGEMENT AXIS as rendered — "horizontal" or
+    /// "vertical" (docs/adaptive-layout-plan.md §2). Observed from the
+    /// backend's own layout state, never the model: a backend that
+    /// ignored the write must fail, the expect_aligned rule.
+    ExpectAxis(Target, String),
     /// None = the implicit primary (window 0), keeping the
     /// single-window spelling; Some(n) prefixes the observation with
     /// `window#n `.
@@ -696,6 +701,7 @@ impl Step {
             | Step::HeaderClick(t, _)
             | Step::ExpectShares(t, _)
             | Step::ExpectAligned(t, _)
+            | Step::ExpectAxis(t, _)
             | Step::Choose(t, _)
             | Step::ExpectGridColumns(t, _)
             | Step::ExpectAx(t, _)
@@ -797,6 +803,7 @@ impl Step {
             Step::Frame(_) => false,
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
+            Step::ExpectAxis { .. } => true,
             Step::ExpectTitle { .. } => true,
             Step::ExpectSections { .. } => true,
             Step::ExpectSection { .. } => true,
@@ -1082,6 +1089,9 @@ pub trait Stage: Send + 'static {
     /// classifies via each toolkit's own baseline query. The observation
     /// expect_aligned verifies.
     fn cross_mode(&self, target: Target) -> String;
+    /// The container's rendered arrangement axis: "horizontal" or
+    /// "vertical", read from the backend's own layout state.
+    fn container_axis(&self, target: Target) -> String;
     /// A surface's REAL materialized title (the title bar on the desktops,
     /// the task label on Android) — never the scene model's copy, so a
     /// backend that ignored the write fails.
@@ -1556,6 +1566,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectShares(parse_target(target)?, parse_string(text)?)
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
+            "expect_axis" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_axis wants a target and an axis string: {line:?}")
+                })?;
+                Step::ExpectAxis(parse_target(target)?, parse_string(text)?)
+            }
             "expect_aligned" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_aligned wants a target and a mode string: {line:?}")
@@ -3799,6 +3815,23 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }))
             }
+            Step::ExpectAxis(t, want) => {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    Some(Err(format!("{t:?} is not a container target")))
+                } else {
+                    Some(poll(|| {
+                        let got = stage.container_axis(*t);
+                        if got == *want {
+                            Ok(format!("{} axis {got}", target_spec(t)))
+                        } else {
+                            Err(format!(
+                                "{} axis {got:?}, wanted {want:?}",
+                                target_spec(t)
+                            ))
+                        }
+                    }))
+                }
+            }
             Step::ExpectAligned(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     Some(Err(format!("{t:?} is not a container target")))
@@ -5118,6 +5151,9 @@ mod tests {
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
+        fn container_axis(&self, _: Target) -> String {
+            "center".into()
+        }
         fn section_count(&self) -> usize {
             0
         }
@@ -5870,6 +5906,9 @@ mod tests {
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
+            fn container_axis(&self, _: Target) -> String {
+                "start".into()
+            }
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
         }
@@ -6105,6 +6144,9 @@ mod tests {
                 "draws 96pt of a 126pt track".into()
             }
             fn cross_mode(&self, _: Target) -> String {
+                "start".into()
+            }
+            fn container_axis(&self, _: Target) -> String {
                 "start".into()
             }
             fn alert_title(&self, _window: u64) -> Option<String> {

@@ -12414,6 +12414,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.container_insets.insert(id, pad);
                     stamp_container_padding(core, id)?;
                 }
+                (NativeWidget::Column(_), Prop::Axis, Value::I64(_))
+                | (NativeWidget::Row(_), Prop::Axis, Value::I64(_)) => {
+                    // The axis-state pass is this backend's breadth debt
+                    // (docs/adaptive-layout-plan.md D1): reindex derives
+                    // direction from the widget VARIANT, so honoring the
+                    // prop needs state threading no depth slice carries.
+                    crate::depth_stub("adaptive");
+                }
                 (NativeWidget::Column(_), Prop::Align, Value::I64(mode))
                 | (NativeWidget::Row(_), Prop::Align, Value::I64(mode)) => {
                     core.aligns.insert(id, mode);
@@ -16559,6 +16567,29 @@ impl crate::harness::Stage for WinUiStage {
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn container_axis(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            // BREADTH DEBT, on the record (docs/adaptive-layout-plan.md D1):
+            // this backend's layout derives direction from the widget
+            // VARIANT (reindex), so until the axis-state pass lands here the
+            // honest answer is the creation kind's own axis — the value the
+            // layout actually uses. The adaptive scene rides DEPTH_SCENES
+            // and does not reach this lane until that pass exists.
+            let from_columns = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if from_columns { &core.columns } else { &core.rows };
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let grid = registry[i].clone();
+            grid.UpdateLayout()?;
+            if grid.ActualWidth()? <= 0.0 && grid.ActualHeight()? <= 0.0 {
+                return Ok("no container layout recorded".to_owned());
+            }
+            Ok(if from_columns { "vertical" } else { "horizontal" }.to_owned())
+        })
+        .unwrap_or_else(|e| format!("<winui read failed: {e:?}>"))
     }
 
     fn cross_mode(&self, t: crate::harness::Target) -> String {

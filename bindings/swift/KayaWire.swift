@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x1cd31581dd9eb228
+let kayaSpecHash: UInt64 = 0xa10b712b34b3546f
 
 struct KayaTx {
     var bytes = Data()
@@ -1052,6 +1052,38 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_INSET))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant axis value.
+    mutating func setAxis(_ widgetId: UInt64, _ axis: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_AXIS))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(axis))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound axis value.
+    mutating func bindAxis(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_AXIS))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindAxisElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_AXIS))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)

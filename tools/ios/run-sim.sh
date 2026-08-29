@@ -2359,6 +2359,14 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     queue_leg run_swiftui_on windowed-swiftui "$APP" dev.kaya.windowedswiftui \
         windowed-swiftui windowed windowed
 
+    # The adaptive scene, depth half (docs/adaptive-layout-plan.md §2):
+    # the same unified interpreter render as the mac leg.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example adaptive
+    APP=$(make_bundle adaptivers-swiftui dev.kaya.adaptiveswiftui "$TARGET_DIR/examples/adaptive")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on adaptive-swiftui "$APP" dev.kaya.adaptiveswiftui \
+        adaptive-swiftui adaptive adaptive
+
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and
     # the `settings` role is inert here — iOS has no application menu to

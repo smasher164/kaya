@@ -446,6 +446,10 @@ name = "canvas"
 path = "../../guests/rust/canvas.rs"
 
 [[example]]
+name = "adaptive"
+path = "../../guests/rust/adaptive.rs"
+
+[[example]]
 name = "sizepolicy"
 path = "../../guests/rust/sizepolicy.rs"
 

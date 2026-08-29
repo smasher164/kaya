@@ -302,6 +302,7 @@ pub const PROP_ROLE: u32 = 16;
 /// between its bounds and its children, uniform all sides. Layout,
 /// carried by the spacing kinds.
 pub const PROP_INSET: u32 = 17;
+pub const PROP_AXIS: u32 = 18;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -387,6 +388,9 @@ pub const FILE_MODE_WRITE: u32 = 1;
 pub const FILE_MODE_READ_WRITE: u32 = 2;
 
 /// The align enum's wire values (spec enum "align").
+// The arrangement axis (docs/adaptive-layout-plan.md D1).
+pub const AXIS_HORIZONTAL: u32 = 0;
+pub const AXIS_VERTICAL: u32 = 1;
 pub const ALIGN_START: u32 = 0;
 pub const ALIGN_CENTER: u32 = 1;
 pub const ALIGN_END: u32 = 2;
@@ -709,6 +713,7 @@ fn prop(raw: u32) -> Prop {
         PROP_ACCEPTS => Prop::Accepts,
         PROP_ROLE => Prop::Role,
         PROP_INSET => Prop::Inset,
+        PROP_AXIS => Prop::Axis,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -3119,6 +3124,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Accepts => PROP_ACCEPTS,
         Prop::Role => PROP_ROLE,
         Prop::Inset => PROP_INSET,
+        Prop::Axis => PROP_AXIS,
         Prop::A11yHint => PROP_A11Y_HINT,
     }
 }

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x1cd31581dd9eb228L;
+    public static final long SPEC_HASH = 0xa10b712b34b3546fL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -82,6 +82,7 @@ public final class KayaWire {
     public static final int PROP_ACCEPTS = 15;
     public static final int PROP_ROLE = 16;
     public static final int PROP_INSET = 17;
+    public static final int PROP_AXIS = 18;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -129,6 +130,8 @@ public final class KayaWire {
     public static final int ALIGN_END = 2;
     public static final int ALIGN_STRETCH = 3;
     public static final int ALIGN_BASELINE = 4;
+    public static final int AXIS_HORIZONTAL = 0;
+    public static final int AXIS_VERTICAL = 1;
     public static final int ROLE_DESTRUCTIVE = 1;
     public static final int ROLE_PROMINENT = 2;
     public static final int ROLE_HEADING = 3;
@@ -1176,6 +1179,29 @@ public final class KayaWire {
     public static byte[] txBindInsetElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INSET).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant axis value. */
+    public static byte[] txSetAxis(long widgetId, long axis) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_AXIS).putInt(SOURCE_CONST);
+        encodeValue(b, axis);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound axis value. */
+    public static byte[] txBindAxis(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_AXIS).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindAxisElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_AXIS).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

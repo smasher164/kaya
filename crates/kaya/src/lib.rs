@@ -76,7 +76,7 @@ pub mod capi;
 extern crate self as kaya;
 
 pub use app::{
-    Accepts, ActionRef, Align, AnyAnchor, AppCtx, Asset, BarAnchor, BlobSource, Capabilities, Collection, ContextAnchor, ContextCatalog,
+    Accepts, ActionRef, Align, AnyAnchor, AppCtx, Axis, Asset, BarAnchor, BlobSource, Capabilities, Collection, ContextAnchor, ContextCatalog,
     capabilities,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,

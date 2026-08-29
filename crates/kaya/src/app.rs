@@ -882,6 +882,26 @@ impl Align {
     }
 }
 
+/// A container's arrangement axis — the axis spec enum,
+/// language-native (docs/adaptive-layout-plan.md D1/D2): row and
+/// column are one node this parameterizes, and the prop is mutable so
+/// a breakpoint diff or a handler toggle is an ordinary property
+/// write. Rides the wire as I64.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+impl Axis {
+    fn wire(self) -> i64 {
+        match self {
+            Axis::Horizontal => 0,
+            Axis::Vertical => 1,
+        }
+    }
+}
+
 /// A just-built widget: the chain handle every live-zone constructor
 /// returns. It reborrows the transaction, so it lives at most to the end
 /// of its statement — chain construction props on it and end with
@@ -1909,6 +1929,14 @@ impl<'a> Tx<'a> {
     /// rows-only. See [`Prop::Align`].
     pub fn align(&mut self, widget: WidgetId, align: Align) {
         self.set(widget, Prop::Align, align.wire());
+    }
+
+    /// A container's arrangement axis (the creation kind's own is the
+    /// default — row horizontal, column vertical). Containers only.
+    /// The widget stays addressable by its CREATION kind whatever the
+    /// axis says today. See [`Prop::Axis`].
+    pub fn axis(&mut self, widget: WidgetId, axis: Axis) {
+        self.set(widget, Prop::Axis, axis.wire());
     }
 
     /// This widget's accessibility IDENTIFIER: a stable authored key,

@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x1cd31581dd9eb228L
+let spec_hash = 0xa10b712b34b3546fL
 
 let value_bool = 1
 let value_i64 = 2
@@ -84,6 +84,7 @@ let prop_a11y_hint = 14
 let prop_accepts = 15
 let prop_role = 16
 let prop_inset = 17
+let prop_axis = 18
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -131,6 +132,8 @@ let align_center = 1
 let align_end = 2
 let align_stretch = 3
 let align_baseline = 4
+let axis_horizontal = 0
+let axis_vertical = 1
 let role_destructive = 1
 let role_prominent = 2
 let role_heading = 3
@@ -1089,6 +1092,32 @@ let tx_bind_inset_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_inset);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant axis value. *)
+let tx_set_axis widget_id axis =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_axis);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 axis))
+
+(* set_property with a signal-bound axis value. *)
+let tx_bind_axis widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_axis);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_axis_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_axis);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

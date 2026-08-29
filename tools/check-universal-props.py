@@ -70,11 +70,18 @@ def census(files):
     else:
         end = text.find("\n}\n", start)
         body = text[start:end if end > 0 else len(text)]
-        heads = list(re.finditer(r"^        KayaCompose\.KIND_([A-Z_]+) ->", body, re.M))
-        arms = {
-            m.group(1): body[m.start():(heads[i + 1].start() if i + 1 < len(heads) else len(body))]
-            for i, m in enumerate(heads)
-        }
+        # An arm head may carry SEVERAL kinds (`KIND_COLUMN,
+        # KayaCompose.KIND_ROW ->` — one node, two constructor
+        # spellings, docs/adaptive-layout-plan.md D1); every named kind
+        # owns the same arm body.
+        heads = list(re.finditer(
+            r"^        KayaCompose\.KIND_[A-Z_]+(?:, KayaCompose\.KIND_[A-Z_]+)* ->",
+            body, re.M))
+        arms = {}
+        for i, m in enumerate(heads):
+            span = body[m.start():(heads[i + 1].start() if i + 1 < len(heads) else len(body))]
+            for kind_name in re.findall(r"KIND_([A-Z_]+)", m.group(0)):
+                arms[kind_name] = span
     for kind in kinds:
         if kind not in arms:
             bad.append(f"{compose}: no render arm for KIND_{kind}")

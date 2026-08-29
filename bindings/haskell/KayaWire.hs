@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x1cd31581dd9eb228
+specHash = 0xa10b712b34b3546f
 
 valueBool :: Word32
 valueBool = 1
@@ -160,6 +160,8 @@ propRole :: Word32
 propRole = 16
 propInset :: Word32
 propInset = 17
+propAxis :: Word32
+propAxis = 18
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -254,6 +256,10 @@ alignStretch :: Word32
 alignStretch = 3
 alignBaseline :: Word32
 alignBaseline = 4
+axisHorizontal :: Word32
+axisHorizontal = 0
+axisVertical :: Word32
+axisVertical = 1
 roleDestructive :: Word32
 roleDestructive = 1
 roleProminent :: Word32
@@ -1069,6 +1075,25 @@ txBindInset widgetId signalId = wireRecord txKindSetProperty
 txBindInsetElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindInsetElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propInset <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant axis value.
+txSetAxis :: Word64 -> Int64 -> Builder
+txSetAxis widgetId axis = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAxis <> word32LE sourceConst
+    <> encodeValue (VI64 axis))
+
+-- set_property with a signal-bound axis value.
+txBindAxis :: Word64 -> Word64 -> Builder
+txBindAxis widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAxis <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindAxisElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindAxisElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAxis <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

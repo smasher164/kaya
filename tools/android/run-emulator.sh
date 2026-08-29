@@ -2372,9 +2372,12 @@ ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
 # tables record no live geometry and the scene cannot answer. It
 # wires with the adaptive-layout milestone
 # (docs/adaptive-layout-plan.md), whose axis flip removes the
-# overflow — docs/deferred.md carries the entry.
+# overflow — docs/deferred.md carries the entry. `adaptive` is that
+# milestone's own depth scene, rust-only: this lane's rust artifact is
+# the milestone2 APK and its scene roster is a fan-out question, so the
+# leg wires with the breadth slice.
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-ANDROID_UNWIRED_SCENES="portfolio"
+ANDROID_UNWIRED_SCENES="portfolio adaptive"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"

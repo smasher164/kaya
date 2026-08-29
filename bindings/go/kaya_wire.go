@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x1cd31581dd9eb228
+	SpecHash uint64 = 0xa10b712b34b3546f
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -83,6 +83,7 @@ const (
 	PropAccepts = 15
 	PropRole = 16
 	PropInset = 17
+	PropAxis = 18
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -130,6 +131,8 @@ const (
 	AlignEnd = 2
 	AlignStretch = 3
 	AlignBaseline = 4
+	AxisHorizontal = 0
+	AxisVertical = 1
 	RoleDestructive = 1
 	RoleProminent = 2
 	RoleHeading = 3
@@ -1309,6 +1312,38 @@ func TxBindInsetElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropInset)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetAxis: set_property with a constant axis value.
+func TxSetAxis(widgetID uint64, axis int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropAxis)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, axis)
+	return endRecord(b)
+}
+
+// TxBindAxis: set_property with a signal-bound axis value.
+func TxBindAxis(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropAxis)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindAxisElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindAxisElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropAxis)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

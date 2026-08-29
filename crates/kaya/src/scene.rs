@@ -672,6 +672,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Alignment likewise: where the container places ITS children
         // on the cross axis.
         Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        // The arrangement axis: the two constructor kinds are one node
+        // this parameterizes (docs/adaptive-layout-plan.md D1).
+        Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         // A container's own padding (docs/styling-plan.md D3, one level
         // down from the window inset): spacing's kinds exactly, and for
         // spacing's reason — the prop is about a container's relation
@@ -834,6 +837,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Spacing => ValueType::F64,
         Prop::Inset => ValueType::F64,
         Prop::Align => ValueType::I64,
+        Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
@@ -1271,6 +1275,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             !(*mode == 4 && kind == WidgetKind::Column),
             "kaya: baseline alignment applies to rows only"
+        );
+    }
+    // The axis enum's two values, nothing else: horizontal 0,
+    // vertical 1 (docs/adaptive-layout-plan.md D1).
+    if let (Prop::Axis, Value::I64(mode)) = (prop, value) {
+        assert!(
+            (0..=1).contains(mode),
+            "kaya: axis must be horizontal (0) or vertical (1), got {mode}"
         );
     }
     // A progress fraction outside 0..=1 has no reading — nonsense

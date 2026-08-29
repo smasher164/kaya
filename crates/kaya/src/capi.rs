@@ -635,6 +635,9 @@ pub const KAYA_PROP_ROLE: u32 = 16;
 /// from the window inset): DIP between its bounds and its children,
 /// uniform all sides. Layout, carried by the spacing kinds.
 pub const KAYA_PROP_INSET: u32 = 17;
+/// The arrangement axis (docs/adaptive-layout-plan.md D1): row and
+/// column are one node this prop parameterizes.
+pub const KAYA_PROP_AXIS: u32 = 18;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -807,6 +810,7 @@ const _: () = assert!(
         && KAYA_PROP_ACCEPTS == wire::PROP_ACCEPTS
         && KAYA_PROP_ROLE == wire::PROP_ROLE
         && KAYA_PROP_INSET == wire::PROP_INSET
+        && KAYA_PROP_AXIS == wire::PROP_AXIS
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -827,12 +831,16 @@ pub const KAYA_ALIGN_CENTER: u32 = 1;
 pub const KAYA_ALIGN_END: u32 = 2;
 pub const KAYA_ALIGN_STRETCH: u32 = 3;
 pub const KAYA_ALIGN_BASELINE: u32 = 4;
+pub const KAYA_AXIS_HORIZONTAL: u32 = 0;
+pub const KAYA_AXIS_VERTICAL: u32 = 1;
 const _: () = assert!(
     KAYA_ALIGN_START == wire::ALIGN_START
         && KAYA_ALIGN_CENTER == wire::ALIGN_CENTER
         && KAYA_ALIGN_END == wire::ALIGN_END
         && KAYA_ALIGN_STRETCH == wire::ALIGN_STRETCH
         && KAYA_ALIGN_BASELINE == wire::ALIGN_BASELINE
+        && KAYA_AXIS_HORIZONTAL == wire::AXIS_HORIZONTAL
+        && KAYA_AXIS_VERTICAL == wire::AXIS_VERTICAL
 );
 
 /// THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4), for the C
@@ -973,7 +981,7 @@ const _: () = {
 // shipped to every generated wire file while kaya.h silently lacked it.
 // A new spec prop trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 17,
+    crate::spec::PROPS.len() == 18,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

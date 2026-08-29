@@ -7966,6 +7966,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let widget = grid.clone().upcast::<gtk4::Widget>();
                     set_container_inset(core, &widget, pad);
                 }
+                // The arrangement axis (docs/adaptive-layout-plan.md D1):
+                // the GtkBox IS one orientable node, so the flip is the
+                // toolkit's own property — the axis-as-data precedent.
+                (NativeWidget::Column(container), Prop::Axis, Value::I64(mode))
+                | (NativeWidget::Row(container), Prop::Axis, Value::I64(mode)) => {
+                    // DEFERRED past the core borrow: on wayland,
+                    // set_orientation relayouts synchronously and the
+                    // resize path re-borrows CORE — "RefCell already
+                    // borrowed" on the second flip, with x11 green (the
+                    // connect_dark_notify comment above records the same
+                    // rule; the harness's poll absorbs the idle hop).
+                    let container = container.clone();
+                    let mode = mode;
+                    glib::idle_add_local_once(move || {
+                        use gtk4::prelude::OrientableExt;
+                        container.set_orientation(if mode == 1 {
+                            gtk4::Orientation::Vertical
+                        } else {
+                            gtk4::Orientation::Horizontal
+                        });
+                    });
+                }
                 (NativeWidget::Column(container), Prop::Align, Value::I64(mode)) => {
                     use gtk4::prelude::WidgetExt;
                     let container = container.clone().upcast::<gtk4::Widget>();
@@ -10922,6 +10944,30 @@ impl crate::harness::Stage for GtkStage {
                 String::new()
             } else {
                 format!("draws {}px of a {}px track", drawn.round(), track.round())
+            }
+        })
+    }
+
+    fn container_axis(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::OrientableExt;
+            use gtk4::prelude::WidgetExt;
+            // Addressed by CREATION KIND (docs/adaptive-layout-plan.md D1);
+            // the answer is the toolkit's own orientation read back, never
+            // the model — a backend that ignored the write must fail.
+            let from_columns = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if from_columns { &core.columns } else { &core.rows };
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return "<no such target>".to_string();
+            };
+            let container = &registry[i];
+            while glib::MainContext::default().iteration(false) {}
+            if container.width() <= 0 && container.height() <= 0 {
+                return "no container layout recorded".to_owned();
+            }
+            match container.orientation() {
+                gtk4::Orientation::Vertical => "vertical".to_owned(),
+                _ => "horizontal".to_owned(),
             }
         })
     }

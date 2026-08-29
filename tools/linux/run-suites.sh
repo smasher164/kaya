@@ -43,7 +43,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # (docs/canvas-plan.md §3.2). `sizepolicy` is rust-only because it is a
 # depth slice: the seven other bindings have no `fixed`/`on_draw`/`on_tick`
 # spelling yet (docs/deferred.md's size-policy entry).
-DEPTH_SCENES="windowed canvas sizepolicy"
+DEPTH_SCENES="windowed canvas sizepolicy adaptive"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1028,6 +1028,11 @@ for proto in x11 wayland; do
     # windowing scene the mobile lanes can run too.
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
+    # THE ADAPTIVE SCENE, depth half (docs/adaptive-layout-plan.md §2):
+    # GTK's axis is its own orientable, so this backend carries the
+    # feature from the depth slice. Rust alone until the fan-out.
+    run "$proto" adaptive-rust env KAYA_SELFTEST=adaptive \
+        "$CARGO_TARGET_DIR/debug/examples/adaptive"
     # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
     # this backend blits a GdkMemoryTexture. The hash is the SAME frozen
     # string every other lane asserts — the raster comes out of this

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x1cd31581dd9eb228;
+    public const ulong SpecHash = 0xa10b712b34b3546f;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -81,6 +81,7 @@ static class KayaWire
     public const uint PropAccepts = 15;
     public const uint PropRole = 16;
     public const uint PropInset = 17;
+    public const uint PropAxis = 18;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -128,6 +129,8 @@ static class KayaWire
     public const uint AlignEnd = 2;
     public const uint AlignStretch = 3;
     public const uint AlignBaseline = 4;
+    public const uint AxisHorizontal = 0;
+    public const uint AxisVertical = 1;
     public const uint RoleDestructive = 1;
     public const uint RoleProminent = 2;
     public const uint RoleHeading = 3;
@@ -1230,6 +1233,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropInset); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant axis value.
+    public static byte[] TxSetAxis(ulong widgetId, long axis)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAxis); w.Write(SourceConst);
+        EncodeValue(w, axis);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound axis value.
+    public static byte[] TxBindAxis(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAxis); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindAxisElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAxis); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

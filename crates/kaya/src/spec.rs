@@ -139,6 +139,14 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // its children, in DIP, uniform on all four sides. LAYOUT, not
     // appearance — carried by the same kinds spacing is.
     ("inset", 17, PropKind::F64),
+    // A CONTAINER'S ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2):
+    // row and column stay the wire's two constructor spellings — each
+    // names the INITIAL axis, and the harness addresses by creation
+    // kind — while every backend implements ONE node this prop
+    // parameterizes. Mutable like any prop, which is what makes both
+    // the breakpoint diff and the user-driven orientation toggle
+    // ordinary property writes.
+    ("axis", 18, PropKind::Enum("axis")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2447,6 +2455,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("accepts", 15),
                 ("role", 16),
                 ("inset", 17),
+                ("axis", 18),
             ],
         },
         EnumSpec {
@@ -2556,6 +2565,15 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("end", 2),
                 ("stretch", 3),
                 ("baseline", 4),
+            ],
+        },
+        EnumSpec {
+            // The arrangement axis (docs/adaptive-layout-plan.md D1).
+            // horizontal = row's initial value, vertical = column's.
+            name: "axis",
+            variants: &[
+                ("horizontal", 0),
+                ("vertical", 1),
             ],
         },
         EnumSpec {
@@ -3078,6 +3096,7 @@ mod tests {
                     ("prop", "accepts") => wire::PROP_ACCEPTS,
                     ("prop", "role") => wire::PROP_ROLE,
                     ("prop", "inset") => wire::PROP_INSET,
+                    ("prop", "axis") => wire::PROP_AXIS,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -3114,6 +3133,8 @@ mod tests {
                     ("alert_choice", "action0") => wire::ALERT_CHOICE_ACTION0,
                     ("alert_choice", "action1") => wire::ALERT_CHOICE_ACTION1,
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,
+                    ("axis", "horizontal") => wire::AXIS_HORIZONTAL,
+                    ("axis", "vertical") => wire::AXIS_VERTICAL,
                     ("align", "start") => wire::ALIGN_START,
                     ("align", "center") => wire::ALIGN_CENTER,
                     ("align", "end") => wire::ALIGN_END,

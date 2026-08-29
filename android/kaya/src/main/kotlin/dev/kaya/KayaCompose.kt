@@ -360,6 +360,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * default). See Prop::Align.
      */
     var align by mutableStateOf(0L)
+
+    /// The arrangement axis (null = the creation kind's own — row
+    /// horizontal, column vertical). One node, two constructor
+    /// spellings (docs/adaptive-layout-plan.md D1).
+    var axis by mutableStateOf<Long?>(null)
     /**
      * THE DECLARED SET OF DECORATED RANGES (textarea only), and the text
      * it was declared against.
@@ -505,6 +510,10 @@ val kayaInsetInner = HashMap<Long, Pair<Double, Double>>()
  * metric, pass-invariant) captured by a layout modifier.
  */
 val kayaContainerCross = HashMap<Long, Double>()
+
+/** The axis each container RENDERED with (true = vertical), recorded at
+ * layout time — expect_axis's observation, never the model's field. */
+val kayaContainerAxis = HashMap<Long, Boolean>()
 val kayaCrossRects = HashMap<Long, Pair<Double, Double>>()
 val kayaBaselineOffsets = HashMap<Long, Double>()
 
@@ -915,7 +924,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x1cd31581dd9eb228uL
+    private const val SPEC_HASH: ULong = 0xa10b712b34b3546fuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1106,6 +1115,7 @@ object KayaCompose {
     private const val PROP_GROW = 7
     private const val PROP_SPACING = 8
     private const val PROP_ALIGN = 9
+    private const val PROP_AXIS = 18
     private const val PROP_INDETERMINATE = 10
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
@@ -1702,6 +1712,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.spacing = readF64(b)
                         PROP_ALIGN ->
                             KayaSceneModel.nodes[id]!!.align = readI64(b)
+                        PROP_AXIS ->
+                            KayaSceneModel.nodes[id]!!.axis = readI64(b)
                         PROP_INDETERMINATE ->
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
                         PROP_COLUMNS ->
@@ -7011,6 +7023,36 @@ object KayaCompose {
                             failures.add("root hugs ($hug)")
                         }
                     }
+                    "expect_axis" -> {
+                        // The axis the render actually used, recorded at
+                        // layout time (kayaContainerAxis) — never the
+                        // model's field: a backend that ignored the write
+                        // must fail (the expect_aligned rule, one prop
+                        // over; harness.rs Step::ExpectAxis is the
+                        // sentence's source of truth).
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            val isRow = parts[1].startsWith("row")
+                            target(
+                                parts[1], if (isRow) "row" else "column",
+                                if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
+                            )?.let { container ->
+                                when (kayaContainerAxis[container.id]) {
+                                    null -> "no container layout recorded"
+                                    true -> "vertical"
+                                    false -> "horizontal"
+                                }
+                            }
+                        }
+                        when {
+                            got == null -> failures.add("no such target " + parts[1])
+                            got == want -> observed.add(parts[1] + " axis " + want)
+                            else ->
+                                failures.add(
+                                    parts[1] + " axis \"" + got + "\", wanted \"" + want + "\""
+                                )
+                        }
+                    }
                     "expect_aligned" -> {
                         // Classified from measured geometry, never the
                         // model's align field.
@@ -9380,14 +9422,19 @@ private fun KayaRenderCore(
             ) {
                 node.children.firstOrNull()?.let { KayaRender(it) }
             }
-        KayaCompose.KIND_COLUMN ->
-            // Normalized default: children packed to the top at natural
-            // size, leading-aligned (Alignment.Start), 8 dp between them.
-            // A container with a declared header bar takes the TABLE
-            // surface instead (docs/tables-plan.md).
-            if (node.tableColumns.isNotEmpty()) {
+        KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW -> {
+            // ONE NODE, TWO CONSTRUCTOR SPELLINGS (docs/adaptive-layout-plan.md
+            // D1): the kind names the INITIAL axis and the harness's
+            // address; the axis prop, when set, is the arrangement truth.
+            // Normalized default: children packed to the start at natural
+            // size, cross-axis start, 8 dp between them. A vertical
+            // container with a declared header bar takes the TABLE surface
+            // instead (docs/tables-plan.md).
+            val kayaVertical =
+                (node.axis ?: if (node.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 1L
+            if (kayaVertical && node.tableColumns.isNotEmpty()) {
                 KayaTableSurface(node, boxFill.then(a11y))
-            } else Column(
+            } else if (kayaVertical) Column(
                 // The inset pair brackets the container's own padding:
                 // outer box, then padding, then the content readers, so
                 // the extents shares divide are the CONTENT box.
@@ -9399,6 +9446,7 @@ private fun KayaRenderCore(
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
                     kayaContainerCross[node.id] = it.size.width.toDouble()
+                    kayaContainerAxis[node.id] = true
                 },
                 verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
                 horizontalAlignment = when (node.align) {
@@ -9449,57 +9497,7 @@ private fun KayaRenderCore(
                     }
                 }
             }
-        KayaCompose.KIND_BUTTON ->
-            // THE ROLE TIER, in M3's own emphasis ladder
-            // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, with
-            // filled reserved for `prominent` — a roleless button that
-            // was already filled would leave `prominent` nowhere to go,
-            // and the other three backends sit the same way.
-            //
-            // DESTRUCTIVE takes the error-role CONTAINER, a pair fixed
-            // by Material rather than derived from the brand, so red
-            // keeps meaning destructive in a red-branded app. Never
-            // `Color.Red`: the role, so the platform judges the shade.
-            when (node.role) {
-                KayaCompose.ROLE_PROMINENT ->
-                    Button(
-                        onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y),
-                    ) {
-                        // A button's label is Material's OWN rung
-                        // (`Button` provides labelLarge internally), so
-                        // this samples the ramp route through a
-                        // component kaya never styles.
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
-                    }
-                KayaCompose.ROLE_DESTRUCTIVE ->
-                    Button(
-                        onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        ),
-                    ) {
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
-                    }
-                else ->
-                    OutlinedButton(
-                        onClick = { KayaPresent.emitClicked(node.tag) },
-                        // THE BEZEL IS THE CHILD, not a natural-width
-                        // control inside a grown box: Material takes this
-                        // modifier onto the Surface, so the chrome spans
-                        // the track the way GTK's Fill and XAML's Stretch
-                        // already do (grow.steps' button#0).
-                        modifier = boxFill.then(a11y),
-                    ) {
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
-                    }
-            }
-        KayaCompose.KIND_ROW ->
-            // Normalized default: children packed to the leading edge at
-            // natural size, top-aligned (Alignment.Top), 8 dp between them.
-            Row(
+            else Row(
                 // The inset pair brackets the padding (see the column's
                 // note).
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
@@ -9510,6 +9508,7 @@ private fun KayaRenderCore(
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
                     kayaContainerCross[node.id] = it.size.height.toDouble()
+                    kayaContainerAxis[node.id] = false
                 },
                 horizontalArrangement = Arrangement.spacedBy(node.spacing.dp),
                 verticalAlignment = when (node.align) {
@@ -9558,6 +9557,54 @@ private fun KayaRenderCore(
                         }
                     }
                 }
+            }
+        }
+        KayaCompose.KIND_BUTTON ->
+            // THE ROLE TIER, in M3's own emphasis ladder
+            // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, with
+            // filled reserved for `prominent` — a roleless button that
+            // was already filled would leave `prominent` nowhere to go,
+            // and the other three backends sit the same way.
+            //
+            // DESTRUCTIVE takes the error-role CONTAINER, a pair fixed
+            // by Material rather than derived from the brand, so red
+            // keeps meaning destructive in a red-branded app. Never
+            // `Color.Red`: the role, so the platform judges the shade.
+            when (node.role) {
+                KayaCompose.ROLE_PROMINENT ->
+                    Button(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = boxFill.then(a11y),
+                    ) {
+                        // A button's label is Material's OWN rung
+                        // (`Button` provides labelLarge internally), so
+                        // this samples the ramp route through a
+                        // component kaya never styles.
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                    }
+                KayaCompose.ROLE_DESTRUCTIVE ->
+                    Button(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = boxFill.then(a11y),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    ) {
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                    }
+                else ->
+                    OutlinedButton(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        // THE BEZEL IS THE CHILD, not a natural-width
+                        // control inside a grown box: Material takes this
+                        // modifier onto the Surface, so the chrome spans
+                        // the track the way GTK's Fill and XAML's Stretch
+                        // already do (grow.steps' button#0).
+                        modifier = boxFill.then(a11y),
+                    ) {
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                    }
             }
         KayaCompose.KIND_LABEL ->
             // The heading role is BOTH facts at once (docs/styling-plan.md

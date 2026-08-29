@@ -1105,6 +1105,11 @@ pub enum Prop {
     /// children to hold away from its edge. Spelled in BOTH construction
     /// zones: a stamped row needs it as much as a live one.
     Inset,
+    /// The container's arrangement axis (docs/adaptive-layout-plan.md
+    /// D1/D2): row and column are one node this parameterizes, and the
+    /// prop is mutable so a breakpoint diff or a handler toggle is an
+    /// ordinary property write.
+    Axis,
 }
 
 /// The leading pane's width for a list-detail split: a FRACTION of the

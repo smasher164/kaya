@@ -463,6 +463,8 @@
  */
 #define PROP_INSET 17
 
+#define PROP_AXIS 18
+
 /**
  * The clip representation masks (spec enum "clip"). BIT POSITIONS, not
  * an ordinal: a copy carries several and a widget accepts several, so
@@ -604,6 +606,10 @@
 /**
  * The align enum's wire values (spec enum "align").
  */
+#define AXIS_HORIZONTAL 0
+
+#define AXIS_VERTICAL 1
+
 #define ALIGN_START 0
 
 #define ALIGN_CENTER 1
@@ -1281,6 +1287,12 @@
 #define KAYA_PROP_INSET 17
 
 /**
+ * The arrangement axis (docs/adaptive-layout-plan.md D1): row and
+ * column are one node this prop parameterizes.
+ */
+#define KAYA_PROP_AXIS 18
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1425,6 +1437,10 @@
 #define KAYA_ALIGN_STRETCH 3
 
 #define KAYA_ALIGN_BASELINE 4
+
+#define KAYA_AXIS_HORIZONTAL 0
+
+#define KAYA_AXIS_VERTICAL 1
 
 /**
  * THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4), for the C

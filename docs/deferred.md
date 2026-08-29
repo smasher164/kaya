@@ -8650,3 +8650,13 @@ container layout recorded". TWO consequences, one fixed and one held:
   (docs/adaptive-layout-plan.md): the dashboard's one stack_below
   keyword removes the overflow, both models then agree, and the leg
   wires — which also makes the crash clamp's repro a lane leg.
+
+- **DEPTH STUB: adaptive on winui** — the axis prop's honor needs an
+  axis-state pass this backend does not have: reindex derives direction
+  from the widget VARIANT (Column vs Row), so a mutable axis means a
+  `core.axes` map consulted at every variant-derived-direction site
+  (reindex and its siblings), threaded like `core.aligns`. Closes with
+  the adaptive milestone's breadth slice, which lands the pass, wires
+  the windows adaptive leg, and deletes the stub — striking this line
+  in the same edit.
+  KEY: adaptive winui, axis-state pass, reindex vertical, depth stub adaptive

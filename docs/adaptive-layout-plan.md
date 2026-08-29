@@ -28,8 +28,17 @@ reach for that no native toolkit ships first-class.
 
 ### D1 — one container node; row and column are its only two spellings
 
-The wire has ONE stack node whose axis is a property. The guest surface
-keeps exactly `row()` and `column()` — sugar for the two axis values —
+ONE NODE, TWO CONSTRUCTOR SPELLINGS — refined at build time
+(2026-08-28 recon): the wire KEEPS kinds `column`=1 and `row`=5,
+because the harness addresses widgets by kind (`row#0`,
+`column@detail`) and merging the kinds would reindex every
+byte-frozen scene in the roster. The kinds are the constructor sugar
+ON THE WIRE — each names the initial axis — while the NODE every
+backend implements is one, parameterized by the `axis` property; a
+widget created as `row` stays addressable as `row#N` whatever its
+axis says today (identity is the creation kind, presentation is the
+prop — the same split the template zone already lives by). The guest
+surface keeps exactly `row()` and `column()`
 and deliberately does NOT surface a third `stack()` constructor
 (ruled 2026-08-28): build-time axis choice is a legal build-time
 conditional (the trace runs once), the adaptive switch is D3's job, and

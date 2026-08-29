@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x1cd31581dd9eb228
+SPEC_HASH = 0xa10b712b34b3546f
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -79,6 +79,7 @@ PROP_A11Y_HINT = 14
 PROP_ACCEPTS = 15
 PROP_ROLE = 16
 PROP_INSET = 17
+PROP_AXIS = 18
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -126,6 +127,8 @@ ALIGN_CENTER = 1
 ALIGN_END = 2
 ALIGN_STRETCH = 3
 ALIGN_BASELINE = 4
+AXIS_HORIZONTAL = 0
+AXIS_VERTICAL = 1
 ROLE_DESTRUCTIVE = 1
 ROLE_PROMINENT = 2
 ROLE_HEADING = 3
@@ -755,6 +758,21 @@ def tx_bind_inset(widget_id, signal_id):
 def tx_bind_inset_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INSET, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_axis(widget_id, axis):
+    """set_property with a constant axis value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_AXIS, SOURCE_CONST) + _enc.value(int(axis)))
+
+
+def tx_bind_axis(widget_id, signal_id):
+    """set_property with a signal-bound axis value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_AXIS, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_axis_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_AXIS, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

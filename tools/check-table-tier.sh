@@ -300,10 +300,14 @@ track_handoff = (
 )
 track_handoff_count = raw.count(track_handoff)
 print(f"check-table-tier: table-generation track handoff found {track_handoff_count} time(s)")
-if track_handoff_count != 2:
-    bad.append(f"{path}: wanted the table-generation handoff at both KayaTrackReader "
-               f"construction sites, found {track_handoff_count}. The vertical and "
-               "horizontal flex paths must tag the same observation.")
+# ONE site since the axis unification (docs/adaptive-layout-plan.md D1):
+# the vertical and horizontal flex paths are one body parameterized by
+# the axis, so both orientations tag the same observation BY
+# CONSTRUCTION — the property the two-site count used to hold.
+if track_handoff_count != 1:
+    bad.append(f"{path}: wanted the table-generation handoff at the unified "
+               f"KayaTrackReader construction site, found {track_handoff_count}. Both "
+               "flex orientations must tag the same observation.")
 
 # THE OBSERVATION FUNNEL, and the reason it is a clause: the mac
 # native tier reports NSTableView's own frames while the synthesized one
@@ -746,7 +750,8 @@ DECLS = (
                r"|override|mutating|nonisolated|convenience|required)\s+)*"
                r"(func|struct|class|enum|extension|protocol|init|subscript)"
                r"\s+(`?\w+`?)"),
-    re.compile(r"^(\s*)(?:(?:public|private|internal|fileprivate|static)\s+)*"
+    re.compile(r"^(\s*)(?:@[\w.]+(?:\([^)]*\))?\s+)*"
+               r"(?:(?:public|private|internal|fileprivate|static)\s+)*"
                r"(var|let)\s+(\w+)\s*:[^=]*\{\s*$"),
     re.compile(r'^(\s*)(case)\s+("[^"]*")\s*:'),
 )
@@ -873,7 +878,7 @@ refuses "$T/unstaled-user-write.swift" "kayaUserWrite must invalidate table geom
 hits="$(perturb "$SWIFTUI" 'kayaUserWrite \{ node\.checked = newValue \}' \
     'node.checked = newValue' "$T/unfunnelled-write.swift")"
 applied "$hits" "a user-route model write moved out of the funnel" \
-    "struct KayaRender > var body"
+    "struct KayaRender > var widget"
 refuses "$T/unfunnelled-write.swift" "writes the model outside" \
     "a model write no path staled"
 
@@ -930,7 +935,7 @@ hits="$(perturb "$SWIFTUI" \
     'tableGeneration: child\.tableColumns\.isEmpty\n                                        \? nil : kayaTableGeometryGeneration\(child\)' \
     'tableGeneration: nil' "$T/untagged-flex-track.swift")"
 applied "$hits" "one flex path stopped handing table generations to its track reader" \
-    "struct KayaRender > var body"
+    "struct KayaRender > var widget"
 refuses "$T/untagged-flex-track.swift" "wanted the table-generation handoff" \
     "one flex orientation recording untagged table tracks"
 
