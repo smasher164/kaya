@@ -287,7 +287,42 @@ the edge instrument measures cells against that interior — the outer
 width reported "content 290 in viewport 290" for a table whose cells
 stood 11pt outside a 279pt viewport, one overflow with two numbers.
 
-STILL OPEN: the macOS NATIVE tier alone. A fix that works is measured
+AND THE macOS NATIVE TIER, 2026-08-29, which completes the roster. The
+representable answers PER PROPOSAL — a concrete width is the parent
+saying what there is and is taken; an unspecified one is the parent
+asking what the table wants, and the answer is its content CAPPED BY THE
+WINDOW, because a hug wider than the window puts columns where no scroll
+view can reach them. Apple's contract leaves no other lever: nil means
+"the default sizing algorithm", which Apple never defines, while "one of
+the values returned from this function will always be used as the actual
+size" (docs/probes/swiftui-sizing-2026.md). Before the table is measured
+there is no content to hug and the honest answer is nil — answering the
+fitting size pins it at ~10pt, which leaves its columns no room to be
+measured in and the floor never arrives.
+
+TWO THINGS THIS TIER TAUGHT, both measured and both now rules:
+NO FORCED LAYOUT INSIDE A HARNESS READ — pumping one is gtk.rs's 1630
+rule a platform over, since the read runs on the main thread while the
+harness holds the core, and the run produced no verdict at all. And a
+DELIBERATE SCROLL SURVIVES A RELAYOUT: the leading-edge park is keyed on
+the CLIP moving, because AppKit keeps the visible RIGHT edge across a
+resize and parked a freshly resized table at its trailing edge, which
+made `expect_at_end` true before anything had scrolled.
+
+RULING A'S GUARD WAS REWRITTEN, not worked around (the maintainer's call,
+2026-08-29): it asked the hug inside a 200pt window against 335pt of
+columns, where the only way to pass was for the table's own VIEWPORT to
+be wider than the window containing it — 135pt of table hanging off the
+side with no way to reach it, which is the behaviour this ruling
+replaces. A test may not demand what its project has ruled against. It
+now asks the hug in kaya's own vocabulary, an UNGROWN column beside a
+GROWN sibling in a window with room, which is the shape a real hugging
+panel has; the two clauses carrying ruling A's substance — no column
+narrower than its content, none declaring a minimum below it — are
+untouched, and the gate's own self-test still reddens the rewritten
+clause.
+
+STILL OPEN: only the shared conformance scene's wiring. A fix that works is measured
 (answer per proposal in the representable's sizeThatFits, capping the hug
 at the window), and it COLLIDES with ruling A's own guard, which asks the
 hug inside a 200pt window and requires the table to overflow it — at that

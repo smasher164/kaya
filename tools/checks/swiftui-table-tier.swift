@@ -656,13 +656,43 @@ enum KayaTableTierProbe {
         let floorRoot = KayaNode(
             id: 53, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("floor-root".utf8))
         floorRoot.children.append(floorTable)
-        // 200pt of window against two columns of long text: the container
-        // CANNOT fit the content unless the tier makes it.
+        // THE HUG IS ASKED WHERE IT IS A HUG (rewritten 2026-08-29). This
+        // clause holds ruling A's substance — a container grows to the
+        // table's content rather than ellipsizing inside it — and it used
+        // to ask that inside a 200pt window against 335pt of columns,
+        // where the only way to pass was for the table's own VIEWPORT to
+        // be wider than the window containing it. That is not a hug; it is
+        // 135pt of table hanging off the side of the window with no way to
+        // reach it, and it is exactly what the overflow ruling replaced
+        // with scrolling (docs/tables-plan.md, 2026-08-29). A test may not
+        // demand the behaviour its own project has ruled against.
+        //
+        // So: room for the hug, and a SPACER beside it so the container
+        // hugs rather than fills — which is the shape a real hugging panel
+        // has, and asks the question without `fixedSize`, whose ideal-width
+        // resolution feeds this tier SwiftUI's 10x10 substitution default
+        // and pins it there (measured 2026-08-29). The narrow case is the
+        // ruling's now, and the scene drives it. TEETH INTACT: a tier that
+        // publishes no content width answers ~10pt here, which is what this
+        // gate's own self-test perturbs it into doing.
         let floorWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        // THE HUG IN KAYA'S OWN VOCABULARY: an ungrown column beside a
+        // GROWN sibling, which is the shape a real hugging panel has (the
+        // portfolio's dashboard is exactly this). The ungrown one takes its
+        // natural width — the table's content — and the grown one takes the
+        // rest. SwiftUI-side tricks do not serve here: the root fills its
+        // host, and `fixedSize` feeds this tier the 10x10 substitution
+        // default and pins it there (both measured 2026-08-29).
+        let floorFiller = KayaNode(
+            id: 55, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("floor-filler".utf8))
+        floorFiller.grow = 1
+        let floorPair = KayaNode(
+            id: 54, kind: UInt32(KAYA_KIND_ROW), tag: Array("floor-pair".utf8))
+        floorPair.children = [floorRoot, floorFiller]
         floorWindow.contentView = NSHostingView(
-            rootView: KayaRender(node: floorRoot, flexVertical: true, flexStretch: false))
+            rootView: KayaRender(node: floorPair, flexVertical: false, flexStretch: false))
         floorWindow.orderFront(nil)
 
         /// (worst deficit against the floor, worst minimum deficit, the

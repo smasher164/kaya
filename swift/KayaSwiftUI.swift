@@ -8806,20 +8806,14 @@ private struct KayaNativeTable: View {
         let generation = kayaTableGeometryGeneration(node)
         #if os(macOS)
             // CONTENT IS THE FLOOR IN BOTH AXES (ruled 2026-08-26). The
-            // height has always been declared here from the core's own
-            // arithmetic; the width is the driver's measured content total,
-            // read in the body so a re-floor re-evaluates it, and declared
-            // the same way — which is what widens a hugging container
-            // instead of ellipsizing inside it.
-            //
-            // WHY THIS TIER STILL DOES NOT SCROLL ITS COLUMNS: this one
-            // declaration is where ruling A and the overflow ruling collide,
-            // and docs/deferred.md's mac-table-reachability entry records
-            // four measured attempts at reconciling them.
-            let contentWidth = node.tableContentWidth
+            // height is declared here from the core's own arithmetic; the
+            // WIDTH is the representable's sizeThatFits below, the only
+            // place that sees the parent's PROPOSAL and so the only one
+            // that can answer the hug and the squeeze differently.
             KayaMacNativeTable(
                 node: node, generation: generation, columns: node.tableColumns,
-                sorted: node.tableSorted, direction: node.tableDirection
+                sorted: node.tableSorted, direction: node.tableDirection,
+                contentWidth: node.tableContentWidth
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if node.grow <= 0 {
@@ -8838,7 +8832,7 @@ private struct KayaNativeTable: View {
             // inside a scroll view this frame IS the content and the tier
             // records it as the viewport (docs/deferred.md's
             // mac-table-reachability entry, measured 2026-08-29).
-            .frame(minWidth: contentWidth > 0 ? contentWidth : nil, alignment: .leading)
+            .frame(alignment: .leading)
         #else
             KayaTableColumns(node: node, generation: generation)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -8974,6 +8968,12 @@ private struct KayaNativeTable: View {
         let columns: [String]
         let sorted: UInt32
         let direction: UInt32
+        /// READ IN THE BODY that builds this, so a re-floor re-evaluates the
+        /// view and SwiftUI asks sizeThatFits again — a read off the node
+        /// inside that method is not an observation, and the hug would keep
+        /// whatever the first, unmeasured pass answered (measured: the ideal
+        /// stuck at 10pt while the tier published 367).
+        let contentWidth: Double
 
         func makeCoordinator() -> KayaTableDriver {
             KayaTableDriver(node: node)
@@ -8989,6 +8989,48 @@ private struct KayaNativeTable: View {
 
         static func dismantleNSView(_ view: NSScrollView, coordinator: KayaTableDriver) {
             coordinator.dismantle()
+        }
+
+        /// CONTENT IS THE FLOOR, AND THE OFFER IS THE ANSWER. Ruling A
+        /// (2026-08-26) and the overflow ruling (2026-08-29) meet on this
+        /// one view, and a `.frame` cannot serve both: as `minWidth` it
+        /// answered the CONTENT to every proposal, which widened every
+        /// container above it — measured, a 430pt table arriving as a 430pt
+        /// PROPOSAL inside a 320pt window — so the scroll view was as wide
+        /// as its own document and had nothing left to scroll.
+        ///
+        /// Per proposal there is no conflict. An unspecified width is a
+        /// parent asking what this table wants: the content, CAPPED BY THE
+        /// WINDOW, because a hug wider than the window puts columns where
+        /// no scroll view can reach them. A concrete width is a parent
+        /// saying what there is, and the answer is to take it and scroll
+        /// inside it.
+        ///
+        /// Apple's contract makes this the only lever: returning nil means
+        /// "the default sizing algorithm", which Apple never defines, while
+        /// "one of the values returned from this function will always be
+        /// used as the actual size" (docs/probes/swiftui-sizing-2026.md).
+        func sizeThatFits(
+            _ proposal: ProposedViewSize, nsView: NSScrollView, context: Context
+        ) -> CGSize? {
+            let floor = CGFloat(contentWidth)
+            guard let offered = proposal.width, offered.isFinite, offered > 0 else {
+                // THE HUG. Before the driver has measured its columns there
+                // is no content to hug, and answering the fitting size here
+                // PINS the table at ~10pt, which leaves its columns no room
+                // to be measured in — the floor then never arrives and the
+                // hug stays 10 forever (measured 2026-08-29). nil is the
+                // honest answer until there is one.
+                guard floor > 0 else { return nil }
+                // Capped by the window: a hug wider than the window puts
+                // columns where no scroll view can reach them.
+                let room = nsView.window?.contentLayoutRect.width ?? floor
+                return CGSize(
+                    width: room > 0 ? min(floor, room) : floor,
+                    height: proposal.height ?? nsView.fittingSize.height)
+            }
+            return CGSize(
+                width: offered, height: proposal.height ?? nsView.fittingSize.height)
         }
 
     }
@@ -9142,16 +9184,33 @@ private struct KayaNativeTable: View {
         /// changed extent only, so an ordinary batch does not throw away a
         /// scroll the reader made.
         private var lastHorizontalExtents: (CGFloat, CGFloat)?
+        /// The extents a DELIBERATE scroll was made at. A relayout that
+        /// moved neither extent must leave that scroll alone — gtk.rs
+        /// states the same rule at its own adjustment. Without it the reset
+        /// and `scroll_end` fought: the scroll moved the bounds, the bounds
+        /// notification drove a layout, the layout parked it back, and the
+        /// run produced no verdict at all (measured 2026-08-29).
+        private var readerScrolledAt: (CGFloat, CGFloat)?
+
+        private var horizontalExtentPair: (CGFloat, CGFloat) {
+            (scrollView.documentView?.frame.width ?? 0,
+             scrollView.contentView.bounds.width)
+        }
+
+        private func extentsMoved(_ a: (CGFloat, CGFloat), _ b: (CGFloat, CGFloat)) -> Bool {
+            abs(a.0 - b.0) > 0.5 || abs(a.1 - b.1) > 0.5
+        }
 
         func resetHorizontalOriginIfGeometryMoved() {
-            let now = (scrollView.documentView?.frame.width ?? 0,
-                       scrollView.contentView.bounds.width)
+            let now = horizontalExtentPair
             defer { lastHorizontalExtents = now }
-            if let last = lastHorizontalExtents,
-                abs(last.0 - now.0) <= 0.5, abs(last.1 - now.1) <= 0.5
-            {
-                return
-            }
+            if let parked = readerScrolledAt, !extentsMoved(parked, now) { return }
+            readerScrolledAt = nil
+            // THE CLIP IS THE TRIGGER: a resize moves the viewport, and
+            // AppKit keeps the visible RIGHT edge across it, which parked a
+            // freshly resized table at its trailing edge and made
+            // `expect_at_end` true before anything had scrolled.
+            guard let last = lastHorizontalExtents, abs(last.1 - now.1) > 0.5 else { return }
             let origin = scrollView.contentView.bounds.origin
             guard origin.x != 0 else { return }
             scrollView.contentView.scroll(to: NSPoint(x: 0, y: origin.y))
@@ -9162,6 +9221,12 @@ private struct KayaNativeTable: View {
         /// is the table's own width and the clip is what the track gave it
         /// (docs/tables-plan.md, ruled 2026-08-29). A table's ROWS answer to
         /// expect_window/scroll_to_row, so these three read the columns.
+        /// NO FORCED LAYOUT IN A HARNESS READ. Pumping one here is
+        /// gtk.rs's 1630 rule one platform over: the read runs on the main
+        /// thread while the harness holds the core, the layout re-enters
+        /// this driver and the apply path, and the whole run produced no
+        /// verdict at all (measured 2026-08-29). The determinism comes from
+        /// the reset below instead.
         func horizontalExtents() -> (content: Double, viewport: Double) {
             (Double(scrollView.documentView?.frame.width ?? 0),
              Double(scrollView.contentView.bounds.width))
@@ -9170,10 +9235,15 @@ private struct KayaNativeTable: View {
         /// The toolkit's own scrolling, like scroll_end's reader proxy one
         /// tier over — never a frame written by hand.
         func scrollToTrailingEdge() {
+            // NO settled() HERE: this runs on the main thread and the
+            // layout hook it would trigger re-enters this driver's own
+            // reset — the whole run then produced no verdict at all
+            // (measured 2026-08-29). The READS settle; the write does not.
             guard let document = scrollView.documentView else { return }
             let x = max(0, document.frame.width - scrollView.contentView.bounds.width)
             scrollView.contentView.scroll(to: NSPoint(x: x, y: scrollView.contentView.bounds.origin.y))
             scrollView.reflectScrolledClipView(scrollView.contentView)
+            readerScrolledAt = horizontalExtentPair
         }
 
         /// Where the visible rect's trailing edge sits against the

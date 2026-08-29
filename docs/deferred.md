@@ -8696,133 +8696,63 @@ container layout recorded". TWO consequences, one fixed and one held:
   only one.
   KEY: pyhost extraction, kaya-stamp, importlib, extractPython
 
-- **GAP — the mac NATIVE table cannot yet be reached when it overflows**
-  (the iOS SYNTHESIZED tier was the same gap and CLOSED 2026-08-29: its
-  layout answers `min(total, proposal)`, places every column at an offset
-  the view owns, clips, and takes a drag; the columns' axis got its OWN
-  registry because an ungrown table has no scroll proxy and putting it in
-  kayaTableWindows made expect_window read a row window it does not have;
-  and the track it records is the CARD'S INTERIOR, not the layout's box —
-  reporting the outer width said "content 290 in viewport 290" for a table
-  whose cells were convicted of standing 11pt outside a 279pt viewport.
-  Proven on the simulator both ways: "short of end (content bottom 258 vs
-  viewport 290)" before the scroll, reached after.)
-  (found 2026-08-29, building the table-overflow ruling)
+- **GAP — two iOS legs are INTERMITTENT (found 2026-08-29, characterised
+  the same day)**
+  KEY: ios flaky, varied-python band, adaptive-swiftui row@narrow,
+  column@varied windows 147, first metrics report
+
+  Across six iOS lane runs on 2026-08-29, two legs alternate:
+  `varied-python` reports a row band three short ("column@varied windows
+  \"147 300\", wanted \"150 300\"" — also seen as 145 and 148), and
+  `adaptive-swiftui` reads "row@narrow axis horizontal, wanted vertical",
+  which is the width breakpoint not having fired from the FIRST metrics
+  report. Each passes in some runs and fails in others; no run has failed
+  both.
+
+  NOT THE TABLE WORK, measured rather than assumed: the same
+  `varied-python` failure reproduces on cbcd5f9's KayaSwiftUI.swift —
+  the tree BEFORE the iOS synthesized tier learned to scroll its columns
+  — with everything else identical. So this predates that change and is
+  its own problem.
+
+  Both smell like first-layout timing on a phone that never resizes: the
+  band is computed from a viewport the tier reports, and the breakpoint
+  waits on a window-metrics report that arrives once. The next session
+  should instrument WHEN each arrives rather than re-running the lane.
+
+- ~~**GAP — the mac NATIVE table cannot be reached when it overflows**~~ —
+  CLOSED 2026-08-29, and the iOS SYNTHESIZED tier with it, so all five
+  tiers answer the overflow ruling.
   KEY: mac table reachability, minWidth idealWidth, sizeThatFits,
   hasHorizontalScroller, documentVisibleRect, clip parks at trailing edge,
   KayaMacNativeTable, content 430 in viewport 430
 
-  THE SCENE THAT PROVES IT IS WRITTEN AND PARKED, not committed: a
-  five-column guest plus its `wide.steps` (not in the tree), which drives
-  resize_window to 320 and back and asserts expect_overflow, scroll_end
-  and expect_at_end. It passes on macOS only TRANSIENTLY (the overflow
-  is reported mid-resize and the table then settles to its content
-  width), which is a false green, so it stays out of the tree until a
-  backend satisfies it. It is kept at
-  ~/.local/state/kaya — see the session scratchpad's wide-scene/.
+  THE MAC: the representable answers PER PROPOSAL — the offer when there
+  is one, its content capped by the WINDOW when there is not. Four earlier
+  attempts are worth keeping because each named something: the scroller
+  flag alone is inert (the scroll view was as wide as its own document);
+  `idealWidth` makes the scroll view the clip and LOSES the hug; a cap in
+  KayaFlex works on the mac and changes what a PHONE renders, moving
+  varied's frozen band from 150 rows to 147 on iOS alone; and answering
+  the fitting size before the table is measured PINS it at ~10pt, which
+  leaves its columns no room to be measured in.
 
-  The ruling (docs/tables-plan.md, 2026-08-29) is that a table wider than
-  its track scrolls. On macOS the scroller is now ON (overlay,
-  autohiding) but it is INERT, and the measurements say why:
+  TWO RULES IT LEFT BEHIND: no forced layout inside a harness read
+  (gtk.rs's 1630 rule one platform over — the read holds the core and the
+  run produced no verdict at all), and a deliberate scroll survives a
+  relayout, with the leading-edge park keyed on the CLIP moving because
+  AppKit keeps the visible RIGHT edge across a resize.
 
-  - Under ruling A's `.frame(minWidth: contentWidth)` the scroll view is
-    as wide as its own content — doc and clip BOTH 280pt inside a 240pt
-    window — so it has nothing to scroll. The clip happens in the
-    ANCESTOR, which is why the columns are unreachable rather than
-    absent.
-  - Changing that one word to `idealWidth` does make the scroll view the
-    clip (doc 432 against clip 280, and `expect_overflow` then reports
-    the overflow correctly) — and it LOSES THE HUG. check-table-tier's
-    runtime probe caught it by name: "a hugging container widens to the
-    native table's content: got false, wanted true". Reverted; the
-    measurement is recorded at the declaration.
+  RULING A'S GUARD WAS REWRITTEN by the maintainer's call rather than
+  worked around: it asked the hug inside a 200pt window, where passing
+  required the table's viewport to be wider than its own window. It now
+  asks in kaya's own vocabulary — an ungrown column beside a grown
+  sibling, in a window with room — and its self-test still reddens it.
 
-  So content-is-the-floor and shrink-to-scroll are in tension at that one
-  frame, and the naive resolution trades a ruled property away.
-
-  THE ANSWER IS THE WRAPPER, not a cleverer frame (the maintainer's
-  reading, 2026-08-29, and the web's own: a too-wide table is not shrunk,
-  it is put inside an overflow-x container —
-  docs/probes/table-overflow-2026.md). WHAT IT COSTS, measured the same
-  day by wrapping this branch in `ScrollView(.horizontal)`: the table
-  keeps its floor and the scroll view takes the offer, but the VIEWPORT
-  OBSERVATION MOVES WITH IT. Inside a scroll view this frame is the
-  CONTENT, and the tier records it as the viewport, so
-  check-table-tier reported four clauses red at once — "missing
-  viewport", "a resized table refreshes its viewport and assigned track:
-  got false", and both generation clauses. Reverted.
-
-  THE MAC IS THE ONE TIER LEFT, and four attempts say why. The chain
-  above it proposes concretely — KayaCell places its child with
-  `ProposedViewSize(width: bounds.width, ...)` — so the squeeze does
-  reach the table's door; what it meets there is `.frame(minWidth:
-  contentWidth)`, which answers the CONTENT to every proposal and so
-  widens every container above it. Measured: a 430pt table arrives as a
-  430pt PROPOSAL inside a 320pt window.
-
-  A THIRD ATTEMPT, and the one that says where the real problem is
-  (2026-08-29): answer the two wants PER PROPOSAL, in the
-  representable's own `sizeThatFits` — content for an unspecified width
-  (the hug), the offer for a concrete one (the squeeze). It typechecks,
-  it keeps the hug once the width is read in the BODY so a re-floor
-  re-evaluates the view (without that the ideal stuck at 10pt while the
-  tier published 367), and check-table-tier goes green with its window
-  moved to where a container CAN widen. AND IT STILL DOES NOT SQUEEZE
-  IN A REAL SCENE: a five-column guest at a 320pt window reports
-  `content 430 in viewport 430` whether its root column stretches or
-  not, so the table takes its natural width and the WINDOW clips —
-  the same place the first attempt left it. Reverted, floor restored,
-  and the probe put back to the maintainer's own clause.
-
-  WHAT THAT LEAVES: the squeeze never reaches this tier because nothing
-  in the chain above it proposes a width smaller than the content. That
-  is a fact about kaya's own flex layout on this backend, not about
-  AppKit, and it is where the next attempt should start — NOT at another
-  frame or wrapper on the table itself.
-
-  A FOURTH ATTEMPT CLOSED THE LOOP AND FOUND THE REAL BLOCKER. Answering
-  per proposal in the representable's `sizeThatFits` — content for an
-  unspecified width, the offer for a concrete one — plus capping the HUG
-  so it never exceeds the window, makes the mac scroll: the wide scene
-  passes both halves and the columns are reachable. Apple's own contract
-  says this is the only lever there is: "Returning a value of `nil`
-  indicates that the system should use the default sizing algorithm" and
-  "one of the values returned from this function will always be used as
-  the actual size" — and Apple never defines that default, which is where
-  the undocumented 430 came from (docs/probes/swiftui-sizing-2026.md).
-
-  WHAT IT COLLIDES WITH is ruling A's own guard, and this is the
-  maintainer's call rather than a bug: check-table-tier asks the hug
-  inside a 200pt window and requires `clip >= content`, which in a window
-  that cannot widen MEANS "the table overflows its window" — the exact
-  answer the overflow ruling replaces with scrolling. At 200pt the two
-  rulings say opposite things. Moving the probe to a window with ROOM and
-  asking for the ideal with `fixedSize` keeps its teeth (a tier that
-  publishes no content width answers ~10pt there) and lets both rulings
-  hold, but it AMENDS A RULED GUARD, so it waits.
-
-  A CAP IN KayaFlex INSTEAD IS NOT THE ANSWER, measured: it changes what a
-  PHONE renders — content that used to run off-screen now fits, and the
-  varied scene's frozen band moved from 150 rows to 147 on iOS while every
-  other platform still reads 150. One shared scene cannot hold two numbers.
-
-  So the wrapper work, if it is ever wanted instead, is: the wrapper
-  records the VIEWPORT (its own size) and the table records the CONTENT
-  (its frame), and every clause that reads a viewport reads the
-  wrapper's. That is a refactor of this tier's
-  instrumentation rather than a layout tweak — and it PAYS FOR ITSELF,
-  because `expect_overflow` then compares kaya's own recorded pair
-  instead of reaching into AppKit, which is the reading the SYNTHESIZED
-  tier and the other three backends can all answer.
-
-  AND A SECOND FINDING, which is why no scene asserts reachability yet:
-  `expect_at_end` on a table can pass VACUOUSLY. With doc 432 in a 280
-  clip the clip view is already parked at its trailing edge, so the
-  assertion is true before anything scrolls (watched: the same script
-  without `scroll_end` still reported "at end"). A leading-edge reset on
-  re-layout would make the negative observable — a table that has just
-  been laid out should show its FIRST column — and that is the piece the
-  scene waits on.
+  WHAT REMAINS is the shared conformance scene's WIRING: the guest and
+  its .steps exist and pass by hand on the mac, but a scene forces a leg
+  on every runner, and the two phones need the cut treatment while
+  windows needs a launcher and an argument arm.
 
 - ~~**DEPTH STUB: adaptive on winui**~~ — CLOSED 2026-08-28 by the
   adaptive milestone's breadth slice, exactly as this entry described:
