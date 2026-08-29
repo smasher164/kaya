@@ -1531,7 +1531,18 @@ $extra"
 # prints in submission order and is the barrier between flavor blocks
 # (their builds overwrite shared scratch files a queued leg reads).
 LEGS_DIR="$(mktemp -d)"
-trap 'rm -rf "$LEGS_DIR" "${PREP_DIR:-}"' EXIT
+# THE FLIGHT RECORDER (tools/lib/flightrec.sh). This lane had none, and it
+# is the lane with the intermittent legs: `varied-python` and
+# `adaptive-swiftui` each fail some runs and pass others, so a rerun
+# erased the only evidence every time (docs/deferred.md's ios-flaky
+# entry). One failure is enough evidence — but only if something keeps it.
+FLIGHTREC_ROOT="$ROOT"
+export FLIGHTREC_ROOT
+FLIGHTREC_SCRATCH="$(mktemp -d)"
+# shellcheck source=tools/lib/flightrec.sh
+source "$ROOT/tools/lib/flightrec.sh"
+flightrec_start ios
+trap 'flightrec_flush; rm -rf "$LEGS_DIR" "$FLIGHTREC_SCRATCH" "${PREP_DIR:-}"' EXIT
 leg_names=()
 leg_pids=()
 # The iPad's legs are tracked apart from the phone pool's. If they rode
@@ -1649,13 +1660,29 @@ drain() {
     fi
     leg_pids=()
     pad_pids=()
-    local name verdict
+    local name verdict secs bundle
     for name in "${leg_names[@]}"; do
         verdict=$(cat "$LEGS_DIR/$name.verdict" 2>/dev/null || echo FAIL)
         echo "== $name =="
         cat "$LEGS_DIR/$name.log" 2>/dev/null
         [ "$verdict" = PASS ] || status=1
-        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
+        secs=$(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')
+        echo "$name: $verdict (${secs}s)"
+        # THE JOURNAL TAKES EVERY LEG, pass or fail: an intermittent leg is
+        # only legible against its own history. The BUNDLE is collected on
+        # a failure alone — the leg's whole log, which carries the harness's
+        # own step timeline, and the device's state at the time.
+        bundle=""
+        if [ "$verdict" != PASS ]; then
+            bundle="$(flightrec_bundle "$name")"
+            flightrec_section "$bundle" leg-log "" cat "$LEGS_DIR/$name.log"
+            flightrec_section "$bundle" devices xcrun \
+                xcrun simctl list devices booted
+            flightrec_bundle_report "$bundle"
+        fi
+        flightrec_leg ios "$name" "$verdict" \
+            "$([ "$secs" = '?' ] && echo 0 || echo "$secs")" \
+            "$(flightrec_fail_sentence "$LEGS_DIR/$name.log")" "$bundle"
     done
     leg_names=()
 }

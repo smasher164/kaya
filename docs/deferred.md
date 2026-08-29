@@ -8717,8 +8717,24 @@ container layout recorded". TWO consequences, one fixed and one held:
 
   Both smell like first-layout timing on a phone that never resizes: the
   band is computed from a viewport the tier reports, and the breakpoint
-  waits on a window-metrics report that arrives once. The next session
-  should instrument WHEN each arrives rather than re-running the lane.
+  waits on a window-metrics report that arrives once.
+
+  THE RATE, measured by running the scene DIRECTLY on a booted simulator
+  rather than through the lane (20s a run instead of seven minutes):
+  `varied` failed 2 of 5, at 145 and at 147. That loop is how the next
+  session should work — not another lane run.
+
+  THE RECORDER NOW COVERS THIS LANE (2026-08-29). tools/lib/flightrec.sh
+  was wired into validate-mac and deploy-win only, so the two lanes with
+  intermittent legs kept nothing when a rerun went green — which is the
+  exact thing the recorder's own header says it exists to stop. run-sim
+  now journals EVERY leg and bundles the leg log plus the booted-device
+  list on a failure. WHAT IT STILL CANNOT SEE is the tier's own numbers:
+  the leg log carries the harness's step timeline, but nothing says WHEN
+  the first window-metrics report landed or what viewport height the band
+  was computed from. Those two lines are the next increment, and the
+  recorder is the pipe they should go into.
+  KEY: flightrec ios, run-sim journal, intermittent leg evidence
 
 - ~~**GAP — the mac NATIVE table cannot be reached when it overflows**~~ —
   CLOSED 2026-08-29, and the iOS SYNTHESIZED tier with it, so all five
