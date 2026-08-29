@@ -8798,12 +8798,13 @@ private struct KayaNativeTable: View {
                 alignment: .top)
             // THE FLOOR STAYS A FLOOR (ruling A, 2026-08-26): a hugging
             // container widens to the table's content, which
-            // tools/check-table-tier.sh holds with a runtime probe.
-            // MEASURED 2026-08-29: `idealWidth` here — the obvious way to
-            // let a squeezed parent shrink this and make the scroll view
-            // the clip — loses that hug, and the probe says so. The two
-            // wants are in tension at this one declaration; see
-            // docs/deferred.md's mac-table-reachability entry.
+            // tools/check-table-tier.sh holds with a runtime probe. The
+            // WRAPPER that would make this scrollable — the web's own
+            // answer, a too-wide table inside an overflow-x container —
+            // needs the viewport observation to move with it, because
+            // inside a scroll view this frame IS the content and the tier
+            // records it as the viewport (docs/deferred.md's
+            // mac-table-reachability entry, measured 2026-08-29).
             .frame(minWidth: contentWidth > 0 ? contentWidth : nil, alignment: .leading)
         #else
             KayaTableColumns(node: node, generation: generation)

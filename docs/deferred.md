@@ -8717,10 +8717,27 @@ container layout recorded". TWO consequences, one fixed and one held:
     measurement is recorded at the declaration.
 
   So content-is-the-floor and shrink-to-scroll are in tension at that one
-  frame, and the naive resolution trades a ruled property away. What is
-  probably wanted is a declaration that gives a HUGGING parent the
-  content width and a CONSTRAINED one the offer — measured per proposal
-  rather than declared once.
+  frame, and the naive resolution trades a ruled property away.
+
+  THE ANSWER IS THE WRAPPER, not a cleverer frame (the maintainer's
+  reading, 2026-08-29, and the web's own: a too-wide table is not shrunk,
+  it is put inside an overflow-x container —
+  docs/probes/table-overflow-2026.md). WHAT IT COSTS, measured the same
+  day by wrapping this branch in `ScrollView(.horizontal)`: the table
+  keeps its floor and the scroll view takes the offer, but the VIEWPORT
+  OBSERVATION MOVES WITH IT. Inside a scroll view this frame is the
+  CONTENT, and the tier records it as the viewport, so
+  check-table-tier reported four clauses red at once — "missing
+  viewport", "a resized table refreshes its viewport and assigned track:
+  got false", and both generation clauses. Reverted.
+
+  So the work is: the wrapper records the VIEWPORT (its own size) and the
+  table records the CONTENT (its frame), and every clause that reads a
+  viewport reads the wrapper's. That is a refactor of this tier's
+  instrumentation rather than a layout tweak — and it PAYS FOR ITSELF,
+  because `expect_overflow` then compares kaya's own recorded pair
+  instead of reaching into AppKit, which is the reading the SYNTHESIZED
+  tier and the other three backends can all answer.
 
   AND A SECOND FINDING, which is why no scene asserts reachability yet:
   `expect_at_end` on a table can pass VACUOUSLY. With doc 432 in a 280
