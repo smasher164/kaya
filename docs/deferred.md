@@ -8646,18 +8646,54 @@ container layout recorded". TWO consequences, one fixed and one held:
   wired scene reaches a zero-width table today, so the repro is the
   pyhost APK with the portfolio scene by hand until this entry closes.
 - HELD: the leg itself. ANDROID_UNWIRED_SCENES="portfolio" with the
-  reason at the declaration. THE OVERFLOW HALF IS GONE (2026-08-28): the
-  dashboard says `stack_below=700` and both phones flip the row —
-  measured on the iPhone (`row#0 axis vertical`, and the capture in the
-  artifact) and on the emulator's adaptive leg. WHAT STILL HOLDS THE LEG
-  IS A CEILING, not a layout: launched by hand on the emulator with the
-  shared script, the guest's 15,000-transaction build outruns the
-  harness's per-step retry deadline and the FIRST step fails "no such
-  target row#0" ~5s in, with no python error and no crash. So the
-  remaining work is that deadline against this guest's build, not the
-  constraints model. The measurement was taken with a never-true
-  expectation to hold the frame; the same launch on iOS reaches the
-  dashboard, so the difference is build speed on the emulator.
+  reason at the declaration. WHAT IS TRUE AS OF 2026-08-28 EVENING, all
+  of it measured by hand on the emulator with the shared script:
+
+  THE APP RUNS THERE. From a clean install the guest builds in ~400ms
+  and the script's first 100+ steps pass — the dashboard, the sorts, the
+  day tick, the push to Transactions, the 15,003-row ledger, windowing,
+  scroll_to_row, the account filter and `back`. The whole script reaches
+  its last step in ~27s.
+
+  THE DASHBOARD'S STACK WORKS: `stack_below=700` flips the outer row on
+  both phones (`row#0 axis vertical` on the iPhone and the emulator).
+
+  ONE COMPOSE DEFECT FOUND AND FIXED (docs/traps.md, this session): a
+  re-declared header cleared the table geometry and nothing republished
+  it, so every table read after the day tick answered "no live table
+  viewport geometry". Three of the leg's four failures were that.
+
+  WHAT STILL BLOCKS IT, both measured, neither a ceiling:
+  1. THE TRANSACTIONS SCREEN IS THE SECOND SIDE-BY-SIDE ROW, and its
+     grown ledger table is measured at ZERO width under Compose's
+     constraints model — `track -32dp, drawn 0dp, content 276dp`, the
+     original zero-width finding alive on the screen `stack_below` was
+     never put on. Adding the keyword there did NOT fix it on Compose
+     while macOS flipped the same row correctly (`row@txnrow axis
+     vertical`), and on Compose that row did not answer its own a11y key
+     at all — so the next thread is why a pushed-entry row is
+     unaddressable there, not another keyword. The experiment was
+     reverted; the guest is unchanged.
+  2. AT 320dp THE ACCOUNT TABLES OVERFLOW: columns resolve to 263dp in a
+     256dp track. The pool device's 320dp width is deliberate (the
+     lane's compact-class coverage), and kaya has no ruling on what a
+     table does when its columns do not fit — today it clamps on Compose
+     and clips on iOS. That is a design question, not a bug to fix here,
+     and D4's keyed arms (docs/adaptive-layout-plan.md) have their first
+     real use case in it.
+
+  AND ONE TRAP THIS COST A SESSION TO FIND: an interrupted extraction
+  leaves the pyhost PERMANENTLY broken. MainActivity.extractPython walks
+  assets/python and the walk COPIES `kaya-stamp` itself, which sorts
+  between `app` and `lib` — so a process killed while the stdlib is
+  still copying leaves a stamped, half-extracted tree, and every later
+  launch matches the stamp and skips the repair. The app then dies at
+  `ModuleNotFoundError: No module named 'importlib'` before any scene
+  exists, which reads exactly like a slow or wedged guest. `pm clear` is
+  the recovery. The fix is to extract to a sibling directory and rename,
+  or to skip the stamp asset in the walk and let the final write be the
+  only one.
+  KEY: pyhost extraction, kaya-stamp, importlib, extractPython
 
 - ~~**DEPTH STUB: adaptive on winui**~~ — CLOSED 2026-08-28 by the
   adaptive milestone's breadth slice, exactly as this entry described:

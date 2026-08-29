@@ -1179,6 +1179,52 @@ guest's transactions have not arrived yet at that point, so the scene
 legitimately looks empty. On the failure path it also cannot
 false-positive on a scene that mounts late.
 
+## A stamped half-extracted Python tree never repairs itself
+
+2026-08-28. The pyhost extracts assets/python into filesDir behind a
+version stamp, and the stamp was written TWICE: once at the end, and
+once by the asset walk itself, which lists `kaya-stamp` between `app`
+and `lib`. A process killed while the standard library was still
+copying therefore left a STAMPED, half-extracted tree, and every later
+launch matched the stamp and skipped the repair. CPython then died at
+`ModuleNotFoundError: No module named 'importlib'` roughly 100ms in,
+before any scene existed — and what the harness reported was "no such
+target label#0" five seconds later, which reads exactly like a slow or
+wedged guest and was written into the ledger as one.
+
+`adb shell run-as dev.kaya.pyhost ls files/python/lib/python3.15` is
+what settles it in one command; `pm clear` is the recovery. The walk
+skips the stamp asset now, so the final write is the only one and an
+interrupted extraction leaves no stamp to believe.
+
+## A cleared table geometry that nothing republishes
+
+2026-08-28, chasing the portfolio's android leg. `expect_column_edges`
+answered "no live table viewport geometry" for every table from the
+DAY TICK onward, and the first read before it had reported real
+numbers. APPLY_SET_COLUMNS clears the geometry and bumps the
+generation — correct, a re-declared header may not be measured against
+the preceding layout — but `tableGeometryGeneration` was a plain
+`@Volatile` field, invisible to Compose's snapshot system. The tick
+changes cell TEXT at the same width, so the table's own box never
+moved: Compose re-measured nothing, the position reader never fired,
+and the cleared geometry stayed cleared for the rest of the run.
+
+The counter is Compose state now and the table's measure READS it, so
+a clear forces the re-measure that writes the geometry again; the
+measure stamps the generation it wrote under and `expect_column_edges`
+refuses a stamp older than the current one, in its own sentence. This
+is SwiftUI's rule arriving on the second interpreter — "a
+generation-keyed reporter republishes even after a same-size resize"
+(tools/check-table-tier.sh) — and the shape of the miss is the usual
+one: the two interpreters re-implement the harness and only one of
+them had learned.
+
+WHAT THE SENTENCE COST: one sentence covered four measurements (track,
+drawn, content and the viewport pair), so a reader chasing it looked at
+the viewport when the missing number was the track. Split, and each
+half prints its own numbers.
+
 ## A vacuous opening expect is not Swift scene admission
 
 2026-08-23, the dynamic-table matrix. Only

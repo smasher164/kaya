@@ -147,6 +147,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -249,7 +250,18 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      */
     val cellEdgeX = java.util.concurrent.ConcurrentHashMap<String, Float>()
     val cellEdgeRightX = java.util.concurrent.ConcurrentHashMap<String, Float>()
-    @Volatile var tableGeometryGeneration = 0L
+    /**
+     * COMPOSE STATE, not a plain field, because the table's own measure
+     * READS it: a bump must force the re-measure that republishes the
+     * geometry the bump cleared. Measured 2026-08-28 on the portfolio's
+     * android leg — a day tick re-declares the header, which clears the
+     * geometry, and same-width cell text leaves this table's box
+     * untouched, so neither the measure nor the position reader ran
+     * again and every later expect_column_edges answered "no live table
+     * viewport geometry" (docs/traps.md). SwiftUI's generation-keyed
+     * reporter is the same rule (tools/check-table-tier.sh).
+     */
+    var tableGeometryGeneration by mutableLongStateOf(0L)
 
     /**
      * The table's assigned horizontal track, laid-out viewport, and raw
@@ -265,6 +277,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     @Volatile var tableTrackW = -1f
     @Volatile var tableDrawnW = -1f
     @Volatile var tableContentW = -1f
+    /** The generation the three widths above were measured under. */
+    @Volatile var tableGeometryAt = -1L
     @Volatile var tableViewportLeftX = -1f
     @Volatile var tableViewportRightX = -1f
     @Volatile var tableViewportH = -1f
@@ -6019,6 +6033,7 @@ object KayaCompose {
                             val track: Float,
                             val drawn: Float,
                             val content: Float,
+                            val stale: Boolean,
                         )
                         val read = onUi(activity) {
                             target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
@@ -6058,6 +6073,7 @@ object KayaCompose {
                                     node.tableTrackW,
                                     node.tableDrawnW,
                                     node.tableContentW,
+                                    node.tableGeometryAt != node.tableGeometryGeneration,
                                 )
                             }
                         }
@@ -6075,9 +6091,32 @@ object KayaCompose {
                                         read.clusters.map { it.toInt() } +
                                         ", wanted ${parts.getOrNull(2)} columns"
                                 )
-                            read.track <= 0f || read.drawn <= 0f || read.content <= 0f ||
-                                read.viewportRight <= read.viewportLeft ->
-                                failures.add("${parts[1]} has no live table viewport geometry")
+                            // ONE CAUSE PER SENTENCE (kayaTableHorizontalComplaint's
+                            // rule): geometry measured under an earlier header
+                            // generation is a republish that never happened, and
+                            // reads differently from never having any.
+                            read.stale ->
+                                failures.add(
+                                    "${parts[1]} geometry was measured before the current header"
+                                )
+                            // TWO MEASUREMENTS, TWO SENTENCES, EACH NAMING ITS
+                            // OWN NUMBERS: the measure block writes the track
+                            // trio and the position reader writes the viewport,
+                            // so one sentence for both sent a reader after the
+                            // wrong half (invariant 3).
+                            read.track <= 0f || read.drawn <= 0f || read.content <= 0f ->
+                                failures.add(
+                                    "${parts[1]} has no live table track " +
+                                        "(track ${read.track.toInt()}dp, drawn " +
+                                        "${read.drawn.toInt()}dp, content " +
+                                        "${read.content.toInt()}dp)"
+                                )
+                            read.viewportRight <= read.viewportLeft ->
+                                failures.add(
+                                    "${parts[1]} has no live table viewport " +
+                                        "(${read.viewportLeft.toInt()}dp to " +
+                                        "${read.viewportRight.toInt()}dp)"
+                                )
                             else -> {
                                 // The ink in the TABLE's own space, which
                                 // is the frame the sentences below name.
@@ -8938,10 +8977,19 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         // the segments span the outer box and the cells the interior, so
         // every number here is the interior's — a raw track convicts every
         // carded table of a 32dp underfill it does not have.
+        // THE REPUBLISH SUBSCRIPTION. Reading the generation inside
+        // measure subscribes this layout to it, so the clear at
+        // APPLY_SET_COLUMNS re-runs this block and the three widths
+        // below are written again even when nothing about the box moved
+        // (KayaNode.tableGeometryGeneration carries the measurement).
+        // The stamp is what lets a reader tell a republished geometry
+        // from the cleared one.
+        val geometryAt = node.tableGeometryGeneration
         node.tableTrackW =
             if (constraints.hasBoundedWidth) (constraints.maxWidth - 2 * padX) / density else -1f
         node.tableDrawnW = innerW / density
         node.tableContentW = acc / density
+        node.tableGeometryAt = geometryAt
         val headerH = headers.maxOfOrNull { it.height } ?: 0
         // A ROW'S EXTENT IS ITS TOP-TO-TOP REPEAT DISTANCE, spacing
         // included (§2.1): a sum of these IS where the next row starts,

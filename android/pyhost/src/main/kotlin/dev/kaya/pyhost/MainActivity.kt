@@ -80,7 +80,14 @@ class MainActivity : ComponentActivity() {
                 val children = assets.list(path)
                 if (children != null && children.isNotEmpty()) {
                     queue.addLast(path)
-                } else {
+                } else if (path != "python/kaya-stamp") {
+                    // THE STAMP IS WRITTEN ONCE, AT THE END, AND THE WALK
+                    // MAY NOT COPY IT: it sorts between `app` and `lib`, so
+                    // a process killed while the stdlib was still copying
+                    // used to leave a STAMPED half-tree that every later
+                    // launch matched and skipped — the app then died at
+                    // `ModuleNotFoundError: No module named 'importlib'`
+                    // before any scene existed (docs/traps.md).
                     val outName = path.removePrefix("python/").let {
                         if (it.endsWith(".gz-")) it.dropLast(1) else it
                     }
