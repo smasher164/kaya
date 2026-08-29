@@ -842,40 +842,60 @@ mod flex {
             assert!(!super::super::table_content_fits(102.1, 100.0));
             use super::super::{table_horizontal_issue, TableHorizontalIssue as Issue};
             assert_eq!(
-                table_horizontal_issue(0.0, 100.0, 100.0, 100.0, 100.0),
+                table_horizontal_issue(0.0, 100.0, 100.0, 100.0, 100.0, 0.0),
                 None
             );
             assert_eq!(
-                table_horizontal_issue(0.0, 100.0, 103.0, 100.0, 100.0),
-                Some(Issue::ContentOverflow)
+                table_horizontal_issue(0.0, 100.0, 103.0, 100.0, 100.0, 0.0),
+                Some(Issue::ContentUnreachable)
             );
             assert_eq!(
-                table_horizontal_issue(0.0, 97.0, 100.0, 100.0, 100.0),
+                table_horizontal_issue(0.0, 97.0, 100.0, 100.0, 100.0, 0.0),
                 Some(Issue::ContentUnderfill)
             );
             assert_eq!(
-                table_horizontal_issue(0.0, 100.0, 100.0, 100.0, 120.0),
+                table_horizontal_issue(0.0, 100.0, 100.0, 100.0, 120.0, 0.0),
                 Some(Issue::TrackUnderfill)
             );
             assert_eq!(
-                table_horizontal_issue(0.0, 100.0, 100.0, 120.0, 100.0),
+                table_horizontal_issue(0.0, 100.0, 100.0, 120.0, 100.0, 0.0),
                 Some(Issue::TrackOverflow)
             );
             assert_eq!(
-                table_horizontal_issue(-2.0, 100.0, 100.0, 100.0, 100.0),
+                table_horizontal_issue(-2.0, 100.0, 100.0, 100.0, 100.0, 0.0),
                 None
             );
             assert_eq!(
-                table_horizontal_issue(-2.1, 100.0, 100.0, 100.0, 100.0),
+                table_horizontal_issue(-2.1, 100.0, 100.0, 100.0, 100.0, 0.0),
                 Some(Issue::ContentLeftOverflow)
             );
             assert_eq!(
-                table_horizontal_issue(2.0, 100.0, 100.0, 100.0, 100.0),
+                table_horizontal_issue(2.0, 100.0, 100.0, 100.0, 100.0, 0.0),
                 None
             );
             assert_eq!(
-                table_horizontal_issue(2.1, 100.0, 100.0, 100.0, 100.0),
+                table_horizontal_issue(2.1, 100.0, 100.0, 100.0, 100.0, 0.0),
                 Some(Issue::ContentLeftUnderfill)
+            );
+
+            // THE RULING'S OWN CASE (2026-08-29): columns wider than the
+            // track are what a scrolling table looks like, and they convict
+            // only when the surface cannot reach them. Same three cell
+            // numbers, three different scroll ranges.
+            assert_eq!(
+                table_horizontal_issue(0.0, 160.0, 160.0, 100.0, 100.0, 60.0),
+                None,
+                "a table that can scroll to its last column is correct"
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 160.0, 160.0, 100.0, 100.0, 40.0),
+                Some(Issue::ContentUnreachable),
+                "20px of columns nothing can scroll to is the defect"
+            );
+            assert_eq!(
+                table_horizontal_issue(0.0, 160.0, 160.0, 100.0, 100.0, 0.0),
+                Some(Issue::ContentUnreachable),
+                "a clipping table is the pre-ruling behaviour and is refused"
             );
 
             // PRECEDENCE where several hold at once, which is the ordinary
@@ -885,19 +905,19 @@ mod flex {
             // end, because a table displaced at its start also ends in the
             // wrong place.
             assert_eq!(
-                table_horizontal_issue(40.0, 60.0, 60.0, 100.0, 120.0),
+                table_horizontal_issue(40.0, 60.0, 60.0, 100.0, 120.0, 0.0),
                 Some(Issue::TrackUnderfill)
             );
             assert_eq!(
-                table_horizontal_issue(40.0, 60.0, 60.0, 100.0, 100.0),
+                table_horizontal_issue(40.0, 60.0, 60.0, 100.0, 100.0, 0.0),
                 Some(Issue::ContentLeftUnderfill)
             );
             assert_eq!(
-                table_horizontal_issue(-40.0, 60.0, 140.0, 100.0, 100.0),
+                table_horizontal_issue(-40.0, 60.0, 140.0, 100.0, 100.0, 0.0),
                 Some(Issue::ContentLeftOverflow)
             );
             assert_eq!(
-                table_horizontal_issue(0.0, 60.0, 140.0, 100.0, 100.0),
+                table_horizontal_issue(0.0, 60.0, 140.0, 100.0, 100.0, 0.0),
                 Some(Issue::ContentUnderfill)
             );
         }
@@ -924,12 +944,12 @@ mod flex {
             let (parent, span) = (800.0, 24.0);
             let viewport = parent - span;
             assert_eq!(
-                table_horizontal_issue(0.0, viewport, viewport, viewport, parent - span),
+                table_horizontal_issue(0.0, viewport, viewport, viewport, parent - span, 0.0),
                 None,
                 "a padded card is a correct table"
             );
             assert_eq!(
-                table_horizontal_issue(0.0, viewport, viewport, viewport, parent),
+                table_horizontal_issue(0.0, viewport, viewport, viewport, parent, 0.0),
                 Some(Issue::TrackUnderfill),
                 "a track basis that forgets the card's own padding \
                  convicts every padded table"
@@ -937,7 +957,7 @@ mod flex {
             // And the padding may not be paid for twice: an UNPADDED
             // table's track is its parent's width untouched.
             assert_eq!(
-                table_horizontal_issue(0.0, parent, parent, parent, parent),
+                table_horizontal_issue(0.0, parent, parent, parent, parent, 0.0),
                 None
             );
         }
@@ -1256,6 +1276,10 @@ outline: 1px solid @borders; outline-offset: -1px; padding: 8px 12px; }
 /// rather than by kaya's stamp. The synthesized header is the landing
 /// docs/tables-plan.md decision 6 predicted.
 struct GtkTable {
+    /// The header's own scroller, sharing `body`'s horizontal adjustment so
+    /// the titles translate with the cells under them (the overflow
+    /// ruling). It is what hangs on the container — `header` is its child.
+    head: gtk4::ScrolledWindow,
     header: gtk4::Box,
     divider: gtk4::Separator,
     /// One horizontal size group per column. Every member REQUESTS the
@@ -1311,11 +1335,23 @@ fn children_of(widget: &impl IsA<gtk4::Widget>) -> Vec<gtk4::Widget> {
 
 /// The header row kaya composed on this For container, or None when no
 /// columns were declared on it. A TREE READ: the header leads the
-/// container's children and wears its class.
+/// container's children and wears its class — inside the scroller that
+/// locks it to the body's horizontal offset (the overflow ruling).
 fn table_header(column: &gtk4::Box) -> Option<gtk4::Box> {
     let first = column.first_child()?;
-    let header = first.downcast::<gtk4::Box>().ok()?;
+    let header = scrolled_box(&first.downcast::<gtk4::ScrolledWindow>().ok()?)?;
     header.has_css_class(TABLE_HEADER_CLASS).then_some(header)
+}
+
+/// A scroller's own Box child. GTK4 unwraps the viewport it inserts for a
+/// non-scrollable child; the second arm is there because believing that is
+/// a read nobody would have watched fail.
+fn scrolled_box(scroller: &gtk4::ScrolledWindow) -> Option<gtk4::Box> {
+    let inner = scroller.child()?;
+    if let Ok(content) = inner.clone().downcast::<gtk4::Box>() {
+        return Some(content);
+    }
+    inner.downcast::<gtk4::Viewport>().ok()?.child()?.downcast::<gtk4::Box>().ok()
 }
 
 #[cfg(any(feature = "harness", test))]
@@ -1338,6 +1374,12 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
 /// Fill, so a line's end here IS the last column's trailing edge. The two
 /// synthesized tiers place cells at their NATURAL size and cannot spell
 /// `ContentUnderfill` at all (docs/deferred.md).
+///
+/// CELLS PAST THE VIEWPORT ARE NOT THE DEFECT ANY MORE (the 2026-08-29
+/// overflow ruling): a table whose columns need more width than its track
+/// scrolls to them, so what is left to convict is columns the surface
+/// CANNOT REACH — hence `reach`, which is the toolkit's own scroll range
+/// and not a claim about the policy that was asked for.
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableHorizontalIssue {
@@ -1346,7 +1388,7 @@ enum TableHorizontalIssue {
     ContentLeftUnderfill,
     ContentLeftOverflow,
     ContentUnderfill,
-    ContentOverflow,
+    ContentUnreachable,
 }
 
 #[cfg(any(feature = "harness", test))]
@@ -1356,6 +1398,7 @@ fn table_horizontal_issue(
     max_end: f64,
     viewport: f64,
     assigned: f64,
+    reach: f64,
 ) -> Option<TableHorizontalIssue> {
     if assigned > 0.0 && viewport < assigned - 2.0 {
         Some(TableHorizontalIssue::TrackUnderfill)
@@ -1367,8 +1410,8 @@ fn table_horizontal_issue(
         Some(TableHorizontalIssue::ContentLeftOverflow)
     } else if min_end < viewport - 2.0 {
         Some(TableHorizontalIssue::ContentUnderfill)
-    } else if max_end > viewport + 2.0 {
-        Some(TableHorizontalIssue::ContentOverflow)
+    } else if max_end > viewport + reach + 2.0 {
+        Some(TableHorizontalIssue::ContentUnreachable)
     } else {
         None
     }
@@ -1528,11 +1571,16 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     content.append(&bottom);
     let body = gtk4::ScrolledWindow::new();
     body.add_css_class(TABLE_BODY_CLASS);
-    // Vertical only, the `scroll` kind's rule: a table's columns are
-    // laid out to the track, never scrolled sideways.
-    body.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    // OVERLAY, and stated rather than inherited: a bar that took width
-    // would take it off the ROWS and not off the header, and
+    // A TABLE WHOSE COLUMNS DO NOT FIT SCROLLS SIDEWAYS (docs/tables-plan.md,
+    // the 2026-08-29 overflow ruling): it does not compress and it does not
+    // clip. AUTOMATIC is what drops this tier's minimum width from the
+    // content floor to the bar's own, which is the whole mechanism — under
+    // NEVER the parent could never hand a table less than its columns need,
+    // so the overflow the ruling describes was unreachable. The vertical
+    // half is set_table_scrolling's.
+    body.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Automatic);
+    // OVERLAY, BOTH BARS, and stated rather than inherited: a bar that took
+    // width would take it off the ROWS and not off the header, and
     // column_edges — which compares the two lines' right edges — would
     // read that as content underfill.
     body.set_overlay_scrolling(true);
@@ -1547,6 +1595,22 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     body.set_halign(gtk4::Align::Fill);
     body.set_valign(gtk4::Align::Fill);
     body.set_child(Some(&content));
+    // THE HEADER TRACKS THE BODY THROUGH ONE ADJUSTMENT, which is
+    // GtkColumnView's own mechanism read out of its source
+    // (docs/probes/table-overflow-2026.md §5.3: one hadjustment translating
+    // header and listview together, the vertical one forwarded to the list
+    // alone so the header stays put). EXTERNAL is GTK's policy for a
+    // scroller that shares another's bar — it draws none, and unlike NEVER
+    // it does not force its size to follow the header's content, so the
+    // header shrinks with the body instead of holding the window open.
+    let head = gtk4::ScrolledWindow::new();
+    head.set_policy(gtk4::PolicyType::External, gtk4::PolicyType::Never);
+    head.set_propagate_natural_width(true);
+    head.set_propagate_natural_height(true);
+    head.set_hexpand(true);
+    head.set_halign(gtk4::Align::Fill);
+    head.set_child(Some(&header));
+    head.set_hadjustment(Some(&body.hadjustment()));
     let pending = Rc::new(std::cell::Cell::new(false));
     let anchor = Rc::new(std::cell::Cell::new(None));
     let programmatic = Rc::new(std::cell::Cell::new(false));
@@ -1570,7 +1634,24 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
         let pending = pending.clone();
         adjustment.connect_changed(move |_| schedule_window_report(&pending, id));
     }
+    // A TABLE JUST LAID OUT SHOWS ITS FIRST COLUMN. Without this
+    // `expect_at_end` can pass before anything scrolled — measured on the
+    // mac tier, where the clip view parks at its trailing edge
+    // (docs/deferred.md). The trigger is a CHANGED extent and not a draw:
+    // `changed` carries every relayout, and resetting on all of them would
+    // throw away a scroll the reader made.
+    {
+        let extents = std::cell::Cell::new((f64::NAN, f64::NAN));
+        body.hadjustment().connect_changed(move |adj| {
+            let now = (adj.upper(), adj.page_size());
+            if extents.get() != now {
+                extents.set(now);
+                adj.set_value(adj.lower());
+            }
+        });
+    }
     GtkTable {
+        head,
         header,
         divider,
         groups,
@@ -1600,30 +1681,43 @@ fn build_spacer() -> gtk4::Box {
 /// way `table_header` reads the header: by class, so no table verb can
 /// agree with a model copy.
 fn table_body(column: &gtk4::Box) -> Option<gtk4::Box> {
+    scrolled_box(&table_body_view(column)?)
+}
+
+/// The scroll container itself — the widget whose adjustments ARE the
+/// table's two axes, read by class like everything else here.
+fn table_body_view(column: &gtk4::Box) -> Option<gtk4::ScrolledWindow> {
     let mut child = column.first_child();
     while let Some(w) = child {
         child = w.next_sibling();
         let Ok(scroller) = w.downcast::<gtk4::ScrolledWindow>() else {
             continue;
         };
-        if !scroller.has_css_class(TABLE_BODY_CLASS) {
-            continue;
+        if scroller.has_css_class(TABLE_BODY_CLASS) {
+            return Some(scroller);
         }
-        let inner = scroller.child()?;
-        // GTK4 unwraps the viewport it inserts for a non-scrollable
-        // child; the second arm is there because believing that is a
-        // read nobody would have watched fail.
-        if let Ok(content) = inner.clone().downcast::<gtk4::Box>() {
-            return Some(content);
-        }
-        return inner
-            .downcast::<gtk4::Viewport>()
-            .ok()?
-            .child()?
-            .downcast::<gtk4::Box>()
-            .ok();
     }
     None
+}
+
+/// THE AXIS THE THREE SCROLL VERBS DRIVE, decided by the target's KIND: a
+/// `scroll` target's vertical one, a TABLE target's horizontal one. A
+/// table's rows already answer expect_window and scroll_to_row, so the
+/// kind is unambiguous and no axis word is needed (docs/tables-plan.md,
+/// the overflow ruling).
+#[cfg(feature = "harness")]
+fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<gtk4::Adjustment> {
+    if t.kind == crate::harness::TargetKind::Column {
+        let i = crate::harness::try_resolve(t.index, core.columns.len())?;
+        // Pending resizes must land before the extents mean anything —
+        // column_edges' own first line, for the same reason: the first
+        // read after mount sees a zero page size, and every one of the
+        // three verbs then answers about a table nothing laid out.
+        while glib::MainContext::default().iteration(false) {}
+        return Some(table_body_view(&core.columns[i])?.hadjustment());
+    }
+    let i = crate::harness::try_resolve(t.index, core.scrolls.len())?;
+    Some(core.scrolls[i].vadjustment())
 }
 
 /// One report per main-loop turn, and never from inside the signal
@@ -1867,6 +1961,8 @@ fn reflow_table(core: &mut CoreState, id: u64) {
     };
     let column = column.clone();
     let Some(table) = core.tables.get(&id) else { return };
+    // The HEAD hangs on the container; the header itself is its child.
+    let head = table.head.clone();
     let header = table.header.clone();
     let divider = table.divider.clone();
     let groups = table.groups.clone();
@@ -1876,15 +1972,15 @@ fn reflow_table(core: &mut CoreState, id: u64) {
     let bottom = table.bottom.clone();
     // The composed header leads the container's children whatever order
     // the rows arrived in, and the divider follows it.
-    if header.parent().is_none() {
-        column.prepend(&header);
+    if head.parent().is_none() {
+        column.prepend(&head);
     } else {
-        column.reorder_child_after(&header, None::<&gtk4::Widget>);
+        column.reorder_child_after(&head, None::<&gtk4::Widget>);
     }
     if divider.parent().is_none() {
-        column.insert_child_after(&divider, Some(&header));
+        column.insert_child_after(&divider, Some(&head));
     } else {
-        column.reorder_child_after(&divider, Some(&header));
+        column.reorder_child_after(&divider, Some(&head));
     }
     if body.parent().is_none() {
         column.insert_child_after(&body, Some(&divider));
@@ -1896,7 +1992,7 @@ fn reflow_table(core: &mut CoreState, id: u64) {
     // columns record declares the table, and those rows were parented
     // before there was a body to parent them to.
     for stray in children_of(&column) {
-        if stray == header.clone().upcast::<gtk4::Widget>()
+        if stray == head.clone().upcast::<gtk4::Widget>()
             || stray == divider.clone().upcast::<gtk4::Widget>()
             || stray == body.clone().upcast::<gtk4::Widget>()
         {
@@ -2186,9 +2282,11 @@ fn set_table_scrolling(body: &gtk4::ScrolledWindow, scrolls: bool) {
     } else {
         gtk4::PolicyType::Never
     };
-    // Written only when it moved: this runs on every scroll frame.
+    // Written only when it moved: this runs on every scroll frame. The
+    // horizontal half is the overflow ruling's and is not this function's
+    // to decide, so it goes back exactly as read.
     if body.policy().1 != want {
-        body.set_policy(gtk4::PolicyType::Never, want);
+        body.set_policy(body.policy().0, want);
     }
 }
 
@@ -7306,7 +7404,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .is_some_and(|t| children_of(&t.header).len() == titles.len());
             if rebuild {
                 if let Some(old) = core.tables.remove(&id.0) {
-                    column.remove(&old.header);
+                    column.remove(&old.head);
                     column.remove(&old.divider);
                     // The rows outlive the header they were declared
                     // under; they go back on the container and the new
@@ -10548,7 +10646,16 @@ impl crate::harness::Stage for GtkStage {
             }
             let viewport = f64::from(column.width());
             let assigned = table_horizontal_track(&column);
-            match table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned) {
+            // HOW FAR THE SURFACE CAN GO, off the toolkit's own adjustment:
+            // columns past the viewport are the ruling's normal state and
+            // convict nothing while the table can scroll to them.
+            let reach = table_body_view(&column).map_or(0.0, |view| {
+                let adj = view.hadjustment();
+                (adj.upper() - adj.page_size()).max(0.0)
+            });
+            let issue =
+                table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned, reach);
+            match issue {
                 Some(TableHorizontalIssue::TrackUnderfill) => {
                     return format!(
                         "viewport draws {}px of its assigned {}px track",
@@ -10584,11 +10691,12 @@ impl crate::harness::Stage for GtkStage {
                         viewport.round()
                     );
                 }
-                Some(TableHorizontalIssue::ContentOverflow) => {
+                Some(TableHorizontalIssue::ContentUnreachable) => {
                     return format!(
-                        "cells end at {}px outside a {}px viewport",
+                        "cells end at {}px past a {}px viewport that scrolls {}px",
                         max_drawn.round(),
-                        viewport.round()
+                        viewport.round(),
+                        reach.round()
                     );
                 }
                 None => {}
@@ -11352,12 +11460,11 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_overflow(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+            let Some(adj) = scroll_axis(core, t) else {
                 return "<no such target>".to_string();
             };
             // The toolkit's own adjustment: upper is the content
             // extent, page_size the viewport.
-            let adj = core.scrolls[i].vadjustment();
             if adj.upper() > adj.page_size() + 2.0 {
                 String::new()
             } else {
@@ -11368,11 +11475,11 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_end(&self, t: crate::harness::Target) {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.scrolls.len());
             // The REAL scrolling API: setting the adjustment's value
             // IS how GTK scrolls (scrollbars and kinetic panning both
             // write it).
-            let adj = core.scrolls[i].vadjustment();
+            let adj = scroll_axis(core, t)
+                .unwrap_or_else(|| panic!("kaya: scroll_end on {t:?}, which scrolls nowhere"));
             adj.set_value(adj.upper() - adj.page_size());
         })
     }
@@ -11506,10 +11613,9 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+            let Some(adj) = scroll_axis(core, t) else {
                 return "<no such target>".to_string();
             };
-            let adj = core.scrolls[i].vadjustment();
             let short = adj.upper() - (adj.value() + adj.page_size());
             if short.abs() <= 2.0 {
                 String::new()

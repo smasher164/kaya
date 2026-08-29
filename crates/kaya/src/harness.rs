@@ -3352,8 +3352,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 None
             }
             Step::ScrollEnd(t) => {
-                if t.kind != TargetKind::Scroll {
-                    Some(Err(format!("{t:?} is not a scroll target")))
+                // A SCROLL CONTAINER OR A TABLE (docs/tables-plan.md, ruled
+                // 2026-08-29). On a table these three read the COLUMNS'
+                // axis, because a table's ROWS already answer to
+                // expect_window and scroll_to_row — so the target's kind
+                // decides the axis and no verb needs an axis word.
+                if !matches!(t.kind, TargetKind::Scroll | TargetKind::Column) {
+                    Some(Err(format!("{t:?} is neither a scroll target nor a table")))
                 } else {
                     // An action, silent like click: expect_at_end is
                     // the observable.
@@ -3766,8 +3771,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }))
             }
             Step::ExpectOverflow(t) => {
-                if t.kind != TargetKind::Scroll {
-                    Some(Err(format!("{t:?} is not a scroll target")))
+                // A SCROLL CONTAINER OR A TABLE (docs/tables-plan.md, ruled
+                // 2026-08-29). On a table these three read the COLUMNS'
+                // axis, because a table's ROWS already answer to
+                // expect_window and scroll_to_row — so the target's kind
+                // decides the axis and no verb needs an axis word.
+                if !matches!(t.kind, TargetKind::Scroll | TargetKind::Column) {
+                    Some(Err(format!("{t:?} is neither a scroll target nor a table")))
                 } else {
                     Some(poll(|| {
                         let slack = stage.scroll_overflow(*t);
@@ -3780,8 +3790,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             }
             Step::ExpectAtEnd(t) => {
-                if t.kind != TargetKind::Scroll {
-                    Some(Err(format!("{t:?} is not a scroll target")))
+                // A SCROLL CONTAINER OR A TABLE (docs/tables-plan.md, ruled
+                // 2026-08-29). On a table these three read the COLUMNS'
+                // axis, because a table's ROWS already answer to
+                // expect_window and scroll_to_row — so the target's kind
+                // decides the axis and no verb needs an axis word.
+                if !matches!(t.kind, TargetKind::Scroll | TargetKind::Column) {
+                    Some(Err(format!("{t:?} is neither a scroll target nor a table")))
                 } else {
                     Some(poll(|| {
                         let off = stage.scroll_at_end(*t);

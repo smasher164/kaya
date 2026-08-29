@@ -9091,10 +9091,37 @@ private struct KayaNativeTable: View {
             NotificationCenter.default.addObserver(
                 self, selector: #selector(boundsMoved),
                 name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
-            scrollView.onLayout = { [weak self] in self?.scheduleReport() }
+            scrollView.onLayout = { [weak self] in
+                self?.resetHorizontalOriginIfGeometryMoved()
+                self?.scheduleReport()
+            }
             kayaTableDrivers[node.id] = self
             syncColumns()
             return scrollView
+        }
+
+        /// A TABLE THAT WAS JUST LAID OUT SHOWS ITS FIRST COLUMN. AppKit
+        /// keeps the visible area across a geometry change, so a table
+        /// whose document or clip width moved could arrive parked at its
+        /// TRAILING edge — measured 2026-08-29, where it made
+        /// `expect_at_end` true before anything had scrolled. Reset on a
+        /// changed extent only, so an ordinary batch does not throw away a
+        /// scroll the reader made.
+        private var lastHorizontalExtents: (CGFloat, CGFloat)?
+
+        func resetHorizontalOriginIfGeometryMoved() {
+            let now = (scrollView.documentView?.frame.width ?? 0,
+                       scrollView.contentView.bounds.width)
+            defer { lastHorizontalExtents = now }
+            if let last = lastHorizontalExtents,
+                abs(last.0 - now.0) <= 0.5, abs(last.1 - now.1) <= 0.5
+            {
+                return
+            }
+            let origin = scrollView.contentView.bounds.origin
+            guard origin.x != 0 else { return }
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: origin.y))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
         /// THE COLUMNS' AXIS, read off the REAL scroll view: the document

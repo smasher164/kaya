@@ -2564,6 +2564,11 @@ struct WinTable {
     grid: Grid,
     /// The card behind the three tracks (TABLE_CARD_XAML).
     card: Grid,
+    /// The header's own scroller, driven to `host`'s horizontal offset so
+    /// the titles travel with the cells under them (the overflow ruling).
+    /// It is what hangs on the container — `header` is its child — and it
+    /// is also what CLIPS the titles, since a XAML panel does not.
+    head: ScrollViewer,
     header: Grid,
     rule: Grid,
     /// THE SCROLL CONTAINER THIS TIER OWNS (docs/virtualization-plan.md
@@ -2638,6 +2643,15 @@ struct WinTable {
     commanded: u8,
     /// One coalesced report per main-loop turn.
     scheduled: bool,
+
+    // --- The columns' axis (the 2026-08-29 overflow ruling). ----------
+    /// The columns' box as `host` last reported it: the resolved columns
+    /// and the track they were laid out in. A table just laid out shows
+    /// its FIRST column, so either half moving parks the offset back at
+    /// the leading edge — and a pass that moved neither keeps the scroll
+    /// the reader made (`table_columns_track`).
+    hcontent: f64,
+    htrack: f64,
 }
 
 /// How many settle rounds one report drives. Each round acts on at most
@@ -2678,7 +2692,8 @@ fn declare_table(
         return Ok(());
     };
     let grid = grid.clone();
-    let mut minted: Option<(Grid, Grid, Grid, ScrollViewer, Grid, Vec<Button>)> = None;
+    let mut minted: Option<(Grid, ScrollViewer, Grid, Grid, ScrollViewer, Grid, Vec<Button>)> =
+        None;
     let remint = TABLES.with_borrow(|tables| match tables.get(&id.0) {
         Some(live) => live.titles.len() != titles.len(),
         None => true,
@@ -2699,17 +2714,43 @@ fn declare_table(
             Bottom: -TABLE_CARD_PAD,
         })?;
         let rule: Grid = XamlReader::Load(&HSTRING::from(TABLE_RULE_XAML))?.cast()?;
-        // THE SCROLL CONTAINER (§4). Vertical only, and its scrollbar is
-        // an OVERLAY (Auto, never Visible): a reserved gutter would take
-        // its width out of the rows and leave them narrower than the
-        // pinned header, which `column_edges` convicts as a
+        // THE SCROLL CONTAINER (§4). BOTH AXES since the 2026-08-29
+        // overflow ruling (docs/tables-plan.md): a table whose columns
+        // need more width than its track scrolls to them, it does not
+        // compress and it does not clip — and Disabled here IS how "the
+        // last column is clipped" shipped (docs/probes/
+        // table-overflow-2026.md §4.4).
+        //
+        // BOTH BARS ARE OVERLAYS (Auto, never Visible): a reserved gutter
+        // would take its width out of the rows and leave them narrower
+        // than the pinned header, which `column_edges` convicts as a
         // ContentUnderfill — its per-line end is there for exactly this.
         let host = ScrollViewer::new()?;
-        host.SetHorizontalScrollMode(ScrollMode::Disabled)?;
-        host.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
+        host.SetHorizontalScrollMode(ScrollMode::Enabled)?;
+        host.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Auto)?;
         host.SetVerticalScrollMode(ScrollMode::Enabled)?;
         host.SetVerticalScrollBarVisibility(ScrollBarVisibility::Auto)?;
         host.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        // THE HEADER RIDES A SCROLLER OF ITS OWN, driven to the body's
+        // offset by `table_columns_track`. There is no shared adjustment
+        // to hang it off the way gtk.rs does, and no transform to
+        // translate it with — this backend's bindings project neither
+        // RenderTransform nor Clip (tools/winui-bindgen) — and a bare
+        // header would not be clipped either, since a XAML panel draws a
+        // child wider than itself.
+        //
+        // NO BAR OF ITS OWN (Hidden, not Disabled): Disabled is the one
+        // mode that also refuses ChangeView, so the sync would have
+        // nothing to write. The vertical half is Disabled precisely so
+        // this scroller reports the header's HEIGHT to the Auto track it
+        // sits in.
+        let head = ScrollViewer::new()?;
+        head.SetHorizontalScrollMode(ScrollMode::Enabled)?;
+        head.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Hidden)?;
+        head.SetVerticalScrollMode(ScrollMode::Disabled)?;
+        head.SetVerticalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
+        head.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        head.SetContent(&header)?;
         let band = Grid::new()?;
         // NO RowSpacing: a row's own bottom margin carries the gap, so
         // the TRACK is the pitch and the spacers are the core's numbers
@@ -2744,12 +2785,12 @@ fn declare_table(
             cell.Click(&handler)?;
             cells.push(cell);
         }
-        minted = Some((card, header, rule, host, band, cells));
+        minted = Some((card, head, header, rule, host, band, cells));
     }
     let fresh = minted.is_some();
     let gap = core.spacings.get(&id).copied().unwrap_or(8.0);
     TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
-        if let Some((card, header, rule, host, band, cells)) = minted {
+        if let Some((card, head, header, rule, host, band, cells)) = minted {
             tables.insert(
                 id.0,
                 WinTable {
@@ -2759,6 +2800,7 @@ fn declare_table(
                     tag,
                     grid: grid.clone(),
                     card,
+                    head,
                     header,
                     rule,
                     host,
@@ -2781,6 +2823,8 @@ fn declare_table(
                     at: 0.0,
                     commanded: 0,
                     scheduled: false,
+                    hcontent: 0.0,
+                    htrack: 0.0,
                 },
             );
         } else if let Some(table) = tables.get_mut(&id.0) {
@@ -2800,11 +2844,11 @@ fn declare_table(
     })?;
     if fresh {
         let children = grid.Children()?;
-        let (card, header, rule, host) = TABLES.with_borrow(|tables| {
+        let (card, head, rule, host) = TABLES.with_borrow(|tables| {
             let table = &tables[&id.0];
             (
                 table.card.clone(),
-                table.header.clone(),
+                table.head.clone(),
                 table.rule.clone(),
                 table.host.clone(),
             )
@@ -2814,19 +2858,22 @@ fn declare_table(
         let card_element = card.cast::<FrameworkElement>()?;
         Grid::SetRow(&card_element, 0)?;
         Grid::SetRowSpan(&card_element, 3)?;
-        Grid::SetRow(&header.cast::<FrameworkElement>()?, 0)?;
+        // The HEAD hangs on the container; the header itself is its child.
+        Grid::SetRow(&head.cast::<FrameworkElement>()?, 0)?;
         Grid::SetRow(&rule.cast::<FrameworkElement>()?, 1)?;
         Grid::SetRow(&host.cast::<FrameworkElement>()?, 2)?;
         children.InsertAt(0, &card)?;
-        children.Append(&header)?;
+        children.Append(&head)?;
         children.Append(&rule)?;
         children.Append(&host)?;
         // A scroll moves no frame of the container, so its LayoutUpdated
         // cannot be the only report trigger: the host's own is where a
         // view change lands (this backend's bindings project no
-        // ViewChanged — see `schedule_report`).
+        // ViewChanged — see `schedule_report`). It is also the only
+        // signal the header has to travel on.
         let host_id = id.0;
         let scrolled = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            table_columns_track(host_id);
             schedule_report(host_id);
             Ok(())
         });
@@ -2939,6 +2986,66 @@ fn schedule_report(id: u64) {
         });
         let _ = dispatcher.0.TryEnqueue(&handler);
     }
+}
+
+/// A scroll offset in the boxed form ScrollViewer's two view calls take.
+fn offset_ref(value: f64) -> windows_core::Result<IReference<f64>> {
+    PropertyValue::CreateDouble(value)?.cast()
+}
+
+/// THE HEADER TRAVELS WITH THE BODY, and a table just laid out shows its
+/// FIRST column (docs/tables-plan.md, the 2026-08-29 overflow ruling).
+///
+/// Reached from `host`'s LayoutUpdated, which is where a view change
+/// lands on this backend (`declare_table`); every write here is gated on
+/// a number that MOVED, or a pass would request a view on every layout
+/// and never let the tree settle.
+///
+/// THE RESET'S TRIGGER IS THE COLUMNS' BOX, never the offset: resetting
+/// on every view change would throw away the scroll the reader just made.
+fn table_columns_track(id: u64) {
+    let Some((head, host)) =
+        TABLES.with(|tables| match tables.try_borrow() {
+            Ok(tables) => tables.get(&id).map(|w| (w.head.clone(), w.host.clone())),
+            // Borrowed by the pass we were called from.
+            Err(_) => None,
+        })
+    else {
+        return;
+    };
+    let _ = (|| -> windows_core::Result<()> {
+        let (content, track) = (host.ExtentWidth()?, host.ViewportWidth()?);
+        let relaid = TABLES.with(|tables| match tables.try_borrow_mut() {
+            Ok(mut tables) => match tables.get_mut(&id) {
+                Some(w) if (w.hcontent - content).abs() > 0.5 || (w.htrack - track).abs() > 0.5 => {
+                    w.hcontent = content;
+                    w.htrack = track;
+                    true
+                }
+                _ => false,
+            },
+            Err(_) => false,
+        });
+        let mut at = host.HorizontalOffset()?;
+        if relaid && at > 0.5 {
+            host.ChangeViewWithOptionalAnimation(
+                &offset_ref(0.0)?,
+                None::<&IReference<f64>>,
+                None::<&IReference<f32>>,
+                true,
+            )?;
+            at = 0.0;
+        }
+        if (head.HorizontalOffset()? - at).abs() > 0.5 {
+            head.ChangeViewWithOptionalAnimation(
+                &offset_ref(at)?,
+                None::<&IReference<f64>>,
+                None::<&IReference<f32>>,
+                true,
+            )?;
+        }
+        Ok(())
+    })();
 }
 
 /// The band panel's live track geometry: the top spacer's height and one
@@ -3374,7 +3481,7 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
 
 /// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half — the
 /// gtk.rs sibling of the same name, and gtk.rs's variant set except that
-/// `ColumnsOverflow` reads a resolved ColumnDefinition sum GTK never
+/// `ColumnsUnreachable` reads a resolved ColumnDefinition sum GTK never
 /// sees. A disjunction here would print one sentence for six causes and
 /// five of them would read compliant (invariant 3).
 ///
@@ -3384,15 +3491,21 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
 /// space the content box, so `column_edges` takes both pads off before it
 /// classifies. Without that a table with a declared inset convicts itself
 /// of starting inside its own viewport.
+///
+/// COLUMNS PAST THE VIEWPORT ARE NOT THE DEFECT ANY MORE (the 2026-08-29
+/// overflow ruling): a table whose columns need more width than its track
+/// scrolls to them, so what is left to convict is columns the surface
+/// CANNOT REACH — hence `reach`, the toolkit's own scroll range and not
+/// `drawn - viewport`, which would make the clause agree with itself.
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableHorizontalIssue {
     TrackUnderfill,
-    ColumnsOverflow,
+    ColumnsUnreachable,
     ContentLeftUnderfill,
     ContentLeftOverflow,
     ContentUnderfill,
-    ContentOverflow,
+    ContentUnreachable,
 }
 
 /// `drawn` is the resolved column tracks plus their spacing, `track` what
@@ -3413,7 +3526,10 @@ enum TableHorizontalIssue {
 ///                read can see.
 ///   `max_end`    the furthest cell's INK, which is the only basis that
 ///                can see ink spilling PAST its own track; tracks
-///                overflowing the viewport are `ColumnsOverflow`'s job.
+///                overflowing the viewport are `ColumnsUnreachable`'s job.
+///
+/// `reach` is how far the columns' axis can be scrolled — the host's own
+/// ScrollableWidth, never an arithmetic over the numbers beside it.
 #[cfg(any(feature = "harness", test))]
 fn table_horizontal_issue(
     drawn: f64,
@@ -3422,19 +3538,20 @@ fn table_horizontal_issue(
     min_start: f64,
     min_end: f64,
     max_end: f64,
+    reach: f64,
 ) -> Option<TableHorizontalIssue> {
     if drawn < track - 2.0 {
         Some(TableHorizontalIssue::TrackUnderfill)
-    } else if drawn > viewport + 2.0 {
-        Some(TableHorizontalIssue::ColumnsOverflow)
+    } else if drawn > viewport + reach + 2.0 {
+        Some(TableHorizontalIssue::ColumnsUnreachable)
     } else if min_start > 2.0 {
         Some(TableHorizontalIssue::ContentLeftUnderfill)
     } else if min_start < -2.0 {
         Some(TableHorizontalIssue::ContentLeftOverflow)
     } else if min_end < viewport - 2.0 {
         Some(TableHorizontalIssue::ContentUnderfill)
-    } else if max_end > viewport + 2.0 {
-        Some(TableHorizontalIssue::ContentOverflow)
+    } else if max_end > viewport + reach + 2.0 {
+        Some(TableHorizontalIssue::ContentUnreachable)
     } else {
         None
     }
@@ -3511,16 +3628,18 @@ fn table_horizontal_complaint(
     min_start: f64,
     min_end: f64,
     max_end: f64,
+    reach: f64,
 ) -> String {
     let dip = |x: f64| x.round() as i64;
-    match table_horizontal_issue(drawn, track, viewport, min_start, min_end, max_end) {
+    match table_horizontal_issue(drawn, track, viewport, min_start, min_end, max_end, reach) {
         Some(TableHorizontalIssue::TrackUnderfill) => {
             format!("draws {}dip of a {}dip track", dip(drawn), dip(track))
         }
-        Some(TableHorizontalIssue::ColumnsOverflow) => format!(
-            "columns resolve to {}dip in a {}dip viewport",
+        Some(TableHorizontalIssue::ColumnsUnreachable) => format!(
+            "columns resolve to {}dip in a {}dip viewport that scrolls {}dip",
             dip(drawn),
-            dip(viewport)
+            dip(viewport),
+            dip(reach)
         ),
         Some(TableHorizontalIssue::ContentLeftUnderfill) => format!(
             "cells start at {}dip inside a {}dip viewport",
@@ -3537,10 +3656,11 @@ fn table_horizontal_complaint(
             dip(min_end),
             dip(viewport)
         ),
-        Some(TableHorizontalIssue::ContentOverflow) => format!(
-            "cells end at {}dip outside a {}dip viewport",
+        Some(TableHorizontalIssue::ContentUnreachable) => format!(
+            "cells end at {}dip past a {}dip viewport that scrolls {}dip",
             dip(max_end),
-            dip(viewport)
+            dip(viewport),
+            dip(reach)
         ),
         None => String::new(),
     }
@@ -14546,6 +14666,23 @@ fn container_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
     })
 }
 
+/// THE AXIS THE THREE SCROLL VERBS DRIVE, decided by the target's KIND:
+/// a `scroll` target's vertical one, a TABLE target's horizontal one. A
+/// table's rows already answer expect_window and scroll_to_row, so the
+/// kind is unambiguous and no verb needs an axis word (docs/tables-plan.md,
+/// the 2026-08-29 overflow ruling). The flag says which axis to read.
+#[cfg(feature = "harness")]
+fn scroll_axis(
+    core: &CoreState,
+    t: crate::harness::Target,
+) -> Option<(ScrollViewer, bool)> {
+    if matches!(t.kind, crate::harness::TargetKind::Column) {
+        return table_of(core, t, |table| (table.host.clone(), true));
+    }
+    let i = crate::harness::try_resolve(t.index, core.scrolls.len())?;
+    Some((core.scrolls[i].clone(), false))
+}
+
 /// A table's stamped rows in the order the TOOLKIT places them — by
 /// attached track, never by the registry, because a sort is a MOVE and a
 /// creation-order registry cannot see one (expect_order's whole reason,
@@ -16070,9 +16207,9 @@ impl crate::harness::Stage for WinUiStage {
 
     fn column_edges(&self, t: crate::harness::Target, want: usize) -> String {
         Self::on_ui_read(move |core| {
-            let Some((grid, header, pad)) =
-                table_of(core, t, |table| (table.grid.clone(), table.header.clone(), table.pad))
-            else {
+            let Some((grid, header, pad, host)) = table_of(core, t, |table| {
+                (table.grid.clone(), table.header.clone(), table.pad, table.host.clone())
+            }) else {
                 return Ok("<no such target>".to_string());
             };
             // Measure/arrange are lazy; force them or the first read
@@ -16184,11 +16321,19 @@ impl crate::harness::Stage for WinUiStage {
             for at in 0..defs.Size()? {
                 drawn += defs.GetAt(at)?.ActualWidth()?;
             }
+            // HOW FAR THE SURFACE CAN GO, off the toolkit's own metric:
+            // columns past the viewport are the ruling's normal state and
+            // convict nothing while the table can scroll to them. `at` is
+            // where it stands, added back below so the ink is read in the
+            // CONTENT's space — a table measured after a scroll is not
+            // convicted of the displacement the reader asked for. At rest
+            // it is 0 and every number is the table's own, as before.
+            let (reach, at) = (host.ScrollableWidth()?, host.HorizontalOffset()?);
             let (track, viewport, min_start, min_end, max_end) = table_content_frame(
                 pad,
                 assigned_track(core, &grid)?,
                 grid.ActualWidth()?,
-                (min_start, min_end, max_end),
+                (min_start + at, min_end + at, max_end + at),
             );
             if track <= 0.0 || viewport <= 0.0 {
                 return Ok("no live table viewport geometry".to_owned());
@@ -16200,6 +16345,7 @@ impl crate::harness::Stage for WinUiStage {
                 min_start,
                 min_end,
                 max_end,
+                reach,
             ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -17183,49 +17329,87 @@ impl crate::harness::Stage for WinUiStage {
 
     fn scroll_overflow(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+            let Some((viewer, columns)) = scroll_axis(core, t) else {
                 return Ok("<no such target>".to_string());
             };
-            let viewer = &core.scrolls[i];
-            // The toolkit's own metrics: ScrollableHeight is the
-            // overflow itself (extent minus viewport).
-            let scrollable = viewer.ScrollableHeight()?;
-            Ok(if scrollable > 2.0 {
-                String::new()
+            // Measure/arrange are lazy; force them or the first read
+            // after mount answers about a surface nothing laid out
+            // (column_edges' own first line).
+            viewer.UpdateLayout()?;
+            // The toolkit's own metrics: the scrollable extent IS the
+            // overflow (extent minus viewport).
+            if columns {
+                Ok(if viewer.ScrollableWidth()? > 2.0 {
+                    String::new()
+                } else {
+                    format!(
+                        "columns {} in viewport {}",
+                        viewer.ExtentWidth()?,
+                        viewer.ViewportWidth()?
+                    )
+                })
             } else {
-                format!(
-                    "content {} in viewport {}",
-                    viewer.ExtentHeight()?,
-                    viewer.ViewportHeight()?
-                )
-            })
+                Ok(if viewer.ScrollableHeight()? > 2.0 {
+                    String::new()
+                } else {
+                    format!(
+                        "content {} in viewport {}",
+                        viewer.ExtentHeight()?,
+                        viewer.ViewportHeight()?
+                    )
+                })
+            }
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn scroll_end(&self, t: crate::harness::Target) {
         Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.scrolls.len());
-            let viewer = &core.scrolls[i];
+            let Some((viewer, columns)) = scroll_axis(core, t) else {
+                panic!("kaya: scroll_end on {t:?}, which scrolls nowhere");
+            };
+            viewer.UpdateLayout()?;
             // The REAL scrolling API: ChangeView is what scrollbars
-            // and touch panning drive.
-            let target = viewer.ScrollableHeight()?;
-            let offset: IReference<f64> = PropertyValue::CreateDouble(target)?.cast()?;
-            viewer.ChangeView(
-                None::<&IReference<f64>>,
-                &offset,
-                None::<&IReference<f32>>,
-            )?;
+            // and touch panning drive. The columns' arm takes the
+            // ANIMATION-FREE overload, because the header travels on
+            // the layout pass this call causes (`table_columns_track`)
+            // and an animated glide would leave it behind per frame.
+            if columns {
+                viewer.ChangeViewWithOptionalAnimation(
+                    &offset_ref(viewer.ScrollableWidth()?)?,
+                    None::<&IReference<f64>>,
+                    None::<&IReference<f32>>,
+                    true,
+                )?;
+            } else {
+                viewer.ChangeView(
+                    None::<&IReference<f64>>,
+                    &offset_ref(viewer.ScrollableHeight()?)?,
+                    None::<&IReference<f32>>,
+                )?;
+            }
             Ok(())
         })
     }
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+            let Some((viewer, columns)) = scroll_axis(core, t) else {
                 return Ok("<no such target>".to_string());
             };
-            let viewer = &core.scrolls[i];
+            viewer.UpdateLayout()?;
+            if columns {
+                let short = viewer.ScrollableWidth()? - viewer.HorizontalOffset()?;
+                return Ok(if short.abs() <= 2.0 {
+                    String::new()
+                } else {
+                    format!(
+                        "columns stand at {} of {}",
+                        viewer.HorizontalOffset()?,
+                        viewer.ScrollableWidth()?
+                    )
+                });
+            }
             let short = viewer.ScrollableHeight()? - viewer.VerticalOffset()?;
             Ok(if short.abs() <= 2.0 {
                 String::new()
@@ -18718,7 +18902,7 @@ mod tests {
     /// pinned, because that slack is what keeps a subpixel arrange from
     /// reddening a correct table.
     ///
-    /// The ColumnsOverflow case is the measured one this exists for:
+    /// The ColumnsUnreachable case is the measured one this exists for:
     /// before the split, a table whose resolved columns overflowed a
     /// 300dip viewport while its ink stayed inside printed "cells span
     /// 290dip inside a 300dip viewport" — two numbers asserting the
@@ -18731,8 +18915,15 @@ mod tests {
     #[test]
     fn table_horizontal_issue_convicts_one_cause() {
         use TableHorizontalIssue as Issue;
-        let issue = table_horizontal_issue;
-        let say = table_horizontal_complaint;
+        // A table that CANNOT scroll its columns is the default here,
+        // which is what every claim written before the 2026-08-29 ruling
+        // assumed; the ruling's own cases below pass a real reach.
+        let issue = |d: f64, t: f64, v: f64, s: f64, e: f64, m: f64| {
+            table_horizontal_issue(d, t, v, s, e, m, 0.0)
+        };
+        let say = |d: f64, t: f64, v: f64, s: f64, e: f64, m: f64| {
+            table_horizontal_complaint(d, t, v, s, e, m, 0.0)
+        };
         // drawn, track, viewport, min_start, min_end, max_end — a table
         // filling its track and its viewport, every line flush inside:
         // silent.
@@ -18755,11 +18946,11 @@ mod tests {
         assert_eq!(issue(102.0, 100.0, 100.0, 0.0, 100.0, 100.0), None);
         assert_eq!(
             issue(102.1, 100.0, 100.0, 0.0, 100.0, 100.0),
-            Some(Issue::ColumnsOverflow)
+            Some(Issue::ColumnsUnreachable)
         );
         assert_eq!(
             say(140.0, 120.0, 100.0, 0.0, 105.0, 110.0),
-            "columns resolve to 140dip in a 100dip viewport"
+            "columns resolve to 140dip in a 100dip viewport that scrolls 0dip"
         );
 
         assert_eq!(issue(100.0, 100.0, 100.0, 2.0, 100.0, 100.0), None);
@@ -18795,11 +18986,47 @@ mod tests {
         assert_eq!(issue(100.0, 100.0, 100.0, 0.0, 100.0, 102.0), None);
         assert_eq!(
             issue(100.0, 100.0, 100.0, 0.0, 100.0, 102.1),
-            Some(Issue::ContentOverflow)
+            Some(Issue::ContentUnreachable)
         );
         assert_eq!(
             say(98.0, 99.0, 100.0, 0.0, 105.0, 140.0),
-            "cells end at 140dip outside a 100dip viewport"
+            "cells end at 140dip past a 100dip viewport that scrolls 0dip"
+        );
+
+        // THE RULING'S OWN CASE (2026-08-29, docs/tables-plan.md):
+        // columns wider than the track are what a scrolling table looks
+        // like, and they convict only where the surface cannot reach
+        // them. Same numbers, three different scroll ranges.
+        let reach = table_horizontal_issue;
+        assert_eq!(
+            reach(160.0, 100.0, 100.0, 0.0, 160.0, 160.0, 60.0),
+            None,
+            "a table that can scroll to its last column is correct"
+        );
+        assert_eq!(
+            reach(160.0, 100.0, 100.0, 0.0, 160.0, 160.0, 40.0),
+            Some(Issue::ColumnsUnreachable),
+            "20dip of columns nothing can scroll to is the defect"
+        );
+        assert_eq!(
+            reach(160.0, 100.0, 100.0, 0.0, 160.0, 160.0, 0.0),
+            Some(Issue::ColumnsUnreachable),
+            "a clipping table is the pre-ruling behaviour and is refused"
+        );
+        // The INK clause takes the same reach: cells legitimately run
+        // that far past the viewport and not one dip further.
+        assert_eq!(reach(100.0, 100.0, 100.0, 0.0, 100.0, 142.0, 40.0), None);
+        assert_eq!(
+            reach(100.0, 100.0, 100.0, 0.0, 100.0, 142.1, 40.0),
+            Some(Issue::ContentUnreachable)
+        );
+        assert_eq!(
+            table_horizontal_complaint(140.0, 120.0, 100.0, 0.0, 105.0, 110.0, 7.0),
+            "columns resolve to 140dip in a 100dip viewport that scrolls 7dip"
+        );
+        assert_eq!(
+            table_horizontal_complaint(98.0, 99.0, 100.0, 0.0, 105.0, 140.0, 7.0),
+            "cells end at 140dip past a 100dip viewport that scrolls 7dip"
         );
 
         // PRECEDENCE where several hold at once, which is the ordinary
@@ -18812,7 +19039,7 @@ mod tests {
         );
         assert_eq!(
             issue(140.0, 100.0, 100.0, 0.0, 60.0, 140.0),
-            Some(Issue::ColumnsOverflow)
+            Some(Issue::ColumnsUnreachable)
         );
         // A table displaced at its leading edge also ends in the wrong
         // place, both ways round: the end is the symptom either way.
@@ -18836,11 +19063,11 @@ mod tests {
         // from 5 to 295 — a 290dip span that reads compliant.
         assert_eq!(
             issue(310.0, 300.0, 300.0, 5.0, 290.0, 295.0),
-            Some(Issue::ColumnsOverflow)
+            Some(Issue::ColumnsUnreachable)
         );
         assert_eq!(
             say(310.0, 300.0, 300.0, 5.0, 290.0, 295.0),
-            "columns resolve to 310dip in a 300dip viewport"
+            "columns resolve to 310dip in a 300dip viewport that scrolls 0dip"
         );
     }
 
@@ -18855,8 +19082,14 @@ mod tests {
     #[test]
     fn table_line_end_reads_the_track_not_the_ink() {
         use TableHorizontalIssue as Issue;
-        let issue = table_horizontal_issue;
-        let say = table_horizontal_complaint;
+        // A table that fits needs no reach (the ruling's own cases are
+        // in the truth table above).
+        let issue = |d: f64, t: f64, v: f64, s: f64, e: f64, m: f64| {
+            table_horizontal_issue(d, t, v, s, e, m, 0.0)
+        };
+        let say = |d: f64, t: f64, v: f64, s: f64, e: f64, m: f64| {
+            table_horizontal_complaint(d, t, v, s, e, m, 0.0)
+        };
         // Column 0: track 0..250, a 40dip label. Column 1: track
         // 258..508, a 31dip label — 289 is where its ink stops.
         let line = [
@@ -18915,7 +19148,9 @@ mod tests {
     #[test]
     fn a_padded_card_convicts_nothing() {
         use TableHorizontalIssue as Issue;
-        let issue = table_horizontal_issue;
+        let issue = |d: f64, t: f64, v: f64, s: f64, e: f64, m: f64| {
+            table_horizontal_issue(d, t, v, s, e, m, 0.0)
+        };
         // The field's own numbers with a 12dip card: a 508dip grid, ink
         // and tracks starting at the padding edge and ending 12 short of
         // the far one.

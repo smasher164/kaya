@@ -32,6 +32,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.ScrollableState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -159,6 +164,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -176,6 +182,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.node.RootForTest
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -283,6 +290,42 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     @Volatile var tableViewportRightX = -1f
     @Volatile var tableViewportH = -1f
     @Volatile var tableContentH = -1f
+
+    /**
+     * THE COLUMNS' AXIS (docs/tables-plan.md, ruled 2026-08-29): a table
+     * whose columns need more than its track SCROLLS to them — header
+     * locked to the body — rather than compressing or clipping.
+     *
+     * [tableScrollX] is the offset the header cells and the row cells are
+     * BOTH placed at, [tableReachX] the furthest it may go; device
+     * pixels, both. Reach is EXACTLY zero when the columns fit, because
+     * the leftover distribution spends the track to the pixel, so
+     * expect_overflow needs no slack over it. [tableDensity] is the
+     * divisor the three widths above were taken with — the only way a
+     * reader holding this node can put these two in that dp.
+     *
+     * Snapshot state on the offset because the table's PLACEMENT reads
+     * it: a scroll re-places and never re-measures.
+     */
+    var tableScrollX by mutableFloatStateOf(0f)
+    @Volatile var tableReachX = 0f
+    @Volatile var tableDensity = 1f
+
+    /**
+     * ONE CLAMP for the finger and for `scroll_end` alike — a harness
+     * that wrote the offset itself could park at a column no gesture can
+     * reach, which is the shape of an assertion that proves nothing.
+     * `by lazy` and not thread-safe for [textState]'s reason: every touch
+     * is on the UI thread.
+     */
+    val tableColumnScroll: ScrollableState by lazy(LazyThreadSafetyMode.NONE) {
+        ScrollableState { delta ->
+            val before = tableScrollX
+            val next = (before + delta).coerceIn(0f, tableReachX)
+            tableScrollX = next
+            next - before
+        }
+    }
 
     /**
      * KAYA'S MODEL MIRROR of the widget's text — what the app was last
@@ -2762,6 +2805,24 @@ object KayaCompose {
         if (b.hasRemaining()) return null
         return TableStamp(node, keys)
     }
+
+    /**
+     * A TABLE TARGET READS ITS COLUMNS' AXIS (docs/tables-plan.md, ruled
+     * 2026-08-29): a table's rows already answer expect_window and
+     * scroll_to_row, so the target's KIND decides which axis
+     * expect_overflow, scroll_end and expect_at_end are about, and none
+     * of the three needs an axis word. Null when the spec names no
+     * table.
+     *
+     * Every number is read on the UI thread, where the layout wrote it.
+     */
+    private fun columnsAxis(activity: ComponentActivity, spec: String): KayaColumnsAxis? =
+        onUi(activity) {
+            target(spec, "column", KayaSceneModel.columns)?.let {
+                KayaColumnsAxis(
+                    it.tableTrackW, it.tableContentW, it.tableReachX, it.tableScrollX)
+            }
+        }
 
     private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
         // harness.rs's Target spelling; sortTag is the stamped table identity.
@@ -6033,6 +6094,8 @@ object KayaCompose {
                             val track: Float,
                             val drawn: Float,
                             val content: Float,
+                            val reach: Float,
+                            val at: Float,
                             val stale: Boolean,
                         )
                         val read = onUi(activity) {
@@ -6073,6 +6136,11 @@ object KayaCompose {
                                     node.tableTrackW,
                                     node.tableDrawnW,
                                     node.tableContentW,
+                                    // The granted scroll and the offset
+                                    // it stands at, in the dp the widths
+                                    // beside them are in.
+                                    node.tableReachX / node.tableDensity,
+                                    node.tableScrollX / node.tableDensity,
                                     node.tableGeometryAt != node.tableGeometryGeneration,
                                 )
                             }
@@ -6118,15 +6186,23 @@ object KayaCompose {
                                         "${read.viewportRight.toInt()}dp)"
                                 )
                             else -> {
-                                // The ink in the TABLE's own space, which
-                                // is the frame the sentences below name.
+                                // The ink in the CONTENT's own space,
+                                // which is the frame the sentences below
+                                // name: the live offset is added back, so
+                                // a table read after a scroll is measured
+                                // where its columns were laid out rather
+                                // than convicted of the displacement the
+                                // reader asked for (ruled 2026-08-29).
+                                // At rest the offset is 0 and this is the
+                                // table's own space, as before.
                                 val complaint = kayaTableHorizontalComplaint(
                                     read.drawn,
                                     read.content,
                                     read.track,
                                     read.viewportRight - read.viewportLeft,
-                                    read.left - read.viewportLeft,
-                                    read.right - read.viewportLeft,
+                                    read.left - read.viewportLeft + read.at,
+                                    read.right - read.viewportLeft + read.at,
+                                    read.reach,
                                 )
                                 if (complaint == null) {
                                     observed.add("${parts[1]} column edges $want")
@@ -6693,12 +6769,17 @@ object KayaCompose {
                         val st = onUi(activity) {
                             target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState
                         }
-                        if (st == null) {
-                            failures.add("no such target $spec")
-                        } else if (st.maxValue > 0) {
-                            observed.add("$spec overflows")
-                        } else {
-                            failures.add("$spec fits (maxValue 0)")
+                        val axis = if (st != null) null else columnsAxis(activity, spec)
+                        when {
+                            st != null && st.maxValue > 0 -> observed.add("$spec overflows")
+                            st != null -> failures.add("$spec fits (maxValue 0)")
+                            axis == null -> failures.add("no such target $spec")
+                            !axis.measured ->
+                                failures.add("$spec records no columns' axis on this tier")
+                            axis.reach > 0f -> observed.add("$spec overflows")
+                            else -> failures.add(
+                                "$spec fits (columns ${axis.content.toInt()}dp in a " +
+                                    "${axis.track.toInt()}dp track)")
                         }
                     }
                     "scroll_end" -> {
@@ -6706,9 +6787,22 @@ object KayaCompose {
                         // Silent, like click.
                         val spec = parts.getOrNull(1) ?: ""
                         onUi(activity) {
-                            target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState?.let { st ->
+                            val rows = target(spec, "scroll", KayaSceneModel.scrolls)
+                            if (rows != null) {
                                 kotlinx.coroutines.MainScope().launch {
-                                    st.scrollTo(st.maxValue)
+                                    rows.scrollState.scrollTo(rows.scrollState.maxValue)
+                                }
+                            } else {
+                                // The table arm, expect_overflow's rule:
+                                // the COLUMNS. Through the same
+                                // ScrollableState the finger drives, so
+                                // this cannot park where a gesture
+                                // could not.
+                                target(spec, "column", KayaSceneModel.columns)?.let { node ->
+                                    kotlinx.coroutines.MainScope().launch {
+                                        node.tableColumnScroll.scrollBy(
+                                            node.tableReachX - node.tableScrollX)
+                                    }
                                 }
                             }
                         }
@@ -6718,13 +6812,19 @@ object KayaCompose {
                         val st = onUi(activity) {
                             target(spec, "scroll", KayaSceneModel.scrolls)?.scrollState
                         }
-                        if (st == null) {
-                            failures.add("no such target $spec")
-                        } else if (st.maxValue - st.value <= 2) {
-                            observed.add("$spec at end")
-                        } else {
-                            failures.add(
+                        val axis = if (st != null) null else columnsAxis(activity, spec)
+                        when {
+                            st != null && st.maxValue - st.value <= 2 ->
+                                observed.add("$spec at end")
+                            st != null -> failures.add(
                                 "$spec short of end (${st.value} of ${st.maxValue})")
+                            axis == null -> failures.add("no such target $spec")
+                            !axis.measured ->
+                                failures.add("$spec records no columns' axis on this tier")
+                            axis.reach - axis.at <= 2f -> observed.add("$spec at end")
+                            else -> failures.add(
+                                "$spec short of end (${axis.at.toInt()} of " +
+                                    "${axis.reach.toInt()} column px)")
                         }
                     }
                     // THE THREE TEXT-RANGE READS, each going to the
@@ -8304,6 +8404,24 @@ internal fun kayaCoreRedo() {
 }
 
 /**
+ * ONE TABLE'S COLUMNS' AXIS as the three scroll verbs read it: the track
+ * and the resolved columns in dp, the granted scroll and the offset it
+ * stands at in device pixels (KayaNode.tableReachX's units).
+ *
+ * [measured] is the one guard the three share — a table whose layout has
+ * not run records no track, and "fits" would then be a claim about a
+ * measurement nobody took.
+ */
+private data class KayaColumnsAxis(
+    val track: Float,
+    val content: Float,
+    val reach: Float,
+    val at: Float,
+) {
+    val measured: Boolean get() = track > 0f && content > 0f
+}
+
+/**
  * ONE CAUSE PER SENTENCE for expect_column_edges' horizontal half — the
  * gtk.rs / winui `TableHorizontalIssue` in this backend's spelling. A
  * disjunction here would print one sentence for several causes and the
@@ -8322,7 +8440,7 @@ internal fun kayaCoreRedo() {
  */
 private enum class KayaTableHorizontalIssue {
     TrackUnderfill,
-    ColumnsOverflow,
+    ColumnsUnreachable,
     ContentLeftUnderfill,
     ContentLeftOverflow,
     ContentOverflow,
@@ -8332,11 +8450,20 @@ private enum class KayaTableHorizontalIssue {
  * [drawn] is the table's laid-out width, [content] the resolved columns
  * BEFORE the coerce that clamps them to the track, [track] what the
  * parent offered, [viewport] the table's own width, [left]/[right] the
- * cell ink in the table's own space.
+ * cell ink in the table's own space, [reach] how far this surface's
+ * columns' axis can be scrolled.
  *
  * [content] is why the overflow cause is separable at all: KayaTableSurface
  * coerces totalW into the incoming constraints, so [drawn] can never
  * exceed [track] and the resolved-column overflow is invisible in it.
+ *
+ * COLUMNS PAST THE TRACK ARE NORMAL (docs/tables-plan.md, ruled
+ * 2026-08-29): a table that does not fit scrolls to the rest of itself.
+ * So the defect is columns the reader CANNOT REACH, which is why [reach]
+ * is a separate measurement — the surface's own granted scroll — and not
+ * `content - track`, which would make the clause agree with itself. It
+ * carries the ink's clause too: the cells legitimately run [reach] past
+ * the viewport and not one dp further.
  */
 private fun kayaTableHorizontalIssue(
     drawn: Float,
@@ -8345,12 +8472,13 @@ private fun kayaTableHorizontalIssue(
     viewport: Float,
     left: Float,
     right: Float,
+    reach: Float,
 ): KayaTableHorizontalIssue? = when {
     drawn < track - 2 -> KayaTableHorizontalIssue.TrackUnderfill
-    content > track + 2 -> KayaTableHorizontalIssue.ColumnsOverflow
+    content > track + reach + 2 -> KayaTableHorizontalIssue.ColumnsUnreachable
     left > 2 -> KayaTableHorizontalIssue.ContentLeftUnderfill
     left < -2 -> KayaTableHorizontalIssue.ContentLeftOverflow
-    right > viewport + 2 -> KayaTableHorizontalIssue.ContentOverflow
+    right > viewport + reach + 2 -> KayaTableHorizontalIssue.ContentOverflow
     else -> null
 }
 
@@ -8362,17 +8490,22 @@ private fun kayaTableHorizontalComplaint(
     viewport: Float,
     left: Float,
     right: Float,
-): String? = when (kayaTableHorizontalIssue(drawn, content, track, viewport, left, right)) {
+    reach: Float,
+): String? = when (
+    kayaTableHorizontalIssue(drawn, content, track, viewport, left, right, reach)
+) {
     KayaTableHorizontalIssue.TrackUnderfill ->
         "draws ${drawn.toInt()}dp of a ${track.toInt()}dp track"
-    KayaTableHorizontalIssue.ColumnsOverflow ->
-        "columns resolve to ${content.toInt()}dp in a ${track.toInt()}dp track"
+    KayaTableHorizontalIssue.ColumnsUnreachable ->
+        "columns resolve to ${content.toInt()}dp in a ${track.toInt()}dp track " +
+            "that scrolls ${reach.toInt()}dp"
     KayaTableHorizontalIssue.ContentLeftUnderfill ->
         "cells start at ${left.toInt()}dp inside a ${viewport.toInt()}dp viewport"
     KayaTableHorizontalIssue.ContentLeftOverflow ->
         "cells start at ${left.toInt()}dp outside a ${viewport.toInt()}dp viewport"
     KayaTableHorizontalIssue.ContentOverflow ->
-        "cells end at ${right.toInt()}dp outside a ${viewport.toInt()}dp viewport"
+        "cells end at ${right.toInt()}dp outside a ${viewport.toInt()}dp viewport " +
+            "that scrolls ${reach.toInt()}dp"
     null -> null
 }
 
@@ -8389,10 +8522,12 @@ private fun kayaTableHorizontalComplaint(
  * failure and not a coincidence.
  */
 private fun kayaTableHorizontalSelftest(): String? {
-    fun issue(d: Float, c: Float, t: Float, v: Float, l: Float, r: Float) =
-        kayaTableHorizontalIssue(d, c, t, v, l, r)
-    fun say(d: Float, c: Float, t: Float, v: Float, l: Float, r: Float) =
-        kayaTableHorizontalComplaint(d, c, t, v, l, r)
+    // A table that CANNOT scroll its columns is the default here, which
+    // is what every claim written before the 2026-08-29 ruling assumed.
+    fun issue(d: Float, c: Float, t: Float, v: Float, l: Float, r: Float, reach: Float = 0f) =
+        kayaTableHorizontalIssue(d, c, t, v, l, r, reach)
+    fun say(d: Float, c: Float, t: Float, v: Float, l: Float, r: Float, reach: Float = 0f) =
+        kayaTableHorizontalComplaint(d, c, t, v, l, r, reach)
     val claims = listOf(
         "a table filling its track, its viewport and its ink is silent" to
             (issue(100f, 100f, 100f, 100f, 0f, 100f) == null &&
@@ -8406,9 +8541,24 @@ private fun kayaTableHorizontalSelftest(): String? {
                 KayaTableHorizontalIssue.TrackUnderfill),
         "columns 2dp over the track are inside the slack" to
             (issue(100f, 102f, 100f, 100f, 0f, 100f) == null),
-        "columns any further over the track are a columns overflow" to
+        "columns any further over an unscrollable track are unreachable" to
             (issue(100f, 102.1f, 100f, 100f, 0f, 100f) ==
-                KayaTableHorizontalIssue.ColumnsOverflow),
+                KayaTableHorizontalIssue.ColumnsUnreachable),
+        // THE RULING OF 2026-08-29, both sides of it: columns past the
+        // track are what a scrolling table looks like, and are a defect
+        // only where the scroll does not go far enough to reach them.
+        "columns past a track that scrolls to them are silent" to
+            (issue(100f, 140f, 100f, 100f, 0f, 140f, 40f) == null),
+        "2dp past what the scroll reaches is still inside the slack" to
+            (issue(100f, 142f, 100f, 100f, 0f, 100f, 40f) == null),
+        "columns any further than the scroll reaches are unreachable" to
+            (issue(100f, 142.1f, 100f, 100f, 0f, 100f, 40f) ==
+                KayaTableHorizontalIssue.ColumnsUnreachable),
+        "ink past a viewport the reader can scroll is silent" to
+            (issue(100f, 100f, 100f, 100f, 0f, 142f, 40f) == null),
+        "ink past what the reader can reach is a trailing-edge overflow" to
+            (issue(100f, 100f, 100f, 100f, 0f, 142.1f, 40f) ==
+                KayaTableHorizontalIssue.ContentOverflow),
         "cells 2dp inside the viewport are inside the slack" to
             (issue(100f, 100f, 100f, 100f, 2f, 100f) == null),
         "cells any further inside are a leading-edge underfill" to
@@ -8427,9 +8577,9 @@ private fun kayaTableHorizontalSelftest(): String? {
         // The four sentences, each naming the number that convicts it.
         "the track-underfill sentence names the drawn width and the track" to
             (say(80f, 85f, 120f, 100f, 0f, 70f) == "draws 80dp of a 120dp track"),
-        "the columns-overflow sentence names the resolved columns and the track" to
-            (say(119f, 140f, 120f, 110f, 0f, 130f) ==
-                "columns resolve to 140dp in a 120dp track"),
+        "the unreachable-columns sentence names the columns, the track and the reach" to
+            (say(119f, 140f, 120f, 110f, 0f, 130f, 7f) ==
+                "columns resolve to 140dp in a 120dp track that scrolls 7dp"),
         "the leading-underfill sentence names the cell start and the viewport" to
             (say(98f, 95f, 99f, 100f, 40f, 90f) ==
                 "cells start at 40dp inside a 100dp viewport"),
@@ -8441,17 +8591,17 @@ private fun kayaTableHorizontalSelftest(): String? {
         // now, so the case stopped isolating the sentence it pins. The
         // number had no other job — six pairwise-distinct numbers, so an
         // arm printing the wrong one is a red rather than a coincidence.
-        "the trailing-edge sentence names the cell end and the viewport" to
-            (say(98f, 95f, 99f, 100f, 1f, 140f) ==
-                "cells end at 140dp outside a 100dp viewport"),
+        "the trailing-edge sentence names the cell end, the viewport and the reach" to
+            (say(98f, 95f, 99f, 100f, 1f, 140f, 7f) ==
+                "cells end at 140dp outside a 100dp viewport that scrolls 7dp"),
         // Precedence where several hold at once, which is the ordinary
         // case: the ROOT is reported, never its symptom.
         "a table short of its track is convicted of that first" to
             (issue(80f, 200f, 120f, 100f, -40f, 200f) ==
                 KayaTableHorizontalIssue.TrackUnderfill),
-        "a columns overflow outranks the ink overflow it causes" to
+        "unreachable columns outrank the ink overflow they cause" to
             (issue(100f, 140f, 100f, 100f, 0f, 140f) ==
-                KayaTableHorizontalIssue.ColumnsOverflow),
+                KayaTableHorizontalIssue.ColumnsUnreachable),
         "a table shifted left is not convicted of overflowing right" to
             (issue(100f, 100f, 100f, 100f, -40f, 140f) ==
                 KayaTableHorizontalIssue.ContentLeftOverflow),
@@ -8489,9 +8639,9 @@ private fun kayaTableHorizontalSelftest(): String? {
         // span), so the split's worth here is that the sentence names
         // the ROOT rather than its symptom; the input is held anyway,
         // because the two backends answer one rule.
-        "an overflowing table names its columns, not a compliant-looking span" to
+        "an unreachable table names its columns, not a compliant-looking span" to
             (say(300f, 310f, 300f, 300f, 5f, 295f) ==
-                "columns resolve to 310dp in a 300dp track"),
+                "columns resolve to 310dp in a 300dp track that scrolls 0dp"),
     )
     val broken = claims.firstOrNull { !it.second } ?: return null
     return "the table containment truth table broke: ${broken.first}"
@@ -8567,7 +8717,13 @@ internal class KayaTableWindow(private val node: KayaNode) {
      *  modifier OUTSIDE the scroll, where the box is what the reader
      *  sees rather than what the content asked for. */
     @Volatile var viewportPx = 0
+    /** THE COLUMNS' AXIS'S BOX as the last layout measured it: the
+     *  resolved columns and the interior track they were laid out in. */
+    @Volatile var hContentPx = 0
+    @Volatile var hTrackPx = 0
 
+    private var lastHContent = -1
+    private var lastHTrack = -1
     private var lastFirst = -1
     private var lastCount = -1
     private var anchorRow = -1
@@ -8664,7 +8820,29 @@ internal class KayaTableWindow(private val node: KayaNode) {
      * THE RANGE LEADS AND THE HEIGHTS FOLLOW (§3.4): the entering rows
      * have to start stamping before there is anything to measure.
      */
+    /**
+     * A TABLE JUST LAID OUT SHOWS ITS FIRST COLUMN: either half of the
+     * columns' box moving resets the offset, and a recomposition that
+     * moved neither keeps the scroll the reader made. Without the reset
+     * `expect_at_end` passes before anything has scrolled — measured on
+     * the mac tier (docs/deferred.md).
+     *
+     * ON THE MAIN-LOOPER HOP AND NEVER FROM MEASURE, [report]'s own rule:
+     * the offset is snapshot state the layout reads, and a write from
+     * inside the layout phase invalidates the pass that made it.
+     */
+    private fun settleColumns() {
+        if (hContentPx != lastHContent || hTrackPx != lastHTrack) {
+            lastHContent = hContentPx
+            lastHTrack = hTrackPx
+            node.tableScrollX = 0f
+        } else {
+            node.tableScrollX = node.tableScrollX.coerceIn(0f, node.tableReachX)
+        }
+    }
+
     fun report() {
+        settleColumns()
         if (viewportPx <= 0) return
         // PUBLISHED BEFORE ANY EARLY RETURN. The park below waits for
         // the band it just asked for, and the band only ever arrives
@@ -8919,6 +9097,26 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 window.viewportPx = it.size.height
                 window.schedule()
             }
+            // THE COLUMNS' AXIS (docs/tables-plan.md, ruled 2026-08-29),
+            // and NOT Modifier.horizontalScroll: that proposes an
+            // infinite width, and the leftover distribution below would
+            // lose the very track it spends (docs/probes/
+            // table-overflow-2026.md §4.2). `scrollable` is the gesture
+            // ALONE — the Layout keeps its real constraints and places
+            // the columns at the offset itself — and it is orthogonal to
+            // the vertical scroll under it, which is the one nesting
+            // Compose allows (a same-direction nest throws at measure).
+            // The clip is this backend's own: verticalScroll's clip
+            // INFLATES the cross axis (androidx's MaxSupportedElevation,
+            // so a child's shadow survives), so a scrolled-out column
+            // draws outside the table's box without this.
+            .clipToBounds()
+            .scrollable(
+                state = node.tableColumnScroll,
+                orientation = Orientation.Horizontal,
+                reverseDirection = ScrollableDefaults.reverseDirection(
+                    LocalLayoutDirection.current, Orientation.Horizontal, false),
+            )
             .verticalScroll(node.scrollState),
     ) { measurables, constraints ->
         // Children arrive in content order: cols headers, the top spacer,
@@ -8953,10 +9151,13 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 for (c in 0 until cols) colWidth[c] += per + if (c < rem) 1 else 0
             }
         }
-        val colX = IntArray(cols)
+        // The columns' RESTING lefts. `colX` below is these shifted by
+        // the live offset, and it is built in the PLACEMENT block so a
+        // scroll re-places without re-measuring.
+        val colLeft = IntArray(cols)
         var acc = 0
         for (c in 0 until cols) {
-            colX[c] = acc
+            colLeft[c] = acc
             acc += colWidth[c] + if (c < cols - 1) colGapPx else 0
         }
         // A REPRESENTABLE CONSTRAINT OR NOTHING: Compose packs width and
@@ -8990,6 +9191,15 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         node.tableDrawnW = innerW / density
         node.tableContentW = acc / density
         node.tableGeometryAt = geometryAt
+        // WHAT THE TRACK COULD NOT HOLD IS WHAT THE READER SCROLLS TO
+        // (the ruling). Exactly 0 when the columns fit — the leftover
+        // above is distributed to the pixel — so no slack is needed on
+        // top of it. The two numbers under it are the box the reset
+        // watches: a table just laid out shows its first column.
+        node.tableReachX = (acc - innerW).coerceAtLeast(0).toFloat()
+        node.tableDensity = density
+        window.hContentPx = acc
+        window.hTrackPx = innerW
         val headerH = headers.maxOfOrNull { it.height } ?: 0
         // A ROW'S EXTENT IS ITS TOP-TO-TOP REPEAT DISTANCE, spacing
         // included (§2.1): a sum of these IS where the next row starts,
@@ -9037,6 +9247,15 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.rowTops = tops
         window.schedule()
         layout(totalW, totalH) {
+            // THE HEADER IS LOCKED TO THE BODY because ONE offset moves
+            // both — the whole mechanism is that the two `colX` reads
+            // below are the same array (the ruling).
+            //
+            // THE CARD STAYS WITH THE VIEWPORT. The segments are what
+            // bounds the table for the reader; sliding them off would
+            // run the rows over bare ground while the boundary the card
+            // draws sat somewhere the reader cannot see.
+            val colX = IntArray(cols) { colLeft[it] - Math.round(node.tableScrollX) }
             headerSeg.place(0, 0)
             bodySeg.place(0, bodyTop)
             headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }

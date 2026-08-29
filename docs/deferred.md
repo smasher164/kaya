@@ -7341,7 +7341,8 @@ reaches table cells; IT DOES NOT — that stamp is for FLEX children,
 while `table_stamp` writes explicit pixel tracks onto the header and
 every row and the cells sit inside them at their own content width.
 The same read PROVED the tables were correct while convicting them:
-TrackUnderfill and ColumnsOverflow were both silent on those legs, so
+TrackUnderfill and ColumnsOverflow (renamed ColumnsUnreachable when
+tables learned to scroll, 2026-08-29) were both silent on those legs, so
 the resolved tracks did span the viewport. `column_edges` now reads
 each line's OWN resolved ColumnDefinitions (`TableCellBox`,
 `table_line_end`) and the three edge numbers no longer share a basis —
@@ -8697,8 +8698,18 @@ container layout recorded". TWO consequences, one fixed and one held:
 
 - **GAP — the mac native table cannot yet be REACHED when it overflows**
   (found 2026-08-29, building the table-overflow ruling)
-  KEY: mac table reachability, minWidth idealWidth, hasHorizontalScroller,
-  documentVisibleRect, clip parks at trailing edge, KayaMacNativeTable
+  KEY: mac table reachability, minWidth idealWidth, sizeThatFits,
+  hasHorizontalScroller, documentVisibleRect, clip parks at trailing edge,
+  KayaMacNativeTable, content 430 in viewport 430
+
+  THE SCENE THAT PROVES IT IS WRITTEN AND PARKED, not committed: a
+  five-column guest plus its `wide.steps` (not in the tree), which drives
+  resize_window to 320 and back and asserts expect_overflow, scroll_end
+  and expect_at_end. It passes on macOS only TRANSIENTLY (the overflow
+  is reported mid-resize and the table then settles to its content
+  width), which is a false green, so it stays out of the tree until a
+  backend satisfies it. It is kept at
+  ~/.local/state/kaya — see the session scratchpad's wide-scene/.
 
   The ruling (docs/tables-plan.md, 2026-08-29) is that a table wider than
   its track scrolls. On macOS the scroller is now ON (overlay,
@@ -8731,9 +8742,29 @@ container layout recorded". TWO consequences, one fixed and one held:
   viewport", "a resized table refreshes its viewport and assigned track:
   got false", and both generation clauses. Reverted.
 
-  So the work is: the wrapper records the VIEWPORT (its own size) and the
-  table records the CONTENT (its frame), and every clause that reads a
-  viewport reads the wrapper's. That is a refactor of this tier's
+  A THIRD ATTEMPT, and the one that says where the real problem is
+  (2026-08-29): answer the two wants PER PROPOSAL, in the
+  representable's own `sizeThatFits` — content for an unspecified width
+  (the hug), the offer for a concrete one (the squeeze). It typechecks,
+  it keeps the hug once the width is read in the BODY so a re-floor
+  re-evaluates the view (without that the ideal stuck at 10pt while the
+  tier published 367), and check-table-tier goes green with its window
+  moved to where a container CAN widen. AND IT STILL DOES NOT SQUEEZE
+  IN A REAL SCENE: a five-column guest at a 320pt window reports
+  `content 430 in viewport 430` whether its root column stretches or
+  not, so the table takes its natural width and the WINDOW clips —
+  the same place the first attempt left it. Reverted, floor restored,
+  and the probe put back to the maintainer's own clause.
+
+  WHAT THAT LEAVES: the squeeze never reaches this tier because nothing
+  in the chain above it proposes a width smaller than the content. That
+  is a fact about kaya's own flex layout on this backend, not about
+  AppKit, and it is where the next attempt should start — NOT at another
+  frame or wrapper on the table itself.
+
+  So the wrapper work, when it happens, is: the wrapper records the
+  VIEWPORT (its own size) and the table records the CONTENT (its frame),
+  and every clause that reads a viewport reads the wrapper's. That is a refactor of this tier's
   instrumentation rather than a layout tweak — and it PAYS FOR ITSELF,
   because `expect_overflow` then compares kaya's own recorded pair
   instead of reaching into AppKit, which is the reading the SYNTHESIZED

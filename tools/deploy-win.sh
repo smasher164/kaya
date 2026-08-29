@@ -122,6 +122,7 @@ for arg in "$@"; do
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
         split_rust|split_python|split_go|split_csharp|split_java) SUITE="$arg" ;;
         panes_rust|panes_python|panes_go|panes_csharp|panes_java) SUITE="$arg" ;;
+        adaptive_rust|adaptive_python|adaptive_go|adaptive_csharp|adaptive_java) SUITE="$arg" ;;
         table_rust|table_python|table_go|table_csharp|table_java) SUITE="$arg" ;;
         listdetail_rust|listdetail_python|listdetail_go|listdetail_csharp|listdetail_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;

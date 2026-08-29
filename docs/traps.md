@@ -345,7 +345,8 @@ the same patterns return through interpreter drop-downs
   text. Shipped on that premise and measured the same day — every
   table-bearing windows leg red with "draws 289dip of a 508dip
   viewport", the 289 following the row's text, while TrackUnderfill and
-  ColumnsOverflow stayed silent on the same read and so PROVED the
+  ColumnsOverflow (renamed ColumnsUnreachable when tables learned to
+  scroll, 2026-08-29) stayed silent on the same read and so PROVED the
   tracks spanned. A line's end there must come from the line's own
   resolved ColumnDefinitions (`TableCellBox`, `table_line_end`), never
   from `ActualWidth` of the cell. The first cross-backend audit

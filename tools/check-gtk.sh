@@ -112,8 +112,15 @@ ENTRIES = (
      "let assigned = table_horizontal_track(&column);",
      "let assigned = viewport;"),
     ("classifier wired into the harness arm",
-     "match table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned) {",
-     "match table_horizontal_issue(0.0, min_drawn, max_drawn, viewport, viewport) {"),
+     "table_horizontal_issue(min_start, min_drawn, max_drawn, viewport, assigned, reach);",
+     "table_horizontal_issue(0.0, min_drawn, max_drawn, viewport, viewport, reach);"),
+    # THE OVERFLOW RULING'S OWN NUMBER (2026-08-29): cells past the
+    # viewport are what a scrolling table looks like, so the classifier
+    # convicts on the SCROLL RANGE and a range read as unbounded would
+    # make the trailing-edge clause dead with every scene still green.
+    ("the scroll range the overflow clause consults",
+     "let reach = table_body_view(&column).map_or(0.0, |view| {",
+     "let reach = f64::MAX; let _ = table_body_view(&column).map(|view| {"),
     # THE ROW WINDOW'S THREE LINKS, NONE OF WHICH ANY SCENE CAN SEE.
     # MEASURED 2026-08-25 on the real X11 leg, each perturbed alone with
     # the substitution count printed: with the range report gone, with

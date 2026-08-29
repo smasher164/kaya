@@ -247,6 +247,42 @@ the same titles at 320dp and at 900dp. The survey behind all of this is
 docs/probes/table-overflow-2026.md, and WCAG 1.4.10 excepts data tables
 by name from the no-two-dimensional-scrolling rule.
 
+LANDED 2026-08-29 ON THREE BACKENDS, each verified on its own lane:
+GTK (the body's horizontal policy Never->Automatic with overlay bars, the
+header in its own scrolled window SHARING the body's hadjustment — which
+is GtkColumnView's own mechanism — and the value parked at `lower` when
+the extents move), COMPOSE (the measure keeps its leftover distribution
+and records a reach; `clipToBounds` + `scrollable(Horizontal)` rather
+than `horizontalScroll`, which would have cost the measure the track it
+distributes; the card segments stay with the viewport because they are
+what bounds the table for the reader), and WINUI (the host's
+HorizontalScrollMode enabled with an Auto — overlay — bar, and the header
+in a SECOND ScrollViewer driven to the host's offset, because this
+backend's bindings project neither RenderTransform nor Clip).
+
+ONE DIAGNOSTIC, THREE SPELLINGS OF IT: each backend's table-overflow
+clause now takes a REACH — the surface's own granted scroll, measured
+rather than derived as `content - track`, which would have made the
+clause agree with itself — and convicts only when the columns exceed the
+track AND cannot be reached. `ColumnsOverflow`/`ContentOverflow` became
+`ColumnsUnreachable`/`ContentUnreachable` so the three spell one rule.
+
+THE VERBS: `expect_overflow`, `scroll_end` and `expect_at_end` take a
+TABLE target and read its COLUMNS' axis, because a table's ROWS already
+answer to `expect_window` and `scroll_to_row` — the target's kind decides
+the axis and no verb needs an axis word. harness.rs admits
+`Scroll | Column` for all three.
+
+STILL OPEN, both recorded in docs/deferred.md: the macOS NATIVE tier
+(three attempts measured, and the finding is that nothing in kaya's own
+flex chain above it ever proposes a width smaller than the content, so
+the squeeze never arrives), and the iOS SYNTHESIZED tier (an attempt
+that worked in isolation cost the varied scene two rows of its band by
+writing observable state inside the layout phase — the mistake Compose's
+own settleColumns warns about — and was reverted). The shared conformance
+scene waits on those two: a scene forces a leg on every runner, and a
+leg that cannot pass is not a leg.
+
 `axis` IS REFUSED ON A TABLE, both orderings (set the axis then declare
 columns, or the reverse). A flip would render the rows as a plain row and
 drop the header, silently, on every backend — legal until this ruling
