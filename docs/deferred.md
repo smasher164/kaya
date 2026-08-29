@@ -8646,10 +8646,18 @@ container layout recorded". TWO consequences, one fixed and one held:
   wired scene reaches a zero-width table today, so the repro is the
   pyhost APK with the portfolio scene by hand until this entry closes.
 - HELD: the leg itself. ANDROID_UNWIRED_SCENES="portfolio" with the
-  reason at the declaration. Closes with the adaptive-layout milestone
-  (docs/adaptive-layout-plan.md): the dashboard's one stack_below
-  keyword removes the overflow, both models then agree, and the leg
-  wires — which also makes the crash clamp's repro a lane leg.
+  reason at the declaration. THE OVERFLOW HALF IS GONE (2026-08-28): the
+  dashboard says `stack_below=700` and both phones flip the row —
+  measured on the iPhone (`row#0 axis vertical`, and the capture in the
+  artifact) and on the emulator's adaptive leg. WHAT STILL HOLDS THE LEG
+  IS A CEILING, not a layout: launched by hand on the emulator with the
+  shared script, the guest's 15,000-transaction build outruns the
+  harness's per-step retry deadline and the FIRST step fails "no such
+  target row#0" ~5s in, with no python error and no crash. So the
+  remaining work is that deadline against this guest's build, not the
+  constraints model. The measurement was taken with a never-true
+  expectation to hold the frame; the same launch on iOS reaches the
+  dashboard, so the difference is build speed on the emulator.
 
 - ~~**DEPTH STUB: adaptive on winui**~~ — CLOSED 2026-08-28 by the
   adaptive milestone's breadth slice, exactly as this entry described:

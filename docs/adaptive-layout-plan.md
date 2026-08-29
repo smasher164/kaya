@@ -153,6 +153,30 @@ Sequencing is RULED (2026-08-28): the packaging milestone's Android
 step first, then this plan as its own milestone feeding the
 portfolio's visual iteration.
 
+## §1.5 — the milestone landed 2026-08-28
+
+The breadth slice closed the same evening as the depth: the record went
+to the SPEC ROOT (kind 48, threshold a tagged f64, setters one flat
+Values list of thirds), so all eight encoders come out of the generator;
+`stack_below` rides the row in each binding's own idiom and the template
+zone is refused BY TYPE in seven, by the frozen live-only sentence in
+Python (its one handle serves both zones); the axis setter joins it
+everywhere for D2. WinUI's stub is gone — `core.axes` plus
+`effective_vertical`, with reindex clearing the axis it is not using and
+stamping both attached indices — and Compose reports the width through a
+new JNI native. The scene runs in eight languages on the mac, seven on
+linux, five on windows and one on each phone (cut at the resize a phone
+cannot command, with the always-narrow truth as the leg's extra). The
+portfolio adopted the feature after the scene was green, as §2 requires:
+`stack_below=700` on the dashboard's outer row.
+
+D6's three rulings, settled by building: the threshold spelling is
+`stack_below=<points>` (below, logical points, matching the platforms'
+convergence); the setter list is axis-only, refused at the root by name;
+and day one is the SUGAR ALONE — the general `when` spelling is D4's
+neighbour on the ledger, unbuilt, since no scene or app needs a
+multi-prop diff yet.
+
 ## §2 — validation shape (sketch, firmed at build time)
 
 A new `adaptive` conformance scene: on the desktops it drives
