@@ -8622,3 +8622,31 @@ are the nearest shipped relatives). Closes when a real narrow layout
 that a property diff cannot express exists — the portfolio's phone
 dashboard is currently believed to need only the axis flip, and if its
 visual iteration proves otherwise this entry is the design to build.
+
+
+## GAP — the portfolio's android leg waits on adaptive layout (found 2026-08-28, by the pyhost APK's first mount)
+KEY: portfolio android, zero-width track, constraints model, proposal model, kayaFixedRepresentable, Can't represent, ANDROID_UNWIRED_SCENES
+
+The packaging milestone's android slice brought python up (varied-python
+runs; the suite is run-emulator.sh's), and the portfolio was the first
+scene to mount a table inside a ZERO-WIDTH track on Compose: at phone
+width the dashboard's detail column overflows, SwiftUI's proposal model
+lays the overflow out at natural size (clipped, geometry real — the iOS
+leg passes), and Compose's constraints model squeezes it to 0, so the
+tables record no live viewport geometry and expect_aligned answers "no
+container layout recorded". TWO consequences, one fixed and one held:
+
+- FIXED SAME DAY: KayaTableSurface THREW during first composition —
+  towering wrapped rows at width 0 made the windowed spacers exceed
+  Compose's Constraints packing ("Can't represent a width of 0 and
+  height of 358912") and the app died before any verdict. The measure
+  sites clamp through kayaFixedRepresentable now
+  (Constraints.fitPrioritizingWidth: identical values whenever they
+  were representable). ITS STANDING NEGATIVE IS THE FUTURE LEG: no
+  wired scene reaches a zero-width table today, so the repro is the
+  pyhost APK with the portfolio scene by hand until this entry closes.
+- HELD: the leg itself. ANDROID_UNWIRED_SCENES="portfolio" with the
+  reason at the declaration. Closes with the adaptive-layout milestone
+  (docs/adaptive-layout-plan.md): the dashboard's one stack_below
+  keyword removes the overflow, both models then agree, and the leg
+  wires — which also makes the crash clamp's repro a lane leg.

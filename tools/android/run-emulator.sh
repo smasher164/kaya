@@ -999,7 +999,7 @@ stage_suite_apk() { # label apk package target...
     local stage_pairs=()
     case "$label" in
         compose) expected=$((POOL + 1)) ;;
-        jvm|go) expected=$POOL ;;
+        jvm|go|python) expected=$POOL ;;
         *)
             echo "run-emulator: refusing to stage unknown suite $label" >&2
             return 1
@@ -1621,6 +1621,65 @@ PY
 #      EITHER SIDE CHECKS IT.
 #   3. THE COPY into jniLibs is what gradle packages, so that is what
 #      gets checked.
+# THE PYTHON SHIM'S ARTIFACT: tools/android/pyhost-jni.c as
+# libkaya_pyhost.so — kaya_go_build's refusals one guest tier over.
+# The NDK API level follows :pyhost's minSdk, and the JNI symbol must
+# be in the built .so: Java_dev_kaya_KayaPy_run is the one name binding
+# KayaPy.kt to the shim and NO COMPILER ON EITHER SIDE CHECKS IT.
+kaya_py_build() { # jnilibs-dir
+    local jnilibs="$1"
+    local module="$ROOT/android/pyhost/build.gradle.kts"
+    local api ndkbin out
+    api="$(python3 - "$module" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text()
+for line in text.splitlines():
+    if line.lstrip().startswith("//"):
+        continue
+    m = re.search(r"\bminSdk\s*=\s*(\d+)", line)
+    if m:
+        print(m.group(1))
+        break
+else:
+    sys.exit(f"run-emulator: {sys.argv[1]} declares no minSdk, so the python "
+             f"shim has no platform to cross-build against")
+PY
+)"
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "$api" ]; then
+        echo "run-emulator: could not read minSdk from $module" >&2
+        return 1
+    fi
+    ndkbin="$(echo "$ANDROID_NDK_ROOT"/toolchains/llvm/prebuilt/*/bin)"
+    if [ ! -x "$ndkbin/aarch64-linux-android$api-clang" ]; then
+        echo "run-emulator: the NDK has no aarch64-linux-android$api-clang" >&2
+        echo "  (looked in $ndkbin; minSdk $api comes from $module)" >&2
+        return 1
+    fi
+    "$ndkbin/aarch64-linux-android$api-clang" -shared -fPIC \
+        "$ROOT/tools/android/pyhost-jni.c" \
+        -I "$KAYA_CPYTHON_ANDROID_AARCH64/prefix/include/python3.15" \
+        -L "$KAYA_CPYTHON_ANDROID_AARCH64/prefix/lib" -lpython3.15 \
+        -o "$jnilibs/libkaya_pyhost.so"
+    local build_rc=$?
+    if [ "$build_rc" -ne 0 ]; then
+        echo "run-emulator: the python shim did not cross-build" >&2
+        return 1
+    fi
+    out="$("$ndkbin/llvm-nm" -D --defined-only "$jnilibs/libkaya_pyhost.so" 2>/dev/null \
+        | grep -c ' Java_dev_kaya_KayaPy_run$')"
+    if [ "$out" != 1 ]; then
+        echo "run-emulator: libkaya_pyhost.so does not export Java_dev_kaya_KayaPy_run" >&2
+        echo "  exactly once (found $out) — KayaPy.run would throw" >&2
+        echo "  UnsatisfiedLinkError at first use" >&2
+        return 1
+    fi
+    return 0
+}
+
 kaya_go_build() { # lib-name jnilibs-dir
     local lib="$1" jnilibs="$2"
     local module="$ROOT/android/milestone2go/build.gradle.kts"
@@ -2304,13 +2363,18 @@ fi
 # design.
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
 ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
-# Scenes whose GUEST cannot run here YET — sequencing, not design: the
-# portfolio dashboard is Python by design (docs/portfolio-plan.md),
-# and CPython reaches this platform with the packaging milestone
-# (official upstream support exists, PEP 738). The legs wire when it
-# lands.
+# Scenes whose GUEST cannot run here YET. CPython reached this
+# platform 2026-08-28 (the python suite below) and varied wired with
+# it; the PORTFOLIO alone stays off: at phone width its dashboard's
+# detail column takes a ZERO-WIDTH track under Compose's constraints
+# model (SwiftUI's proposal model lays the same overflow out at
+# natural size, clipped, which is why the iOS leg runs), so the
+# tables record no live geometry and the scene cannot answer. It
+# wires with the adaptive-layout milestone
+# (docs/adaptive-layout-plan.md), whose axis flip removes the
+# overflow — docs/deferred.md carries the entry.
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-ANDROID_UNWIRED_SCENES="portfolio varied"
+ANDROID_UNWIRED_SCENES="portfolio"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
@@ -2543,6 +2607,108 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         --es KAYA_SELFTEST_SCRIPT "'${editor_script}'"
     drain
     timing legs-go
+fi
+
+# THE PYTHON GUEST SUITE (docs/python-mobile-plan.md): CPython embedded
+# in ONE APK carrying every python scene behind app/main.py's
+# KAYA_SELFTEST dispatch (tools/pyhost-main.py — the iOS bundle's
+# pattern, which was this platform's pattern first). The shell is
+# milestone2go's five lines with the guest tier swapped
+# (android/pyhost/src/main/kotlin/dev/kaya/pyhost/MainActivity.kt);
+# the shim runs CPython to completion on a background thread
+# (tools/android/pyhost-jni.c), and the guest's app.run() parks as the
+# occurrence consumer through the binding's HOSTED_ENTRY arm.
+# arm64-v8a only, like every family here; the x86_64 flake pin exists
+# for the day an Intel-host lane appears.
+if [ "$SUITE" = python ] || [ "$SUITE" = all ]; then
+    if [ -z "${KAYA_CPYTHON_ANDROID_AARCH64:-}" ] \
+        || [ ! -d "$KAYA_CPYTHON_ANDROID_AARCH64/prefix" ]; then
+        echo "run-emulator: KAYA_CPYTHON_ANDROID_AARCH64 is unset or not a" >&2
+        echo "  directory — the dev shell exports it (flake.nix's cpythonAndroid);" >&2
+        echo "  re-enter nix develop" >&2
+        exit 1
+    fi
+    PYPFX="$KAYA_CPYTHON_ANDROID_AARCH64/prefix"
+    PYJNILIBS="$ROOT/android/pyhost/src/main/jniLibs/arm64-v8a"
+    PYASSETS="$ROOT/android/pyhost/src/main/assets/python"
+    mkdir -p "$PYJNILIBS"
+    cargo ndk -t arm64-v8a build --locked --lib || exit 1
+    cp "$ROOT/target/aarch64-linux-android/debug/libkaya.so" "$PYJNILIBS/"
+    "$ROOT/tools/build-id.sh" --verify "$PYJNILIBS/libkaya.so" || exit 1
+    for so in libpython3.15.so libcrypto_python.so libssl_python.so \
+        libsqlite3_python.so; do
+        # rm first: the source is the read-only nix store, so a prior
+        # staging's copy has no write bit and a bare cp refuses it.
+        rm -f "$PYJNILIBS/$so"
+        cp "$PYPFX/lib/$so" "$PYJNILIBS/" || exit 1
+        chmod u+w "$PYJNILIBS/$so"
+    done
+    kaya_py_build "$PYJNILIBS" || exit 1
+    # The staged stdlib + guests, re-derived every run (the runner is
+    # the staging truth, like the jniLibs above; the extraction stamp
+    # is a hash of the staged bytes, so an unchanged staging is a
+    # skipped device copy). AAPT decompresses real `.gz` assets, so the
+    # rename here is undone by MainActivity's extraction.
+    rm -rf "$PYASSETS"
+    mkdir -p "$PYASSETS/app"
+    python3 - "$PYPFX" "$PYASSETS" "$ROOT" <<'PY' || exit 1
+import hashlib
+import pathlib
+import shutil
+import sys
+
+pfx, dest, root = (pathlib.Path(a) for a in sys.argv[1:4])
+skip = {"test", "idlelib", "tkinter", "turtledemo", "__pycache__"}
+src = pfx / "lib/python3.15"
+out = dest / "lib/python3.15"
+for f in sorted(src.rglob("*")):
+    if f.is_dir() or set(f.relative_to(src).parts) & skip:
+        continue
+    target = out / f.relative_to(src)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(f, target)
+app = dest / "app"
+shutil.copy2(root / "tools/pyhost-main.py", app / "main.py")
+for scene in ("portfolio", "varied"):
+    shutil.copy2(root / f"guests/python/{scene}.py", app / f"{scene}.py")
+shutil.copytree(root / "bindings/python/kaya", app / "kaya",
+                ignore=shutil.ignore_patterns("__pycache__"))
+renamed = 0
+for p in dest.rglob("*.gz"):
+    p.rename(p.with_name(p.name + "-"))
+    renamed += 1
+h = hashlib.sha256()
+count = 0
+for f in sorted(dest.rglob("*")):
+    if f.is_file():
+        h.update(f.relative_to(dest).as_posix().encode())
+        h.update(f.read_bytes())
+        count += 1
+if count < 400:
+    sys.exit(f"run-emulator: python staging copied {count} files — a stdlib "
+             "that small is the copy failing, not the guests passing")
+(dest / "kaya-stamp").write_text(h.hexdigest(), encoding="utf-8")
+print(f"python staging: {count} files, {renamed} gz renamed, "
+      f"stamp {h.hexdigest()[:12]}")
+PY
+    kaya_write_compose_marker
+    (cd android && gradle --console=plain -q :pyhost:assembleDebug) || exit 1
+    "$ROOT/tools/build-id.sh" --verify --component compose \
+        "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" || exit 1
+    apk_icon_verify \
+        "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" || exit 1
+    apk_assets_verify \
+        "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" || exit 1
+    timing build-python
+    stage_suite_apk python \
+        "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" \
+        dev.kaya.pyhost "${SERIALS[@]}" || exit 1
+    run_apk varied-python \
+        "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" \
+        dev.kaya.pyhost/.MainActivity varied \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script varied)'"
+    drain
+    timing legs-python
 fi
 
 exit "$status"

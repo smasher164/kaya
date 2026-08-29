@@ -8878,6 +8878,17 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             colX[c] = acc
             acc += colWidth[c] + if (c < cols - 1) colGapPx else 0
         }
+        // A REPRESENTABLE CONSTRAINT OR NOTHING: Compose packs width and
+        // height into one long, so a giant height beside a tiny width is
+        // an IllegalArgumentException, not a big box. A zero-width track
+        // (the phone-width portfolio dashboard, first mounted by the
+        // packaging milestone's pyhost APK) made the windowed spacers
+        // tower past the packing and this measure THREW during first
+        // composition. fitPrioritizingWidth returns the same values
+        // whenever they were representable and clamps only past the
+        // packing's edge — where nothing is visible anyway.
+        fun kayaFixedRepresentable(w: Int, h: Int) =
+            Constraints.fitPrioritizingWidth(w, w, h.coerceAtLeast(0), h.coerceAtLeast(0))
         val totalW = (acc + 2 * padX).coerceIn(constraints.minWidth, constraints.maxWidth)
         val innerW = (totalW - 2 * padX).coerceAtLeast(0)
         // THE CARD'S OWN SPAN COMES OFF THE TRACK (gtk.rs's `css_inset_span`
@@ -8904,9 +8915,9 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val tail = if (rowExtents.isEmpty()) 0 else rowGapPx
         val spacers = kayaWindowSpacers(offsetPx, extentPx, bandH, tail)
         val topH = spacers.first
-        val top = measurables[cols].measure(Constraints.fixed(totalW, spacers.first))
+        val top = measurables[cols].measure(kayaFixedRepresentable(totalW, spacers.first))
         val bottom = measurables[measurables.size - 3]
-            .measure(Constraints.fixed(totalW, spacers.second))
+            .measure(kayaFixedRepresentable(totalW, spacers.second))
         // TWO SEGMENTS: the header row is its own container, then the gap,
         // then ONE container for every body row. The interior is inside
         // each, which is the whole of why the reported viewport is the
@@ -8921,9 +8932,9 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         // container ends at its last row and a tall one's scrolls with the
         // rows, ONE rounded rectangle each rather than one per band.
         val headerSeg = measurables[measurables.size - 2]
-            .measure(Constraints.fixed(totalW, headerSegH))
+            .measure(kayaFixedRepresentable(totalW, headerSegH))
         val bodySeg = measurables[measurables.size - 1]
-            .measure(Constraints.fixed(totalW, (contentH - bodyTop).coerceAtLeast(0)))
+            .measure(kayaFixedRepresentable(totalW, contentH - bodyTop))
         val tops = IntArray(rowExtents.size)
         var y = topH
         for (r in rowExtents.indices) {

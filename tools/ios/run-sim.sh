@@ -2040,7 +2040,7 @@ if [ "$SUITE" = python ] || [ "$SUITE" = all ]; then
     cp -R "$PYFW/Python.framework" "$APP/Frameworks/Python.framework"
     chmod -R u+w "$APP/Frameworks"
     cp -R "$PYHOME" "$APP/python"
-    cp tools/ios/pyhost-main.py "$APP/app/main.py"
+    cp tools/pyhost-main.py "$APP/app/main.py"
     for entry in $IOS_PYTHON_SCENES; do
         cp "guests/python/$entry.py" "$APP/app/$entry.py" || exit 1
     done

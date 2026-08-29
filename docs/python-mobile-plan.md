@@ -214,7 +214,7 @@ precedent for simulator-only proof).
    platform dispatch; App.run()'s caller-is-the-app-thread arm), the
    C host tools/ios/pyhost.c owns the process entry and boots CPython
    on a signal-free worker, ONE bundle carries every python scene
-   behind tools/ios/pyhost-main.py's KAYA_SELFTEST dispatch (the
+   behind tools/pyhost-main.py's KAYA_SELFTEST dispatch (the
    Android APK pattern), and run-sim.sh's python suite wires
    `portfolio-python` AND `varied-python` — varied turned out
    phone-clean from birth, so the iOS half of the fan-out collapsed
@@ -231,6 +231,28 @@ precedent for simulator-only proof).
    unwire→red→wire→green negative watched both directions.
 2. Android: the JNI shim + gradle asset split, the same leg green on
    the emulator lane.
+   LANDED 2026-08-28, same session, with two findings the first mount
+   earned. The build: android/pyhost (the APK, milestone2go's shell
+   with the guest tier swapped), dev.kaya.KayaPy resolved BY NAME out
+   of the shim tools/android/pyhost-jni.c (kaya_py_build's nm refusal
+   is the wall, kaya_go_build's), assets staged by the runner behind a
+   content-hash stamp so extraction is once per staged version, and
+   the flake pinning BOTH ABI tarballs while the APK ships arm64-v8a
+   alone — every family here does, and the x86_64 pin waits for an
+   Intel-host lane. THE FINDINGS: (1) the portfolio was the first
+   scene ever to mount a table in a ZERO-WIDTH track on Compose, and
+   KayaTableSurface THREW ("Can't represent a width of 0 and height
+   of 358912" — the windowed spacers past the Constraints packing);
+   the measure sites clamp through kayaFixedRepresentable now, and
+   the repro stands in docs/deferred.md's portfolio-android entry.
+   (2) the leg divergence itself: SwiftUI's proposal model lays the
+   dashboard's overflow out at natural size (the iOS leg passes) and
+   Compose's constraints model hands it width 0 (no live geometry, no
+   answers) — so varied-python wires here and PORTFOLIO'S ANDROID LEG
+   IS LEDGERED, closing with the adaptive-layout milestone whose axis
+   flip removes the overflow. D7 amends accordingly: the app is
+   FINISHED when that milestone lands its one keyword, which was the
+   sequencing the maintainer ruled anyway.
 3. Fan-out: the portfolio's `IOS_UNWIRED_SCENES`/`ANDROID_UNWIRED_SCENES`
    declarations deleted WITH THEIR NEGATIVES WATCHED, the varied
    scene following, and whatever other Python-only scenes exist at

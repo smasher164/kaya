@@ -450,10 +450,18 @@ else:
          "the collection s height stops being the core s extent"),
         ("kayaWindowSpacers(offsetPx, extentPx, bandH, tail)",
          "the two spacers stop being one function of those two numbers"),
-        ("Constraints.fixed(totalW, spacers.first)",
+        # kayaFixedRepresentable since 2026-08-28: the same fixed
+        # constraints wherever they are representable, clamped only past
+        # Compose s packing edge (the zero-width portfolio mount threw;
+        # docs/deferred.md s portfolio-android entry). The third pin
+        # holds the helper honest: fitPrioritizingWidth IS the identity
+        # on every representable input, so the spacer link survives.
+        ("kayaFixedRepresentable(totalW, spacers.first)",
          "the TOP spacer stops being that function s answer"),
-        ("Constraints.fixed(totalW, spacers.second)",
+        ("kayaFixedRepresentable(totalW, spacers.second)",
          "the BOTTOM spacer stops being that function s answer"),
+        ("Constraints.fitPrioritizingWidth(w, w, h.coerceAtLeast(0), h.coerceAtLeast(0))",
+         "kayaFixedRepresentable stops being the representability clamp"),
     ):
         if pin not in surface:
             bad.append("KayaTableSurface does not spell `" + pin + "` — "

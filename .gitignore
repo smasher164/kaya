@@ -34,6 +34,8 @@ __pycache__/
 /android/.gradle/
 /android/**/build/
 /android/*/src/main/jniLibs/
+# The python family's runner-staged stdlib+guests (run-emulator.sh).
+/android/pyhost/src/main/assets/python/
 /android/.kotlin/
 # The picker probe is a SEPARATE gradle build (tools/android/pickerprobe),
 # deliberately outside /android so it can never affect what the lane

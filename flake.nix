@@ -77,6 +77,23 @@
             mkdir -p "$out"
             tar -xzf "$src" -C "$out"
           '';
+          # The Android halves of the same pin (docs/python-mobile-plan.md
+          # §D1): python.org's official embeddable packages, one per ABI —
+          # arm64-v8a for the phones and Apple Silicon emulators, x86_64
+          # for Intel-host emulators — both shipped in the APK's jniLibs
+          # so the artifact runs on either (the probe report's §6 note).
+          cpythonAndroid = arch: hash: pkgs.runCommand "cpython-android-3.15.0rc1-${arch}"
+            {
+              src = pkgs.fetchurl {
+                url = "https://www.python.org/ftp/python/3.15.0/python-3.15.0rc1-${arch}-linux-android.tar.gz";
+                inherit hash;
+              };
+            } ''
+            mkdir -p "$out"
+            tar -xzf "$src" -C "$out"
+          '';
+          cpythonAndroidAarch64 = cpythonAndroid "aarch64" "sha256-fW+yimk2iEFlb5GaCBQbDjcgg3rGeYc4gDfunSpcVJI=";
+          cpythonAndroidX86_64 = cpythonAndroid "x86_64" "sha256-8Ej1xgtTjvxk5MJjmaCiEgLOQwlJ1bLBA2nWJFSKXcM=";
         in
         {
         default = pkgs.mkShell {
@@ -182,6 +199,10 @@
             export ANDROID_HOME="${androidSdk}/libexec/android-sdk"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk-bundle"
+            # The Android lane's embedded CPython, both ABIs (see
+            # cpythonAndroid above).
+            export KAYA_CPYTHON_ANDROID_AARCH64="${cpythonAndroidAarch64}"
+            export KAYA_CPYTHON_ANDROID_X86_64="${cpythonAndroidX86_64}"
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             # The iOS lane's embedded CPython (see cpythonIos above).
             export KAYA_CPYTHON_IOS="${cpythonIos}/Python.xcframework"

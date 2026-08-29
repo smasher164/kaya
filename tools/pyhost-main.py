@@ -1,4 +1,4 @@
-"""The iOS python-host entry, staged into the bundle as app/main.py:
+"""The python-host entry on BOTH phone platforms, staged as app/main.py:
 one bundle carries every python scene — the Android APK's
 one-artifact-many-scenes pattern — and KAYA_SELFTEST names the guest
 file (docs/python-mobile-plan.md §D6)."""

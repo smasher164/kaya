@@ -93,7 +93,7 @@ FORBIDDEN_EMPTY_SETTING = re.compile(
 )
 STAGE_REQUIRED = [
     'compose) expected=$((POOL + 1))',
-    'jvm|go) expected=$POOL',
+    'jvm|go|python) expected=$POOL',
     'if [ "${#targets[@]}" -ne "$expected" ]; then',
     'if [ "${targets[$i]}" = "${targets[$j]}" ]; then',
     'for serial in "${targets[@]}"; do',
@@ -224,17 +224,18 @@ def shell_function(text: str, name: str) -> str | None:
 def suite_blocks(text: str) -> dict[str, str] | None:
     starts = {
         name: text.find(f'if [ "$SUITE" = {name} ] || [ "$SUITE" = all ]; then')
-        for name in ("compose", "jvm", "go")
+        for name in ("compose", "jvm", "go", "python")
     }
     if any(pos < 0 for pos in starts.values()):
         return None
-    end = text.find('\nexit "$status"', starts["go"])
-    if not (starts["compose"] < starts["jvm"] < starts["go"] < end):
+    end = text.find('\nexit "$status"', starts["python"])
+    if not (starts["compose"] < starts["jvm"] < starts["go"] < starts["python"] < end):
         return None
     return {
         "compose": text[starts["compose"] : starts["jvm"]],
         "jvm": text[starts["jvm"] : starts["go"]],
-        "go": text[starts["go"] : end],
+        "go": text[starts["go"] : starts["python"]],
+        "python": text[starts["python"] : end],
     }
 
 
@@ -285,6 +286,11 @@ def staging_problem(text: str) -> str | None:
             "dev.kaya.milestone2go",
             '"${SERIALS[@]}"',
         ),
+        "python": (
+            "android/pyhost/build/outputs/apk/debug/pyhost-debug.apk",
+            "dev.kaya.pyhost",
+            '"${SERIALS[@]}"',
+        ),
     }
     for name, block in blocks.items():
         apk, package, targets = specs[name]
@@ -299,12 +305,17 @@ def staging_problem(text: str) -> str | None:
             return f"{name} is not staged once on {suffix}"
         if len(re.findall(rf'\bstage_suite_apk {name}\b', block)) != 1:
             return f"{name} must have exactly one staging barrier"
+        # The three original tiers open with the suite-named default leg
+        # (KAYA_SELFTEST=1, milestone2's app); the python tier has no
+        # default arm BY DESIGN — its dispatcher (tools/pyhost-main.py)
+        # keys on scene names — so its anchor is its first scene leg.
+        first_leg = "run_apk varied-python " if name == "python" else f"run_apk {name} "
         markers = [
             block.find('"$ROOT/tools/build-id.sh" --verify --component compose'),
             block.find("apk_icon_verify"),
             block.find("apk_assets_verify"),
             call_pos,
-            block.find(f"run_apk {name} "),
+            block.find(first_leg),
         ]
         if any(pos < 0 for pos in markers) or markers != sorted(markers):
             return f"{name} staging must follow every artifact verification and precede its first leg"
@@ -349,7 +360,11 @@ def ime_problem(text: str) -> str | None:
         runs = list(re.finditer(r"(?m)^    run_apk(?:_tablet)? ", block))
         if not runs or drains[0].start() < runs[-1].start():
             return f"{name}'s only drain must follow its last submitted leg"
-        if f"run_apk ranges-{name} " not in block:
+        # The python suite's roster is varied alone until the portfolio's
+        # ledgered android entry closes (docs/deferred.md); no python
+        # scene here needs the IME, so the ranges anchor is the three
+        # original suites' rule.
+        if name != "python" and f"run_apk ranges-{name} " not in block:
             return f"{name} no longer submits its ranges leg through run_apk"
     go = blocks["go"]
     if go.find("run_apk editor-go ") > go.find("\n    drain\n"):

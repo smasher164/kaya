@@ -335,10 +335,14 @@ RUST_EXT = ".rs"
 READ_EXT = (SWIFT_EXT, RUST_EXT)
 CODE_EXT = (".swift", ".rs", ".kt", ".kts", ".java", ".cs", ".go", ".py",
             ".ml", ".mli", ".hs", ".c", ".h", ".m")
+# "assets" joined 2026-08-28: an assets directory holds packaged
+# payload, not source — the android python suite stages CPython's own
+# stdlib under android/pyhost/src/main/assets/python (gitignored), and
+# urllib.error's `reason` property is not a kaya diagnostic.
 SKIP_DIRS = {"target", "target-linux", "_build", "_build-linux", "build",
              ".build", ".git", ".gradle", "node_modules", "__pycache__",
              "dist-newstyle", "DerivedData", "obj", "bin", "third_party",
-             "checkouts", "Pods"}
+             "checkouts", "Pods", "assets"}
 
 
 def find_func(code, name):
