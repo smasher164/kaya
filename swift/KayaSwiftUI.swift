@@ -9738,17 +9738,6 @@ func kayaRecordTableCell(
 
 /// Its viewport twin — `synthesized` is what tells the realization census
 /// which tier owes how many rows.
-/// THE GATE PROBE'S ONLY DOOR TO THE SYNTHESIZED TIER, for `widthClass`'s
-/// reason one type over: the mac picks the NATIVE tier from a
-/// compile-time arm, so a probe on this host cannot reach the phone's
-/// branch through `KayaTableSurface` at all. An opaque return keeps the
-/// view private — check-table-tier and check-table-card both anchor on
-/// that declaration, and moving it broke them
-/// (tools/checks/swiftui-stacked-grow.swift).
-func kayaSynthesizedTableForProbe(_ node: KayaNode) -> some View {
-    KayaSynthesizedTable(node: node)
-}
-
 func kayaRecordTableViewport(
     _ node: KayaNode, _ generation: Int, _ frame: CGRect, _ synthesized: Bool
 ) {

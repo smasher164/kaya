@@ -8750,13 +8750,24 @@ story that costs a session to re-test:
    at `311x0`. The box's own `placeSubviews` passes `bounds.height`
    straight through, so the zero arrives from ABOVE it.
 
-THE INSTRUMENTATION AND THE FAST LOOP NOW EXIST (2026-08-29). The whole
-chain speaks under `KAYA_LAYOUT_TRACE=1` — flex bounds and per-child
-extents by node id, cell proposal/natural/out, scroll-box proposal, and
-the viewport the reporter records — so one run shows the sequence instead
-of one probe per build. And `tools/checks/swiftui-stacked-grow.swift`
-renders THIS EXACT SHAPE on a Mac in seconds: a hugging summary column
-with the long `net` label, a grown 40-row table under it, at 393 points.
+THE INSTRUMENTATION EXISTS (2026-08-29). The whole chain speaks under
+`KAYA_LAYOUT_TRACE=1` — flex bounds and per-child extents BY NODE ID,
+cell proposal/natural/out, scroll-box proposal, and the viewport the
+reporter records — so one run shows the sequence instead of one probe per
+build. The Compose side has the same channel, gated the same way.
+
+A MAC-SIDE PROBE WAS BUILT AND THEN REMOVED, deliberately, and the
+reasoning is worth keeping: `tools/checks/swiftui-stacked-grow.swift` (gone)
+rendered the phone's synthesized tier on a Mac in seconds, which needed a
+door through `KayaTableSurface`'s tier switch, which in turn needed
+check-table-tier's one-caller census to sanction a second construction
+site. It answered its question — the pure layout shape is healthy — and
+then nothing ran it, so it was an unwired guard plus a hole in a strict
+gate, which is a bad trade. Recover it from git history if this tier
+needs a fast loop again; the shape is a hugging summary column with a
+long label and a grown 40-row table under it at 393 points, rendered
+through `KayaSynthesizedTable` directly because the mac's tier arm is
+`#if os(macOS)` and never selects it.
 
 TWO THINGS THAT COST HOURS BEFORE THE PROBE EXISTED, both now permanent:
 - THE MAC CANNOT REACH THIS CODE THROUGH THE APP. `kayaTableTier` gates
