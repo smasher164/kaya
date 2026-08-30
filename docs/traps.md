@@ -6191,3 +6191,49 @@ whole chain rather than one probe per build. Four hypotheses were tested
 serially at two and a half minutes each — the scroll box's zero fallback,
 the sibling's width, the summary's height, `align="stretch"` — and every
 one came back byte-identical, because none of them was ever the question.
+
+## The android guest is staged, so a hand-built APK packages the LAST LANE RUN's copy (2026-08-29)
+
+`android/pyhost/src/main/assets/python/app/portfolio.py` is a STAGED COPY
+that `tools/android/run-emulator.sh` refreshes. Gradle packages from
+there, not from `guests/`. So editing the guest and running
+`gradle :pyhost:assembleDebug` by hand builds an APK containing whatever
+the last LANE run staged — and `--rerun-tasks` does not help, because the
+staged file is the task's input and it is unchanged.
+
+MEASURED: a three-state bisect over the guest (no scroll / dashboard
+scroll / both) produced identical results for all three, because all
+three APKs contained the same staged guest. The check that caught it was
+reading the packaged bytes back:
+
+    unzip -p <apk> assets/python/app/portfolio.py | grep -c 'kaya.scroll'
+
+against the same count in the tree. When they disagree, every conclusion
+drawn from that APK is about a file nobody edited.
+
+STAGE IT YOURSELF before any hand-built android experiment, and verify
+the packaged bytes rather than the build's exit status — this is
+invariant 4's "validation scripts build and verify what they ship" one
+directory over, and the lane obeys it while a hand build does not.
+
+
+## Compose REFUSES kaya's portfolio Transactions screen outright (2026-08-29)
+
+    java.lang.IllegalStateException: Vertically scrollable component was
+    measured with an infinity maximum height constraints, which is
+    disallowed.
+
+Navigating to Transactions on the android emulator kills the app. It is
+NOT caused by this session's scroll work: the same crash reproduces with
+the guest exactly as it was beforehand, on an APK whose packaged bytes
+were verified to contain no `kaya.scroll` at all. It has simply never
+been seen, because `ANDROID_UNWIRED_SCENES="portfolio"` keeps the scene
+off that lane, so no gate and no leg has ever rendered this screen there.
+
+WHY IT MATTERS BEYOND THE CRASH: this is the runtime proof of the design
+entry in docs/deferred.md. `grow` divides leftover; a scroll offers an
+unbounded main extent; the grown ledger is itself a vertically scrollable
+component. Flutter refuses that combination at layout time, Compose
+refuses it at runtime — and kaya answers ZERO on SwiftUI and CRASHES on
+Compose for the same declaration. Two backends, two failure modes, one
+cause, and the surface currently lets an author write it.
