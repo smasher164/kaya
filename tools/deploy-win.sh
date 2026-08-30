@@ -2241,4 +2241,11 @@ drain_suites
 timing suites
 rec_suite_stop || status=1
 [ -z "${KAYA_RECORD:-}" ] || timing recording-pull+stills
+# The one-line verdict (run-suites.sh's rule, and the reason it exists):
+# suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer. Without it a log that stops early — a
+# killed lane, a lost pipe — reads exactly like a complete one, which is
+# how an ios run that reached no leg at all was read as a pass
+# (2026-08-29). tools/check-gates.sh holds all five runners to this.
+if [ "$status" = 0 ]; then echo "deploy-win: ALL PASS"; else echo "deploy-win: FAILURES ABOVE"; fi
 exit "$status"

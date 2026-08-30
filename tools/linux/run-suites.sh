@@ -263,6 +263,24 @@ LEGS_DIR="$(mktemp -d)"
 leg_names=()
 leg_pids=()
 
+# The flight recorder: one journal outside the build tree for every leg,
+# and a capture bundle for every FAIL. One failure is enough evidence — a
+# leg that fails once and passes on the rerun leaves nothing behind
+# otherwise, which is what the two ios legs did all through 2026-08-29.
+# tools/lib/flightrec.sh holds the rules; a runner that cannot open the
+# journal prints the miss once and still runs every leg.
+# /work IS the root here: this runner runs INSIDE the container and has
+# no $ROOT (it `cd /work` at the top, under `set -u`).
+FLIGHTREC_ROOT=/work
+export FLIGHTREC_ROOT
+FLIGHTREC_SCRATCH="$(mktemp -d)"
+# shellcheck source=tools/lib/flightrec.sh
+source /work/tools/lib/flightrec.sh
+flightrec_start linux
+# A lane that dies mid-run is exactly when the journal matters, and this
+# runner has no other EXIT trap to share.
+trap 'flightrec_flush; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
+
 # THE X11 DISPLAY POOL, one Xvfb per pool slot, booted once (2026-08-20:
 # xvfb-run per leg re-paid ~half a second of server boot on every one of
 # ~280 x11 legs). One leg per display at a time — the claim lock in
@@ -321,12 +339,19 @@ run() {
     if [ "$JOBS" = 1 ]; then
         echo "== $name ($proto) =="
         local t0=$SECONDS
+        local serial_verdict=PASS
         if run_one "$proto" "$name" "$@"; then
             echo "$name ($proto): PASS ($((SECONDS - t0))s)"
         else
+            serial_verdict=FAIL
             echo "$name ($proto): FAIL ($((SECONDS - t0))s)"
             status=1
         fi
+        # SERIAL LEGS JOURNAL TOO — this path prints to the terminal and
+        # keeps no log file, so a bundle has nothing to carry, but the
+        # record of what ran and how long it took is the half that makes
+        # an intermittent leg legible at all.
+        flightrec_leg linux "$name-$proto" "$serial_verdict" "$((SECONDS - t0))" "" ""
         return
     fi
     (
@@ -447,7 +472,27 @@ drain() {
             fi
             status=1
         fi
-        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
+        local secs bundle
+        secs=$(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')
+        bundle=""
+        if [ "$verdict" != PASS ]; then
+            bundle="$(flightrec_bundle linux "$name")"
+            if [ -n "$bundle" ]; then
+                # THE LEG'S OWN LOG, which is the whole of what this lane
+                # knows about a failure, plus the display pool's state —
+                # an X11 leg that failed because its Xvfb died looks
+                # exactly like one that failed an assertion, and only the
+                # server log tells them apart.
+                flightrec_section "$bundle" leg-log "" \
+                    cat "$LEGS_DIR/$name.log"
+                flightrec_section "$bundle" xvfb "" \
+                    sh -c 'cat /tmp/xvfb-*.log 2>/dev/null'
+                flightrec_bundle_report "$bundle"
+            fi
+        fi
+        flightrec_leg linux "$name" "$verdict" "$secs" \
+            "$(flightrec_fail_sentence "$LEGS_DIR/$name.log")" "$bundle"
+        echo "$name: $verdict (${secs}s)"
     done
     leg_names=()
 }
@@ -1312,6 +1357,7 @@ xvfb-run -a bash -c "
     kill %1
 " 2>/dev/null || true
 
+flightrec_flush
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
 if [ "$status" = 0 ]; then echo "run-suites: ALL PASS"; else echo "run-suites: FAILURES ABOVE"; fi

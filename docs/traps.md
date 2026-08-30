@@ -6079,3 +6079,42 @@ harness that ran only the block's output asserted the scene minus its
 one interesting step — 78 green runs that tested nothing. The pad, which
 MUST fail, is what exposed that: a loop with no known-red canary agrees
 with everything.
+
+## A background matrix that outlives its shell, and the second one that fights it (2026-08-29)
+
+Two full matrices ran concurrently over the same working tree for seven
+minutes, and the symptom was three java legs on the MAC lane failing with
+
+    Error: Could not find or load main class dev.kaya.milestone2kt.Main
+
+while thirty-seven java legs on the same lane passed — the three sitting
+CONSECUTIVELY in the middle, with java legs green before and after. That
+shape is the whole diagnosis: validate-mac's `build_java` opens with
+`rm -rf target/java-guests`, so one matrix rebuilding the directory while
+the other's legs read it empties the classpath for exactly as long as the
+javac takes. Nothing in the tree was wrong, and the same lane had passed
+349 of 349 standalone an hour earlier.
+
+The android lane's `remount-*` legs and one `portfolio-python` leg failed
+in the same window, for the same reason. EVERY verdict from a contended
+run is worthless, including the green ones, which is why both runs were
+killed and one clean matrix started rather than re-reading the logs.
+
+HOW THE SECOND MATRIX GOT THERE: it was launched as `nohup … &` from
+inside an already-backgrounded shell. The launching shell returned
+immediately, the harness reported the command COMPLETE WITH EXIT 0, and
+the log it wrote held three lines — so it read exactly like a lane that
+had finished. The process was reparented to init and kept running. The
+tell is `ps -Ao pid,ppid,etime` showing a `validate-all.sh` with PPID 1
+and an elapsed time longer than the run you think you started.
+
+THE RULE: never wrap a lane or matrix in `nohup … &` inside a background
+shell. Start it as the shell's own foreground command and let the harness
+background it, so its lifetime is the task's lifetime. And before
+starting any matrix, count the trees — one `validate-all.sh` root, no
+PPID 1.
+
+THE SAME EVENT ALSO EXPLAINS A FALSE GREEN one file over: a lane whose
+log simply stops is indistinguishable from one that finished, because
+three of the five runners ended with a bare exit and printed no verdict.
+They all print one now, and check-gates holds all five to it.

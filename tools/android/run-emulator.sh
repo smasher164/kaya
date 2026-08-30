@@ -425,13 +425,27 @@ fi
 # file; drain() prints in submission order and closes the suite before
 # the next build and stage.
 LEGS_DIR="$(mktemp -d)"
+
+# The flight recorder: one journal outside the build tree for every leg,
+# and a capture bundle for every FAIL. One failure is enough evidence — a
+# leg that fails once and passes on the rerun leaves nothing behind
+# otherwise, which is what the two ios legs did all through 2026-08-29.
+# tools/lib/flightrec.sh holds the rules; a runner that cannot open the
+# journal prints the miss once and still runs every leg.
+FLIGHTREC_ROOT="$ROOT"
+export FLIGHTREC_ROOT
+FLIGHTREC_SCRATCH="$(mktemp -d)"
+# shellcheck source=tools/lib/flightrec.sh
+source "$ROOT/tools/lib/flightrec.sh"
+flightrec_start android
 # THE POOL STAYS WARM ACROSS RUNS (nothing kills it at exit), so every
 # device-global switch this run flips has to come back off. In the trap
 # and not at the end of the script because a failed leg, a ^C and a
 # `set -e` abort all leave the same mess.
 CLIPHELPER_IME_ON=()
 kaya_teardown() {
-    rm -rf "$LEGS_DIR"
+    flightrec_flush
+    rm -rf "$LEGS_DIR" "${FLIGHTREC_SCRATCH:-}"
     local serial
     for serial in ${CLIPHELPER_IME_ON[@]+"${CLIPHELPER_IME_ON[@]}"}; do
         adb -s "$serial" shell ime reset >/dev/null 2>&1 || true
@@ -769,7 +783,26 @@ drain() {
         echo "== $name =="
         cat "$LEGS_DIR/$name.log" 2>/dev/null
         [ "$verdict" = PASS ] || status=1
-        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
+        local secs bundle
+        secs=$(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')
+        bundle=""
+        if [ "$verdict" != PASS ]; then
+            bundle="$(flightrec_bundle android "$name")"
+            if [ -n "$bundle" ]; then
+                # THE LEG'S LOG plus the device roster. An android leg
+                # that failed because its emulator went offline reads
+                # exactly like one that failed an assertion, and only the
+                # roster tells them apart — the same discrimination the
+                # ios lane's `devices` section buys.
+                flightrec_section "$bundle" leg-log "" \
+                    cat "$LEGS_DIR/$name.log"
+                flightrec_section "$bundle" devices adb devices -l
+                flightrec_bundle_report "$bundle"
+            fi
+        fi
+        flightrec_leg android "$name" "$verdict" "$secs" \
+            "$(flightrec_fail_sentence "$LEGS_DIR/$name.log")" "$bundle"
+        echo "$name: $verdict (${secs}s)"
     done
     leg_names=()
 }
@@ -2746,4 +2779,11 @@ PY
     timing legs-python
 fi
 
+# The one-line verdict (run-suites.sh's rule, and the reason it exists):
+# suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer. Without it a log that stops early — a
+# killed lane, a lost pipe — reads exactly like a complete one, which is
+# how an ios run that reached no leg at all was read as a pass
+# (2026-08-29). tools/check-gates.sh holds all five runners to this.
+if [ "$status" = 0 ]; then echo "run-emulator: ALL PASS"; else echo "run-emulator: FAILURES ABOVE"; fi
 exit "$status"

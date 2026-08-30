@@ -187,6 +187,64 @@ def ios_pool_problem(runner, probe):
     return None
 
 
+# The five platform runners, by the two things a lane owes a reader who
+# was not watching: the ANSWER, and the EVIDENCE.
+LANE_RUNNERS = {
+    "tools/validate-mac.sh": ("validate-mac", "mac"),
+    "tools/ios/run-sim.sh": ("run-sim", "ios"),
+    "tools/linux/run-suites.sh": ("run-suites", "linux"),
+    "tools/android/run-emulator.sh": ("run-emulator", "android"),
+    "tools/deploy-win.sh": ("deploy-win", "windows"),
+}
+
+
+def lane_contract_problems(texts, lib):
+    """A lane must END WITH THE ANSWER and KEEP ITS EVIDENCE.
+
+    Both were measured missing. Three runners ended with a bare
+    `exit "$status"`, so a log that stopped early — a killed lane, a lost
+    pipe — read exactly like a complete one; an ios run that reached no
+    leg at all was read as a pass twice on 2026-08-29. And the flight
+    recorder was wired into two runners of five, with the lane that had
+    the intermittent legs among the three without it, so every rerun
+    erased the only evidence (tools/lib/flightrec.sh's own header).
+    """
+    problems = []
+    for rel, (name, lane) in LANE_RUNNERS.items():
+        text = texts[rel]
+        for want in (f'echo "{name}: ALL PASS"',
+                     f'echo "{name}: FAILURES ABOVE"'):
+            if want not in text:
+                problems.append(
+                    f"{rel} never prints {want} — a lane that ends without "
+                    f"its verdict cannot be told from one that was cut off, "
+                    f"and a truncated log then reads as a pass")
+        if f"flightrec_start {lane}" not in text:
+            problems.append(
+                f"{rel} does not call `flightrec_start {lane}` — a leg that "
+                f"fails once and passes on the rerun would leave nothing "
+                f"behind, which is what tools/lib/flightrec.sh exists to stop")
+        # DIRECTLY, or through a lane wrapper in the library that
+        # journals under this lane's name — deploy-win calls
+        # flightrec_win_leg and validate-mac flightrec_mac_leg, and both
+        # of those reach flightrec_leg inside tools/lib/flightrec.sh.
+        journals = f"flightrec_leg {lane} " in text
+        if not journals:
+            for wrapper in re.findall(r"\bflightrec_\w*_leg\b", text):
+                body = re.search(rf"^{wrapper}\(\) \{{(.*?)^\}}", lib,
+                                 re.S | re.M)
+                if body and f"flightrec_leg {lane} " in body.group(1):
+                    journals = True
+                    break
+        if not journals:
+            problems.append(
+                f"{rel} opens a flight-recorder run but journals no leg under "
+                f"lane `{lane}` — neither directly nor through a wrapper in "
+                f"tools/lib/flightrec.sh, and an empty journal is the same "
+                f"silence with more moving parts")
+    return problems
+
+
 # ---------------------------------------------------------------- data
 
 out = subprocess.run([str(root / "tools" / "gates.sh"), "--list"],
@@ -201,6 +259,10 @@ EXCLUDED = listing["excluded"]
 
 claude_text = (root / "CLAUDE.md").read_text(encoding="utf-8")
 mac_text = (root / "tools" / "validate-mac.sh").read_text(encoding="utf-8")
+lane_texts = {rel: (root / rel).read_text(encoding="utf-8")
+              for rel in LANE_RUNNERS}
+flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
+    encoding="utf-8")
 matrix_text = (root / "tools" / "validate-all.sh").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.sh").read_text(
     encoding="utf-8")
@@ -494,6 +556,71 @@ if problem is not None:
 problem = ios_pool_problem(ios_text, probe_text)
 if problem is not None:
     fail(problem)
+for problem in lane_contract_problems(lane_texts, flightrec_lib_text):
+    fail(problem)
+
+# N15 — a lane that stops printing its verdict must be reported. The
+# measured shape: three of five runners ended with a bare `exit "$status"`
+# and a truncated log read as a complete one.
+doctored, n = re.subn(
+    re.escape('echo "run-sim: ALL PASS"'), 'true', lane_texts["tools/ios/run-sim.sh"],
+    count=1)
+print("check-gates: self-test N15 silenced a lane's verdict, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N15 did not remove exactly one verdict — the lane "
+         "contract clause is not reading the real runner")
+else:
+    hurt = dict(lane_texts, **{"tools/ios/run-sim.sh": doctored})
+    problems = lane_contract_problems(hurt, flightrec_lib_text)
+    if not problems:
+        fail("self-test N15: a lane that never prints its verdict passed")
+    elif not any("ALL PASS" in x for x in problems):
+        fail("self-test N15 failed for another reason: " + "; ".join(problems))
+
+# N16 — a lane that keeps no evidence must be reported. The measured
+# shape: the recorder was wired into two runners of five, and the lane
+# with the intermittent legs was one of the three without it.
+doctored, n = re.subn(
+    r"^flightrec_start linux$", "true",
+    lane_texts["tools/linux/run-suites.sh"], count=1, flags=re.M)
+print("check-gates: self-test N16 unwired a lane's flight recorder, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N16 did not remove exactly one flightrec_start — the "
+         "lane contract clause is not reading the real runner")
+else:
+    hurt = dict(lane_texts, **{"tools/linux/run-suites.sh": doctored})
+    problems = lane_contract_problems(hurt, flightrec_lib_text)
+    if not problems:
+        fail("self-test N16: a lane that records nothing passed")
+    elif not any("flightrec_start" in x for x in problems):
+        fail("self-test N16 failed for another reason: " + "; ".join(problems))
+
+# N17 — THE WRAPPER PATH ITSELF. deploy-win journals through
+# flightrec_win_leg rather than calling flightrec_leg, so the clause has
+# to read the wrapper's body out of the library; a pattern that never
+# matches would call that lane uncovered — or, if every lane journaled
+# directly, would pass while reading nothing. This doctors the LIBRARY,
+# which is the only half N15/N16 never touch. (It has already earned its
+# keep: the first draft of the clause carried a literal backspace where
+# `\b` belonged.)
+doctored, n = re.subn(
+    r"^    flightrec_leg windows ", "    flightrec_leg ghostlane ",
+    flightrec_lib_text, count=1, flags=re.M)
+print("check-gates: self-test N17 renamed the windows wrapper's lane, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N17 did not rename exactly one wrapper journal — the "
+         "lane contract clause is not reading tools/lib/flightrec.sh")
+else:
+    problems = lane_contract_problems(lane_texts, doctored)
+    if not problems:
+        fail("self-test N17: a lane whose only journal is a wrapper that "
+             "records another lane passed")
+    elif not any("deploy-win" in x and "journals no leg" in x
+                 for x in problems):
+        fail("self-test N17 failed for another reason: " + "; ".join(problems))
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.
@@ -508,7 +635,8 @@ if proof.returncode != 0:
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
           f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
-          "delayed niced sweep, four-phone Android pool, three-sim iOS pool)")
+          "delayed niced sweep, four-phone Android pool, three-sim iOS pool, "
+          "five lanes each ending with their verdict and journaling every leg)")
 else:
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)
 sys.exit(status)

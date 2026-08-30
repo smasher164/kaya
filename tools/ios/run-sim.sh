@@ -1674,7 +1674,7 @@ drain() {
         # own step timeline, and the device's state at the time.
         bundle=""
         if [ "$verdict" != PASS ]; then
-            bundle="$(flightrec_bundle "$name")"
+            bundle="$(flightrec_bundle ios "$name")"
             flightrec_section "$bundle" leg-log "" cat "$LEGS_DIR/$name.log"
             flightrec_section "$bundle" devices xcrun \
                 xcrun simctl list devices booted
@@ -2476,4 +2476,11 @@ fi
 
 rec_suite_stop || status=1
 timing stills-extraction
+# The one-line verdict (run-suites.sh's rule, and the reason it exists):
+# suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer. Without it a log that stops early — a
+# killed lane, a lost pipe — reads exactly like a complete one, which is
+# how an ios run that reached no leg at all was read as a pass
+# (2026-08-29). tools/check-gates.sh holds all five runners to this.
+if [ "$status" = 0 ]; then echo "run-sim: ALL PASS"; else echo "run-sim: FAILURES ABOVE"; fi
 exit "$status"

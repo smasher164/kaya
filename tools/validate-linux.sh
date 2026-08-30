@@ -33,7 +33,17 @@ T0=$SECONDS
 # Hard ceiling on a suite that never returns. Generous: a cold container
 # compiles everything from scratch.
 rc=0
+# THE FLIGHT RECORDER'S HOME IS THE HOST'S, MOUNTED IN. The container is
+# `--rm`, so a journal written to its own filesystem dies with it — and
+# the recorder's whole point is that a leg which fails once and passes on
+# the rerun leaves something behind. One home per MACHINE is also the
+# design (tools/lib/flightrec.py): two lanes from two checkouts belong in
+# one journal, and a per-container home would fragment it.
+FLIGHTREC_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/kaya"
+mkdir -p "$FLIGHTREC_HOME"
 timeout 1800 docker run --rm -v "$ROOT:/work" \
+    -v "$FLIGHTREC_HOME:/flightrec-state/kaya" \
+    -e XDG_STATE_HOME=/flightrec-state \
     -e KAYA_RECORD="${KAYA_RECORD:-}" -e KAYA_JOBS="${KAYA_JOBS:-}" \
     -e KAYA_ONLY="${KAYA_ONLY:-}" \
     kaya-linux bash /work/tools/linux/run-suites.sh || rc=$?
