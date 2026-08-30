@@ -287,8 +287,13 @@ refuses "$GTK" "$WINUI" "$T/swiftui-emptyview.swift" "$COMPOSE" \
     "renders \`EmptyView()\` when the decode fails" \
     "a SwiftUI image arm that renders nothing"
 
-hits="$(perturb "$SWIFTUI" 'let natural = subviews\.first\?\.sizeThatFits\(\.unspecified\) \?\? \.zero' \
-    'let natural = subviews[0].sizeThatFits(.unspecified)' "$T/swiftui-subscript.swift")"
+# The cell measures at the width it was GIVEN (the 2026-08-29 wrapping
+# ruling), so the line this perturbs is `sizeThatFits(probe)` — it used to
+# read `.unspecified`, and that string still occurs elsewhere in the file,
+# which is how this self-test went vacuous the day the cell changed: the
+# substitution applied somewhere OUTSIDE KayaCell and the gate passed.
+hits="$(perturb "$SWIFTUI" 'let natural = subviews\.first\?\.sizeThatFits\(probe\) \?\? \.zero' \
+    'let natural = subviews[0].sizeThatFits(probe)' "$T/swiftui-subscript.swift")"
 applied "$hits" "the KayaCell subscript perturbation"
 refuses "$GTK" "$WINUI" "$T/swiftui-subscript.swift" "$COMPOSE" \
     "KayaCell subscripts" "a KayaCell that indexes an unchecked child"

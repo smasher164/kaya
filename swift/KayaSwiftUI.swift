@@ -8291,7 +8291,13 @@ struct KayaCell: Layout {
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
-        let natural = subviews.first?.sizeThatFits(.unspecified) ?? .zero
+        // MEASURED AT THE WIDTH WE WERE GIVEN (ruled 2026-08-29, the same
+        // rule KayaFlex carries): text is as tall as the width lets it be,
+        // so measuring with `.unspecified` here reported ONE LINE and the
+        // cell then placed the label one line tall — a long label
+        // truncated with an ellipsis where it should have wrapped.
+        let probe = ProposedViewSize(width: proposal.width, height: nil)
+        let natural = subviews.first?.sizeThatFits(probe) ?? .zero
         return CGSize(
             width: proposal.width ?? natural.width,
             height: proposal.height ?? natural.height)
@@ -10582,10 +10588,40 @@ struct KayaFlex: Layout {
     private func main(_ size: CGSize) -> CGFloat { vertical ? size.height : size.width }
     private func cross(_ size: CGSize) -> CGFloat { vertical ? size.width : size.height }
 
+    /// The cross extent this container was actually offered, or nil when
+    /// the proposal leaves it open (SwiftUI's natural-size passes do).
+    static func offeredCross(_ proposal: ProposedViewSize, vertical: Bool) -> CGFloat? {
+        guard let v = vertical ? proposal.width : proposal.height,
+            v.isFinite, v > 0
+        else { return nil }
+        return v
+    }
+
+    /// What to ask a child: the cross we were offered, main left open so
+    /// the child still reports what it wants along the stack's axis.
+    static func bounded(_ proposal: ProposedViewSize, vertical: Bool) -> ProposedViewSize {
+        guard let offered = offeredCross(proposal, vertical: vertical) else {
+            return .unspecified
+        }
+        return vertical
+            ? ProposedViewSize(width: offered, height: nil)
+            : ProposedViewSize(width: nil, height: offered)
+    }
+
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
-        let natural = subviews.map { $0.sizeThatFits(.unspecified) }
+        // THE OFFERED CROSS BOUNDS THE MEASUREMENT (ruled 2026-08-29). A
+        // child asked with `.unspecified` answers what it WANTS, and a
+        // label's answer is its whole text on one line — so a container
+        // reported its widest label's width and hung off the screen, and a
+        // grown sibling beside it was left a negative track. Measuring
+        // against the width we were actually offered is also what makes
+        // wrapping possible at all: a label only breaks lines when
+        // something hands it a narrower box, and until this nothing did
+        // (docs/traps.md, and GTK says the same of its own labels).
+        let childProposal = Self.bounded(proposal, vertical: vertical)
+        let natural = subviews.map { $0.sizeThatFits(childProposal) }
         let gaps = spacing * CGFloat(max(0, subviews.count - 1))
         let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
         let naturalCross = natural.map { cross($0) }.max() ?? 0
@@ -10608,7 +10644,14 @@ struct KayaFlex: Layout {
         let extent = proposal.replacingUnspecifiedDimensions(by: fallback)
         let filledMain = vertical ? extent.height : extent.width
         let filledCross = vertical ? extent.width : extent.height
-        let crossExtent = fillCross ? max(naturalCross, filledCross) : naturalCross
+        // NEVER WIDER THAN WE WERE OFFERED. A hugging container still hugs
+        // — it just cannot answer with more than it was given.
+        let crossExtent: CGFloat
+        if let offered = Self.offeredCross(proposal, vertical: vertical) {
+            crossExtent = fillCross ? offered : min(naturalCross, offered)
+        } else {
+            crossExtent = fillCross ? max(naturalCross, filledCross) : naturalCross
+        }
         return vertical
             ? CGSize(width: crossExtent, height: filledMain)
             : CGSize(width: filledMain, height: crossExtent)
@@ -10621,8 +10664,14 @@ struct KayaFlex: Layout {
         let gaps = spacing * CGFloat(subviews.count - 1)
         // A grower's own natural size is deliberately not consulted: the
         // contract is flex-basis 0, so it starts from nothing.
+        // MEASURED AGAINST THE BOX WE ARE PLACING INTO, not against
+        // nothing: a wrapped label's height depends on the width it gets,
+        // so measuring with `.unspecified` here would lay out every line
+        // after the first outside the container.
+        let childProposal = Self.bounded(
+            ProposedViewSize(bounds.size), vertical: vertical)
         var extents = subviews.indices.map { i -> CGFloat in
-            weight(i) > 0 ? 0 : main(subviews[i].sizeThatFits(.unspecified))
+            weight(i) > 0 ? 0 : main(subviews[i].sizeThatFits(childProposal))
         }
         let fixed = extents.reduce(0, +)
         let leftover = max(0, main(bounds.size) - fixed - gaps)

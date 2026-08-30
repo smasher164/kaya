@@ -6118,3 +6118,43 @@ THE SAME EVENT ALSO EXPLAINS A FALSE GREEN one file over: a lane whose
 log simply stops is indistinguishable from one that finished, because
 three of the five runners ended with a bare exit and printed no verdict.
 They all print one now, and check-gates holds all five to it.
+
+## A container measured with `.unspecified` is as wide as its longest label (2026-08-29)
+
+Two layouts asked every child what it WANTED, with no constraint:
+`KayaFlex.sizeThatFits` (`subviews.map { $0.sizeThatFits(.unspecified) }`)
+and `KayaCell.sizeThatFits` one layer under it. A label's answer to that
+question is its whole text on ONE LINE, so a container reported its
+longest label's width and hung off the screen, and a grown sibling beside
+it was left a negative track.
+
+WRAPPING ALONE WOULD NOT HAVE FIXED IT, and this is the part worth
+keeping: a label only breaks lines when something hands it a narrower
+box, and until this nothing ever did. GTK's own documentation says the
+same of its labels — setting `wrap` does not make a label wrap at its
+parent's width, "because GTK+ widgets conceptually can't make their
+requisition depend on the parent container's size", which is why it also
+wants `max-width-chars`. Both halves are required: labels that wrap, and
+containers that do not answer with more than they were offered.
+
+THE TWO SITES, and they fail differently:
+- `KayaFlex`: measure children against the offered cross and never answer
+  wider than it. Without this the container overflows the screen.
+- `KayaCell`: measure the child at the width the CELL was given. Without
+  this the cell reports a ONE-LINE height even when its width is
+  concrete, and the label is then placed one line tall — which showed up
+  as an ellipsis exactly where the text should have wrapped. Fixing
+  KayaFlex alone got the text bounded and still truncated.
+
+MEASURED on the portfolio's Transactions screen at 393 points: before,
+`net AAPL 10, …` ran off the right edge; after KayaFlex alone it
+truncated with an ellipsis; after both it wraps to two lines and the
+whole sum is readable.
+
+THE GATE THIS MOVED: check-empty-child's KayaCell negative perturbs an
+exact line, and that line used to read `.unspecified`. The same string
+occurs elsewhere in the file, so once the cell changed the substitution
+landed OUTSIDE KayaCell and the self-test went vacuous — it reported
+"applied (1 substitution)" and then passed. It perturbs
+`sizeThatFits(probe)` now. A negative test pinned to a line's text is
+only as good as that line.

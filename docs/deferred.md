@@ -8665,16 +8665,26 @@ container layout recorded". TWO consequences, one fixed and one held:
   viewport geometry". Three of the leg's four failures were that.
 
   WHAT STILL BLOCKS IT, both measured, neither a ceiling:
-  1. THE TRANSACTIONS SCREEN IS THE SECOND SIDE-BY-SIDE ROW, and its
-     grown ledger table is measured at ZERO width under Compose's
-     constraints model — `track -32dp, drawn 0dp, content 276dp`, the
-     original zero-width finding alive on the screen `stack_below` was
-     never put on. Adding the keyword there did NOT fix it on Compose
-     while macOS flipped the same row correctly (`row@txnrow axis
-     vertical`), and on Compose that row did not answer its own a11y key
-     at all — so the next thread is why a pushed-entry row is
-     unaddressable there, not another keyword. The experiment was
-     reverted; the guest is unchanged.
+  1. THE TRANSACTIONS SCREEN'S GROWN LEDGER GETS NO TRACK. THE CAUSE
+     RECORDED HERE WAS WRONG, and was disproved 2026-08-29 by four
+     experiments that each left the number BYTE-IDENTICAL at `track
+     -32dp, drawn 0dp, content 281dp`: shortening the `net` line to one
+     word, shortening ALL FOUR summary labels to one character,
+     REMOVING the recent table from the summary column entirely, and
+     removing that column's `align="stretch"`. The sibling's width is
+     therefore not what starves the ledger — nothing about the summary
+     column is. A constant -32 is the card inset applied to a track of
+     ZERO, i.e. the table is never laid out at all.
+     WHAT IS ALSO NOW KNOWN, from the SwiftUI side: stack the same row
+     with `stack_below` and iOS loses the ledger's viewport too
+     (`rect=311x0` — a real width, zero height), because a grown child
+     under a summary that is already a screenful gets no leftover. So
+     this is not a Compose-only defect and not a width defect; it is a
+     grown table with nowhere to live on a phone. A blunt fix — giving
+     any starved grower a containerful — was tried and REVERTED: it
+     changed track arithmetic wherever the leftover legitimately reaches
+     zero and cost 16 sizepolicy legs on the mac lane.
+     KEY: txnrow, grown ledger no track, track -32dp, four falsified
   2. AT 320dp THE ACCOUNT TABLES OVERFLOW: columns resolve to 263dp in a
      256dp track. The pool device's 320dp width is deliberate (the
      lane's compact-class coverage), and kaya has no ruling on what a
