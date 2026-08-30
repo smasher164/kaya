@@ -8655,13 +8655,42 @@ story that costs a session to re-test:
    at `311x0`. The box's own `placeSubviews` passes `bounds.height`
    straight through, so the zero arrives from ABOVE it.
 
-WHERE TO PICK IT UP: the height is lost between the flex (which assigns
-259) and the scroll box (which was observed receiving -1, 145 and 0 in
-one run). Instrument the chain — KayaFlex extent, KayaCell bounds,
-KayaTableSurface, KayaScrollBox — in ONE run and correlate; the passes
-disagree, and which pass the clip ends up reflecting is the question. The
-fast loop is `tools/ios/run-sim.sh python` (2 legs, 35s) plus
-scratch `shoot-ios.py`, which prints KAYA_DIAG lines.
+THE INSTRUMENTATION AND THE FAST LOOP NOW EXIST (2026-08-29). The whole
+chain speaks under `KAYA_LAYOUT_TRACE=1` — flex bounds and per-child
+extents by node id, cell proposal/natural/out, scroll-box proposal, and
+the viewport the reporter records — so one run shows the sequence instead
+of one probe per build. And `tools/checks/swiftui-stacked-grow.swift`
+renders THIS EXACT SHAPE on a Mac in seconds: a hugging summary column
+with the long `net` label, a grown 40-row table under it, at 393 points.
+
+TWO THINGS THAT COST HOURS BEFORE THE PROBE EXISTED, both now permanent:
+- THE MAC CANNOT REACH THIS CODE THROUGH THE APP. `kayaTableTier` gates
+  on TableColumnForEach's AVAILABILITY, not width, and `widthClass` is a
+  compile-time `#if os(macOS)` arm returning `.noSizeClass`, so the mac
+  always renders the NATIVE tier. A traced run of the real app at 400
+  points emitted 2,423 lines and not one from the synthesized tier. An
+  `.environment(\.horizontalSizeClass, .compact)` does not help — the mac
+  arm never reads one. `kayaSynthesizedTableForProbe` is the sanctioned
+  door, and check-table-tier holds it to being a door (its A1 census
+  refuses any call from the interpreter, watched firing).
+- A PROBE HAS NO CORE, so `visible` is ALWAYS nil there by the tier's own
+  early return in `report()`. Asserting it reads as this bug and is not.
+  The viewport is the part that is pure layout, and it is what was zero
+  on the phone.
+
+WHAT THE PROBE SAYS, and it is a NEGATIVE result that redirects the hunt:
+the pure layout shape is HEALTHY. `flex bounds=393x700 extents=[80, 612]`,
+`box#20 size in=393x612 out=393x612`, `vp#20 clip=413x628`. The flex
+hands the grown table its height, the cell passes it, the box takes it and
+the viewport records it. So the phone's `311x0` is NOT produced by this
+geometry alone — it needs something the probe deliberately lacks, which is
+the CORE IN THE LOOP: windowGeometry, rowExtent, windowMoved and the
+re-layout each report provokes. That feedback is where to look next, and
+the probe is the place to add a fake core to drive it.
+
+ALSO FALSIFIED, with the probe: `KayaScrollBox`'s `proposal.height ?? 0`
+fallback. Changed to answer the content height instead and every number
+came back byte-identical.
 
 NOT A DESIGN FORK. It was put to the maintainer as one (a `hide_below`
 primitive, or a viewport policy) and that framing was withdrawn: nothing

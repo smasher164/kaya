@@ -563,6 +563,30 @@ if body is not None:
             bad.append(f"{path}: {tier} is never constructed — this census is reading "
                        "a name the interpreter no longer uses, so it agrees with "
                        "anything.")
+        # THE ONE SANCTIONED DOOR. The mac picks its tier from a
+        # compile-time `#if os(macOS)` arm, so on this host the
+        # SYNTHESIZED branch — the only one a phone runs — is unreachable
+        # through the routing, and a gate probe that cannot render it
+        # cannot test the phone's layout at all. `kayaSynthesizedTableForProbe`
+        # is that door; the clause below holds it to being a door and
+        # nothing more, so it can never become a second route: its body
+        # must be the one construction, and the interpreter itself may not
+        # call it.
+        door = braced(text, r"func kayaSynthesizedTableForProbe\b")
+        if door is not None:
+            outside = [s for s in outside if not (door[0] <= s < door[1])]
+            # NOT THE DEFINITION. Grepping a bare function name matches
+            # `func name(` too, which is how three of check-tx-liveness's
+            # clauses once passed with their guard deleted (CLAUDE.md).
+            callers = [m.start() for m in re.finditer(
+                r"(?<!func )kayaSynthesizedTableForProbe\s*\(", text)]
+            if callers:
+                bad.append(f"{path}:{line_of(callers[0])}: the interpreter calls "
+                           "kayaSynthesizedTableForProbe. That function exists so a "
+                           "GATE PROBE can reach the synthesized tier on a host whose "
+                           "routing never selects it; a call from the interpreter makes "
+                           "it a second route, which is the very thing this census "
+                           "refuses.")
         for off in outside:
             # WHERE it escaped to is the difference between two fixes, so
             # the sentence says which one this is.

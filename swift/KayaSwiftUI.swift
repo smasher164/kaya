@@ -763,6 +763,15 @@ func kayaArmSelftestStartupDeadline() {
 }
 
 /// Absolute timestamps on stderr so a leg log correlates with `log show`.
+/// A LAYOUT TRACE, off unless asked for. One run has to be able to show
+/// the whole chain — flex extent, cell bounds, scroll box proposal, the
+/// clip the viewport reporter actually sees — or a layout question turns
+/// into one probe per build (docs/deferred.md, the grown-table entry).
+let kayaTraceOn = ProcessInfo.processInfo.environment["KAYA_LAYOUT_TRACE"] != nil
+@inline(__always) func kayaTrace(_ msg: @autoclosure () -> String) {
+    if kayaTraceOn { kayaDiag("TRACE " + msg()) }
+}
+
 func kayaDiag(_ msg: String) {
     let line = String(format: "KAYA_DIAG %.3f %@\n", Date().timeIntervalSince1970, msg)
     FileHandle.standardError.write(line.data(using: .utf8)!)
@@ -8273,6 +8282,9 @@ var kayaAvailableSize = CGSize.zero
 /// KayaCell entry). Cross-axis: start/stretch/baseline lead, center centers,
 /// end trails; the main axis always starts.
 struct KayaCell: Layout {
+    /// Trace only (KAYA_LAYOUT_TRACE): which node this cell wraps, so one
+    /// run's lines can be read as a chain rather than a pile.
+    var traceId: UInt64 = 0
     /// The CONTAINER's axis: true for a column's cells.
     let vertical: Bool
     /// The container's cross-axis align mode.
@@ -8298,9 +8310,13 @@ struct KayaCell: Layout {
         // truncated with an ellipsis where it should have wrapped.
         let probe = ProposedViewSize(width: proposal.width, height: nil)
         let natural = subviews.first?.sizeThatFits(probe) ?? .zero
-        return CGSize(
+        let out = CGSize(
             width: proposal.width ?? natural.width,
             height: proposal.height ?? natural.height)
+        kayaTrace("cell#\(traceId) size in=\(proposal.width.map { Int($0) } ?? -1)x"
+            + "\(proposal.height.map { Int($0) } ?? -1) natural=\(Int(natural.width))x"
+            + "\(Int(natural.height)) out=\(Int(out.width))x\(Int(out.height))")
+        return out
     }
 
     func placeSubviews(
@@ -8309,6 +8325,8 @@ struct KayaCell: Layout {
         guard let child = subviews.first else { return }
         let full = ProposedViewSize(width: bounds.width, height: bounds.height)
         let size = child.sizeThatFits(full)
+        kayaTrace("cell#\(traceId) place bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
+            + "childAsked=\(Int(size.width))x\(Int(size.height))")
         // The baseline-recording hooks are alignmentGuide closures, and guide
         // closures only run when somebody QUERIES a guide — the alignment
         // frames this layout replaced used to be that somebody. Query .top
@@ -9720,6 +9738,17 @@ func kayaRecordTableCell(
 
 /// Its viewport twin — `synthesized` is what tells the realization census
 /// which tier owes how many rows.
+/// THE GATE PROBE'S ONLY DOOR TO THE SYNTHESIZED TIER, for `widthClass`'s
+/// reason one type over: the mac picks the NATIVE tier from a
+/// compile-time arm, so a probe on this host cannot reach the phone's
+/// branch through `KayaTableSurface` at all. An opaque return keeps the
+/// view private — check-table-tier and check-table-card both anchor on
+/// that declaration, and moving it broke them
+/// (tools/checks/swiftui-stacked-grow.swift).
+func kayaSynthesizedTableForProbe(_ node: KayaNode) -> some View {
+    KayaSynthesizedTable(node: node)
+}
+
 func kayaRecordTableViewport(
     _ node: KayaNode, _ generation: Int, _ frame: CGRect, _ synthesized: Bool
 ) {
@@ -10133,6 +10162,8 @@ typealias KayaTablePlaced = () -> Void
         // viewport writer, and the two must report the same box.
         let cells = kayaTableCellsBox(
             inScrollClip: viewportRect, interior: kayaTableCardInsetX)
+        kayaTrace("vp#\(node.id) clip=\(Int(viewportRect.width))x\(Int(viewportRect.height)) "
+            + "cells=\(Int(cells.width))x\(Int(cells.height))")
         if cells.width > 0, cells.height > 0 {
             kayaRecordTableViewport(
                 node, kayaTableGeometryGeneration(node), cells, true)
@@ -10329,11 +10360,15 @@ typealias KayaTablePlaced = () -> Void
 /// the collection, the container is never smaller than what it holds,
 /// and nothing scrolls: the window is a window on nothing.
 private struct KayaScrollBox: Layout {
+    var traceId: UInt64 = 0
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
         let natural = subviews.first?.sizeThatFits(.unspecified) ?? .zero
-        return CGSize(width: proposal.width ?? natural.width, height: proposal.height ?? 0)
+        let out = CGSize(width: proposal.width ?? natural.width, height: proposal.height ?? 0)
+        kayaTrace("box#\(traceId) size in=\(proposal.width.map { Int($0) } ?? -1)x"
+            + "\(proposal.height.map { Int($0) } ?? -1) out=\(Int(out.width))x\(Int(out.height))")
+        return out
     }
 
     func placeSubviews(
@@ -10519,7 +10554,7 @@ private struct KayaSynthesizedTable: View {
                 // ruling) and a window is a window on a viewport; an
                 // UNGROWN one hugs its rows, has none, and stays on §1's
                 // bridge — every row realized, exactly as before.
-                KayaScrollBox {
+                KayaScrollBox(traceId: node.id) {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical) {
                             rows(generation)
@@ -10692,6 +10727,9 @@ struct KayaFlex: Layout {
             }
         }
 
+        kayaTrace("flex v=\(vertical) bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
+            + "ids=\(nodes.map { $0.id }) grow=\(nodes.map { $0.grow }) "
+            + "extents=\(extents.map { Int($0) })")
         var offset: CGFloat = 0
         for i in subviews.indices {
             let extent = extents[i]
@@ -11855,7 +11893,9 @@ struct KayaRender: View {
                             // breadth, content top-leading like GTK's Fill)
                             // and the content's box otherwise; every other
                             // mode places in KayaCell.
-                            KayaCell(vertical: vertical, align: node.align) {
+                            KayaCell(
+                                traceId: child.id, vertical: vertical, align: node.align
+                            ) {
                                 KayaRender(
                                     node: child, flexVertical: vertical,
                                     flexStretch: node.align == alignStretch)
