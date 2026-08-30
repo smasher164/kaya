@@ -6270,8 +6270,10 @@ Navigating to Transactions on the android emulator kills the app. It is
 NOT caused by this session's scroll work: the same crash reproduces with
 the guest exactly as it was beforehand, on an APK whose packaged bytes
 were verified to contain no `kaya.scroll` at all. It has simply never
-been seen, because `ANDROID_UNWIRED_SCENES="portfolio"` keeps the scene
-off that lane, so no gate and no leg has ever rendered this screen there.
+been seen, because `ANDROID_UNWIRED_SCENES="portfolio"` kept the scene off
+that lane, so no gate and no leg had ever rendered this screen there. (The
+scene is WIRED now and the list is empty — that is what made the crash
+visible in the first place.)
 
 FIXED 2026-08-29, at the viewport rather than at the caller. The
 infinity arrives from an ANCESTOR'S INTRINSIC PASS — Compose answers an

@@ -257,6 +257,9 @@ precedent for simulator-only proof).
    declarations deleted WITH THEIR NEGATIVES WATCHED, the varied
    scene following, and whatever other Python-only scenes exist at
    that point riding the same rails.
+   DONE 2026-08-30: both lists are empty and both phones run the
+   portfolio; the android half needed a Compose viewport clamp and a
+   build that re-stamps its staged guest (docs/deferred.md, struck).
 
 ### D7 — what "done" means
 

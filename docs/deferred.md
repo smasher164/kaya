@@ -8818,7 +8818,20 @@ primitive, or a viewport policy) and that framing was withdrawn: nothing
 about the layout is over-subscribed, so no product decision is owed.
 
 
-## GAP — the portfolio's android leg waits on adaptive layout (found 2026-08-28, by the pyhost APK's first mount)
+## ~~GAP — the portfolio's android leg waits on adaptive layout~~ — CLOSED 2026-08-30: the leg is WIRED and the lane is ALL PASS over 123 legs
+CLOSED BY three fixes, none of them the adaptive work this entry expected
+to wait for. (1) The screen was KILLING THE APP, not merely laying out
+badly — Compose refuses to measure a scrollable with an infinite maximum,
+and the infinity came from an ancestor's intrinsic pass, so the viewport
+clamps an unbounded ask to the display's height (docs/traps.md). (2) The
+zero-width track was real and is gone with it. (3) The reason it took a
+day is that the android build LIED: the guest is a staged copy and the
+extraction is stamp-gated, so a rebuilt APK ran last week's guest and four
+conclusions were drawn from a file nobody had edited. `stageGuestPython`
+stages and re-stamps on every build now.
+ANDROID_UNWIRED_SCENES is EMPTY, and run-emulator queues portfolio-python
+beside varied-python.
+
 KEY: portfolio android, zero-width track, constraints model, proposal model, kayaFixedRepresentable, Can't represent, ANDROID_UNWIRED_SCENES
 
 The packaging milestone's android slice brought python up (varied-python
