@@ -8640,10 +8640,16 @@ WHAT IS ALREADY RULED OUT, each measured rather than argued — this
 entry's value is the dead ends, because every one of them is a plausible
 story that costs a session to re-test:
 
-1. NOT the stacking. Probed in KayaFlex: `bounds=343x596 fixed=328
-   leftover=259`. The three summary lines, the dropdown and the recent
-   table take 328 of 596 points and the grown table IS handed 259. The
-   stack does exactly what it should.
+1. ~~NOT the stacking~~ — THAT CLAIM WAS WRONG, and the way it was wrong
+   is the lesson. `bounds=343x596 fixed=328 leftover=259` is the
+   DASHBOARD's stacked row. The probe that produced it printed no node
+   ids, so the numbers were attributed to the screen being investigated
+   rather than the one they came from, and the entry then argued from
+   them that the stack was healthy. With ids in the trace the two rows
+   are told apart at a glance and disagree completely:
+       flex bounds=343x596 ids=[2, 10]  extents=[328, 259]   <- dashboard
+       flex bounds=343x596 ids=[22, 38] extents=[594, 0]     <- transactions
+   A MEASUREMENT WITHOUT AN IDENTITY IS A GUESS WITH A NUMBER ON IT.
 2. NOT the sibling's width, on either platform. Four perturbations left
    Compose's number byte-identical: `net` shortened to one word, all four
    summary labels shortened to one character, the recent table removed
@@ -8678,15 +8684,30 @@ TWO THINGS THAT COST HOURS BEFORE THE PROBE EXISTED, both now permanent:
   The viewport is the part that is pure layout, and it is what was zero
   on the phone.
 
-WHAT THE PROBE SAYS, and it is a NEGATIVE result that redirects the hunt:
-the pure layout shape is HEALTHY. `flex bounds=393x700 extents=[80, 612]`,
-`box#20 size in=393x612 out=393x612`, `vp#20 clip=413x628`. The flex
-hands the grown table its height, the cell passes it, the box takes it and
-the viewport records it. So the phone's `311x0` is NOT produced by this
-geometry alone — it needs something the probe deliberately lacks, which is
-the CORE IN THE LOOP: windowGeometry, rowExtent, windowMoved and the
-re-layout each report provokes. That feedback is where to look next, and
-the probe is the place to add a fake core to drive it.
+ROOT CAUSE, FOUND AND MEASURED (2026-08-29). The Transactions screen's
+summary column is 594 POINTS TALL IN A 596-POINT VIEWPORT, so the grown
+ledger beside it divides a leftover of two points and gets none. Nothing
+is broken in the flex, the cell, the box or the reporter — they do exactly
+what they are told. The same row proves it by reviving when there is room:
+    ids=[22, 38] bounds=343x596 -> extents=[594, 0]
+    ids=[22, 38] bounds=343x780 -> extents=[594, 177]
+The 594 is mostly the RECENT TABLE: twelve ungrown rows plus a header,
+about 464 points of it, under four summary lines and the account filter.
+
+THE PROBE'S OWN VERDICT IS CONSISTENT with that and worth keeping: given
+a container with room (700 points and one short label), the whole chain is
+healthy — `extents=[80, 612]`, `box in=393x612 out=393x612`,
+`vp clip=413x628`. It reproduces the SHAPE, not the crowding, which is why
+it passes. It stays as the regression guard for the shape.
+
+SO THE FIX IS A PRODUCT ONE, and it is the shape of the thing that was
+ledgered here from the start: a phone cannot show a twelve-row summary
+table stacked above a fifteen-thousand-row ledger and give both room. It
+needs the adaptive work to drop `recent` below the breakpoint (D4's keyed
+arms, docs/adaptive-layout-plan.md), or the guest must stop declaring it
+on this screen. A TOOLKIT-SIDE FLOOR WAS TRIED AND REVERTED: giving any
+starved grower a containerful changed track arithmetic wherever a leftover
+legitimately reaches zero and cost 16 sizepolicy legs on the mac lane.
 
 ALSO FALSIFIED, with the probe: `KayaScrollBox`'s `proposal.height ?? 0`
 fallback. Changed to answer the content height instead and every number

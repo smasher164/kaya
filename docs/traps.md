@@ -6158,3 +6158,36 @@ landed OUTSIDE KayaCell and the self-test went vacuous — it reported
 "applied (1 substitution)" and then passed. It perturbs
 `sizeThatFits(probe)` now. A negative test pinned to a line's text is
 only as good as that line.
+
+## A measurement without an identity is a guess with a number on it (2026-08-29)
+
+The portfolio's grown ledger gets no viewport on a phone. A probe in
+`KayaFlex.placeSubviews` printed `bounds=343x596 fixed=328 leftover=259`,
+which says the grown child IS handed 259 points — so the investigation
+concluded the stack was healthy, withdrew a correct hypothesis, wrote the
+conclusion into the ledger, and went looking somewhere else for a day.
+
+THE LINE WAS TRUE AND ABOUT THE WRONG SCREEN. Both the dashboard and the
+Transactions screen are a stacked row with one hugging child and one
+grower, so their trace lines are indistinguishable without node ids. With
+ids they disagree completely:
+
+    flex bounds=343x596 ids=[2, 10]  grow=[0,1] extents=[328, 259]
+    flex bounds=343x596 ids=[22, 38] grow=[0,1] extents=[594, 0]
+
+The second is the one under investigation: its hugging sibling is 594
+points of a 596-point viewport, so the grower divides two points and gets
+none. The same row revives at `bounds=343x780` with `extents=[594, 177]`,
+which is the proof that nothing is broken in the layout at all.
+
+THE RULE: every layout trace line carries the identity of what it
+measured. `nodes` is already in hand at both KayaFlex sites and `child.id`
+at every KayaCell, so there is no excuse for an anonymous number. The same
+goes for any probe over a tree with repeated shapes — a shape that occurs
+twice will be read as whichever occurrence the reader is thinking about.
+
+AND THE COROLLARY THAT COST THE SAME DAY: instrument ONE run over the
+whole chain rather than one probe per build. Four hypotheses were tested
+serially at two and a half minutes each — the scroll box's zero fallback,
+the sibling's width, the summary's height, `align="stretch"` — and every
+one came back byte-identical, because none of them was ever the question.
