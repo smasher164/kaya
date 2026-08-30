@@ -6500,6 +6500,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let scrolled = gtk4::ScrolledWindow::new();
                     // Vertical-only v1: no horizontal bar, ever.
                     scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+                    // A SCROLL IS A VERTICAL CONTAINER, and saying so is what
+                    // makes it SPAN a row's breadth (the 2026-08-22 crossing
+                    // rule, `crosses_container`). Unmarked it crossed nothing,
+                    // took Align::Start and therefore its NATURAL height —
+                    // which for a scroller is tiny — so the portfolio's
+                    // Transactions summary rendered as three clipped lines
+                    // with its filter and recents table simply absent, while
+                    // the same declaration filled correctly on SwiftUI and
+                    // Compose (measured 2026-08-30).
+                    set_container_vertical(scrolled.upcast_ref::<gtk4::Widget>(), true);
                     core.scrolls.push(scrolled.clone());
                     NativeWidget::Scroll(scrolled)
                 }

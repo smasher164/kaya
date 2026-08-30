@@ -6287,3 +6287,34 @@ component. Flutter refuses that combination at layout time, Compose
 refuses it at runtime — and kaya answers ZERO on SwiftUI and CRASHES on
 Compose for the same declaration. Two backends, two failure modes, one
 cause, and the surface currently lets an author write it.
+
+## A GTK scroll took its NATURAL height, because only rows and columns "cross" (2026-08-30)
+
+The portfolio's Transactions summary rendered on GTK as three clipped
+lines — the third cut mid-glyph, the `net` line, the account filter and
+the entire recents table simply absent — while the identical declaration
+filled correctly on SwiftUI and Compose.
+
+THE CROSSING RULE is what a container's child gets for its breadth: a row
+inside a column, or a column inside a row, has its own main axis lying
+along the parent's cross axis, so it SPANS that breadth
+(`crosses_container`, the 2026-08-22 breadth ruling) and is given
+`Align::Fill`. Anything else takes `Align::Start` and therefore its
+NATURAL size.
+
+`container_vertical` was only ever set on Row and Column. A `scroll` is a
+container too — a vertical viewport over one child — but it was unmarked,
+so it crossed nothing, took Start, and a scroller's natural height is
+tiny. `set_container_vertical(scrolled, true)` is the fix: a vertical
+scroll inside a ROW now spans the row's breadth exactly as a column does,
+and inside a COLUMN it is along the main axis where `grow` decides, which
+is the same answer as before.
+
+AND THE CAPTURE THAT HID IT FOR A ROUND: the scratch GTK capture harness
+required `target-linux/debug/libkaya.so` and never BUILT it, so the shot
+taken right after the fix photographed the previous library and read
+exactly like "the change did nothing". It builds the lib first now. This
+is the third shape of the same defect in one session — the android guest
+staging, the android extraction stamp, and this — and the rule they share
+is invariant 4's: a thing that shows you an artifact must build the
+artifact it shows you.
