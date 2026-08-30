@@ -567,6 +567,15 @@ fn set_container_spacing(widget: &gtk4::Widget, gap: i32) {
 /// and a radio group is a vertical one).
 const AXIS_KEY: &str = "kaya-axis";
 
+/// The natural width a wrapping label asks for, in characters. GTK needs a
+/// NUMBER here: `max-width-chars` is what bounds a wrapping label's
+/// requisition, and without it the label asks for its whole text on one
+/// line and the window grows to match. 60 is a line of prose — wide enough
+/// that ordinary labels never wrap when there is room (the natural width is
+/// a MAXIMUM, not a target), narrow enough that a long one stops dragging
+/// its container off the screen.
+const KAYA_LABEL_MAX_WIDTH_CHARS: i32 = 60;
+
 fn container_vertical(widget: &gtk4::Widget) -> Option<bool> {
     // SAFETY: the key is private to this module and only ever set to a
     // bool by set_container_vertical below.
@@ -6490,6 +6499,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // reads centered where WinUI, Compose and SwiftUI lead.
                     // Invisible at natural size — there the box IS the text.
                     label.set_xalign(0.0);
+                    // TEXT WRAPS, the same semantics SwiftUI and Compose
+                    // carry (the 2026-08-29 ruling): a label given less
+                    // width than its text breaks lines instead of forcing
+                    // its container wider than the screen. GTK's own
+                    // documentation warns that `wrap` alone does not make a
+                    // label wrap AT the parent's width — a widget's
+                    // requisition cannot depend on its parent — so the
+                    // natural width is bounded too; without that bound the
+                    // window simply grows to the longest line, which is
+                    // exactly the defect this rule exists to end.
+                    label.set_wrap(true);
+                    label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+                    label.set_max_width_chars(KAYA_LABEL_MAX_WIDTH_CHARS);
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }

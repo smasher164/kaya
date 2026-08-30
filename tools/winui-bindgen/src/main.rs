@@ -55,6 +55,15 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Primitives.ButtonBase".to_string(),
         "Microsoft.UI.Xaml.Controls.Button".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBlock".to_string(),
+        // TEXT WRAPS (the 2026-08-29 ruling), and these two enums are what
+        // it takes to say so in Rust. `SetTextWrapping`/`SetTextTrimming`
+        // were vtable PADS because the filter never pulls referenced types
+        // transitively (docs/traps.md) — the METHOD was reachable, its
+        // parameter type was not — which is why the caption title has to
+        // build its TextBlock out of XAML markup. With the enums named,
+        // both are ordinary setters.
+        "Microsoft.UI.Xaml.TextWrapping".to_string(),
+        "Microsoft.UI.Xaml.TextTrimming".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBox".to_string(),
         // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md).
         // RichEditBox is the rich-CAPABLE control kaya pins to

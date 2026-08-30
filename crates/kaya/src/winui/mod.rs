@@ -94,7 +94,7 @@ use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, FocusState, FrameworkElement,
-    RoutedEventHandler, UIElement, UnhandledExceptionEventHandler, Window,
+    RoutedEventHandler, TextWrapping, UIElement, UnhandledExceptionEventHandler, Window,
 };
 use bindings::Windows::Foundation::EventHandler;
 
@@ -10037,6 +10037,14 @@ fn brand_typeface() -> Option<String> {
 /// are four callers today and all four are here.
 fn text_block() -> windows_core::Result<TextBlock> {
     let block = TextBlock::new()?;
+    // TEXT WRAPS (the 2026-08-29 ruling), which on this platform means
+    // saying so: a TextBlock's own default is `NoWrap`, where SwiftUI and
+    // Compose wrap by construction. Without it a long label forces its
+    // container wider than the window instead of taking a second line —
+    // the divergence this ruling exists to close. The enum needed the
+    // bindgen filter to name it before there was a setter to call at all
+    // (tools/winui-bindgen/src/main.rs).
+    block.SetTextWrapping(TextWrapping::Wrap)?;
     if let Some(source) = brand_typeface() {
         block.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(source))?)?;
     }

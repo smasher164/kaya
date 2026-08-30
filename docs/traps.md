@@ -6151,6 +6151,21 @@ MEASURED on the portfolio's Transactions screen at 393 points: before,
 truncated with an ellipsis; after both it wraps to two lines and the
 whole sum is readable.
 
+ALL FOUR BACKENDS CARRY IT NOW (2026-08-30). SwiftUI and Compose wrap by
+construction once the width is bounded; the other two had to be told, and
+each in its own way:
+- GTK: `set_wrap(true)` plus `set_wrap_mode(WordChar)` AND
+  `set_max_width_chars`. GTK's own documentation is explicit that `wrap`
+  alone does not wrap at the parent's width — a widget's requisition
+  cannot depend on its parent — so without the char bound the label still
+  asks for its whole text on one line and the WINDOW grows to match.
+- WinUI: `SetTextWrapping(TextWrapping::Wrap)`, whose enum had to be
+  named in tools/winui-bindgen's filter first. The method was reachable
+  and its PARAMETER TYPE was not, so the slot was a vtable pad and there
+  was no setter to call — which is why the caption title still builds its
+  own TextBlock out of XAML markup, and why that workaround can now be
+  retired whenever someone wants to.
+
 THE GATE THIS MOVED: check-empty-child's KayaCell negative perturbs an
 exact line, and that line used to read `.unspecified`. The same string
 occurs elsewhere in the file, so once the cell changed the substitution

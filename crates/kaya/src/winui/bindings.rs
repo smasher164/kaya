@@ -10877,6 +10877,41 @@ pub mod Microsoft {
             }
             unsafe impl Send for Style {}
             unsafe impl Sync for Style {}
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct TextTrimming(pub i32);
+            impl TextTrimming {
+                pub const None: Self = Self(0i32);
+                pub const CharacterEllipsis: Self = Self(1i32);
+                pub const WordEllipsis: Self = Self(2i32);
+                pub const Clip: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for TextTrimming {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for TextTrimming {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.TextTrimming;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct TextWrapping(pub i32);
+            impl TextWrapping {
+                pub const NoWrap: Self = Self(1i32);
+                pub const Wrap: Self = Self(2i32);
+                pub const WrapWholeWords: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for TextWrapping {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for TextWrapping {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.TextWrapping;i4)",
+                    );
+            }
             #[repr(C)]
             #[derive(Clone, Copy, Debug, Default, PartialEq)]
             pub struct Thickness {
@@ -66746,8 +66781,16 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     TextAlignment: usize,
                     SetTextAlignment: usize,
-                    TextWrapping: usize,
-                    SetTextWrapping: usize,
+                    pub TextWrapping: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::TextWrapping,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetTextWrapping: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::TextWrapping,
+                    )
+                        -> windows_core::HRESULT,
                     pub IsSpellCheckEnabled: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut bool,
@@ -68205,10 +68248,26 @@ pub mod Microsoft {
                         *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    TextWrapping: usize,
-                    SetTextWrapping: usize,
-                    TextTrimming: usize,
-                    SetTextTrimming: usize,
+                    pub TextWrapping: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::TextWrapping,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetTextWrapping: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::TextWrapping,
+                    )
+                        -> windows_core::HRESULT,
+                    pub TextTrimming: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::TextTrimming,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetTextTrimming: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::TextTrimming,
+                    )
+                        -> windows_core::HRESULT,
                     TextAlignment: usize,
                     SetTextAlignment: usize,
                     pub Text: unsafe extern "system" fn(
@@ -68490,8 +68549,16 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     TextAlignment: usize,
                     SetTextAlignment: usize,
-                    TextWrapping: usize,
-                    SetTextWrapping: usize,
+                    pub TextWrapping: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::TextWrapping,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetTextWrapping: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::TextWrapping,
+                    )
+                        -> windows_core::HRESULT,
                     pub IsSpellCheckEnabled: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut bool,
@@ -121435,6 +121502,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TextWrapping(&self) -> windows_core::Result<super::TextWrapping> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextWrapping)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetTextWrapping(
+                        &self,
+                        value: super::TextWrapping,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetTextWrapping)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsSpellCheckEnabled(&self) -> windows_core::Result<bool> {
                         let this = self;
                         unsafe {
@@ -135946,6 +136037,54 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TextWrapping(&self) -> windows_core::Result<super::TextWrapping> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextWrapping)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetTextWrapping(
+                        &self,
+                        value: super::TextWrapping,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetTextWrapping)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn TextTrimming(&self) -> windows_core::Result<super::TextTrimming> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextTrimming)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetTextTrimming(
+                        &self,
+                        value: super::TextTrimming,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetTextTrimming)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Text(&self) -> windows_core::Result<windows_core::HSTRING> {
                         let this = self;
                         unsafe {
@@ -139392,6 +139531,30 @@ pub mod Microsoft {
                         let this = self;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetAcceptsReturn)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn TextWrapping(&self) -> windows_core::Result<super::TextWrapping> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextWrapping)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetTextWrapping(
+                        &self,
+                        value: super::TextWrapping,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetTextWrapping)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
