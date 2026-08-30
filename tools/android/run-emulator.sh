@@ -2442,7 +2442,7 @@ ANDROID_DESKTOP_ONLY_SCENES="window panels split panes"
 # wired with that milestone's breadth slice (adaptive-compose, the
 # handler half plus the breakpoint's first-report arm).
 # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-ANDROID_UNWIRED_SCENES="portfolio"
+ANDROID_UNWIRED_SCENES=""
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
@@ -2775,6 +2775,16 @@ PY
         "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" \
         dev.kaya.pyhost/.MainActivity varied \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script varied)'"
+    # WIRED SO THE LANE CAN SEE IT (2026-08-29). This scene was held off
+    # this lane, and while it was held its Transactions screen started
+    # KILLING THE APP — Compose refuses a vertically scrollable component
+    # measured with an infinity maximum height, and the grown ledger is
+    # one. Nothing observed it, because an unwired scene has no leg and
+    # the matrix was green over the crash for a day (docs/traps.md).
+    run_apk portfolio-python \
+        "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" \
+        dev.kaya.pyhost/.MainActivity portfolio \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script portfolio)'"
     drain
     timing legs-python
 fi

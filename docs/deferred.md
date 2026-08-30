@@ -8625,6 +8625,38 @@ dashboard is currently believed to need only the axis flip, and if its
 visual iteration proves otherwise this entry is the design to build.
 
 
+## DESIGN — THE BREAKPOINT IS A RAW NUMBER, WHERE EVERY OTHER TOOLKIT NAMES A CLASS (2026-08-29)
+KEY: stack_below 700, size class, WindowSizeClass, compact regular expanded, breakpoint vocabulary
+
+`stack_below=700` makes the AUTHOR invent the number. Nobody else does
+that, and the maintainer's question — "how is the user supposed to know
+what the breakpoint value is?" — is the same one that moved the whole
+industry off raw pixels:
+
+- APPLE gives two named classes per axis, `compact` and `regular`, and
+  never a number in app code.
+- MATERIAL 3 names five and owns the thresholds: compact 0-599dp, medium
+  600-839, expanded 840-1199, then large and extra-large.
+- THE CSS ECOSYSTEM converged the same way — Bootstrap and Tailwind ship
+  named tiers (sm/md/lg/xl) and the numbers live in the framework.
+
+KAYA ALREADY HAS THE VOCABULARY AND DOES NOT EXPOSE IT: `KayaTableWidth`
+is `compact | regular | noSizeClass | unknown` and the TABLE TIER already
+routes on it (`kayaTableTier`). So the backend knows the class the
+platform reports and the guest cannot name it. The breakpoint should
+speak that vocabulary — `stack_below="compact"` or a `stack_when` taking
+the class — leaving the thresholds where the platform defines them, which
+is also the only way one number can be right on a phone, a foldable and a
+split-screen iPad at once.
+
+NOT THE SAME QUESTION AS THE EXTENT, and the distinction is worth
+keeping: a container's EXTENT is never authored. The window hands its own
+size to the root and each container passes a share down, so the 596 in
+these entries is derived, never typed. The breakpoint is the one number
+an author writes, which is exactly why it is the one that should be a
+name.
+
+
 ## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO, AND A LIST CANNOT OWN ITS HEADER (2026-08-29)
 KEY: grow inside scroll, unbounded main axis, sliver header, tableHeaderView, LazyColumn item, nested scroll, interim portfolio fix
 
