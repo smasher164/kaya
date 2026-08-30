@@ -133,6 +133,31 @@ for rel in runners:
             fail(f"{rel} runs guests/python/{m.group(1)}, which does not "
                  f"exist")
 
+# --- the iOS bundle: a leg's WINDOW GEOMETRY is not unpinned state ----
+# An app declaring no supported orientations inherits the DEVICE's, and
+# the same phone then reports 375x734 or 724x355 depending on how the
+# simulator happens to be turned. `adaptive`'s breakpoint is declared at
+# 520, so one of those two widths makes `expect_axis row@narrow
+# "vertical"` true and the other makes it false — same build, no code in
+# between, and the verdict is CORRECT both times, which is why no rerun
+# could ever explain it (measured 2026-08-29, docs/traps.md). The pool's
+# device TYPE is pinned in run-sim.sh; this is its geometry.
+plist = (root / "tools/ios/Info.plist.in").read_text(encoding="utf-8")
+for key in ("UISupportedInterfaceOrientations",
+            "UISupportedInterfaceOrientations~ipad"):
+    m = re.search(rf"<key>{re.escape(key)}</key>\s*<array>(.*?)</array>",
+                  plist, re.S)
+    if not m:
+        fail(f"tools/ios/Info.plist.in declares no <{key}> — every iOS leg's "
+             f"window width would then follow the simulator's orientation, "
+             f"which nothing in the lane sets")
+        continue
+    orientations = re.findall(r"<string>([^<]+)</string>", m.group(1))
+    if len(orientations) != 1:
+        fail(f"tools/ios/Info.plist.in lets <{key}> take {orientations} — a "
+             f"leg's width must not depend on how the device is turned, so "
+             f"exactly one orientation is declared")
+
 for f in findings:
     print(f, file=sys.stderr)
 sys.exit(1 if findings else 0)
@@ -144,9 +169,11 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 shadow() {
-    mkdir -p "$T/$1/tools/linux" "$T/$1/tools/scenes" "$T/$1/guests/python"
+    mkdir -p "$T/$1/tools/linux" "$T/$1/tools/scenes" "$T/$1/tools/ios" \
+        "$T/$1/guests/python"
     cp tools/validate-mac.sh tools/deploy-win.sh "$T/$1/tools/"
     cp tools/linux/run-suites.sh "$T/$1/tools/linux/"
+    cp tools/ios/Info.plist.in "$T/$1/tools/ios/"
     cp -R tools/scenes "$T/$1/tools/" 2>/dev/null
     cp -R tools/guest "$T/$1/tools/" 2>/dev/null
     cp -R guests/python "$T/$1/guests/" 2>/dev/null
@@ -220,9 +247,27 @@ echo "check-staging: self-test N3 pointed a leg at a missing guest, $hits substi
 refuses "$s" 'guests/python/ghostledger.py, which does not' \
     "N3 (a python leg whose guest file is gone)"
 
+s="$(shadow n4)"
+hits="$(doctor "$s" tools/ios/Info.plist.in \
+    '^        <string>UIInterfaceOrientationPortrait</string>$' \
+    '        <string>UIInterfaceOrientationPortrait</string>\n        <string>UIInterfaceOrientationLandscapeLeft</string>')"
+echo "check-staging: self-test N4 let the phone bundle turn, $hits substitution(s)"
+[ "$hits" = 1 ] || { echo "check-staging: SELF-TEST BROKEN (N4 applied $hits)" >&2; exit 1; }
+refuses "$s" 'must not depend on how the device is turned' \
+    "N4 (an iOS bundle whose window width follows the simulator)"
+
+s="$(shadow n5)"
+hits="$(doctor "$s" tools/ios/Info.plist.in \
+    '    <key>UISupportedInterfaceOrientations</key>' \
+    '    <key>UIGhostOrientations</key>')"
+echo "check-staging: self-test N5 removed the phone pin, $hits substitution(s)"
+[ "$hits" = 1 ] || { echo "check-staging: SELF-TEST BROKEN (N5 applied $hits)" >&2; exit 1; }
+refuses "$s" 'declares no <UISupportedInterfaceOrientations>' \
+    "N5 (an iOS bundle that inherits the device's orientation)"
+
 if ! out="$(check "$ROOT" 2>&1)"; then
     echo "$out" >&2
     echo "check-staging: FINDINGS ABOVE" >&2
     exit 1
 fi
-echo "check-staging: OK (mac rust staging, windows suite lists, scene scripts and python guests all derive)"
+echo "check-staging: OK (mac rust staging, windows suite lists, scene scripts and python guests all derive; the iOS bundle pins one orientation per family)"

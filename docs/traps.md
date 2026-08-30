@@ -6033,3 +6033,49 @@ and the park's three decisions. Then loop `tools/ios/run-sim.sh python`,
 which is two legs and 35 seconds, not the seven-minute lane. Both lines
 were removed again once the fix landed: they print once per band change,
 which during a scroll is every pass.
+
+## A leg whose premise is the window's WIDTH, on a device nothing pinned the orientation of (2026-08-29)
+
+`adaptive`'s breakpoint is declared at 520 points, and the iOS leg cuts
+the scene at `resize_window` — a phone does not command its own window
+size — then asserts its own always-narrow truth as a per-leg extra:
+`expect_axis row@narrow "vertical"`.
+
+That extra is true on a phone in PORTRAIT and false in LANDSCAPE, and
+nothing in the lane pinned which. Measured on kaya-sim-0, one build, two
+Info.plists:
+
+    portrait   metrics window=0 375x734   KAYA_SELFTEST: OK
+    landscape  metrics window=0 724x355   FAILED (row@narrow axis
+                                          "horizontal", wanted "vertical")
+
+724 > 520, so the core applied no override and the row stayed
+horizontal — the verdict is CORRECT in both runs. Only the premise
+moved. That is why six lane runs and 78 direct reruns said nothing: a
+rerun re-rolls the premise instead of testing it, and the failing
+sentence is identical to the one a real breakpoint bug would print.
+
+THE CAUSE IS AN ABSENT KEY. The bundle template declared no
+`UISupportedInterfaceOrientations`, and an iPhone app without it inherits
+whatever orientation the device is in. The pool's device TYPE is pinned
+in run-sim.sh (it refuses a stale kaya-sim-pad of the wrong type, for
+exactly this class of reason); its GEOMETRY was not. Both families
+declare portrait now, and `tools/check-staging.sh` holds it — one
+orientation per key, with the missing-key branch and the two-orientation
+branch each watched refusing.
+
+HOW IT WAS CAUGHT, since no rerun could: the width was made VISIBLE.
+`KayaHost.windowMetrics` is the one chokepoint both reporters funnel
+through, and one `kayaDiag` line there prints what every breakpoint is
+actually being evaluated against. THE PAD IS THE CANARY THAT PROVED THE
+READING — kaya-sim-pad reports 1032 and fails this same leg with this
+same sentence every single run, which is what told us the sentence means
+"the latched width was at or above the threshold" and not "the report
+never arrived".
+
+AND THE LOOP THAT FOUND IT WAS VACUOUS FIRST: run-sim.sh's cut block
+prints the PREFIX and the runner appends the leg's extra itself, so a
+harness that ran only the block's output asserted the scene minus its
+one interesting step — 78 green runs that tested nothing. The pad, which
+MUST fail, is what exposed that: a loop with no known-red canary agrees
+with everything.

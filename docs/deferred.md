@@ -8696,8 +8696,11 @@ container layout recorded". TWO consequences, one fixed and one held:
   only one.
   KEY: pyhost extraction, kaya-stamp, importlib, extractPython
 
-- **GAP — one iOS leg is INTERMITTENT (found 2026-08-29; the OTHER of the
-  two, `varied-python`, was FIXED the same day — see the diagnosis below)**
+- ~~**GAP — two iOS legs are INTERMITTENT**~~ — BOTH CLOSED 2026-08-29.
+  `varied-python` was a park that mistook its own correction for the
+  reader's scroll; `adaptive-swiftui` was a leg whose premise is the
+  window's WIDTH on a device whose orientation nothing pinned. Each
+  diagnosis is below, and each arithmetic is in docs/traps.md.
   KEY: ios flaky, varied-python band, adaptive-swiftui row@narrow,
   column@varied windows 147, first metrics report
 
@@ -8754,8 +8757,24 @@ container layout recorded". TWO consequences, one fixed and one held:
   STAYED IN for it — `KAYA_DIAG ... metrics window=<id> <w>x<h>` at
   KayaHost.windowMetrics, the one chokepoint both reporters funnel
   through — so the next sighting says when the first report landed and
-  what width it carried. A `swift` suite run is that leg's own fast loop.
-  KEY: adaptive-swiftui narrow, first metrics report, KAYA_DIAG metrics
+  what width it carried.
+
+  `adaptive-swiftui` IS FIXED TOO (2026-08-29), and that metrics line is
+  what closed it — not by catching a sighting, but by making the width
+  readable at all. THE LEG WAS NEVER FLAKY IN THE CODE: its extra step
+  asserts an always-narrow truth, `adaptive`'s breakpoint is 520, and the
+  bundle declared NO supported orientations, so the app inherited the
+  simulator's. The same phone reports 375x734 turned one way and 724x355
+  turned the other; 724 is above the threshold, the core correctly
+  applied no override, and the leg correctly said "horizontal". The
+  verdict was right both times and only the premise moved, which is why
+  no rerun could ever explain it. tools/ios/Info.plist.in pins portrait
+  for both device families now, and tools/check-staging.sh holds it with
+  the missing-key and the two-orientation branches each watched refusing.
+  Full arithmetic, the pad canary, and the vacuous-loop lesson are in
+  docs/traps.md.
+  KEY: adaptive-swiftui narrow, UISupportedInterfaceOrientations,
+  ios bundle orientation, check-staging N4 N5
 
 - ~~**GAP — the mac NATIVE table cannot be reached when it overflows**~~ —
   CLOSED 2026-08-29, and the iOS SYNTHESIZED tier with it, so all five

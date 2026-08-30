@@ -1531,11 +1531,11 @@ $extra"
 # prints in submission order and is the barrier between flavor blocks
 # (their builds overwrite shared scratch files a queued leg reads).
 LEGS_DIR="$(mktemp -d)"
-# THE FLIGHT RECORDER (tools/lib/flightrec.sh). This lane had none, and it
-# is the lane with the intermittent legs: `varied-python` and
-# `adaptive-swiftui` each fail some runs and pass others, so a rerun
-# erased the only evidence every time (docs/deferred.md's ios-flaky
-# entry). One failure is enough evidence — but only if something keeps it.
+# THE FLIGHT RECORDER (tools/lib/flightrec.sh). This lane had none while
+# it was the lane with the intermittent legs, so every rerun erased the
+# only evidence. Both are closed now (docs/deferred.md's ios-flaky entry,
+# and the two arithmetics in docs/traps.md) and the recorder stays: one
+# failure is enough evidence, but only if something keeps it.
 FLIGHTREC_ROOT="$ROOT"
 export FLIGHTREC_ROOT
 FLIGHTREC_SCRATCH="$(mktemp -d)"
