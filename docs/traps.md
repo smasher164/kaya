@@ -6225,6 +6225,25 @@ store path and is far too big to sync per build. Its absence is loud —
 the app dies at `ModuleNotFoundError` on first launch — where a stale
 GUEST was silent, which is the whole difference.
 
+AND THE STAMP IS HALF THE FIX, learned the hard way an hour later.
+Copying the guest into the APK is worthless on its own: MainActivity
+extracts `assets/python` ONCE and skips the entire walk while
+`kaya-stamp` matches what it already unpacked. So a rebuilt APK carrying
+a new guest RUNS THE OLD ONE — the packaged bytes are right, the device's
+bytes are last week's, and every measurement is about a file nobody
+edited. Four conclusions were drawn from that state in one session,
+including "a breakpoint declared inside a pushed entry never applies",
+which is simply false: with a fresh extraction the guest emits both
+breakpoints, the core receives both, and both axes apply.
+
+`stageGuestPython` recomputes the stamp over the staged tree now, so a
+changed guest changes the stamp and the device re-extracts. Watched: a
+marker added to the guest reaches the EXTRACTED tree on a launch with no
+`pm clear` at all. `pm clear` is no longer the price of believing a
+measurement — which matters, because the tests that use it
+(shoot-android.py) were the only ones telling the truth, and the ones
+that did not (a bare `am start`) were the ones that lied.
+
 
 ## Compose REFUSES kaya's portfolio Transactions screen outright (2026-08-29)
 

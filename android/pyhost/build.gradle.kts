@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -74,9 +76,27 @@ val stageGuestPython by tasks.registering {
             into(app.dir("kaya"))
             exclude("__pycache__/**")
         }
+        // AND THE STAMP, or the staging is invisible to the DEVICE.
+        // MainActivity extracts assets/python once and skips the whole
+        // walk when `kaya-stamp` matches what it already unpacked — so a
+        // rebuilt APK carrying a new guest runs the OLD one, silently and
+        // for as long as the stamp is unchanged. That cost four wrong
+        // conclusions in one session (docs/traps.md); the copy above is
+        // worthless without this.
+        val pythonDir = layout.projectDirectory.dir("src/main/assets/python").asFile
+        val digest = MessageDigest.getInstance("SHA-256")
+        pythonDir.walkTopDown()
+            .filter { it.isFile && it.name != "kaya-stamp" }
+            .sortedBy { it.relativeTo(pythonDir).invariantSeparatorsPath }
+            .forEach {
+                digest.update(it.relativeTo(pythonDir).invariantSeparatorsPath.toByteArray())
+                digest.update(it.readBytes())
+            }
+        val stamp = digest.digest().joinToString("") { b -> "%02x".format(b) }
+        File(pythonDir, "kaya-stamp").writeText(stamp)
         logger.lifecycle(
             "pyhost: staged main.py, ${kayaPythonScenes.joinToString(", ")} " +
-                "and the python binding from the tree")
+                "and the python binding from the tree; stamp ${stamp.take(12)}")
     }
 }
 

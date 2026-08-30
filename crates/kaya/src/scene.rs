@@ -6253,6 +6253,56 @@ mod tests {
     /// value where one exists and the creation kind's own otherwise —
     /// with a same-width report emitting nothing, and a breakpoint
     /// declared before any report applying at the first one.
+    /// A SECOND BREAKPOINT DECLARED AFTER THE WIDTH IS ALREADY LATCHED —
+    /// the portfolio's Transactions screen, whose row is built when the
+    /// entry is PUSHED, long after the window has reported its size. The
+    /// dashboard's row is declared before any report and applies at the
+    /// first one; this one has to apply at DECLARATION, off the latched
+    /// width, or a screen reached by navigation never adapts at all.
+    #[test]
+    fn breakpoint_declared_after_the_width_is_latched_applies_at_once() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 700.0,
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]);
+        // The first report applies the one declared before it.
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(1) }]
+            ),
+            "the dashboard's breakpoint must apply at the first report, got {ops:?}"
+        );
+        // NOW the navigated screen, as the guest actually builds it: a
+        // PUSHED ENTRY with its own surface, its row mounted as that
+        // surface's root, and the breakpoint still naming window 0 — the
+        // binding hardcodes it (bindings/python/kaya/__init__.py).
+        let ops = scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Row },
+            TxOp::Mount { window: WindowId(7), root: WidgetId(2) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 700.0,
+                setters: vec![(WidgetId(2), Prop::Axis, Value::I64(1))],
+            },
+        ]);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::SetProp { id: WidgetId(2), prop: Prop::Axis, value: Value::I64(1) }
+            )),
+            "a breakpoint declared after the width is latched must apply at once, got {ops:?}"
+        );
+    }
+
     #[test]
     fn breakpoint_applies_and_reverts_around_the_threshold() {
         let mut scene = Scene::new();
