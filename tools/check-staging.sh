@@ -158,6 +158,49 @@ for key in ("UISupportedInterfaceOrientations",
              f"leg's width must not depend on how the device is turned, so "
              f"exactly one orientation is declared")
 
+# --- every guest .ps1 is in BOTH windows lists ------------------------
+# The .cmd and .vbs families ride GLOBS, so a new one ships itself; a
+# .ps1 is named individually in deploy_stamp AND in DEPLOY_ARTIFACTS,
+# and deploy-win.sh's own comment says which half is worse — missing
+# from the STAMP, the stamp does not move, the whole deploy block is
+# skipped, and the lane runs against a file that is not there. That
+# comment was the only thing holding the rule: shot-window.ps1 shipped
+# with its .cmd riding the glob beside it and the .ps1 in NEITHER list,
+# so the launcher was staged and the script it runs was not.
+win = (root / "tools/deploy-win.sh").read_text(encoding="utf-8")
+
+
+def block(text, opener, closer):
+    start = text.find(opener)
+    if start < 0:
+        return None
+    end = text.find(closer, start + len(opener))
+    return text[start:end] if end > 0 else None
+
+
+stamp_block = block(win, 'shasum -a 256 "$0"', "\n    }")
+artifacts_block = block(win, "DEPLOY_ARTIFACTS=(", "\n    )")
+guest_dir = root / "tools" / "guest"
+ps1s = sorted(p.name for p in guest_dir.glob("*.ps1")) if guest_dir.is_dir() else []
+if stamp_block is None or artifacts_block is None:
+    fail("tools/deploy-win.sh no longer spells deploy_stamp's shasum list or "
+         "DEPLOY_ARTIFACTS where this census reads them — re-point the clause")
+elif not ps1s:
+    fail("tools/guest holds no .ps1 at all — a census that reads nothing "
+         "agrees with everything")
+else:
+    for where, body in (("deploy_stamp", stamp_block),
+                        ("DEPLOY_ARTIFACTS", artifacts_block)):
+        if "tools/guest/*.ps1" in body:
+            continue  # a glob covers the whole family
+        for name in ps1s:
+            if f"tools/guest/{name}" not in body:
+                fail(f"tools/guest/{name} is staged to the Windows guest by "
+                     f"neither glob nor name in {where} — a .ps1 is named "
+                     f"individually in BOTH deploy_stamp and "
+                     f"DEPLOY_ARTIFACTS, and missing it from the stamp means "
+                     f"the deploy block never runs at all")
+
 for f in findings:
     print(f, file=sys.stderr)
 sys.exit(1 if findings else 0)
@@ -264,6 +307,26 @@ echo "check-staging: self-test N5 removed the phone pin, $hits substitution(s)"
 [ "$hits" = 1 ] || { echo "check-staging: SELF-TEST BROKEN (N5 applied $hits)" >&2; exit 1; }
 refuses "$s" 'declares no <UISupportedInterfaceOrientations>' \
     "N5 (an iOS bundle that inherits the device's orientation)"
+
+# The two halves separately, because they fail differently: dropped from
+# DEPLOY_ARTIFACTS the file simply never ships, dropped from the STAMP
+# the whole deploy block is skipped and the lane runs against what the
+# VM happened to hold.
+s="$(shadow n6)"
+hits="$(doctor "$s" tools/deploy-win.sh \
+    '^ {12}"\$ROOT/tools/guest/shot-window\.ps1" \\\n' '')"
+echo "check-staging: self-test N6 dropped a guest .ps1 from the stamp, $hits substitution(s)"
+[ "$hits" = 1 ] || { echo "check-staging: SELF-TEST BROKEN (N6 applied $hits)" >&2; exit 1; }
+refuses "$s" 'neither glob nor name in deploy_stamp' \
+    "N6 (a guest .ps1 the deploy stamp cannot see, so the ship is skipped)"
+
+s="$(shadow n7)"
+hits="$(doctor "$s" tools/deploy-win.sh \
+    '^ {8}"\$ROOT/tools/guest/shot-window\.ps1"\n' '')"
+echo "check-staging: self-test N7 dropped a guest .ps1 from the artifacts, $hits substitution(s)"
+[ "$hits" = 1 ] || { echo "check-staging: SELF-TEST BROKEN (N7 applied $hits)" >&2; exit 1; }
+refuses "$s" 'neither glob nor name in DEPLOY_ARTIFACTS' \
+    "N7 (a guest .ps1 that never rides the wire)"
 
 if ! out="$(check "$ROOT" 2>&1)"; then
     echo "$out" >&2

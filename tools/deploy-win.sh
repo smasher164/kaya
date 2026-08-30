@@ -901,6 +901,7 @@ deploy_stamp() {
             "$ROOT"/tools/guest/*.cmd \
             "$ROOT"/tools/guest/*.vbs \
             "$ROOT/tools/guest/shot.ps1" \
+            "$ROOT/tools/guest/shot-window.ps1" \
             "$ROOT/tools/guest/desk-warm.ps1" \
             "$ROOT/tools/guest/wait-exit.ps1" \
             "$ROOT/tools/guest/flightrec.ps1" \
@@ -942,13 +943,16 @@ else
         "$ROOT"/tools/guest/*.cmd
         "$ROOT"/tools/guest/*.vbs
         "$ROOT/tools/guest/shot.ps1"
+        "$ROOT/tools/guest/shot-window.ps1"
         "$ROOT/tools/guest/desk-warm.ps1"
         "$ROOT/tools/guest/wait-exit.ps1"
         # The .cmd/.vbs globs above ship themselves; a .ps1 is named
         # individually, in BOTH this list and deploy_stamp's. Missing it
         # from the stamp is the worse half: the stamp would not move, the
         # whole deploy block would be skipped, and the lane would run
-        # against a file that is not there.
+        # against a file that is not there. Held by check-staging.sh —
+        # shot-window.ps1 shipped for a day with its .cmd riding the glob
+        # beside it and the .ps1 in neither list.
         "$ROOT/tools/guest/flightrec.ps1"
     )
     shasum -a 256 "${DEPLOY_ARTIFACTS[@]}" >"$LEGS_DIR/local.sums"
