@@ -10516,6 +10516,24 @@ let kayaFoldSeamGap: CGFloat = 16
 /// page by background contrast, not by an outline. Semantic colours, so dark
 /// mode is free. tools/check-table-card.sh holds the layer as well as the
 /// look.
+/// Set for the render of FOLDED children (D7): they already sit on the
+/// host table's grouped ground, and a nested table drawing its own
+/// band spends a second 16pt inset — the recents card rendered exactly
+/// one cardInsetX narrower per side than the ledger's while Android's
+/// matched (the maintainer's screenshot, 2026-08-30; the trace closes
+/// the arithmetic: 370 -> 338 at the host's ground, 338 -> 306 at the
+/// nested one).
+private struct KayaOnFoldedGroundKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var kayaOnFoldedGround: Bool {
+        get { self[KayaOnFoldedGroundKey.self] }
+        set { self[KayaOnFoldedGroundKey.self] = newValue }
+    }
+}
+
 private struct KayaTableCardFace: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -10543,13 +10561,23 @@ private struct KayaTableCardFace: ViewModifier {
 /// from ever touching the region's edge. Together with the face's interior
 /// it is what the edge instrument subtracts (kayaTableCardPad).
 private struct KayaTableCardGround: ViewModifier {
+    @Environment(\.kayaOnFoldedGround) private var onFoldedGround
+
     func body(content: Content) -> some View {
         #if os(macOS)
             content
         #else
-            content
-                .padding(kayaTableCardBand)
-                .background(Color(uiColor: .systemGroupedBackground))
+            if onFoldedGround {
+                // Folded content's ground is the VIEWPORT's (D7): a
+                // second band here is a second inset, not a second
+                // colour — grey on grey draws nothing and still
+                // narrows the card.
+                content
+            } else {
+                content
+                    .padding(kayaTableCardBand)
+                    .background(Color(uiColor: .systemGroupedBackground))
+            }
         #endif
     }
 }
@@ -10668,6 +10696,7 @@ private struct KayaSynthesizedTable: View {
                                         }
                                     }
                                     .padding(.bottom, kayaFoldSeamGap)
+                                    .environment(\.kayaOnFoldedGround, true)
                                 }
                                 rows(generation)
                                     .background(
