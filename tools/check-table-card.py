@@ -54,7 +54,9 @@ COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 SWIFTUI = "swift/KayaSwiftUI.swift"
 
 FACE_CALL = ".modifier(KayaTableCardFace())"
-GROUND_CALL = ".modifier(KayaTableCardGround())"
+# The fold-host flag joined the call 2026-08-30 (D7's presentation
+# half): a fold host's screen carries the ground, so the call names it.
+GROUND_CALL = ".modifier(KayaTableCardGround(foldHost: !node.foldedChildren.isEmpty))"
 TIER_HEAD = "private struct KayaSynthesizedTable: View {"
 FACE_HEAD = "private struct KayaTableCardFace: ViewModifier {"
 GROUND_HEAD = "private struct KayaTableCardGround: ViewModifier {"
@@ -201,9 +203,22 @@ PRESENT = (
     # CONTENT box and KayaTrackReader the flex cell's OUTER one, so the
     # card's own span comes off the track or every carded table convicts
     # itself at expect_column_edges.
+    # THE LIVE PAD, not the constant (D7, 2026-08-30): fold-tier tables
+    # paint no band, so the instrument reads what the card actually
+    # spends — the constant convicted a correct fold host of a viewport
+    # 32pt wider than its track.
     ("ios card interior off the assigned track", SWIFTUI,
-     "assigned, pad: kayaTableCardPad, synthesized: got.2)",
+     "assigned, pad: got.3, synthesized: got.2)",
      "assigned, pad: 0, synthesized: got.2)"),
+    ("ios live pad read by the edge instrument", SWIFTUI,
+     "kayaTableCardPadLive(node)",
+     "kayaTableCardPad"),
+    ("ios fold host spends no band", SWIFTUI,
+     "if !table.foldedChildren.isEmpty { return kayaTableCardInsetX }",
+     "if false { return kayaTableCardInsetX }"),
+    ("ios folded content spends no band", SWIFTUI,
+     "if node.foldedInto != 0 { return kayaTableCardInsetX }",
+     "if false { return kayaTableCardInsetX }"),
     # BOTH numbers are between the track and the cells, and the interior
     # alone is the plausible half-answer.
     ("ios card span is the band and the interior", SWIFTUI,

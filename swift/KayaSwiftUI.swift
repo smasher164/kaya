@@ -628,6 +628,13 @@ final class KayaSceneModel {
     /// Live navigation entries by surface id. `navEntries`, not `entries` —
     /// that name is the ENTRY-widget registry below.
     var navEntries: [UInt64: KayaEntryModel] = [:]
+    /// Surfaces hosting a LIVE fold (D7's presentation half, ratified
+    /// 2026-08-30): a folded screen is a grouped screen, and these are
+    /// what the surface roots consult to paint the grouped ground edge
+    /// to edge. Rewritten by the fold apply arm, never derived in a
+    /// body.
+    var groupedEntries: Set<UInt64> = []
+    var groupedWindows: Set<UInt64> = []
     /// entry id -> the window whose stack holds it.
     var entryWindow: [UInt64: UInt64] = [:]
     /// Live sections by surface id (the one surface namespace), and section
@@ -3976,6 +3983,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     if table != 0, let dest = kayaScene.nodes[table] {
                         dest.foldedChildren.append(node)
                     }
+                    kayaRecomputeGroupedSurfaces()
                 }
             case applyMount:
                 // The target is a SURFACE: the primary, an auxiliary
@@ -5925,14 +5933,15 @@ private func kayaRunScript(_ script: String) {
                 // "A table viewport contains rows".
                 let want = Int(parts[2]) ?? -1
                 let got = DispatchQueue.main.sync {
-                    () -> (KayaCurrentTableGeometry, Double?, Bool)? in
+                    () -> (KayaCurrentTableGeometry, Double?, Bool, CGFloat)? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return nil
                     }
                     let trackWidth = kayaCurrentTableTrackWidth(node)
                     return (
                         kayaCurrentTableGeometry(node), trackWidth,
-                        kayaCurrentTableSynthesized(node)
+                        kayaCurrentTableSynthesized(node),
+                        kayaTableCardPadLive(node)
                     )
                 }
                 guard let got else {
@@ -5981,9 +5990,10 @@ private func kayaRunScript(_ script: String) {
                             break
                         }
                         // The card's own span comes off the track first, or
-                        // every carded table convicts itself.
+                        // every carded table convicts itself. The LIVE pad:
+                        // fold-tier tables paint no band (D7).
                         let track = kayaTableContentTrack(
-                            assigned, pad: kayaTableCardPad, synthesized: got.2)
+                            assigned, pad: got.3, synthesized: got.2)
                         let frames = columns.flatMap { $0 }
                         // TRACK, THEN THE LEADING EDGE, THEN THE TRAILING
                         // ONE — one precedence in all four backends
@@ -8522,6 +8532,23 @@ func kayaTableContentTrack(_ track: Double, pad: CGFloat, synthesized: Bool) -> 
     synthesized ? track - 2 * Double(pad) : track
 }
 
+/// What the card ACTUALLY spends on this table's track: a fold host and
+/// folded content paint no band (D7), so the pad the edge instrument
+/// subtracts is insetX alone there — the constant would convict a
+/// correct fold-tier layout of drawing a viewport 32pt wider than its
+/// track. Folded content is found by the model (`foldedInto` up the
+/// parent chain), never by the render's environment flag, which the
+/// harness thread cannot read.
+func kayaTableCardPadLive(_ table: KayaNode) -> CGFloat {
+    if !table.foldedChildren.isEmpty { return kayaTableCardInsetX }
+    var at: KayaNode? = table
+    while let node = at {
+        if node.foldedInto != 0 { return kayaTableCardInsetX }
+        at = kayaScene.parents[node.id].flatMap { kayaScene.nodes[$0] }
+    }
+    return kayaTableCardPad
+}
+
 /// THE CELLS' OWN BOX inside a carded SCROLL CLIP. The card's interior lives
 /// INSIDE the scrolling content (KayaTableCardFace) — it has to end with the
 /// last row rather than with the viewport — so the clip is wider than the
@@ -10516,6 +10543,139 @@ let kayaFoldSeamGap: CGFloat = 16
 /// page by background contrast, not by an outline. Semantic colours, so dark
 /// mode is free. tools/check-table-card.sh holds the layer as well as the
 /// look.
+/// Which surfaces host a live fold, recomputed at each Fold op (rare —
+/// breakpoint crossings): every table holding folded children walks its
+/// parent chain to a root, and the entry or window owning that root is
+/// a grouped screen.
+func kayaRecomputeGroupedSurfaces() {
+    var entries = Set<UInt64>()
+    var windows = Set<UInt64>()
+    for (id, node) in kayaScene.nodes where !node.foldedChildren.isEmpty {
+        var at = id
+        while let parent = kayaScene.parents[at] { at = parent }
+        for (eid, model) in kayaScene.navEntries where model.root?.id == at {
+            entries.insert(eid)
+        }
+        for (wid, model) in kayaScene.windows where model.root?.id == at {
+            windows.insert(wid)
+        }
+        if kayaScene.root?.id == at { windows.insert(0) }
+    }
+    kayaScene.groupedEntries = entries
+    kayaScene.groupedWindows = windows
+}
+
+/// A section card's interior (D7's section lowering): the standard
+/// grouped-row rhythm, 16 leading like a Settings row, a hair tighter
+/// vertically since labels carry their own line height.
+let kayaFoldSectionPadX: CGFloat = 16
+let kayaFoldSectionPadY: CGFloat = 12
+
+/// D7's SECTION LOWERING (the maintainer, 2026-08-30): folded content
+/// on the grouped ground presents as SECTIONS — each run of consecutive
+/// non-table children is one card, and a nested table is its own. The
+/// native reading, verbatim: SwiftUI's inset-grouped List cards every
+/// Section, arbitrary views included, and only small-caps headers and
+/// footnotes sit directly on the ground — full-size text never does,
+/// which is exactly what our bare summary block was.
+private enum KayaFoldSection: Identifiable {
+    case run([KayaNode])
+    case table(KayaNode)
+    var id: UInt64 {
+        switch self {
+        case .run(let nodes): return nodes[0].id
+        case .table(let node): return node.id
+        }
+    }
+}
+
+private func kayaFoldSections(_ folded: KayaNode) -> [KayaFoldSection] {
+    // Only a VERTICAL non-table container splits; anything else is one
+    // section whole (a folded leaf, a horizontal row, a table).
+    let vertical = (folded.axis ?? (folded.kind == kindColumn ? 1 : 0)) == 1
+    if !vertical || !folded.tableColumns.isEmpty || folded.laidOut.isEmpty {
+        return folded.tableColumns.isEmpty ? [.run([folded])] : [.table(folded)]
+    }
+    var out: [KayaFoldSection] = []
+    var run: [KayaNode] = []
+    for child in folded.laidOut {
+        if !child.tableColumns.isEmpty {
+            if !run.isEmpty {
+                out.append(.run(run))
+                run = []
+            }
+            out.append(.table(child))
+        } else {
+            run.append(child)
+        }
+    }
+    if !run.isEmpty { out.append(.run(run)) }
+    return out
+}
+
+private struct KayaFoldedSections: View {
+    let folded: KayaNode
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: kayaFoldSeamGap) {
+            ForEach(kayaFoldSections(folded)) { section in
+                switch section {
+                case .table(let table):
+                    KayaRender(node: table, flexVertical: true, flexStretch: true)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                case .run(let nodes):
+                    kayaCarded(
+                        VStack(alignment: .leading, spacing: folded.spacing) {
+                            ForEach(nodes) { child in
+                                KayaRender(
+                                    node: child, flexVertical: true,
+                                    flexStretch: folded.align == alignStretch
+                                )
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                            }
+                        })
+                }
+            }
+        }
+    }
+
+    /// The card, the FACE's colours and radius on a run of ordinary
+    /// content — macOS keeps its flat look exactly as the face does.
+    @ViewBuilder private func kayaCarded(_ content: some View) -> some View {
+        #if os(macOS)
+            content
+        #else
+            content
+                .padding(.horizontal, kayaFoldSectionPadX)
+                .padding(.vertical, kayaFoldSectionPadY)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(kayaCardShape())
+        #endif
+    }
+}
+
+/// The grouped SCREEN ground (D7's presentation half, ratified
+/// 2026-08-30 after the maintainer's read of the folded screen): a
+/// folded screen is a grouped screen, so the ground is the SCREEN's —
+/// edge to edge, behind the title too — never a sharp-edged band
+/// around the table's region, which is what read as "embedded in the
+/// same sharp grey".
+private struct KayaGroupedScreenGround: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        #if os(macOS)
+            content
+        #else
+            if on {
+                content.background(
+                    Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            } else {
+                content
+            }
+        #endif
+    }
+}
+
 /// Set for the render of FOLDED children (D7): they already sit on the
 /// host table's grouped ground, and a nested table drawing its own
 /// band spends a second 16pt inset — the recents card rendered exactly
@@ -10534,6 +10694,17 @@ extension EnvironmentValues {
     }
 }
 
+#if !os(macOS)
+    /// THE CARD, one spelling: the face and the fold's section cards
+    /// (D7) draw the same rounded surface, and check-table-card holds
+    /// the look to exactly one occurrence — a second copy is where a
+    /// radius or a colour drifts.
+    func kayaCardShape() -> some View {
+        RoundedRectangle(cornerRadius: kayaTableCardRadius, style: .continuous)
+            .fill(Color(uiColor: .secondarySystemGroupedBackground))
+    }
+#endif
+
 private struct KayaTableCardFace: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -10542,10 +10713,7 @@ private struct KayaTableCardFace: ViewModifier {
             content
                 .padding(.horizontal, kayaTableCardInsetX)
                 .padding(.vertical, kayaTableCardInsetY)
-                .background(
-                    RoundedRectangle(cornerRadius: kayaTableCardRadius, style: .continuous)
-                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
-                )
+                .background(kayaCardShape())
         #endif
     }
 }
@@ -10563,15 +10731,25 @@ private struct KayaTableCardFace: ViewModifier {
 private struct KayaTableCardGround: ViewModifier {
     @Environment(\.kayaOnFoldedGround) private var onFoldedGround
 
+    /// A FOLD HOST paints no band either: its screen carries the ground
+    /// (KayaGroupedScreenGround), and the band's one job — keeping the
+    /// card off the region's edge — is the window inset's on a grouped
+    /// screen.
+    let foldHost: Bool
+
+    init(foldHost: Bool = false) {
+        self.foldHost = foldHost
+    }
+
     func body(content: Content) -> some View {
         #if os(macOS)
             content
         #else
-            if onFoldedGround {
-                // Folded content's ground is the VIEWPORT's (D7): a
-                // second band here is a second inset, not a second
-                // colour — grey on grey draws nothing and still
-                // narrows the card.
+            if onFoldedGround || foldHost {
+                // Folded content's ground is the VIEWPORT's, a fold
+                // host's the SCREEN's (D7): a band here is a second
+                // inset, not a second colour — grey on grey draws
+                // nothing and still narrows the card.
                 content
             } else {
                 content
@@ -10675,24 +10853,16 @@ private struct KayaSynthesizedTable: View {
                                     // section gap under the last folded
                                     // child, so the summary and the
                                     // ledger read as two surfaces.
-                                    VStack(alignment: .leading, spacing: node.spacing) {
+                                    // SECTIONS, not bare content (D7's
+                                    // section lowering): each folded
+                                    // child presents as grouped cards —
+                                    // runs of ordinary content carded,
+                                    // nested tables their own. Stretch
+                                    // is Compose's hard width bound,
+                                    // spelled SwiftUI.
+                                    VStack(alignment: .leading, spacing: kayaFoldSeamGap) {
                                         ForEach(node.foldedChildren) { folded in
-                                            // STRETCHED, not offered: Compose
-                                            // measures folded children with the
-                                            // table's width as a hard bound,
-                                            // and a natural-sized column here
-                                            // answered with less — the recents
-                                            // card rendered narrower than the
-                                            // ledger's on iOS while Android's
-                                            // matched (the maintainer's
-                                            // 2026-08-30 screenshot). One
-                                            // semantics: folded content spans
-                                            // the viewport.
-                                            KayaRender(
-                                                node: folded, flexVertical: true,
-                                                flexStretch: true
-                                            )
-                                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                                            KayaFoldedSections(folded: folded)
                                         }
                                     }
                                     .padding(.bottom, kayaFoldSeamGap)
@@ -10742,7 +10912,7 @@ private struct KayaSynthesizedTable: View {
             }
         }
         // A TABLE BOUNDS ITS OWN EXTENT — this tier's spelling of it.
-        .modifier(KayaTableCardGround())
+        .modifier(KayaTableCardGround(foldHost: !node.foldedChildren.isEmpty))
         // task(id:), not onChange: this tier compiles at the macOS 13 /
         // iOS 16 floor, below the zero-parameter onChange.
         .task(id: presented) { node.tablePresented = presented }
@@ -15875,6 +16045,7 @@ struct KayaEntryRoot: View {
         // window.
         .padding(scene.windows[0]?.inset ?? 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .modifier(KayaGroupedScreenGround(on: scene.groupedEntries.contains(entryId)))
         .navigationTitle(scene.navEntries[entryId]?.title ?? "")
     }
 }
@@ -17393,6 +17564,9 @@ struct KayaRoot: View {
             Group {
                 if let root = scene.root {
                     KayaRender(node: root, isRoot: true)
+                        .modifier(
+                            KayaGroupedScreenGround(
+                                on: scene.groupedWindows.contains(0)))
                         .background(
                             GeometryReader { geo in
                                 Color.clear
