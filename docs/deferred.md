@@ -8625,6 +8625,63 @@ dashboard is currently believed to need only the axis flip, and if its
 visual iteration proves otherwise this entry is the design to build.
 
 
+## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO, AND A LIST CANNOT OWN ITS HEADER (2026-08-29)
+KEY: grow inside scroll, unbounded main axis, sliver header, tableHeaderView, LazyColumn item, nested scroll, interim portfolio fix
+
+`grow` means "take a share of the leftover". A `scroll` offers its content
+an UNBOUNDED main extent. So `grow` along a scroll's own axis has nothing
+to divide, and kaya answers ZERO — silently. Researched 2026-08-29, every
+other toolkit does something else:
+
+- FLUTTER refuses: "RenderFlex children have non-zero flex but incoming
+  height constraints are unbounded", and states the principle — if a
+  parent shrink-wraps its child, the child cannot simultaneously expand
+  to fit that parent. The two are mutually exclusive.
+- COMPOSE throws: "Vertically scrollable component was measured with an
+  infinity maximum height constraints, which is disallowed."
+- CSS MAKES IT WORK, because a CSS scroll container has a DEFINITE box
+  and overflows internally rather than proposing infinity. `flex: 1` plus
+  `overflow-y: auto` is the canonical idiom, and the spec special-cases
+  it: a flex item's automatic minimum size is content-based EXCEPT for
+  scroll containers, where it is zero, precisely so this composes.
+
+kaya does the one thing nobody chose. THE ASYMMETRY THAT MAKES IT BITE,
+from this session's own trace: inside a scroll, `grow` degenerates to the
+child's NATURAL size. An ordinary container reports its content (the
+dashboard's detail column asks 586 and gets 586, which is why that fix
+works), but a GROWN TABLE reports 32 — its header alone — because it is a
+viewport built to claim nothing. So containers survive a scroll and
+windowed tables vanish inside one.
+
+TWO CHANGES, when this is picked up:
+1. A `scroll` should TAKE THE EXTENT IT IS GIVEN and overflow its
+   content — which is exactly what a grown table already does. kaya
+   already implements the right model for tables and the wrong one for
+   `scroll`; making them agree REMOVES a special case rather than adding
+   one, and `grow` inside a scroll then means the obvious thing. Failing
+   that, refuse loudly like Flutter and Compose. Silent zero is the one
+   answer with no defenders.
+2. A WINDOWED COLLECTION CANNOT TAKE THE CONTENT ABOVE IT AS ITS HEADER,
+   and every mobile toolkit provides exactly that: Compose's
+   `LazyColumn { item { header }; items(rows) }`, Flutter's
+   `CustomScrollView` with a `SliverToBoxAdapter` over a `SliverList`,
+   UIKit's `UITableView.tableHeaderView`. It is the idiom for "summary
+   above a long list", and kaya cannot express it at all.
+
+THE PORTFOLIO'S TRANSACTIONS SCREEN SHIPS AN INTERIM SHAPE because of
+this. Its two sides share the track and each scrolls — the summary
+explicitly, the ledger implicitly since a grown table is a viewport — so
+a phone gets TWO INDEPENDENTLY SCROLLING REGIONS STACKED VERTICALLY,
+which is a documented anti-pattern (Baymard measures 26% of inline scroll
+areas implemented wrong; nested scrollbars penalise assistive-technology,
+keyboard, tremor, low-vision, magnification and mobile users alike). It
+is reachable, correct and green on all five lanes, and it is NOT the
+intended shape. With the two changes above it becomes one scroll, the
+summary scrolling away as the ledger's header. THE SCENE CANNOT SEE THE
+DIFFERENCE: every assertion here is about geometry and content, never
+about how many scrollers a thumb must fight.
+
+
 ## GAP — a GROWN TABLE STACKED ON A PHONE GETS A ZERO-HEIGHT VIEWPORT (found 2026-08-29)
 KEY: grown table phone viewport, clip 311x0, KayaScrollBox, txnrow stack_below, leftover 259
 
