@@ -106,6 +106,13 @@ expect_drawing_hash canvas@mark "29abce8483ccc343"
 # the chart's filled region freezes, and necessarily: the same two
 # paints, `series_fill` composited over `ground` (§7.2, ±1 per channel).
 expect_ink canvas@mark "50,50 = light D2E3F7 dark 212A35"
+# THE DEFAULT WINDOW INSET, MEASURED (styling-plan D3): the styling
+# scene freezes inset 0, and nothing froze the default-16 path until a
+# scroll-rooted dashboard shipped flush left on WinUI — its one-Padding
+# design stamps the window inset onto the mounted root, and a SCROLL
+# root matched no stamp arm (2026-08-30). Relative, so byte-frozen on
+# all five lanes.
+expect_inset 16
 # NO expect_window_size, ruled 2026-08-28 when the phone legs arrived:
 # the declared 900x600 is a desktop request and a phone's window IS the
 # device, so the outer geometry is the panes-band shape — a value the

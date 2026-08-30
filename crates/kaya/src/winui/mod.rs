@@ -358,6 +358,13 @@ struct CoreState {
     /// where SwiftUI and Compose nest two boxes — see
     /// `container_padding`, which is the only thing that writes it.
     container_insets: HashMap<WidgetId, f64>,
+    /// The minted padding host around a SCROLL mounted as a window's
+    /// root: a ScrollViewer's default template ignores Control.Padding
+    /// (the retemplated entry ScrollViewer in this file exists for that
+    /// reason), so the window inset lives on a Grid AROUND the viewer —
+    /// the same nesting the other three backends have. Keyed by the
+    /// scroll's widget id; written only by the Mount arm.
+    scroll_root_hosts: HashMap<WidgetId, Grid>,
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
@@ -2111,21 +2118,35 @@ fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     own + card + if root { core.inset } else { 0.0 }
 }
 
-/// Write [`container_padding`] onto a container. Not a container (or
-/// destroyed): nothing to stamp.
+/// Write [`container_padding`] onto a container, or onto the minted
+/// HOST of a scroll-rooted window. The scroll arm is load-bearing for
+/// exactly one case: a `kaya.scroll` mounted as a window's root, where
+/// the window inset has nowhere else to land — matching containers
+/// alone dropped it silently, and the portfolio dashboard sat flush
+/// against the window edge from the morning its root grew a scroll
+/// until `expect_inset 16` joined the scene (measured 2026-08-30; the
+/// other three backends nest the window inset OUTSIDE the mounted tree
+/// and never had the hole). Padding cannot go on the viewer itself:
+/// ScrollViewer's default template does not bind Control.Padding.
+/// Anything else (or destroyed): nothing to stamp.
 fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
-    let Some(NativeWidget::Column(grid) | NativeWidget::Row(grid) | NativeWidget::Grid2D(grid)) =
-        core.widgets.get(&id)
-    else {
-        return Ok(());
-    };
     let pad = container_padding(core, id);
-    grid.SetPadding(Thickness {
+    let pad = Thickness {
         Left: pad,
         Top: pad,
         Right: pad,
         Bottom: pad,
-    })
+    };
+    match core.widgets.get(&id) {
+        Some(
+            NativeWidget::Column(grid) | NativeWidget::Row(grid) | NativeWidget::Grid2D(grid),
+        ) => grid.SetPadding(pad),
+        Some(NativeWidget::Scroll(_)) => match core.scroll_root_hosts.get(&id) {
+            Some(host) => host.SetPadding(pad),
+            None => Ok(()),
+        },
+        _ => Ok(()),
+    }
 }
 
 /// Re-attach a 2D grid's children row-major per its current column count,
@@ -13041,6 +13062,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Column(panel) | NativeWidget::Row(panel) => Some(panel.clone()),
                 _ => None,
             };
+            let scroll_root = matches!(widget, NativeWidget::Scroll(_));
             if let Some(panel) = panel {
                 // The normalized root inset — the window's OWN (wprop 8,
                 // docs/styling-plan.md D3), INSIDE the root (Grid.Padding
@@ -13086,6 +13108,30 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 panel.LayoutUpdated(&laid)?;
                 schedule_window_metrics();
             }
+            // A SCROLL-ROOTED WINDOW gets the panel path's three duties
+            // through a minted HOST grid, because the viewer can carry
+            // none of them itself: the window inset (its template
+            // ignores Padding — scroll_root_hosts), the mounted-root
+            // record the inset restamp iterates, and the LayoutUpdated
+            // metrics trigger, without which a resize is never seen and
+            // every breakpoint on the screen is dead — the pushed-entry
+            // class one root shape over (docs/adaptive-layout-plan.md).
+            let element = if scroll_root {
+                core.mounted_roots.insert(window.0, root);
+                let host = Grid::new()?;
+                host.Children()?.Append(&element)?;
+                core.scroll_root_hosts.insert(root, host.clone());
+                stamp_container_padding(core, root)?;
+                let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                    schedule_window_metrics();
+                    Ok(())
+                });
+                host.LayoutUpdated(&laid)?;
+                schedule_window_metrics();
+                host.cast::<UIElement>()?
+            } else {
+                element
+            };
             // The target is a SURFACE: a navigation entry presents
             // in-window (the push already stacked it; the mount fills
             // it), the primary is the window's own root, an auxiliary
@@ -14460,6 +14506,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         *core = Some(CoreState {
             inset: 16.0,
             container_insets: HashMap::new(),
+            scroll_root_hosts: HashMap::new(),
             transactions: tx_rx,
             // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
             // declares-windowing entry): every declared table gets the
@@ -18223,8 +18270,18 @@ impl crate::harness::Stage for WinUiStage {
             // (docs/styling-plan.md D3).
             let root: FrameworkElement = core.window.Content()?.cast()?;
             root.UpdateLayout()?;
-            let grid: Grid = root.cast()?;
-            let child: UIElement = grid.Children()?.GetAt(0)?;
+            // The mounted root is a Grid for the container kinds and a
+            // ScrollViewer for a scroll-rooted scene (the portfolio
+            // dashboard) — the read broke on the cast alone before the
+            // scroll arm existed, the same hole as the padding stamp's
+            // (2026-08-30).
+            let child: UIElement = if let Ok(grid) = root.cast::<Grid>() {
+                grid.Children()?.GetAt(0)?
+            } else if let Ok(viewer) = root.cast::<ScrollViewer>() {
+                viewer.Content()?.cast()?
+            } else {
+                return Ok("<the window content is neither a Grid nor a ScrollViewer>".into());
+            };
             let transform = child.TransformToVisual(&root)?;
             let origin = transform
                 .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
