@@ -143,9 +143,11 @@ PRESENT = (
      "    bottomStart = KAYA_TABLE_SEGMENT_OUTER,"),
     # And the gap between them: fused, it is one container again and the
     # header stops being a segment at all.
+    # The folded block (docs/adaptive-layout-plan.md D7) leads the sum;
+    # the gap this clause holds is still the one between the segments.
     ("compose segment gap", COMPOSE,
-     "val bodyTop = headerSegH + gap",
-     "val bodyTop = headerSegH"),
+     "val bodyTop = foldedBlock + headerSegH + gap",
+     "val bodyTop = foldedBlock + headerSegH"),
     # THE INTERIOR, inside each segment. Both numbers are laid out rather
     # than padded now, so the perturbation is the measure that reads them.
     ("compose card interior", COMPOSE,
@@ -335,16 +337,19 @@ BLOCKS = (
 # so the layer is a gate clause or nothing.
 # (label, file, needle, replacement, the sentence the census must say)
 ZONE = (
+    # The fold's VStack (docs/adaptive-layout-plan.md D7) sits between the
+    # face and the ScrollView's brace, so the shape walks two braces out.
     ("the card back on the scroll viewport's background", SWIFTUI,
-     FACE_CALL + "\n                        }\n"
+     FACE_CALL + "\n                            }\n                        }\n"
      "                        .coordinateSpace(name: kayaTableScrollSpace(node))",
-     "}\n                        .coordinateSpace(name: kayaTableScrollSpace(node))\n"
+     "\n                            }\n                        }\n"
+     "                        .coordinateSpace(name: kayaTableScrollSpace(node))\n"
      "                        " + FACE_CALL,
      "is not inside the scroll clip's content"),
     ("the ground moved inside the scroll clip", SWIFTUI,
-     FACE_CALL + "\n                        }",
+     FACE_CALL + "\n                            }",
      FACE_CALL + "\n                                " + GROUND_CALL
-     + "\n                        }",
+     + "\n                            }",
      "the grouped ground is INSIDE the scroll clip"),
     ("the card wrapped around the mac's native tier", SWIFTUI,
      "case .native: KayaNativeTable(node: node)",
@@ -373,11 +378,11 @@ ZONE = (
      "vertical = KAYA_TABLE_CARD_PAD_Y)\n            // NOTHING ON THIS CHAIN",
      "the compose table modifier chain names `.padding(`"),
     ("the compose segments painted over the rows", COMPOSE,
-     "            headerSeg.place(0, 0)\n"
-     "            bodySeg.place(0, bodyTop)\n"
-     "            headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }",
-     "            headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }\n"
-     "            headerSeg.place(0, 0)\n"
+     "            headerSeg.place(0, foldedBlock)\n"
+     "            bodySeg.place(0, bodyTop)",
+     "            headers.forEachIndexed { c, p -> "
+     "p.place(padX + colX[c], foldedBlock + padY) }\n"
+     "            headerSeg.place(0, foldedBlock)\n"
      "            bodySeg.place(0, bodyTop)",
      "paints OVER them"),
     # A MOVE, not a deletion: both segments still emitted, still exactly
@@ -405,9 +410,11 @@ ZONE = (
      "            HorizontalDivider()\n"
      "            Spacer(Modifier)\n            rows.forEach { row ->",
      "names `HorizontalDivider`"),
+    # The folded children lead the content since D7; the segment census
+    # still refuses a third segment wherever it lands.
     ("a third compose segment, at the head of the content", COMPOSE,
-     "        content = {\n            node.tableColumns.forEachIndexed",
-     "        content = {\n"
+     "            folded.forEach { KayaRender(it) }\n            node.tableColumns.forEachIndexed",
+     "            folded.forEach { KayaRender(it) }\n"
      "            KayaTableSegment(KAYA_TABLE_HEADER_SEGMENT_SHAPE)\n"
      "            node.tableColumns.forEachIndexed",
      "wanted exactly 2"),

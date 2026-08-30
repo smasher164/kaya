@@ -259,3 +259,19 @@ expect label#1 "Transactions: 15003"
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
 expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
+
+# THE STACKED FOLD (docs/adaptive-layout-plan.md D7), at the scene's END
+# so the phone cut costs nothing above it: stacked, the summary renders
+# inside the ledger's viewport — one scroll, the summary scrolling away
+# above row 0 — and side by side it does not. Every assert sits after a
+# resize because the initial state is width-dependent (the adaptive
+# scene's rule); the phone legs cut at resize_window and assert their
+# always-stacked truth as a per-leg extra.
+click button#1
+expect_title "Transactions"
+resize_window 900x600
+expect_folded column@summary none
+resize_window 640x600
+expect_folded column@summary column@ledger
+resize_window 900x600
+expect_folded column@summary none

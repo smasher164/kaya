@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xb1f68943daa4f9e6L
+let spec_hash = 0x85185a153afbc4b7L
 
 let value_bool = 1
 let value_i64 = 2
@@ -251,6 +251,7 @@ let apply_kind_set_typeface = 33
 let apply_kind_set_app_identity = 34
 let apply_kind_set_column_headers = 35
 let apply_kind_set_drawing = 36
+let apply_kind_fold = 37
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3

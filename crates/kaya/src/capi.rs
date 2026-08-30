@@ -481,6 +481,13 @@ const _: () = assert!(KAYA_APPLY_SET_COLUMN_HEADERS == wire::APPLY_SET_COLUMN_HE
 /// The RASTER a canvas's declaration produced: premultiplied RGBA8
 /// device pixels the backend blits (docs/canvas-plan.md §1.1).
 pub const KAYA_APPLY_SET_DRAWING: u16 = 36;
+/// FOLD: u64 child, u64 table — the stacked fold (docs/adaptive-layout-plan.md
+/// D7). Render the child inside the grown table's viewport as scroll-away
+/// content above row 0, in sibling order; table 0 restores it to its
+/// structural parent's layout. Identity does not move: the child keeps
+/// its parent, its id and its addressing.
+pub const KAYA_APPLY_FOLD: u16 = 37;
+const _: () = assert!(KAYA_APPLY_FOLD == wire::APPLY_FOLD);
 const _: () = assert!(KAYA_APPLY_SET_DRAWING == wire::APPLY_SET_DRAWING);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
@@ -3886,6 +3893,7 @@ mod tests {
             ("set_app_identity", KAYA_APPLY_SET_APP_IDENTITY),
             ("set_column_headers", KAYA_APPLY_SET_COLUMN_HEADERS),
             ("set_drawing", KAYA_APPLY_SET_DRAWING),
+            ("fold", KAYA_APPLY_FOLD),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

@@ -2089,8 +2089,22 @@ if [ "$SUITE" = python ] || [ "$SUITE" = all ]; then
     cp -R bindings/python/kaya "$APP/app/kaya"
     rm -rf "$APP/app/kaya/__pycache__"
     for entry in $IOS_PYTHON_SCENES; do
-        queue_leg run_swiftui_on "$entry-python" "$APP" dev.kaya.pyhost \
-            "$entry-python" "$entry" "$entry"
+        if [ "$entry" = portfolio ]; then
+            # The fold block sits at the scene's END so this cut costs
+            # nothing above it (docs/adaptive-layout-plan.md D7): the cut
+            # takes the resize-driven fold/unfold round trip a phone
+            # cannot command, the keep holds the windowing assertions the
+            # leg exists for, and the extra asserts the always-stacked
+            # truth this host CAN express — the summary folded into the
+            # ledger's viewport, no resize ever.
+            queue_leg run_swiftui_on "$entry-python" "$APP" dev.kaya.pyhost \
+                "$entry-python" "$entry" "$entry" \
+                'expect_folded column@summary column@ledger' resize_window \
+                'expect_window=column@ledger'
+        else
+            queue_leg run_swiftui_on "$entry-python" "$APP" dev.kaya.pyhost \
+                "$entry-python" "$entry" "$entry"
+        fi
     done
     # The swift phase's interleave rule, verbatim.
     if [ "$SUITE" = all ] && [ -z "${KAYA_RECORD:-}" ]; then

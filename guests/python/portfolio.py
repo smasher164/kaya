@@ -485,43 +485,42 @@ def open_transactions():
         last_line = kaya.signal("")
         net_signal = kaya.signal("")
         with kaya.row(stack_below=700):
-            # THE SUMMARY TAKES A SHARE AND SCROLLS INSIDE IT. Stacked on
-            # a phone this side wants 594 points of a 596-point screen,
-            # which left the grown ledger a leftover of two and so no
-            # viewport to window into at all. Sharing the track gives the
-            # ledger a real one, and the summary's own overflow becomes
-            # reachable instead of clipped. Side by side on a desktop the
-            # share is the width it already had.
-            with kaya.scroll(grow=1):
-                with kaya.column(align="stretch"):
-                    kaya.label(bind=count_line).a11y_id("count")
-                    kaya.label(bind=first_line).a11y_id("first")
-                    kaya.label(bind=last_line).a11y_id("last")
-                    kaya.label(bind=net_signal).a11y_id("net")
-                    kaya.select([name for name, _ in FILTERS], selected=0,
-                                on_select=on_filter)  # select#0
-                    recent = kaya.collection(Txn)
-                    # UNGROWN: a summary table hugs its rows (the empty-row
-                    # ruling, docs/tables-plan.md).
-                    for row in recent.columns("Date", "Ticker", "Side", "Total",
-                                              a11y_id="recent"):
-                        with kaya.row():
-                            kaya.label(bind=row.date)
-                            kaya.label(bind=row.ticker)
-                            kaya.label(bind=row.side)
-                            kaya.label(bind=row.total)
-            with kaya.column(grow=1, align="stretch"):
-                ledger = kaya.collection(Txn)
-                # GROWN: this one is the fill-and-scroll viewport the
-                # window reports its visible range from.
-                for row in ledger.columns("Date", "Ticker", "Side", "Total",
-                                          on_sort=on_ledger_sort, grow=1,
-                                          a11y_id="ledger"):
+            # A HUGGING SUMMARY, THEN THE ONE GROWN TABLE — the stacked
+            # fold's shape (docs/adaptive-layout-plan.md D7). Side by side
+            # on a desktop these are two columns; stacked on a phone the
+            # core folds the summary into the ledger's viewport, one
+            # scroll, the summary scrolling away above row 0. The app
+            # declares nothing extra: the fold is derived from this shape.
+            with kaya.column(align="stretch") as summary:
+                summary.a11y_id("summary")
+                kaya.label(bind=count_line).a11y_id("count")
+                kaya.label(bind=first_line).a11y_id("first")
+                kaya.label(bind=last_line).a11y_id("last")
+                kaya.label(bind=net_signal).a11y_id("net")
+                kaya.select([name for name, _ in FILTERS], selected=0,
+                            on_select=on_filter)  # select#0
+                recent = kaya.collection(Txn)
+                # UNGROWN: a summary table hugs its rows (the empty-row
+                # ruling, docs/tables-plan.md).
+                for row in recent.columns("Date", "Ticker", "Side", "Total",
+                                          a11y_id="recent"):
                     with kaya.row():
                         kaya.label(bind=row.date)
                         kaya.label(bind=row.ticker)
                         kaya.label(bind=row.side)
                         kaya.label(bind=row.total)
+            ledger = kaya.collection(Txn)
+            # GROWN: this one is the fill-and-scroll viewport the
+            # window reports its visible range from — and the row's
+            # direct child, which is what the fold rule reads.
+            for row in ledger.columns("Date", "Ticker", "Side", "Total",
+                                      on_sort=on_ledger_sort, grow=1,
+                                      a11y_id="ledger"):
+                with kaya.row():
+                    kaya.label(bind=row.date)
+                    kaya.label(bind=row.ticker)
+                    kaya.label(bind=row.side)
+                    kaya.label(bind=row.total)
         screen.update(count=count_line, first=first_line, last=last_line,
                       net=net_signal, recent=recent, ledger=ledger,
                       in_recent=[], in_ledger=[])

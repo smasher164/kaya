@@ -153,6 +153,67 @@ Sequencing is RULED (2026-08-28): the packaging milestone's Android
 step first, then this plan as its own milestone feeding the
 portfolio's visual iteration.
 
+### D7 — the adaptive fold (ratified 2026-08-30)
+
+RATIFIED BY THE MAINTAINER 2026-08-30, choosing the derived fold over an
+explicit `header=` slot: when a `stack_below` row is STACKED, its leading
+hugging children fold into the viewport of its one grown table as
+scroll-away content above row 0 — one scroll where the interim shape had
+two — and crossing back restores them. NO NEW SPELLING ANYWHERE: the
+surface is `stack_below` itself, already in all eight bindings, and the
+fold is derived from the row's own shape, which is why the portfolio's
+guest change was a deletion (the interim `scroll(grow=1)` wrapper came
+out). An explicit header slot was rejected because a header renders
+inside the collection's scroll on EVERY width, which would have changed
+the desktop's two-column screen or dragged conditional layout into the
+guest — the ledgered breakpoint-vocabulary question, made worse.
+
+THE SHAPE RULE IS TOTAL and the core owns it (`fold_assignment` in
+scene.rs, apply record 37 on the apply channel — a record and not a
+prop, because a PROPS entry generates a guest setter in every binding
+and no guest may spell derived state): a stacked row folds IF AND ONLY
+IF exactly one child grows, that child is a declared table, and at least
+one hugging child precedes it. Trailing children keep stacking —
+trailing content on a stacked screen is bottom-bar-shaped, and a bar
+that scrolls away with the rows would be wrong. Two growers keep the
+two-viewport split; a grown non-table keeps stacking; everything that
+fails the shape is exactly what it was before.
+
+EVALUATION IS AT THE BATCH TAIL, not at the CreateBreakpoint op: the
+sugar spells `stack_below` in the row's constructor, so at that op the
+row has no children and the rule would read an empty shape — watched
+failing under the op-time evaluation (scene.rs's
+`stacked_fold_computed_at_the_batch_tail_sees_the_rows_children`).
+
+LOWERINGS, one semantics in four spellings: SwiftUI renders folded
+children above `rows()` inside the synthesized tier's ScrollView, and a
+FOLDED table routes to the synthesized tier at every width on every
+platform (`kayaTableTier`'s `folded` input; the native NSTableView owns
+its scroll and takes no content above row 0) — which is also what makes
+the mac reach that tier through the app. Compose folds them into the
+table's own Layout (this backend cannot nest a second vertical
+scrollable), the `rowsTopPx` origin carrying the folded block so the
+band arithmetic never changes. GTK and WinUI move the widget into the
+scrolling side under their pinned headers — GTK into the content box
+above the top spacer behind the `kaya-folded` class, WinUI into an
+Auto-row wrap Grid above the band — each with the folded extent added
+back wherever band space meets scroll space.
+
+THE OBSERVABLE IS `expect_folded <child> <table|none>`, in all three
+harnesses with one spelling, reading which viewport the child RENDERS in
+(class + ancestry on GTK, wrap membership on WinUI, the render's own
+fold registry on the interpreters). The portfolio scene asserts the full
+round trip at its END — not-folded at 900, folded at 640, not-folded
+back at 900 — so the phones' cut costs nothing above it, and each phone
+leg asserts its always-stacked truth as its extra.
+
+FOUND BY ITS OWN ASSERTIONS ON DAY ONE: the Windows leg reddened because
+every pushed-entry screen's breakpoint was DEAD on that backend —
+`mounted_roots` is keyed by SURFACE and the metrics loop handed entry
+ids to `window_client_width`, which answered None (eighteen metrics
+passes, not one width reaching the core). The adaptive scene could never
+see it: no entries.
+
 ## §1.5 — the milestone landed 2026-08-28
 
 The breadth slice closed the same evening as the depth: the record went

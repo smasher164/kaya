@@ -1599,6 +1599,13 @@ pub enum ApplyOp {
     /// Set a menu property to an already-resolved value.
     SetMenuProp { item: MenuItemId, prop: MenuProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
+    /// The stacked fold (docs/adaptive-layout-plan.md D7): render `child`
+    /// inside grown table `table`'s viewport as scroll-away content above
+    /// row 0, in sibling order; `table` 0 restores it. Derived by the
+    /// core from a `stack_below` row's own shape — no guest spells it —
+    /// and identity does not move: the child keeps its parent and its
+    /// addressing, only where it renders changes.
+    Fold { child: WidgetId, table: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the
     /// sibling `before`, or to the end when None.

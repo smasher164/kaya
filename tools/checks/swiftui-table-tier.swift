@@ -185,27 +185,40 @@ enum KayaTableTierProbe {
         // macOS: the native Table always, at or above its floor. There is
         // no compact mode to collapse into.
         expect("mac (no size class) at/above the floor -> native",
-            kayaTableTier(width: .noSizeClass, dynamicColumns: true), .native)
+            kayaTableTier(width: .noSizeClass, dynamicColumns: true, folded: false), .native)
         expect("mac (no size class) below the floor -> synthesized",
-            kayaTableTier(width: .noSizeClass, dynamicColumns: false), .synthesized)
+            kayaTableTier(width: .noSizeClass, dynamicColumns: false, folded: false), .synthesized)
         // iOS regular: the native Table only where TableColumnForEach
         // exists; kaya's floor is below it.
         expect("iOS regular at/above the floor -> native",
-            kayaTableTier(width: .regular, dynamicColumns: true), .native)
+            kayaTableTier(width: .regular, dynamicColumns: true, folded: false), .native)
         expect("iOS regular below the floor -> synthesized",
-            kayaTableTier(width: .regular, dynamicColumns: false), .synthesized)
+            kayaTableTier(width: .regular, dynamicColumns: false, folded: false), .synthesized)
         // iOS compact: kaya's own header at ANY availability — the native
         // Table collapses to a first-column list and hides the declared
         // columns (docs/tables-plan.md decision 5, revised 2026-08-21).
         expect("iOS compact at/above the floor -> synthesized",
-            kayaTableTier(width: .compact, dynamicColumns: true), .synthesized)
+            kayaTableTier(width: .compact, dynamicColumns: true, folded: false), .synthesized)
         expect("iOS compact below the floor -> synthesized",
-            kayaTableTier(width: .compact, dynamicColumns: false), .synthesized)
+            kayaTableTier(width: .compact, dynamicColumns: false, folded: false), .synthesized)
         // A host that reported no size class at all is not a regular one.
         expect("unknown width at/above the floor -> synthesized",
-            kayaTableTier(width: .unknown, dynamicColumns: true), .synthesized)
+            kayaTableTier(width: .unknown, dynamicColumns: true, folded: false), .synthesized)
         expect("unknown width below the floor -> synthesized",
-            kayaTableTier(width: .unknown, dynamicColumns: false), .synthesized)
+            kayaTableTier(width: .unknown, dynamicColumns: false, folded: false), .synthesized)
+
+        // THE FOLD (docs/adaptive-layout-plan.md D7): a folded table
+        // hosts scroll-away header content inside its own viewport, and
+        // only the synthesized tier's scroll can hold it — on EVERY
+        // platform and at EVERY width. The mac row is the one no phone
+        // can reach: a resized desktop window crosses the breakpoint
+        // outright.
+        expect("mac folded -> synthesized",
+            kayaTableTier(width: .noSizeClass, dynamicColumns: true, folded: true), .synthesized)
+        expect("iOS regular folded -> synthesized (the half-split iPad)",
+            kayaTableTier(width: .regular, dynamicColumns: true, folded: true), .synthesized)
+        expect("iOS compact folded -> synthesized",
+            kayaTableTier(width: .compact, dynamicColumns: true, folded: true), .synthesized)
 
         expectWidth("the environment's .regular maps to regular",
             kayaTableWidth(sizeClass: .regular), .regular)
@@ -276,7 +289,7 @@ enum KayaTableTierProbe {
         expectWidth("this host's KayaTableSurface reports its own width class",
             surface.widthClass, .noSizeClass)
         expect("…and the rule sends it to the native tier",
-            kayaTableTier(width: surface.widthClass, dynamicColumns: true), .native)
+            kayaTableTier(width: surface.widthClass, dynamicColumns: true, folded: false), .native)
 
         // --- Half 3: the tier that actually drew. ----------------------
         let app = NSApplication.shared

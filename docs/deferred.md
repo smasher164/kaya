@@ -8657,8 +8657,20 @@ an author writes, which is exactly why it is the one that should be a
 name.
 
 
-## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO, AND A LIST CANNOT OWN ITS HEADER (2026-08-29)
+## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO (2026-08-29; the header half CLOSED 2026-08-30)
 KEY: grow inside scroll, unbounded main axis, sliver header, tableHeaderView, LazyColumn item, nested scroll, interim portfolio fix
+
+THE SECOND HALF CLOSED 2026-08-30, ratified by the maintainer as the
+ADAPTIVE FOLD (docs/adaptive-layout-plan.md D7): a stacked `stack_below`
+row whose shape is leading hugging children then one grown table folds
+those children into the table's viewport as scroll-away header content —
+DERIVED from the shape, no new spelling in any binding — so "a list
+cannot own its header" is no longer true where it mattered, and the
+interim two-scroller portfolio shape below is GONE (the guest change was
+a DELETION). The FIRST half stands: `grow` along a scroll's own axis is
+still silently zero, and the ruling this entry asks for — take the given
+extent like a grown table does, or refuse loudly like Flutter and
+Compose — is still open.
 
 `grow` means "take a share of the leftover". A `scroll` offers its content
 an UNBOUNDED main extent. So `grow` along a scroll's own axis has nothing
@@ -8700,22 +8712,32 @@ TWO CHANGES, when this is picked up:
    UIKit's `UITableView.tableHeaderView`. It is the idiom for "summary
    above a long list", and kaya cannot express it at all.
 
-THE PORTFOLIO'S TRANSACTIONS SCREEN SHIPS AN INTERIM SHAPE because of
-this. Its two sides share the track and each scrolls — the summary
-explicitly, the ledger implicitly since a grown table is a viewport — so
-a phone gets TWO INDEPENDENTLY SCROLLING REGIONS STACKED VERTICALLY,
-which is a documented anti-pattern (Baymard measures 26% of inline scroll
-areas implemented wrong; nested scrollbars penalise assistive-technology,
-keyboard, tremor, low-vision, magnification and mobile users alike). It
-is reachable, correct and green on all five lanes, and it is NOT the
-intended shape. With the two changes above it becomes one scroll, the
-summary scrolling away as the ledger's header. THE SCENE CANNOT SEE THE
-DIFFERENCE: every assertion here is about geometry and content, never
-about how many scrollers a thumb must fight.
+THE PORTFOLIO'S TRANSACTIONS SCREEN SHIPPED AN INTERIM SHAPE because of
+this, 2026-08-29 to 2026-08-30: two independently scrolling regions
+stacked vertically (a documented anti-pattern — Baymard measures 26% of
+inline scroll areas implemented wrong; nested scrollbars penalise
+assistive-technology, keyboard, tremor, low-vision, magnification and
+mobile users alike). The fold replaced it with one scroll, the summary
+scrolling away as the ledger's header, and the scene now DOES see the
+difference: `expect_folded` reads which viewport a child renders in on
+every lane, both sides of the breakpoint.
 
 
-## GAP — a GROWN TABLE STACKED ON A PHONE GETS A ZERO-HEIGHT VIEWPORT (found 2026-08-29)
+## ~~GAP — a GROWN TABLE STACKED ON A PHONE GETS A ZERO-HEIGHT VIEWPORT (found 2026-08-29)~~ CLOSED 2026-08-30 by the adaptive fold
 KEY: grown table phone viewport, clip 311x0, KayaScrollBox, txnrow stack_below, leftover 259
+
+CLOSED 2026-08-30: the shape that produced the zero — a hugging summary
+worth most of a screen above a grown table dividing the two leftover
+points — no longer reaches the flex at all. The adaptive fold
+(docs/adaptive-layout-plan.md D7) moves the hugging children into the
+table's own viewport when the row stacks, so the table is the row's one
+laid-out child and takes the whole track. The interim fix this entry
+drove (the summary in its own grown scroll) was deleted with it. The
+dead-end list below is kept as the history it is; note the mac-reach
+paragraph predates the fold — a FOLDED table now routes to the
+synthesized tier on every platform including macOS (check-table-tier's
+folded rows), so the mac reaches that tier through the app whenever a
+stacked fold is live.
 
 Put `stack_below=700` on the portfolio's Transactions row and the phone
 lays the screen out correctly in every respect but one: the grown ledger

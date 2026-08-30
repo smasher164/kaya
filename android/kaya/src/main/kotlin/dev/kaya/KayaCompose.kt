@@ -448,6 +448,22 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var revealRequest by mutableStateOf<KayaRange?>(null)
     var revealSeq by mutableStateOf(0)
     val children = mutableStateListOf<KayaNode>()
+
+    /**
+     * The stacked fold (docs/adaptive-layout-plan.md D7): non-zero = the
+     * table whose viewport this node renders inside. Identity stays here
+     * — only layout moves. State, so the flip recomposes both homes.
+     */
+    var foldedInto by mutableStateOf(0L)
+
+    /** The table side: folded content in sibling order, rendered above
+     * row 0 inside this table's scroll. */
+    val foldedChildren = mutableStateListOf<KayaNode>()
+
+    /** The children this container LAYS OUT — a folded child renders in
+     * its table's viewport instead, while every harness read keeps
+     * seeing [children]. */
+    val laidOut: List<KayaNode> get() = children.filter { it.foldedInto == 0L }
 }
 
 /**
@@ -992,7 +1008,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xb1f68943daa4f9e6uL
+    private const val SPEC_HASH: ULong = 0x85185a153afbc4b7uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1036,6 +1052,15 @@ object KayaCompose {
      * ahead of the apply, because a handle dies with its batch.
      */
     private const val APPLY_SET_DRAWING = 36
+
+    /**
+     * The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child;
+     * u64 table } — render the child inside the grown table's viewport
+     * as scroll-away content above row 0; table 0 restores it.
+     * Core-derived; identity and addressing stay with the structural
+     * parent.
+     */
+    private const val APPLY_FOLD = 37
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -2221,6 +2246,24 @@ object KayaCompose {
                     val parentKind = KayaSceneModel.nodes[parent]!!.kind
                     if (parentKind == KIND_SELECT || parentKind == KIND_RADIO) {
                         KayaSceneModel.labels.removeAll { it.id == child }
+                    }
+                }
+                APPLY_FOLD -> {
+                    // The stacked fold (D7). Order is the core's
+                    // emission order — the row's declaration order — so
+                    // add() holds sibling order.
+                    val child = b.long
+                    val table = b.long
+                    val node = KayaSceneModel.nodes[child]
+                    if (node != null) {
+                        if (node.foldedInto != 0L) {
+                            KayaSceneModel.nodes[node.foldedInto]
+                                ?.foldedChildren?.removeAll { it.id == child }
+                        }
+                        node.foldedInto = table
+                        if (table != 0L) {
+                            KayaSceneModel.nodes[table]?.foldedChildren?.add(node)
+                        }
                     }
                 }
                 APPLY_MOUNT -> {
@@ -7232,6 +7275,57 @@ object KayaCompose {
                                 )
                         }
                     }
+                    "expect_folded" -> {
+                        // The stacked fold (D7), read off the state the
+                        // render consumes directly — laidOut and
+                        // foldedChildren ARE the composition's inputs, so
+                        // this is the render's own record, membership
+                        // checked on BOTH ends. harness.rs
+                        // Step::ExpectFolded is the sentence's source of
+                        // truth.
+                        val tableSpec = parts[2]
+                        val got = onUi(activity) {
+                            val child =
+                                target(parts[1], "column", KayaSceneModel.columns)
+                            when {
+                                child == null -> null
+                                tableSpec == "none" ->
+                                    if (child.foldedInto == 0L) "not folded" else "folded"
+                                else -> {
+                                    val table =
+                                        target(parts[2], "column", KayaSceneModel.columns)
+                                    val held =
+                                        table?.foldedChildren?.any { it.id == child.id }
+                                            ?: false
+                                    when {
+                                        table == null -> "<no such table target>"
+                                        child.foldedInto == table.id && held -> "folded"
+                                        child.foldedInto == 0L -> "not folded"
+                                        else ->
+                                            "stamped folded, but rendered outside " +
+                                                "that table's viewport"
+                                    }
+                                }
+                            }
+                        }
+                        when {
+                            got == null -> failures.add("no such target " + parts[1])
+                            got == "folded" && tableSpec != "none" ->
+                                observed.add(parts[1] + " folded into " + tableSpec)
+                            got == "not folded" && tableSpec == "none" ->
+                                observed.add(parts[1] + " not folded")
+                            tableSpec == "none" ->
+                                failures.add(
+                                    parts[1] + " fold reads \"" + got +
+                                        "\", wanted it not folded"
+                                )
+                            else ->
+                                failures.add(
+                                    parts[1] + " fold reads \"" + got +
+                                        "\", wanted it folded into " + tableSpec
+                                )
+                        }
+                    }
                     "expect_aligned" -> {
                         // Classified from measured geometry, never the
                         // model's align field.
@@ -9076,6 +9170,12 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     // one (docs/deferred.md, the declares-windowing entry), so
     // `children` is a band's worth from the first frame.
     val rows = node.children
+    // THE FOLD (D7): a stacked row's hugging children render inside this
+    // viewport, above row 0, and scroll away with the rows — this
+    // backend cannot nest a second vertical scrollable, so they join the
+    // table's own Layout rather than wrapping it. One snapshot, so the
+    // content and measure lambdas agree on the count.
+    val folded = node.foldedChildren.toList()
     val cols = node.tableColumns.size
     val geometryGeneration = "${node.tableGeometryGeneration}:"
     val density = LocalDensity.current.density
@@ -9088,6 +9188,9 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     }
     Layout(
         content = {
+            // FIRST IN THE CONTENT: the folded children, in sibling
+            // order; every index below starts past them.
+            folded.forEach { KayaRender(it) }
             node.tableColumns.forEachIndexed { index, title ->
                 val indicator = when {
                     node.tableSorted != index -> ""
@@ -9199,8 +9302,12 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val padX = KAYA_TABLE_CARD_PAD_X.roundToPx()
         val padY = KAYA_TABLE_CARD_PAD_Y.roundToPx()
         val gap = KAYA_TABLE_SEGMENT_GAP.roundToPx()
-        val headers = measurables.take(cols).map { it.measure(Constraints()) }
-        val cells = measurables.subList(cols + 1, measurables.size - 3)
+        // The folded children lead the content (D7), so every positional
+        // index shifts past them; the segments keep counting from the end.
+        val nFolded = folded.size
+        val headers =
+            measurables.subList(nFolded, nFolded + cols).map { it.measure(Constraints()) }
+        val cells = measurables.subList(nFolded + cols + 1, measurables.size - 3)
             .map { it.measure(Constraints()) }
         val colWidth = IntArray(cols)
         headers.forEachIndexed { c, p -> colWidth[c] = maxOf(colWidth[c], p.width) }
@@ -9271,6 +9378,14 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         node.tableDensity = density
         window.hContentPx = acc
         window.hTrackPx = innerW
+        // The folded children measure at the table's own width — bounded,
+        // which is what makes their labels wrap — and their block sits
+        // above the header segment, one segment gap between.
+        val foldedPlaceables = folded.indices.map {
+            measurables[it].measure(Constraints(minWidth = totalW, maxWidth = totalW))
+        }
+        val foldedH = foldedPlaceables.sumOf { it.height }
+        val foldedBlock = if (foldedH > 0) foldedH + gap else 0
         val headerH = headers.maxOfOrNull { it.height } ?: 0
         // A ROW'S EXTENT IS ITS TOP-TO-TOP REPEAT DISTANCE, spacing
         // included (§2.1): a sum of these IS where the next row starts,
@@ -9286,15 +9401,18 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val tail = if (rowExtents.isEmpty()) 0 else rowGapPx
         val spacers = kayaWindowSpacers(offsetPx, extentPx, bandH, tail)
         val topH = spacers.first
-        val top = measurables[cols].measure(kayaFixedRepresentable(totalW, spacers.first))
+        val top =
+            measurables[nFolded + cols].measure(kayaFixedRepresentable(totalW, spacers.first))
         val bottom = measurables[measurables.size - 3]
             .measure(kayaFixedRepresentable(totalW, spacers.second))
         // TWO SEGMENTS: the header row is its own container, then the gap,
         // then ONE container for every body row. The interior is inside
         // each, which is the whole of why the reported viewport is the
-        // cells' box and not this clip.
+        // cells' box and not this clip. The folded block shifts the whole
+        // grammar down; rowsTop carries it into the band arithmetic, which
+        // is why the window's own code never changes.
         val headerSegH = padY + headerH + padY
-        val bodyTop = headerSegH + gap
+        val bodyTop = foldedBlock + headerSegH + gap
         val rowsTop = bodyTop + padY
         val contentH = rowsTop + topH + bandH - tail + spacers.second + padY
         val totalH = contentH.coerceIn(constraints.minHeight, constraints.maxHeight)
@@ -9327,9 +9445,16 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             // run the rows over bare ground while the boundary the card
             // draws sat somewhere the reader cannot see.
             val colX = IntArray(cols) { colLeft[it] - Math.round(node.tableScrollX) }
-            headerSeg.place(0, 0)
+            headerSeg.place(0, foldedBlock)
             bodySeg.place(0, bodyTop)
-            headers.forEachIndexed { c, p -> p.place(padX + colX[c], padY) }
+            // The folded children, above everything, at the content's
+            // top — they scroll away exactly as a row does.
+            var foldedY = 0
+            foldedPlaceables.forEach { p ->
+                p.place(0, foldedY)
+                foldedY += p.height
+            }
+            headers.forEachIndexed { c, p -> p.place(padX + colX[c], foldedBlock + padY) }
             top.place(0, rowsTop)
             cells.chunked(cols).forEachIndexed { r, row ->
                 row.forEachIndexed { c, p -> p.place(padX + colX[c], rowsTop + tops[r]) }
@@ -9794,7 +9919,7 @@ private fun KayaRenderCore(
                     else -> Alignment.Start
                 },
             ) {
-                node.children.forEach { child ->
+                node.laidOut.forEach { child ->
                     // Every child rides in a cell, grown or not: the
                     // cell carries Modifier.weight (Compose's own
                     // per-child weight, so the contract needs no
@@ -9856,7 +9981,7 @@ private fun KayaRenderCore(
                     else -> Alignment.Top
                 },
             ) {
-                node.children.forEach { child ->
+                node.laidOut.forEach { child ->
                     var cell = Modifier.onGloballyPositioned {
                         kayaMainExtents[child.id] = it.size.width.toDouble()
                         kayaCrossRects[child.id] = Pair(

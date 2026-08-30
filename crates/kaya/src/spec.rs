@@ -1920,6 +1920,24 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   present with no picture, never absent \
                   (tools/check-empty-child.sh's rule).",
         },
+        Record {
+            kind: 37,
+            name: "fold",
+            fields: &[f("child", FieldTy::U64), f("table", FieldTy::U64)],
+            payload: None,
+            doc: "THE STACKED FOLD (docs/adaptive-layout-plan.md D7): render \
+                  `child` inside the viewport of the grown table `table` as \
+                  scroll-away content above row 0, in sibling order; `table` \
+                  0 restores the child to its structural parent's layout. \
+                  APPLY-ONLY AND DERIVED: no guest spells this — the core \
+                  computes it from a `stack_below` row's own shape when the \
+                  breakpoint crosses, which is why it is a record here and \
+                  not a prop (a PROPS entry generates a guest setter in \
+                  every binding). The tree does not change: the child keeps \
+                  its parent, its id and its addressing; only where it \
+                  RENDERS moves, exactly as the axis prop moves arrangement \
+                  without moving identity.",
+        },
     ],
     occurrence: &[
         Record {
@@ -2877,6 +2895,7 @@ mod tests {
             ("set_app_identity", wire::APPLY_SET_APP_IDENTITY),
                 ("set_column_headers", wire::APPLY_SET_COLUMN_HEADERS),
                 ("set_drawing", wire::APPLY_SET_DRAWING),
+                ("fold", wire::APPLY_FOLD),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says

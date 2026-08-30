@@ -368,6 +368,10 @@ struct CoreState {
     widgets: HashMap<WidgetId, NativeWidget>,
     // Which grid each widget sits in, for Destroy's detach.
     parents: HashMap<WidgetId, Grid>,
+    /// The stacked fold's memory (D7): folded child -> its table's id.
+    /// reindex filters these out of a container's tracks, and the unfold
+    /// op carries table 0, so the map is what routes the element home.
+    folded_into: HashMap<u64, u64>,
     // Grid places by attached Row/Column index, not by child order
     // (docs/traps.md), so the logical order is tracked here and stamped
     // back onto the children after every structural change. It is also
@@ -1432,7 +1436,7 @@ fn report_canvas_tracks(core: &mut CoreState) {
         for op in ops {
             let what = op_head(&op);
             if let Err(e) = apply(core, op) {
-                crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+            crate::fault::report(format!("kaya: applying {what} failed: {e}"));
                 return;
             }
         }
@@ -1447,7 +1451,29 @@ fn report_canvas_tracks(core: &mut CoreState) {
 /// silent in the core, so re-asking on every layout pass is free — the
 /// canvas report's rule, one report over.
 fn report_window_metrics(core: &mut CoreState) {
-    let windows: Vec<u64> = core.mounted_roots.keys().copied().collect();
+    // A mounted root's key is a SURFACE — the primary or an aux window's
+    // own id, a pushed entry's, a section's — and the width that governs
+    // a breakpoint is the OWNING WINDOW's. An entry id handed to
+    // window_client_width answers None, which is how every pushed
+    // screen's breakpoint sat dead on this backend while the adaptive
+    // scene (no entries) stayed green: measured on the portfolio's fold
+    // block, 2026-08-30, eighteen metrics passes over mounted_roots=[7]
+    // and not one width reaching the core.
+    let mut windows: Vec<u64> = core
+        .mounted_roots
+        .keys()
+        .map(|&surface| {
+            if let Some(entry) = core.nav_entries.get(&surface) {
+                entry.window
+            } else if let Some(section) = core.section_panes.get(&surface) {
+                section.window
+            } else {
+                surface
+            }
+        })
+        .collect();
+    windows.sort_unstable();
+    windows.dedup();
     for window in windows {
         let Some(width) = window_client_width(core, window) else {
             continue;
@@ -1462,7 +1488,7 @@ fn report_window_metrics(core: &mut CoreState) {
         for op in ops {
             let what = op_head(&op);
             if let Err(e) = apply(core, op) {
-                crate::fault::report(format!("kaya: applying {what} failed: {e}"));
+            crate::fault::report(format!("kaya: applying {what} failed: {e}"));
                 return;
             }
         }
@@ -2181,7 +2207,17 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         _ => return Ok(()),
     };
     let vertical = effective_vertical(core, parent);
-    let order = core.child_order.children(parent);
+    // The children this container LAYS OUT (D7): a folded child renders
+    // inside its table's viewport instead; its order entry stays, so the
+    // unfold re-stamps it exactly where it was declared.
+    let order: Vec<WidgetId> = core
+        .child_order
+        .children(parent)
+        .iter()
+        .copied()
+        .filter(|c| !core.folded_into.contains_key(&c.0))
+        .collect();
+    let order = &order[..];
     // A DECLARED TABLE OWNS THREE TRACKS OF ITS OWN — the header, the
     // rule and the scroll host — and its rows are placed inside the
     // host's band panel, one track down past the top spacer
@@ -2439,6 +2475,37 @@ fn baseline_compensate(
 }
 
 /// One child's track: natural size, or a share of the leftover.
+/// Re-stamp the wrap's rows after a fold change (D7): one Auto row per
+/// folded element in sibling order, then the band. Its only callers are
+/// the Fold arm's two directions.
+fn fold_restack(table: &WinTable) -> windows_core::Result<()> {
+    let defs = table.wrap.RowDefinitions()?;
+    defs.Clear()?;
+    for _ in 0..=table.folded.len() {
+        let def = RowDefinition::new()?;
+        def.SetHeight(track(0.0))?;
+        defs.Append(&def)?;
+    }
+    for (i, element) in table.folded.iter().enumerate() {
+        Grid::SetRow(element, i as i32)?;
+    }
+    Grid::SetRow(&table.band.cast::<FrameworkElement>()?, table.folded.len() as i32)?;
+    Ok(())
+}
+
+/// The folded block's extent above the band (D7): what every band-space
+/// coordinate must add to reach host space, and 0.0 with nothing folded.
+fn fold_extent(id: u64) -> f64 {
+    TABLES.with_borrow(|tables| {
+        tables.get(&id).map_or(0.0, |t| {
+            t.folded
+                .iter()
+                .map(|e| e.ActualHeight().unwrap_or(0.0))
+                .sum()
+        })
+    })
+}
+
 fn track(weight: f64) -> GridLength {
     if weight > 0.0 {
         GridLength {
@@ -2578,6 +2645,14 @@ struct WinTable {
     /// The band panel: the top spacer track, one track per REALIZED row,
     /// the bottom spacer track. `reindex` is its only structural writer.
     band: Grid,
+    /// The host's real content since the fold (D7): Auto rows holding the
+    /// folded children, then the band. With nothing folded it is one row
+    /// of band and changes nothing.
+    wrap: Grid,
+    /// The folded elements in sibling order — the extent the report adds
+    /// back, since every band coordinate is band-space and the host's
+    /// offset now spans the folded block above it.
+    folded: Vec<FrameworkElement>,
     /// The header cells, one per title, in visual order.
     cells: Vec<Button>,
     /// The stamped row containers, refreshed from the core each drain.
@@ -2692,7 +2767,7 @@ fn declare_table(
         return Ok(());
     };
     let grid = grid.clone();
-    let mut minted: Option<(Grid, ScrollViewer, Grid, Grid, ScrollViewer, Grid, Vec<Button>)> =
+    let mut minted: Option<(Grid, ScrollViewer, Grid, Grid, ScrollViewer, Grid, Grid, Vec<Button>)> =
         None;
     let remint = TABLES.with_borrow(|tables| match tables.get(&id.0) {
         Some(live) => live.titles.len() != titles.len(),
@@ -2757,7 +2832,18 @@ fn declare_table(
         // with nothing added (`reindex`).
         band.SetRowSpacing(0.0)?;
         band.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
-        host.SetContent(&band)?;
+        // The wrap (D7): the scrolling side is [folded children..., band],
+        // Auto rows; fold_restack keeps the definitions in step.
+        let wrap = Grid::new()?;
+        wrap.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        {
+            let def = RowDefinition::new()?;
+            def.SetHeight(track(0.0))?;
+            wrap.RowDefinitions()?.Append(&def)?;
+        }
+        Grid::SetRow(&band.cast::<FrameworkElement>()?, 0)?;
+        wrap.Children()?.Append(&band)?;
+        host.SetContent(&wrap)?;
         let mut cells = Vec::new();
         for (column, _) in titles.iter().enumerate() {
             let cell: Button = XamlReader::Load(&HSTRING::from(TABLE_HEADER_CELL_XAML))?.cast()?;
@@ -2785,12 +2871,12 @@ fn declare_table(
             cell.Click(&handler)?;
             cells.push(cell);
         }
-        minted = Some((card, head, header, rule, host, band, cells));
+        minted = Some((card, head, header, rule, host, band, wrap, cells));
     }
     let fresh = minted.is_some();
     let gap = core.spacings.get(&id).copied().unwrap_or(8.0);
     TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
-        if let Some((card, head, header, rule, host, band, cells)) = minted {
+        if let Some((card, head, header, rule, host, band, wrap, cells)) = minted {
             tables.insert(
                 id.0,
                 WinTable {
@@ -2805,6 +2891,8 @@ fn declare_table(
                     rule,
                     host,
                     band,
+                    wrap,
+                    folded: Vec::new(),
                     cells,
                     rows: Vec::new(),
                     pad: 0.0,
@@ -3194,9 +3282,13 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
     let (anchor, at, commanded) =
         TABLES.with_borrow(|t| t.get(&id).map(|w| (w.anchor, w.at, w.commanded)).unwrap_or((None, 0.0, 0)));
     let landed = (y0 - at).abs() <= 0.5;
+    // Band space to host space (D7): the folded block above the band
+    // shifts every host offset by its own extent.
+    let folded_h = fold_extent(id);
     let want = anchor.and_then(|row| {
         let offset = row.checked_sub(geometry.first)?;
-        (offset <= tracks.len()).then(|| spacer_top + tracks[..offset].iter().sum::<f64>())
+        (offset <= tracks.len())
+            .then(|| folded_h + spacer_top + tracks[..offset].iter().sum::<f64>())
     });
     if commanded > 0 || landed {
         TABLES.with_borrow_mut(|t| {
@@ -3227,7 +3319,8 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
     }
 
     // --- The report: the visible range (§3.2). ----------------------
-    let visible = table_visible_rows(&geometry, spacer_top, &tracks, y0, viewport);
+    let visible =
+        table_visible_rows(&geometry, spacer_top, &tracks, (y0 - folded_h).max(0.0), viewport);
     if trace_enabled() {
         eprintln!(
             "kaya: winui window {id} band {}+{} of {} offset {:.1} extent {:.1} corrected {} \
@@ -12855,6 +12948,59 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // once per append.
             core.child_order.append(parent, child);
         }
+        ApplyOp::Fold { child, table } => {
+            // The stacked fold (D7): the element moves into the table's
+            // wrap — the scrolling side, above the band — and scrolls
+            // away with the rows under this backend's pinned header.
+            // Identity does not move: the child keeps its id, its order
+            // entry and its registries; reindex filters it out of the
+            // structural parent's tracks, and a panel's Children order
+            // never places anything (the attached indices do), so the
+            // move is an Append each way plus a re-stamp.
+            let element = core
+                .widgets
+                .get(&child)
+                .expect("scene validated the id")
+                .element()?;
+            if table.0 != 0 {
+                core.folded_into.insert(child.0, table.0);
+                if let Some(panel) = core.parents.get(&child) {
+                    let children = panel.Children()?;
+                    let mut at = 0u32;
+                    if children.IndexOf(&element, &mut at)? {
+                        children.RemoveAt(at)?;
+                    }
+                }
+                TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
+                    if let Some(t) = tables.get_mut(&table.0) {
+                        t.wrap.Children()?.Append(&element)?;
+                        t.folded.push(element.cast()?);
+                        fold_restack(t)?;
+                    }
+                    Ok(())
+                })?;
+            } else if let Some(tid) = core.folded_into.remove(&child.0) {
+                TABLES.with_borrow_mut(|tables| -> windows_core::Result<()> {
+                    if let Some(t) = tables.get_mut(&tid) {
+                        let children = t.wrap.Children()?;
+                        let mut at = 0u32;
+                        if children.IndexOf(&element, &mut at)? {
+                            children.RemoveAt(at)?;
+                        }
+                        let fe: FrameworkElement = element.cast()?;
+                        t.folded.retain(|e| e != &fe);
+                        fold_restack(t)?;
+                    }
+                    Ok(())
+                })?;
+                if let Some(panel) = core.parents.get(&child) {
+                    panel.Children()?.Append(&element)?;
+                }
+            }
+            if let Some(parent) = core.child_order.parent_of(child) {
+                core.child_order.mark(parent);
+            }
+        }
         ApplyOp::Mount { window, root } => {
             let widget = core.widgets.get(&root).expect("scene validated the id");
             // Both handles are taken here, under the widget borrow: a
@@ -14299,6 +14445,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             pending_dialog_dir: RefCell::new(None),
             widgets: HashMap::new(),
             parents: HashMap::new(),
+            folded_into: HashMap::new(),
             buttons: Vec::new(),
             checkboxes: Vec::new(),
             labels: Vec::new(),
@@ -16442,7 +16589,10 @@ impl crate::harness::Stage for WinUiStage {
             let (spacer_top, tracks) = band_tracks(&band)?;
             let first = core.scene.window_geometry(id).first;
             let offset = index.saturating_sub(first);
-            let want = spacer_top + tracks[..offset.min(tracks.len())].iter().sum::<f64>();
+            // Band space to host space (D7), the report's rule verbatim.
+            let want = fold_extent(id)
+                + spacer_top
+                + tracks[..offset.min(tracks.len())].iter().sum::<f64>();
             table_scroll_to(&host, id, want)?;
             // Parked on the ROW, not on the pixel: every correction cycle
             // re-parks it (§2.4, and docs/traps.md "The anchoring race").
@@ -16842,6 +16992,58 @@ impl crate::harness::Stage for WinUiStage {
                 (false, true) => "horizontal".to_owned(),
                 (false, false) => "no container layout recorded".to_owned(),
                 (true, true) => format!("<both axes have tracks: {rows} rows, {cols} columns>"),
+            })
+        })
+        .unwrap_or_else(|e| format!("<winui read failed: {e:?}>"))
+    }
+
+    fn fold_state(&self, child: crate::harness::Target, table: Option<crate::harness::Target>) -> String {
+        Self::on_ui_read(move |core| {
+            // Measured off the TREE, both halves (D7): the child's element
+            // is (or is not) inside the table's wrap — the scrolling side
+            // — never the model map alone, which would echo the Fold op.
+            // Column children only: the id registry this read rides is
+            // the columns', and every fold this rule can produce folds a
+            // container (a leaf would ride inside one).
+            if !matches!(child.kind, crate::harness::TargetKind::Column) {
+                return Ok("<the fold read speaks column children only>".to_owned());
+            }
+            let Some(child_id) = crate::harness::try_resolve(child.index, core.columns.len())
+                .map(|i| core.column_ids[i])
+            else {
+                return Ok("<no such child target>".to_owned());
+            };
+            let Some(element) = core.widgets.get(&child_id).map(|w| w.element()) else {
+                return Ok("<no such child widget>".to_owned());
+            };
+            let element = element?;
+            let Some(want) = table else {
+                return Ok(if core.folded_into.contains_key(&child_id.0) {
+                    "folded"
+                } else {
+                    "not folded"
+                }
+                .to_owned());
+            };
+            if !matches!(want.kind, crate::harness::TargetKind::Column) {
+                return Ok("<the fold target is not a column>".to_owned());
+            }
+            let Some(i) = crate::harness::try_resolve(want.index, core.columns.len()) else {
+                return Ok("<no such table target>".to_owned());
+            };
+            let table_id = core.column_ids[i].0;
+            let held = TABLES.with_borrow(|tables| -> windows_core::Result<bool> {
+                let Some(t) = tables.get(&table_id) else {
+                    return Ok(false);
+                };
+                let children = t.wrap.Children()?;
+                let mut at = 0u32;
+                children.IndexOf(&element, &mut at)
+            })?;
+            Ok(match (core.folded_into.get(&child_id.0), held) {
+                (Some(&tid), true) if tid == table_id => "folded".to_owned(),
+                (None, _) => "not folded".to_owned(),
+                _ => "stamped folded, but rendered outside that table's viewport".to_owned(),
             })
         })
         .unwrap_or_else(|e| format!("<winui read failed: {e:?}>"))

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xb1f68943daa4f9e6L;
+    public static final long SPEC_HASH = 0x85185a153afbc4b7L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -249,6 +249,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_APP_IDENTITY = 34;
     public static final short APPLY_KIND_SET_COLUMN_HEADERS = 35;
     public static final short APPLY_KIND_SET_DRAWING = 36;
+    public static final short APPLY_KIND_FOLD = 37;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;

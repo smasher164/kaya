@@ -1537,6 +1537,17 @@ ADAPTIVE_CUT="$(scene_script_cut adaptive resize_window \
     'expect_axis row@narrow "vertical"')" || exit 1
 ADAPTIVE_CUT="${ADAPTIVE_CUT}expect_axis row@narrow \"vertical\";"
 
+# The portfolio's fold block (docs/adaptive-layout-plan.md D7) sits at
+# the scene's END so this cut costs nothing above it: the cut takes the
+# resize-driven fold/unfold round trip a phone cannot command, the keep
+# holds the windowing assertions the leg exists for, and the extra
+# asserts the always-stacked truth this host CAN express — the summary
+# folded into the ledger's viewport, no resize ever.
+PORTFOLIO_CUT="$(scene_script_cut portfolio resize_window \
+    "expect_window=column@ledger" \
+    'expect_folded column@summary column@ledger')" || exit 1
+PORTFOLIO_CUT="${PORTFOLIO_CUT}expect_folded column@summary column@ledger;"
+
 # The identity scene's one desktop-only step, dropped for every suite
 # rather than per block: all three guests ask the core
 # (`kaya_capabilities`) rather than each deriving it from its own
@@ -2784,7 +2795,7 @@ PY
     run_apk portfolio-python \
         "$ROOT/android/pyhost/build/outputs/apk/debug/pyhost-debug.apk" \
         dev.kaya.pyhost/.MainActivity portfolio \
-        --es KAYA_SELFTEST_SCRIPT "'$(scene_script portfolio)'"
+        --es KAYA_SELFTEST_SCRIPT "'$PORTFOLIO_CUT'"
     drain
     timing legs-python
 fi

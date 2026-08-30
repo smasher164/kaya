@@ -1218,6 +1218,11 @@ const TABLE_CELL_CLASS: &str = "kaya-table-header-cell";
 /// like the header above so the table verbs stay tree reads.
 const TABLE_BODY_CLASS: &str = "kaya-table-body";
 const TABLE_SPACER_CLASS: &str = "kaya-table-spacer";
+/// The stacked fold's marker (docs/adaptive-layout-plan.md D7): a folded
+/// child rides inside the table's content box, above the top spacer, and
+/// every reader of that box skips this class exactly as it skips the
+/// spacers'.
+const KAYA_FOLDED_CLASS: &str = "kaya-folded";
 
 /// How much of an UNGROWN table this tier shows before the rest scrolls
 /// — GTK's spelling of tools/scenes/table.steps' "a table is a
@@ -1482,7 +1487,9 @@ fn table_rows(column: &gtk4::Box) -> Vec<gtk4::Widget> {
     if let Some(content) = table_body(column) {
         return children_of(&content)
             .into_iter()
-            .filter(|w| !w.has_css_class(TABLE_SPACER_CLASS))
+            .filter(|w| {
+                !w.has_css_class(TABLE_SPACER_CLASS) && !w.has_css_class(KAYA_FOLDED_CLASS)
+            })
             .collect();
     }
     match table_header(column) {
@@ -2012,8 +2019,17 @@ fn reflow_table(core: &mut CoreState, id: u64) {
     }
     // The spacers bracket the band whatever order the moves left behind:
     // MoveChild's "before: None" appends at the very end, which is past
-    // the bottom spacer until this puts it back.
+    // the bottom spacer until this puts it back. The FOLDED children
+    // (D7) lead everything, above the top spacer, in their own preserved
+    // order.
     content.reorder_child_after(&top, None::<&gtk4::Widget>);
+    let mut folded_anchor: Option<gtk4::Widget> = None;
+    for w in children_of(&content) {
+        if w.has_css_class(KAYA_FOLDED_CLASS) {
+            content.reorder_child_after(&w, folded_anchor.as_ref());
+            folded_anchor = Some(w);
+        }
+    }
     let last = content.last_child();
     if last.as_ref() != Some(bottom.upcast_ref::<gtk4::Widget>()) {
         content.reorder_child_after(&bottom, last.as_ref());
@@ -2139,8 +2155,16 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     // clamped at the collection's end simply does not land, and the
     // reading below is then the honest one.
     if let Some(index) = anchor.get().filter(|i| *i < total) {
+        // row_position speaks the COLLECTION's coordinates; the folded
+        // children above the top spacer (D7) shift every allocation down
+        // by their own extent, so the adjustment write adds it back.
+        let folded_extra: f64 = children_of(&content)
+            .into_iter()
+            .filter(|w| w.has_css_class(KAYA_FOLDED_CLASS))
+            .map(|w| f64::from(w.allocation().height()) + spacing)
+            .sum();
         let want = row_position(scene, id, index, &band);
-        if let Some(want) = want {
+        if let Some(want) = want.map(|w| w + folded_extra) {
             if (adjustment.value() - want).abs() > 0.5 {
                 programmatic.set(true);
                 adjustment.set_value(want);
@@ -2154,7 +2178,9 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     // The band's rows, in band order, with the boxes this tier gave them.
     let rows: Vec<(f64, f64)> = children_of(&content)
         .into_iter()
-        .filter(|w| !w.has_css_class(TABLE_SPACER_CLASS))
+        .filter(|w| {
+            !w.has_css_class(TABLE_SPACER_CLASS) && !w.has_css_class(KAYA_FOLDED_CLASS)
+        })
         .map(|w| {
             let allocation = w.allocation();
             (f64::from(allocation.y()), f64::from(allocation.height()))
@@ -2413,6 +2439,10 @@ struct CoreState {
     rows: Vec<gtk4::Box>,
     /// The declared tables, by For-container id (see GtkTable).
     tables: HashMap<u64, GtkTable>,
+    /// The stacked fold's memory (D7): folded child id -> its table's id,
+    /// kept because the unfold op carries table 0 and the widget must go
+    /// back before the table it came out of.
+    folded_into: HashMap<u64, u64>,
     window: gtk4::Window,
     /// Auxiliary surfaces by kaya window id (the primary is
     /// `window`); created hidden, presented at mount.
@@ -6745,6 +6775,66 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 parent_box.reorder_child_after(&child_widget, after.as_ref());
             }
         }
+        ApplyOp::Fold { child, table } => {
+            // The stacked fold (D7): the child moves INTO the table's
+            // content box, above the top spacer, and scrolls away with
+            // the rows — under this backend's pinned header, which is
+            // its own idiom. Identity does not move: the widget keeps
+            // its id and its registry entries; reflow_table and the
+            // class filters keep it out of every row read.
+            use gtk4::prelude::WidgetExt;
+            let child_widget = core
+                .widgets
+                .get(&child)
+                .expect("scene validated the id")
+                .widget();
+            if table.0 != 0 {
+                let Some(t) = core.tables.get(&table.0) else {
+                    panic!("kaya: fold into {table:?}, which declared no columns");
+                };
+                let content = t.content.clone();
+                core.folded_into.insert(child.0, table.0);
+                child_widget.add_css_class(KAYA_FOLDED_CLASS);
+                if let Some(parent) = child_widget
+                    .parent()
+                    .and_then(|p| p.downcast::<gtk4::Box>().ok())
+                {
+                    parent.remove(&child_widget);
+                }
+                // Spanning, like a scroll viewport's one child; the
+                // unfold's reconcile restores the authored alignment.
+                child_widget.set_halign(gtk4::Align::Fill);
+                let mut after: Option<gtk4::Widget> = None;
+                for w in children_of(&content) {
+                    if w.has_css_class(KAYA_FOLDED_CLASS) {
+                        after = Some(w);
+                    }
+                }
+                content.insert_child_after(&child_widget, after.as_ref());
+            } else if let Some(tid) = core.folded_into.remove(&child.0) {
+                child_widget.remove_css_class(KAYA_FOLDED_CLASS);
+                if let Some(t) = core.tables.get(&tid) {
+                    t.content.remove(&child_widget);
+                }
+                // Back BEFORE the table it came out of — the rule folds
+                // leading siblings only, and the ops arrive in recorded
+                // order, so each lands after the one before it.
+                if let Some(table_widget) =
+                    core.widgets.get(&WidgetId(tid)).map(|w| w.widget())
+                {
+                    if let Some(parent) = table_widget
+                        .parent()
+                        .and_then(|p| p.downcast::<gtk4::Box>().ok())
+                    {
+                        parent.insert_child_after(
+                            &child_widget,
+                            table_widget.prev_sibling().as_ref(),
+                        );
+                    }
+                }
+                reconcile_grow_align(&child_widget);
+            }
+        }
         ApplyOp::Destroy { id } => {
             // The clipboard hub forgets the widget with it (the weak
             // ref would go stale on its own; the maps must not grow).
@@ -6754,6 +6844,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // A destroyed For container takes its composed header with
             // it; the entry would otherwise outlive the widget it holds.
             core.tables.remove(&id.0);
+            core.folded_into.remove(&id.0);
             // A destroyed anchor takes its context attachment with it (menu
             // ITEMS are never destroyed): the popover unparents BEFORE the
             // widget leaves its container, and a dangling open-context claim
@@ -9047,6 +9138,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 column_ids: Vec::new(),
                 rows: Vec::new(),
                 tables: HashMap::new(),
+                folded_into: HashMap::new(),
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -11164,6 +11256,47 @@ impl crate::harness::Stage for GtkStage {
             match container.orientation() {
                 gtk4::Orientation::Vertical => "vertical".to_owned(),
                 _ => "horizontal".to_owned(),
+            }
+        })
+    }
+
+    fn fold_state(&self, child: crate::harness::Target, table: Option<crate::harness::Target>) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            // Measured off the TREE, both halves (D7): the class the fold
+            // stamps, and the ancestry that says which viewport the child
+            // actually renders in — never the core's model, which would
+            // echo the Fold op back.
+            let Some(child_widget) = target_widget(core, child) else {
+                return "<no such child target>".to_owned();
+            };
+            let stamped = child_widget.has_css_class(KAYA_FOLDED_CLASS);
+            let Some(want) = table else {
+                return if stamped { "folded" } else { "not folded" }.to_owned();
+            };
+            if !matches!(want.kind, crate::harness::TargetKind::Column) {
+                return "<the fold target is not a column>".to_owned();
+            }
+            let Some(i) = crate::harness::try_resolve(want.index, core.columns.len()) else {
+                return "<no such table target>".to_owned();
+            };
+            let Some(gtk_table) = core.tables.get(&core.column_ids[i].0) else {
+                return "that column declared no columns, so it has no viewport".to_owned();
+            };
+            let content = gtk_table.content.clone().upcast::<gtk4::Widget>();
+            let mut at = child_widget.parent();
+            let mut inside = false;
+            while let Some(w) = at {
+                if w == content {
+                    inside = true;
+                    break;
+                }
+                at = w.parent();
+            }
+            match (stamped, inside) {
+                (true, true) => "folded".to_owned(),
+                (false, _) => "not folded".to_owned(),
+                (true, false) => "stamped folded, but rendered outside that table's viewport".to_owned(),
             }
         })
     }

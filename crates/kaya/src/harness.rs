@@ -372,6 +372,12 @@ pub enum Step {
     /// backend's own layout state, never the model: a backend that
     /// ignored the write must fail, the expect_aligned rule.
     ExpectAxis(Target, String),
+    /// The stacked fold (docs/adaptive-layout-plan.md D7): the child
+    /// renders inside the table's viewport (Some) or in its structural
+    /// parent (None, spelled `none`). Observed from the backend's own
+    /// tree, never the core's model — a backend that ignored the Fold op
+    /// must fail, the expect_axis rule.
+    ExpectFolded(Target, Option<Target>),
     /// None = the implicit primary (window 0), keeping the
     /// single-window spelling; Some(n) prefixes the observation with
     /// `window#n `.
@@ -712,6 +718,13 @@ impl Step {
             | Step::ExpectDrawing(t, _)
             | Step::ExpectRaster(t, _)
             | Step::Compose(t, _) => vec![t],
+            Step::ExpectFolded(child, table) => {
+                let mut out = vec![child];
+                if let Some(table) = table {
+                    out.push(table);
+                }
+                out
+            }
             Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectWindow(t, _, _) => vec![t],
@@ -804,6 +817,7 @@ impl Step {
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
+            Step::ExpectFolded { .. } => true,
             Step::ExpectTitle { .. } => true,
             Step::ExpectSections { .. } => true,
             Step::ExpectSection { .. } => true,
@@ -1092,6 +1106,11 @@ pub trait Stage: Send + 'static {
     /// The container's rendered arrangement axis: "horizontal" or
     /// "vertical", read from the backend's own layout state.
     fn container_axis(&self, target: Target) -> String;
+    /// The stacked fold, measured off this backend's own tree (D7): "folded"
+    /// when the child renders inside the table's viewport, "not folded"
+    /// when it renders in its structural parent, and any other sentence
+    /// is what the backend could actually see.
+    fn fold_state(&self, child: Target, table: Option<Target>) -> String;
     /// A surface's REAL materialized title (the title bar on the desktops,
     /// the task label on Android) — never the scene model's copy, so a
     /// backend that ignored the write fails.
@@ -1571,6 +1590,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_axis wants a target and an axis string: {line:?}")
                 })?;
                 Step::ExpectAxis(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_folded" => {
+                let (child, table) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_folded wants a child target and a table target (or `none`): {line:?}")
+                })?;
+                let table = table.trim();
+                let table = if table == "none" { None } else { Some(parse_target(table)?) };
+                Step::ExpectFolded(parse_target(child)?, table)
             }
             "expect_aligned" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -3847,6 +3874,38 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
+            Step::ExpectFolded(child, table) => {
+                Some(poll(|| {
+                    let got = stage.fold_state(*child, *table);
+                    match table {
+                        Some(table) => {
+                            if got == "folded" {
+                                Ok(format!(
+                                    "{} folded into {}",
+                                    target_spec(child),
+                                    target_spec(table)
+                                ))
+                            } else {
+                                Err(format!(
+                                    "{} fold reads {got:?}, wanted it folded into {}",
+                                    target_spec(child),
+                                    target_spec(table)
+                                ))
+                            }
+                        }
+                        None => {
+                            if got == "not folded" {
+                                Ok(format!("{} not folded", target_spec(child)))
+                            } else {
+                                Err(format!(
+                                    "{} fold reads {got:?}, wanted it not folded",
+                                    target_spec(child)
+                                ))
+                            }
+                        }
+                    }
+                }))
+            }
             Step::ExpectAligned(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     Some(Err(format!("{t:?} is not a container target")))
@@ -5169,6 +5228,9 @@ mod tests {
         fn container_axis(&self, _: Target) -> String {
             "center".into()
         }
+        fn fold_state(&self, _: Target, _: Option<Target>) -> String {
+            "<mock stage folds nothing>".into()
+        }
         fn section_count(&self) -> usize {
             0
         }
@@ -5927,6 +5989,9 @@ mod tests {
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
         }
+        fn fold_state(&self, _: Target, _: Option<Target>) -> String {
+            "<mock stage folds nothing>".into()
+        }
         fn inset(&self) -> String {
             "16".into()
         }
@@ -6166,6 +6231,9 @@ mod tests {
             }
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
+        }
+        fn fold_state(&self, _: Target, _: Option<Target>) -> String {
+            "<mock stage folds nothing>".into()
         }
         fn inset(&self) -> String {
             "16".into()

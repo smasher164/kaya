@@ -1067,7 +1067,7 @@ applied "$hits" "a tier view constructed in the surface but outside its body" \
 refuses "$T/escaped-in-surface.swift" "but outside its \`body\`" \
     "a second construction site beside the routing"
 
-hits="$(perturb "$SWIFTUI" 'switch kayaTableTier\(width: widthClass, dynamicColumns: true\)' \
+hits="$(perturb "$SWIFTUI" 'switch kayaTableTier\(\n *width: widthClass, dynamicColumns: true,\n *folded: !node.foldedChildren.isEmpty\)' \
     'switch KayaTableTier.native' "$T/unconsulted.swift")"
 applied "$hits" "the body deciding without the rule" \
     "struct KayaTableSurface > var body"

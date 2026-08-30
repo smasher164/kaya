@@ -533,6 +533,13 @@ pub(crate) struct Scene {
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
     /// axis refusal below can be stated in both orderings.
     tables: std::collections::HashSet<WidgetId>,
+    /// `parent_of`'s ORDERED twin: parent -> children in declaration
+    /// order. Kept for the stacked fold (docs/adaptive-layout-plan.md
+    /// D7), whose rule reads a breakpoint row's own shape at evaluation
+    /// time. Never pruned, like `widgets`.
+    children_of: HashMap<WidgetId, Vec<WidgetId>>,
+    /// Guest-authored grow weights — the fold rule's other input.
+    grow_weights: HashMap<WidgetId, f64>,
     template_nodes: HashMap<u64, WidgetKind>,
     collections: HashMap<CollectionId, CollDecl>,
     coll_instances: HashMap<(CollectionId, PathKey), CollInstance>,
@@ -664,6 +671,11 @@ struct BreakpointState {
     below: f64,
     setters: Vec<(WidgetId, Prop, Value)>,
     applied: bool,
+    /// The fold assignments currently applied — (child, table) pairs
+    /// (docs/adaptive-layout-plan.md D7). Recorded when the crossing
+    /// computes them, so the revert unfolds exactly what was folded even
+    /// if the row's shape has changed since.
+    folded: Vec<(WidgetId, WidgetId)>,
 }
 
 fn check_prop(kind: WidgetKind, prop: Prop) {
@@ -1395,14 +1407,14 @@ impl Scene {
         self.breakpoints[index].applied = below;
         let setters = self.breakpoints[index].setters.clone();
         let mut out = Vec::new();
-        for (widget, prop, value) in setters {
+        for (widget, prop, value) in &setters {
             let value = if below {
-                value
+                value.clone()
             } else {
                 match prop {
                     Prop::Axis => {
-                        let base = self.authored_axis.get(&widget).copied().unwrap_or_else(|| {
-                            match self.widgets.get(&widget) {
+                        let base = self.authored_axis.get(widget).copied().unwrap_or_else(|| {
+                            match self.widgets.get(widget) {
                                 Some(WidgetKind::Column) => 1,
                                 _ => 0,
                             }
@@ -1415,9 +1427,53 @@ impl Scene {
                     _ => unreachable!("breakpoint setters are axis-only"),
                 }
             };
-            out.push(ApplyOp::SetProp { id: widget, prop, value });
+            out.push(ApplyOp::SetProp { id: *widget, prop: *prop, value });
+        }
+        // THE STACKED FOLD (docs/adaptive-layout-plan.md D7). Crossing
+        // below, each stacked row whose own shape says so folds its
+        // leading hugging children into its one grown table's viewport;
+        // crossing back unfolds exactly what was folded — recorded pairs,
+        // not a recomputation, so a shape that changed while stacked
+        // still reverts cleanly. Assignments are computed at the
+        // crossing and hold until the crossing back.
+        if below {
+            let mut folded = Vec::new();
+            for (row, _, _) in &setters {
+                if let Some((table, children)) = self.fold_assignment(*row) {
+                    for child in children {
+                        out.push(ApplyOp::Fold { child, table });
+                        folded.push((child, table));
+                    }
+                }
+            }
+            self.breakpoints[index].folded = folded;
+        } else {
+            for (child, _) in std::mem::take(&mut self.breakpoints[index].folded) {
+                out.push(ApplyOp::Fold { child, table: WidgetId(0) });
+            }
         }
         out
+    }
+
+    /// D7's shape rule, total by construction: a stacked row folds IF AND
+    /// ONLY IF exactly one of its children grows, that child is a
+    /// declared table, and at least one hugging child precedes it. The
+    /// fold is those leading children, in declaration order. Trailing
+    /// children keep stacking — trailing content on a stacked screen is
+    /// bottom-bar-shaped, and a bar that scrolls away with the rows would
+    /// be wrong. Everything that fails the shape keeps today's stacking
+    /// unchanged.
+    fn fold_assignment(&self, row: WidgetId) -> Option<(WidgetId, Vec<WidgetId>)> {
+        let children = self.children_of.get(&row)?;
+        let mut growers = children
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| self.grow_weights.get(c).copied().unwrap_or(0.0) > 0.0);
+        let (at, &table) = growers.next()?;
+        if growers.next().is_some() || !self.tables.contains(&table) || at == 0 {
+            return None;
+        }
+        Some((table, children[..at].to_vec()))
     }
 
     pub(crate) fn new() -> Self {
@@ -1471,6 +1527,9 @@ impl Scene {
         // that map: DestroyWindow and PopEntry drop the surfaces and leave
         // their widget ids behind forever.
         let mut created: Vec<WidgetId> = Vec::new();
+        // Breakpoints this batch declared, evaluated at the batch tail
+        // when the row's children exist (the fold rule's requirement).
+        let mut declared_breakpoints: Vec<usize> = Vec::new();
 
         for (at, op) in tx.into_iter().enumerate() {
             if !scopes.is_empty() {
@@ -1604,6 +1663,13 @@ impl Scene {
                                     self.authored_axis.insert(widget, *mode);
                                 }
                             }
+                            // The fold rule's input (D7): a grower is a
+                            // grower at evaluation time, not at write time.
+                            if prop == Prop::Grow {
+                                if let Value::F64(w) = &v {
+                                    self.grow_weights.insert(widget, *w);
+                                }
+                            }
                             out.push(ApplyOp::SetProp {
                                 id: widget,
                                 prop,
@@ -1636,6 +1702,13 @@ impl Scene {
                                          index {idx} is out of range (add options \
                                          before selecting)"
                                     );
+                                }
+                            }
+                            // The fold rule's input (D7), the bind-time
+                            // half; fan_out_signals keeps it current.
+                            if prop == Prop::Grow {
+                                if let Value::F64(w) = &current {
+                                    self.grow_weights.insert(widget, *w);
                                 }
                             }
                             self.bindings.entry(id).or_default().push((widget, prop));
@@ -2352,6 +2425,7 @@ impl Scene {
                          cycle — {parent:?} is already inside {child:?}"
                     );
                     self.parent_of.insert(child, parent);
+                    self.children_of.entry(parent).or_default().push(child);
                     out.push(ApplyOp::AddChild { parent, child });
                 }
                 TxOp::Mount { window, root } => {
@@ -2457,14 +2531,15 @@ impl Scene {
                         below,
                         setters,
                         applied: false,
+                        folded: Vec::new(),
                     });
-                    // Evaluate NOW against the latched width: a phone that
-                    // never resizes must still apply.
-                    let n = self.breakpoints.len() - 1;
-                    if let Some(width) = self.window_widths.get(&window).copied() {
-                        let mut ops = self.evaluate_breakpoint(n, width);
-                        out.append(&mut ops);
-                    }
+                    // Evaluated at the BATCH TAIL, not here: the sugar
+                    // spells stack_below in the row's constructor, so at
+                    // this op the row has no children yet and the fold
+                    // rule (D7) would read an empty shape. The latched
+                    // width still applies within the same batch — a phone
+                    // that never resizes must still apply.
+                    declared_breakpoints.push(self.breakpoints.len() - 1);
                 }
                 TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                     // The header bar's three addressings, spec doc order
@@ -2838,6 +2913,18 @@ impl Scene {
             panic!("{}", self.orphan_message(orphan));
         }
 
+        // Breakpoints declared this batch, against the latched width —
+        // deferred from their op to here so the fold rule (D7) reads the
+        // row's finished shape, and after the barrier so a refused batch
+        // evaluates nothing.
+        for n in declared_breakpoints {
+            let window = self.breakpoints[n].window;
+            if let Some(width) = self.window_widths.get(&window).copied() {
+                let mut ops = self.evaluate_breakpoint(n, width);
+                out.append(&mut ops);
+            }
+        }
+
         self.fan_out_signals(&dirty, &mut out);
 
         // EVERY programmatic text write this batch produced, read off the
@@ -2863,14 +2950,25 @@ impl Scene {
     fn fan_out_signals(&mut self, dirty: &[SignalId], out: &mut Vec<ApplyOp>) {
         for id in dirty.iter().copied() {
             let value = self.signals[&id].clone();
+            // The fold rule's input stays current through the signal
+            // route too (D7); collected first, the borrow rule's shape.
+            let mut grew: Vec<(WidgetId, f64)> = Vec::new();
             if let Some(bound) = self.bindings.get(&id) {
                 for (widget, prop) in bound {
+                    if *prop == Prop::Grow {
+                        if let Value::F64(w) = &value {
+                            grew.push((*widget, *w));
+                        }
+                    }
                     out.push(ApplyOp::SetProp {
                         id: *widget,
                         prop: *prop,
                         value: value.clone(),
                     });
                 }
+            }
+            for (widget, w) in grew {
+                self.grow_weights.insert(widget, w);
             }
             if let Some(bound) = self.window_bindings.get(&id) {
                 for (window, prop) in bound {
@@ -6354,6 +6452,204 @@ mod tests {
             "the revert must restore the guest-authored axis, got {ops:?}"
         );
     }
+
+    /// The Transactions shape for the fold tests (D7): row 1 holding a
+    /// hugging column 2, then For 4 — a declared, grown table. `head`
+    /// takes the ops that come BEFORE the children so the deferral test
+    /// can put CreateBreakpoint in constructor position.
+    fn fold_scene(head: Vec<TxOp>) -> Transaction {
+        let mut tx = head;
+        tx.extend([
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str, ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(11),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::CreateWidget { id: WidgetId(12), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(12),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 1 },
+            },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(12) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::SetColumnHeaders {
+                widget: WidgetId(4),
+                sorted: crate::wire::SORT_NONE,
+                direction: 0,
+                path: Vec::new(),
+                titles: vec!["A".into(), "B".into()],
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        tx
+    }
+
+    /// D7: the stacked fold, the portfolio's Transactions shape. The
+    /// crossing folds the hugging summary into the grown table's
+    /// viewport, and the crossing back unfolds exactly what was folded.
+    #[test]
+    fn stacked_fold_applies_and_reverts_with_the_breakpoint() {
+        let mut scene = Scene::new();
+        let mut tx = fold_scene(vec![TxOp::CreateWidget {
+            id: WidgetId(1),
+            kind: WidgetKind::Row,
+        }]);
+        tx.push(TxOp::CreateBreakpoint {
+            window: DEFAULT_WINDOW,
+            below: 700.0,
+            setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+        });
+        scene.apply(tx);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::Fold { child: WidgetId(2), table: WidgetId(4) }
+            )),
+            "stacking must fold the summary into the table, got {ops:?}"
+        );
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::Fold { child: WidgetId(2), table: WidgetId(0) }
+            )),
+            "crossing back must unfold what was folded, got {ops:?}"
+        );
+        // And nothing lingers: the next stacking folds afresh.
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        assert_eq!(
+            ops.iter()
+                .filter(|op| matches!(op, ApplyOp::Fold { .. }))
+                .count(),
+            1,
+            "a re-crossing folds once, got {ops:?}"
+        );
+    }
+
+    /// D7's deferral: the sugar spells stack_below in the row's
+    /// CONSTRUCTOR, so CreateBreakpoint lands before any AddChild — and
+    /// with the width already latched (the phone's order), an evaluation
+    /// at that op would read an empty row and fold nothing. The batch
+    /// tail is where the shape is finished.
+    #[test]
+    fn stacked_fold_computed_at_the_batch_tail_sees_the_rows_children() {
+        let mut scene = Scene::new();
+        let _ = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.apply(fold_scene(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 700.0,
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]));
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::Fold { child: WidgetId(2), table: WidgetId(4) }
+            )),
+            "a constructor-position breakpoint must still fold the finished shape, got {ops:?}"
+        );
+    }
+
+    /// D7's shape rule refuses what it cannot read one way: no fold —
+    /// today's stacking — for a second grower, for a grower that is not
+    /// a declared table, and for a table with nothing before it.
+    #[test]
+    fn stacked_fold_shape_rule_leaves_other_shapes_stacking() {
+        // A second grower: the interim two-viewport split, kept.
+        let mut scene = Scene::new();
+        let mut tx = fold_scene(vec![TxOp::CreateWidget {
+            id: WidgetId(1),
+            kind: WidgetKind::Row,
+        }]);
+        tx.push(TxOp::SetProperty {
+            widget: WidgetId(2),
+            prop: Prop::Grow,
+            value: PropValue::Const(Value::F64(1.0)),
+        });
+        tx.push(TxOp::CreateBreakpoint {
+            window: DEFAULT_WINDOW,
+            below: 700.0,
+            setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+        });
+        scene.apply(tx);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        assert!(
+            !ops.iter().any(|op| matches!(op, ApplyOp::Fold { .. })),
+            "two growers must not fold, got {ops:?}"
+        );
+
+        // A grower that is not a table: a grown plain column has no
+        // viewport to fold into.
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Column },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                below: 700.0,
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        assert!(
+            !ops.iter().any(|op| matches!(op, ApplyOp::Fold { .. })),
+            "a grown non-table must not fold, got {ops:?}"
+        );
+
+        // Nothing before the table: nothing to fold.
+        let mut scene = Scene::new();
+        let mut tx = fold_scene(vec![TxOp::CreateWidget {
+            id: WidgetId(1),
+            kind: WidgetKind::Row,
+        }]);
+        // Remove the summary from the shape by making it the TRAILING
+        // child instead: leading-only is the ruled half of D7.
+        tx.retain(|op| {
+            !matches!(op, TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) })
+        });
+        tx.push(TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) });
+        tx.push(TxOp::CreateBreakpoint {
+            window: DEFAULT_WINDOW,
+            below: 700.0,
+            setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+        });
+        scene.apply(tx);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        assert!(
+            !ops.iter().any(|op| matches!(op, ApplyOp::Fold { .. })),
+            "a trailing hugging child keeps stacking (header-only rule), got {ops:?}"
+        );
+    }
+
 
     /// The ruled setter list (D6.2): anything but axis dies at the root.
     #[test]

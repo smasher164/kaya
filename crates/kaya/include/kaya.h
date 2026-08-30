@@ -327,6 +327,14 @@
  */
 #define APPLY_SET_DRAWING 36
 
+/**
+ * The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child;
+ * u64 table } — render the child inside the grown table's viewport as
+ * scroll-away content above row 0; table 0 restores it. Core-derived
+ * from a stack_below row's own shape; no guest record spells it.
+ */
+#define APPLY_FOLD 37
+
 #define VALUE_BOOL 1
 
 #define VALUE_I64 2
@@ -1180,6 +1188,15 @@
  * device pixels the backend blits (docs/canvas-plan.md §1.1).
  */
 #define KAYA_APPLY_SET_DRAWING 36
+
+/**
+ * FOLD: u64 child, u64 table — the stacked fold (docs/adaptive-layout-plan.md
+ * D7). Render the child inside the grown table's viewport as scroll-away
+ * content above row 0, in sibling order; table 0 restores it to its
+ * structural parent's layout. Identity does not move: the child keeps
+ * its parent, its id and its addressing.
+ */
+#define KAYA_APPLY_FOLD 37
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply

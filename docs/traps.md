@@ -702,6 +702,28 @@ the same patterns return through interpreter drop-downs
 
 ## Process / testing
 
+- **A map keyed by SURFACE handed to a reader that wants a WINDOW answers
+  None forever, and every breakpoint on a pushed screen sat dead on
+  Windows.** WinUI's `mounted_roots` keys are surfaces — the primary or an
+  aux window's own id, a pushed entry's, a section's — and
+  `report_window_metrics` handed those keys straight to
+  `window_client_width`. An entry id is not a Win32 window, so the moment
+  a navigation entry was the mounted surface, no width ever reached the
+  core and no `stack_below` on that screen could apply OR revert. Measured
+  2026-08-30 on the portfolio's fold block: eighteen metrics passes over
+  `mounted_roots=[7]`, every one answering `client_width=None`, while
+  `expect_window_size 640x600` proved the resize itself had landed. THE
+  ADAPTIVE SCENE COULD NEVER SEE IT — its breakpoint row lives on the
+  primary window's root and it pushes no entries — so the conformance
+  scene for the feature was green over the broken half for two days. The
+  fix resolves each mounted surface to its owning window (nav_entries /
+  section_panes, else the id is a window) and dedups before reading.
+  What found it was a NEW assertion added for an unrelated feature
+  (`expect_folded`, the adaptive fold) — a reminder that a feature's
+  conformance scene covers the shapes it was written against, and a
+  second scene exercising the same mechanism from a different surface is
+  not redundancy.
+
 - **The FIRST dialog a scene opens pays DocumentsUI's COLD start, and it
   was given a frame-sized budget.** Android's `expect_file_dialog` and
   `expect_save_dialog` retried on the generic 5s step deadline, which is

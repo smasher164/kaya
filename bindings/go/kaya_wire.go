@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xb1f68943daa4f9e6
+	SpecHash uint64 = 0x85185a153afbc4b7
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -250,6 +250,7 @@ const (
 	applySetAppIdentity = 34
 	applySetColumnHeaders = 35
 	applySetDrawing = 36
+	applyFold = 37
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3

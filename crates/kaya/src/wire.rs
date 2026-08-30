@@ -154,6 +154,12 @@ pub const APPLY_SET_COLUMN_HEADERS: u16 = 35;
 /// crosses this channel.
 pub const APPLY_SET_DRAWING: u16 = 36;
 
+/// The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child;
+/// u64 table } — render the child inside the grown table's viewport as
+/// scroll-away content above row 0; table 0 restores it. Core-derived
+/// from a stack_below row's own shape; no guest record spells it.
+pub const APPLY_FOLD: u16 = 37;
+
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
 pub const VALUE_I64: u32 = 2;
@@ -2370,6 +2376,10 @@ impl Writer {
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
+            }),
+            ApplyOp::Fold { child, table } => self.record(APPLY_FOLD, |b, _| {
+                b.extend_from_slice(&child.0.to_le_bytes());
+                b.extend_from_slice(&table.0.to_le_bytes());
             }),
             ApplyOp::Mount { window, root } => self.record(APPLY_MOUNT, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());

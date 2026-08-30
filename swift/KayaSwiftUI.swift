@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xb1f68943daa4f9e6
+let kayaSpecHash: UInt64 = 0x85185a153afbc4b7
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -45,6 +45,11 @@ private let applySetTypeface: UInt16 = 33
 private let applySetAppIdentity: UInt16 = 34
 private let applySetColumnHeaders: UInt16 = 35
 private let applySetDrawing: UInt16 = 36
+/// The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child; u64
+/// table } — render the child inside the grown table's viewport as
+/// scroll-away content above row 0; table 0 restores it. Core-derived;
+/// identity and addressing stay with the structural parent.
+private let applyFold: UInt16 = 37
 /// `tableSorted`'s no-column sentinel (the wire's SORT_NONE).
 let kayaSortNone: UInt32 = 0xFFFF_FFFF
 private let applyPushEntry: UInt16 = 12
@@ -411,6 +416,16 @@ final class KayaNode: Identifiable {
     var revealRequest: NSRange?
     var revealSeq = 0
     var children: [KayaNode] = []
+    /// The stacked fold (D7): non-zero = the table whose viewport this
+    /// node renders inside. Identity stays here — only layout moves.
+    var foldedInto: UInt64 = 0
+    /// The table side of the same record: folded content in sibling
+    /// order, rendered above row 0 inside this table's scroll.
+    var foldedChildren: [KayaNode] = []
+    /// The children this container LAYS OUT — a folded child renders in
+    /// its table's viewport instead, while every harness read and
+    /// addressing path keeps seeing `children`.
+    var laidOut: [KayaNode] { children.filter { $0.foldedInto == 0 } }
     /// TABLE (docs/tables-plan.md): the declared header bar — titles in
     /// visual order, the indicator column (kayaSortNone for none) and
     /// its direction, and the core-minted sort tag a header click hands
@@ -3947,6 +3962,21 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 if parentKind == kindSelect || parentKind == kindRadio {
                     kayaScene.labels.removeAll { $0.id == child }
                 }
+            case applyFold:
+                // The stacked fold (D7). Order is the core's emission
+                // order — the row's declaration order — so append holds
+                // sibling order.
+                let child = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let table = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                if let node = kayaScene.nodes[child] {
+                    if node.foldedInto != 0, let prev = kayaScene.nodes[node.foldedInto] {
+                        prev.foldedChildren.removeAll { $0.id == child }
+                    }
+                    node.foldedInto = table
+                    if table != 0, let dest = kayaScene.nodes[table] {
+                        dest.foldedChildren.append(node)
+                    }
+                }
             case applyMount:
                 // The target is a SURFACE: the primary, an auxiliary
                 // window, or a pushed navigation entry.
@@ -7150,6 +7180,44 @@ private func kayaRunScript(_ script: String) {
                 case let other?:
                     failures.append("\(parts[1]) axis \"\(other)\", wanted \"\(want)\"")
                 }
+            case "expect_folded":
+                // The stacked fold (D7), read off the state the render
+                // consumes directly — laidOut and foldedChildren ARE the
+                // ViewBuilder's inputs, so this is the render's own
+                // record, membership checked on BOTH ends. harness.rs
+                // Step::ExpectFolded is the sentence's source of truth.
+                let tableSpec = String(parts[2])
+                let got = DispatchQueue.main.sync { () -> String? in
+                    guard let child = kayaTarget(parts[1], "column", kayaScene.columns)
+                    else { return nil }
+                    if tableSpec == "none" {
+                        return child.foldedInto == 0 ? "not folded" : "folded"
+                    }
+                    guard
+                        let table = kayaTarget(parts[2], "column", kayaScene.columns)
+                    else { return "<no such table target>" }
+                    let held = table.foldedChildren.contains { $0.id == child.id }
+                    if child.foldedInto == table.id && held { return "folded" }
+                    if child.foldedInto == 0 { return "not folded" }
+                    return "stamped folded, but rendered outside that table's viewport"
+                }
+                switch got {
+                case nil:
+                    failures.append("no such target \(parts[1])")
+                case "folded" where tableSpec != "none":
+                    observed.append("\(parts[1]) folded into \(tableSpec)")
+                case "not folded" where tableSpec == "none":
+                    observed.append("\(parts[1]) not folded")
+                case let other?:
+                    if tableSpec == "none" {
+                        failures.append(
+                            "\(parts[1]) fold reads \"\(other)\", wanted it not folded")
+                    } else {
+                        failures.append(
+                            "\(parts[1]) fold reads \"\(other)\", "
+                                + "wanted it folded into \(tableSpec)")
+                    }
+                }
             case "expect_aligned":
                 // Classified from recorded geometry (cross rects in the
                 // container's named space; baseline = child top + its
@@ -8677,8 +8745,15 @@ enum KayaTableWidth {
 /// any availability: SwiftUI's Table collapses to a first-column list
 /// there and throws the declared columns away (docs/tables-plan.md
 /// decision 5, revised 2026-08-21).
-func kayaTableTier(width: KayaTableWidth, dynamicColumns: Bool) -> KayaTableTier {
+func kayaTableTier(width: KayaTableWidth, dynamicColumns: Bool, folded: Bool) -> KayaTableTier {
     guard dynamicColumns else { return .synthesized }
+    // A FOLDED table hosts scroll-away header content inside its own
+    // viewport (docs/adaptive-layout-plan.md D7), which only the
+    // synthesized tier's scroll can hold — the native NSTableView owns
+    // its scroll and takes no arbitrary content above row 0. Any
+    // platform, any width: a half-split iPad can be regular below the
+    // breakpoint, and a resized desktop window crosses it outright.
+    if folded { return .synthesized }
     switch width {
     case .noSizeClass, .regular: return .native
     case .compact, .unknown: return .synthesized
@@ -8717,7 +8792,10 @@ struct KayaTableSurface: View {
 
     var body: some View {
         if #available(macOS 14.4, iOS 17.4, *) {
-            switch kayaTableTier(width: widthClass, dynamicColumns: true) {
+            switch kayaTableTier(
+                width: widthClass, dynamicColumns: true,
+                folded: !node.foldedChildren.isEmpty)
+            {
             case .native: KayaNativeTable(node: node)
             case .synthesized: KayaSynthesizedTable(node: node)
             }
@@ -10546,17 +10624,35 @@ private struct KayaSynthesizedTable: View {
                 KayaScrollBox(traceId: node.id) {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical) {
-                            rows(generation)
-                                .background(
-                                    KayaTableContentReporter(
-                                        node: node, window: window, generation: generation))
-                                // THE CARD IS CONTENT, inside the clip: it
-                                // ends with the last row and scrolls with
-                                // them. Under the content reporter, whose
-                                // box must stay the LAYOUT's own — the band
-                                // arithmetic reads its top against
-                                // placement.bandTop.
-                                .modifier(KayaTableCardFace())
+                            // THE FOLD (D7): a stacked row's hugging
+                            // children render here, above row 0, and
+                            // scroll away with the rows — one viewport
+                            // where the interim shape had two. The card
+                            // and the reporters stay on the rows alone:
+                            // the folded content is ordinary screen
+                            // content that happens to share the scroll,
+                            // and the band arithmetic reads the rows' own
+                            // box wherever it sits.
+                            VStack(alignment: .leading, spacing: node.spacing) {
+                                ForEach(node.foldedChildren) { folded in
+                                    KayaRender(
+                                        node: folded, flexVertical: true,
+                                        flexStretch: false
+                                    )
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                }
+                                rows(generation)
+                                    .background(
+                                        KayaTableContentReporter(
+                                            node: node, window: window, generation: generation))
+                                    // THE CARD IS CONTENT, inside the clip: it
+                                    // ends with the last row and scrolls with
+                                    // them. Under the content reporter, whose
+                                    // box must stay the LAYOUT's own — the band
+                                    // arithmetic reads its top against
+                                    // placement.bandTop.
+                                    .modifier(KayaTableCardFace())
+                            }
                         }
                         .coordinateSpace(name: kayaTableScrollSpace(node))
                         .background(
@@ -11825,7 +11921,7 @@ struct KayaRender: View {
     /// reader, content top-leading (the stretch-classified-center fix,
     /// 2026-08-22, now one body for both spellings).
     @ViewBuilder private func kayaStackChildren(vertical: Bool) -> some View {
-        ForEach(node.children) { child in
+        ForEach(node.laidOut) { child in
             KayaRender(
                 node: child, flexVertical: vertical,
                 flexStretch: node.align == alignStretch
@@ -11870,12 +11966,12 @@ struct KayaRender: View {
                     // KayaTableSurface picks the tier. Tables declare on
                     // columns; the core holds the templates to the arity.
                     KayaTableSurface(node: node)
-                } else if boxFills || node.children.contains(where: { $0.grow > 0 }) {
+                } else if boxFills || node.laidOut.contains(where: { $0.grow > 0 }) {
                     KayaFlex(
-                        vertical: vertical, spacing: node.spacing, nodes: node.children,
+                        vertical: vertical, spacing: node.spacing, nodes: node.laidOut,
                         fillCross: boxFills
                     ) {
-                        ForEach(node.children) { child in
+                        ForEach(node.laidOut) { child in
                             // The cell fills the track KayaFlex proposes; the
                             // reader records the STRETCH FRAME's box when the
                             // mode is stretch (child breadth = content
