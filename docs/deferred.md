@@ -8625,6 +8625,49 @@ dashboard is currently believed to need only the axis flip, and if its
 visual iteration proves otherwise this entry is the design to build.
 
 
+## GAP — a GROWN TABLE STACKED ON A PHONE GETS A ZERO-HEIGHT VIEWPORT (found 2026-08-29)
+KEY: grown table phone viewport, clip 311x0, KayaScrollBox, txnrow stack_below, leftover 259
+
+Put `stack_below=700` on the portfolio's Transactions row and the phone
+lays the screen out correctly in every respect but one: the grown ledger
+table's scroll clip measures `311x0` — a real width, ZERO height — so it
+records no viewport, windows nothing, and `expect_window column@ledger`
+reads "0 0". The iOS leg fails; the guest change is therefore NOT in the
+tree. The same screen on Compose reports `track -32dp, drawn 0dp` and is
+the android leg's block.
+
+WHAT IS ALREADY RULED OUT, each measured rather than argued — this
+entry's value is the dead ends, because every one of them is a plausible
+story that costs a session to re-test:
+
+1. NOT the stacking. Probed in KayaFlex: `bounds=343x596 fixed=328
+   leftover=259`. The three summary lines, the dropdown and the recent
+   table take 328 of 596 points and the grown table IS handed 259. The
+   stack does exactly what it should.
+2. NOT the sibling's width, on either platform. Four perturbations left
+   Compose's number byte-identical: `net` shortened to one word, all four
+   summary labels shortened to one character, the recent table removed
+   entirely, and `align="stretch"` removed from the summary column.
+3. NOT "the summary is a screenful" — see 1; that was an assumption, and
+   the measurement contradicts it.
+4. NOT `KayaScrollBox`'s `proposal.height ?? 0` fallback, which was the
+   best-looking suspect: making it answer 200 instead of 0 left the clip
+   at `311x0`. The box's own `placeSubviews` passes `bounds.height`
+   straight through, so the zero arrives from ABOVE it.
+
+WHERE TO PICK IT UP: the height is lost between the flex (which assigns
+259) and the scroll box (which was observed receiving -1, 145 and 0 in
+one run). Instrument the chain — KayaFlex extent, KayaCell bounds,
+KayaTableSurface, KayaScrollBox — in ONE run and correlate; the passes
+disagree, and which pass the clip ends up reflecting is the question. The
+fast loop is `tools/ios/run-sim.sh python` (2 legs, 35s) plus
+scratch `shoot-ios.py`, which prints KAYA_DIAG lines.
+
+NOT A DESIGN FORK. It was put to the maintainer as one (a `hide_below`
+primitive, or a viewport policy) and that framing was withdrawn: nothing
+about the layout is over-subscribed, so no product decision is owed.
+
+
 ## GAP — the portfolio's android leg waits on adaptive layout (found 2026-08-28, by the pyhost APK's first mount)
 KEY: portfolio android, zero-width track, constraints model, proposal model, kayaFixedRepresentable, Can't represent, ANDROID_UNWIRED_SCENES
 
