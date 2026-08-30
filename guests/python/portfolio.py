@@ -531,65 +531,72 @@ with app.window(title="portfolio", width=900, height=600):
     # edge — SwiftUI clipped it, Compose gave it a zero-width track and the
     # tables recorded no geometry at all. One keyword, evaluated in the
     # core against the window's own width.
-    with kaya.row(stack_below=700):
-        with kaya.column():
-            # THE DRAWN MARK, inline with the title (the placement ruling,
-            # 2026-08-28): a row hugs its content, so the chip can take no
-            # share of the column's leftover — as a bare column child it
-            # did, floating centred in empty space with the chart pushed
-            # to the column's bottom and every assertion green.
-            with kaya.row(align="center"):
-                mark = kaya.canvas(MARK_BOX, fixed=True)
-                mark.a11y_id("mark").a11y_label("kaya portfolio mark")
-                with mark.draw() as d:
-                    # The ground mound under the translucent series fill
-                    # is what makes the centre opaque — expect_ink samples
-                    # hundredths of the canvas's own box, and a
-                    # translucent probe point would read the compositor's
-                    # ground instead of the palette's.
-                    d.polyline(MARK_AREA).close().fill("ground")
-                    d.polyline(MARK_AREA).close().fill("series_fill")
-                    d.polyline(MARK_LINE).stroke("series", width=2)
-                kaya.label(bind=portfolio_value)  # label#0
-            kaya.label(bind=book_size)  # label#1
-            # THE CHART, beside the account tables in a column that hugs,
-            # so the canvas is laid out at the natural size its viewbox
-            # declares. Its numbers are spoken through the accessible
-            # name — a drawing is an image to every platform's
-            # accessibility tree (docs/canvas-plan.md §9).
-            # DECLARED WITH THE REAL TEXT, never "": an empty a11y label
-            # is refused at the tx (crates/kaya/src/scene.rs), and the
-            # summary is computable here — draw_chart() recomputes the
-            # same string from the same series on the next line.
-            chart_summary = kaya.signal(chart_summary_text(*value_series()))
-            chart = kaya.canvas(CHART_BOX)
-            chart.a11y_id("chart").a11y_label(chart_summary)
-            draw_chart()
-            kaya.button("Day tick", on_click=tick)  # button#0
-            kaya.button("Transactions", on_click=open_transactions)  # button#1
-        accounts = kaya.collection(Account)
-        with kaya.column(grow=1, align="stretch") as detail:  # the detail column
-            detail.a11y_id("detail")
-            for account in accounts.rows(
-                align="stretch", a11y_id="accounts",
-            ):
-                with kaya.column(align="stretch"):
-                    kaya.label(bind=account.name)
-                    positions = kaya.collection(Position)
-                    # UNGROWN since the empty-row ruling: a summary
-                    # table hugs its rows (docs/tables-plan.md); grow is
-                    # the fill-and-scroll opt-in this dashboard no longer
-                    # wants.
-                    for item in positions.columns(
-                        "Ticker", "Qty", "Price", "Value",
-                        on_sort=on_positions_sort, a11y_id="positions",
-                    ):
-                        with kaya.row():
-                            kaya.label(bind=item.ticker)
-                            kaya.label(bind=item.qty)
-                            kaya.label(bind=item.price)
-                            kaya.label(bind=item.value)
-                    kaya.label(bind=account.total)
+    # THE SCREEN SCROLLS WHEN IT DOES NOT FIT (2026-08-29). Stacked on
+    # a phone this dashboard is 586 points of account tables in a
+    # 259-point track, so Savings was not below the fold — it was
+    # UNREACHABLE, with no gesture that could bring it back. A desktop
+    # window fits the content and a viewport that fits does not
+    # scroll, so one declaration serves every platform.
+    with kaya.scroll(grow=1):
+        with kaya.row(stack_below=700):
+            with kaya.column():
+                # THE DRAWN MARK, inline with the title (the placement ruling,
+                # 2026-08-28): a row hugs its content, so the chip can take no
+                # share of the column's leftover — as a bare column child it
+                # did, floating centred in empty space with the chart pushed
+                # to the column's bottom and every assertion green.
+                with kaya.row(align="center"):
+                    mark = kaya.canvas(MARK_BOX, fixed=True)
+                    mark.a11y_id("mark").a11y_label("kaya portfolio mark")
+                    with mark.draw() as d:
+                        # The ground mound under the translucent series fill
+                        # is what makes the centre opaque — expect_ink samples
+                        # hundredths of the canvas's own box, and a
+                        # translucent probe point would read the compositor's
+                        # ground instead of the palette's.
+                        d.polyline(MARK_AREA).close().fill("ground")
+                        d.polyline(MARK_AREA).close().fill("series_fill")
+                        d.polyline(MARK_LINE).stroke("series", width=2)
+                    kaya.label(bind=portfolio_value)  # label#0
+                kaya.label(bind=book_size)  # label#1
+                # THE CHART, beside the account tables in a column that hugs,
+                # so the canvas is laid out at the natural size its viewbox
+                # declares. Its numbers are spoken through the accessible
+                # name — a drawing is an image to every platform's
+                # accessibility tree (docs/canvas-plan.md §9).
+                # DECLARED WITH THE REAL TEXT, never "": an empty a11y label
+                # is refused at the tx (crates/kaya/src/scene.rs), and the
+                # summary is computable here — draw_chart() recomputes the
+                # same string from the same series on the next line.
+                chart_summary = kaya.signal(chart_summary_text(*value_series()))
+                chart = kaya.canvas(CHART_BOX)
+                chart.a11y_id("chart").a11y_label(chart_summary)
+                draw_chart()
+                kaya.button("Day tick", on_click=tick)  # button#0
+                kaya.button("Transactions", on_click=open_transactions)  # button#1
+            accounts = kaya.collection(Account)
+            with kaya.column(grow=1, align="stretch") as detail:  # the detail column
+                detail.a11y_id("detail")
+                for account in accounts.rows(
+                    align="stretch", a11y_id="accounts",
+                ):
+                    with kaya.column(align="stretch"):
+                        kaya.label(bind=account.name)
+                        positions = kaya.collection(Position)
+                        # UNGROWN since the empty-row ruling: a summary
+                        # table hugs its rows (docs/tables-plan.md); grow is
+                        # the fill-and-scroll opt-in this dashboard no longer
+                        # wants.
+                        for item in positions.columns(
+                            "Ticker", "Qty", "Price", "Value",
+                            on_sort=on_positions_sort, a11y_id="positions",
+                        ):
+                            with kaya.row():
+                                kaya.label(bind=item.ticker)
+                                kaya.label(bind=item.qty)
+                                kaya.label(bind=item.price)
+                                kaya.label(bind=item.value)
+                        kaya.label(bind=account.total)
     for account in ACCOUNT_ORDER:
         name, _ = BOOK[account]
         accounts.insert(
