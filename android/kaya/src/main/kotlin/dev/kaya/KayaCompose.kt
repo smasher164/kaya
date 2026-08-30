@@ -974,6 +974,17 @@ internal fun kayaParseAcceptList(list: String): Pair<Int, List<String>> {
     return Pair(kinds, custom)
 }
 
+/// A layout trace, off unless asked for (KAYA_LAYOUT_TRACE=1), matching
+/// the SwiftUI interpreter's channel of the same name.
+val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
+
+/// The height a scroll viewport claims when it is measured with NO bound
+/// (see the clamp in KayaTableSurface). The display's own pixel height:
+/// an unbounded ask cannot be answered from the constraint, and a window
+/// onto larger content that is bigger than the screen is not a window.
+val kayaUnboundedViewportPx: Int
+    get() = android.content.res.Resources.getSystem().displayMetrics.heightPixels
+
 object KayaCompose {
     // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants
     // in kaya.h. The protocol fingerprint (KAYA_SPEC_HASH) is asserted
@@ -9110,6 +9121,34 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             // INFLATES the cross axis (androidx's MaxSupportedElevation,
             // so a child's shadow survives), so a scrolled-out column
             // draws outside the table's box without this.
+            // TRACE (KAYA_LAYOUT_TRACE): what this scrollable is measured
+            // with. Compose refuses an infinite maximum height here and
+            // kills the app, and the stack is all framework frames — the
+            // constraint itself is the only thing that names the caller.
+            // A VIEWPORT ASKED FOR NO BOUND TAKES THE SCREEN (2026-08-29).
+            // Compose refuses to measure a scrollable with an infinite
+            // maximum along its own axis — "Vertically scrollable
+            // component was measured with an infinity maximum height
+            // constraints, which is disallowed" — and it is a HARD THROW
+            // that killed the app on every visit to the portfolio's
+            // Transactions screen. The infinity arrives from an ancestor's
+            // intrinsic pass, which no descendant can prevent, so the
+            // clamp belongs here where the rule is: a window onto larger
+            // content must have a size, and absent one the screen is the
+            // honest answer. Bounded asks pass through untouched, so this
+            // changes nothing about a normally-measured table.
+            .layout { measurable, constraints ->
+                val bounded =
+                    if (constraints.hasBoundedHeight) constraints
+                    else constraints.copy(maxHeight = kayaUnboundedViewportPx)
+                if (kayaLayoutTrace) {
+                    Log.i("kaya", "KAYA_TRACE table#${node.id} maxH=" +
+                        (if (constraints.hasBoundedHeight) "${constraints.maxHeight}"
+                         else "INFINITY->${bounded.maxHeight}"))
+                }
+                val placeable = measurable.measure(bounded)
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            }
             .clipToBounds()
             .scrollable(
                 state = node.tableColumnScroll,
@@ -9421,6 +9460,7 @@ private fun kayaHugCross(
         Modifier.width(IntrinsicSize.Max)
     }
 }
+
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable

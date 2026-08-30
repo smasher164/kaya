@@ -6239,6 +6239,28 @@ were verified to contain no `kaya.scroll` at all. It has simply never
 been seen, because `ANDROID_UNWIRED_SCENES="portfolio"` keeps the scene
 off that lane, so no gate and no leg has ever rendered this screen there.
 
+FIXED 2026-08-29, at the viewport rather than at the caller. The
+infinity arrives from an ANCESTOR'S INTRINSIC PASS — Compose answers an
+`IntrinsicSize` query by measuring with an infinite constraint along that
+axis — and no descendant can stop an ancestor asking. Two attempts to fix
+it upstream both missed: `kayaHugCross`'s `IntrinsicSize.Min` looked like
+the culprit and is not (the container in question returns from that
+function EARLY and never reaches the hint), and a `grow > 0` predicate
+for "is there a scrollable below me" never fired, because `grow` reads 0
+on the very node whose surface carries the scroll. So the clamp lives in
+`KayaTableSurface`: an unbounded ask is answered with the DISPLAY's own
+height, on the principle that a window onto larger content must have a
+size and a window bigger than the screen is not a window. Bounded asks
+pass through untouched, so a normally-measured table is unaffected —
+watched after the fix, the two tables on that screen measure 432 and 608
+where they had measured INFINITY.
+
+WHAT THE CRASH WAS HIDING: with the app alive, the screen fails cleanly
+with the zero-WIDTH track this entry's sibling describes
+(`track -32dp, drawn 0dp, content 281dp`). The crash was masking a
+pre-existing defect, which is the usual reason a fix reveals rather than
+resolves.
+
 WHY IT MATTERS BEYOND THE CRASH: this is the runtime proof of the design
 entry in docs/deferred.md. `grow` divides leftover; a scroll offers an
 unbounded main extent; the grown ledger is itself a vertically scrollable
