@@ -199,8 +199,8 @@ expect_column_edges column@ledger 4
 # The whole collection arrived: 15,003 rows of DATA behind a band that
 # realizes a few dozen widgets. label@count counts what the guest holds,
 # and the last three rows are the dividends the tick posted.
-expect_window column@recent 0 12
-expect_rows column@recent "2026-08-24,VXUS,buy,$921.00|2026-08-24,VTI,sell,$8848.50|2026-08-24,AAPL,sell,$3780.00|2026-08-24,VTI,div,$15.50|2026-08-24,VTI,sell,$7547.25|2026-08-24,AAPL,sell,$7200.00|2026-08-24,VTI,buy,$7547.25|2026-08-24,VTI,div,$0.50|2026-08-24,VTI,sell,$10410.00|2026-08-25,AAPL,div,$2.40|2026-08-25,BND,div,$6.20|2026-08-25,CASH,div,$2.05"
+expect_window column@recent 0 8
+expect_rows column@recent "2026-08-24,VTI,sell,$7547.25|2026-08-24,AAPL,sell,$7200.00|2026-08-24,VTI,buy,$7547.25|2026-08-24,VTI,div,$0.50|2026-08-24,VTI,sell,$10410.00|2026-08-25,AAPL,div,$2.40|2026-08-25,BND,div,$6.20|2026-08-25,CASH,div,$2.05"
 # The band at rest sits at the top of a 15,003-row collection.
 expect_window column@ledger 0 15003
 # The middle, addressed by the ROW and not by a pixel: t07500 is the

@@ -82,7 +82,10 @@ FILTERS = [
 # the whole collection and windowing is observably invisible
 # (docs/virtualization-plan.md §1), which is the one place a shared
 # scene can freeze a realized count.
-RECENT = 12
+# 8, down from 12 (the maintainer, 2026-08-30): with the fold, the
+# recents and the ledger share one screen on a phone, and at 12 the
+# recents card pushed the seam and the ledger's opening below the fold.
+RECENT = 8
 
 # What "Day tick" posts: the day's dividend for each account, on the day
 # after the ledger's last, in the same shape read_ledger yields. A

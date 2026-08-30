@@ -950,13 +950,16 @@ hits="$(doctor "$s" tools/scenes/portfolio.steps 'expect label@last "last [^"]*"
 applied "$hits" "N14's drifted last row"
 refuses "$s" "the ledger's last row" "N14 (a scene that outlived its artifact)"
 
-# N15 — C9: the same, one string over — the twelve most recent rows,
-# which is the expectation a regenerated ledger moves every time.
+# N15 — C9: the same, one string over — the most recent rows, which is
+# the expectation a regenerated ledger moves every time. COUNT-FREE on
+# purpose: the census derives the count from the guest's own RECENT
+# (8 since 2026-08-30, 12 before), and a self-test pinned to the number
+# broke the day the number moved while the census itself was right.
 s="$(fresh n15)"
 hits="$(doctor "$s" tools/scenes/portfolio.steps '(expect_rows column@recent ")[^"]*"' \
     '\1nothing,here,at,$0.00"')"
 applied "$hits" "N15's drifted recent rows"
-refuses "$s" "the 12 most recent rows" "N15 (a stale recent table)"
+refuses "$s" "most recent rows" "N15 (a stale recent table)"
 
 # N16 — C9: the scene is deleted while the artifact stays.
 s="$(fresh n16)"
@@ -971,7 +974,7 @@ hits="$(doctor "$s" guests/python/portfolio.py \
     '\("2026-08-25", "brokerage", "AAPL", "div", 0, 240\)' \
     '("2026-08-25", "brokerage", "AAPL", "div", 0, 250)')"
 applied "$hits" "N17's re-valued posted dividend"
-refuses "$s" "the 12 most recent rows" "N17 (a posting rule the scene never heard about)"
+refuses "$s" "most recent rows" "N17 (a posting rule the scene never heard about)"
 
 # N18 — C9: the DASHBOARD's own count of the book drifts. That label is
 # the one place the two screens are asserted to share a model, and it

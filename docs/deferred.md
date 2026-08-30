@@ -9079,3 +9079,53 @@ container layout recorded". TWO consequences, one fixed and one held:
   which is what makes it a render read. The stub is deleted and the
   windows leg wired (deploy-win's resize block, five languages).
   KEY: adaptive winui, axis-state pass, reindex vertical, depth stub adaptive
+
+## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30)
+KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion
+
+The maintainer asked for host-driven scrolling so visual checks need no
+human in the loop. What is MEASURED, so nobody re-derives it:
+
+- Synthetic CGEvents (any source, any tap point) reach the Simulator's
+  MAC CHROME — a posted click opens its menus — and the DEVICE CONTENT
+  VIEW ignores clicks, drags, wheel and keys alike (macOS 26 / iOS 26.5
+  sim). System Events wants an Automation grant nobody has clicked.
+  nixpkgs' idb-companion (a 2022 build) NSException-crashes on attach
+  against this CoreSimulator.
+- simdrive's HID path DELIVERS: every send answers ok, taps land (a
+  degenerate `swipe` moved the table's columns drag). The new `swipe`
+  verb sends down + interpolated down-state + up — idb's own encoding of
+  a moving contact — and this runtime does NOT read it as a pan: a
+  SwiftUI vertical scroll does not move. Move-phase values 0/3/4/5/6 in
+  the mouse builder's state slot were each tried; none pans.
+- `IndigoHIDMessageForScrollEvent` exists in SimulatorKit and its shape
+  was read from the prologue: `(i32, i32, f64, f64, f64)` stored at
+  +0x30/+0x34/+0x3c/+0x44/+0x4c of a complete 0xc0-byte envelope
+  (eventType 1, inner 0xa0, kind 6) that sends as-is. Sends answer ok;
+  no permutation moved content — (x,y,delta) ratios, raw values,
+  dx/dy-first, phase sequences 1/2…/3 in the first int. The missing
+  ingredient is unknown; possibly a display/source id or a runtime gate.
+
+THE GUARANTEED PATH if pan synthesis is ever needed: a resident XCUITest
+driver (XCUICoordinate press/drag), the industry answer — a small runner
+app in tools/ios beside simdrive. Until a need bigger than screenshot
+framing exists, the fold's visual checks get by without it: the shorter
+recents (RECENT = 8) puts the seam and the ledger's opening on the FIRST
+screen of a phone, which was the capture this hunt was for.
+
+## WATCH — AN iOS GUEST'S PANIC MESSAGE DIES WITH ITS PTY (2026-08-30)
+KEY: pyhost panic message, kaya_run abort, ips crash report, panic hook file
+
+pyhost aborted once tonight (SIGABRT, a Rust panic crossing `kaya_run`'s
+extern "C" boundary — `panic_cannot_unwind`), seconds after a scripted
+click into the folded Transactions screen on a COLD first launch of a
+fresh install: ~/Library/Logs/DiagnosticReports/pyhost-2026-08-30-094806.ips.
+Six deliberate cold-start repetitions of the same script did not
+reproduce it, and the panic MESSAGE is unrecovered because the launch
+had no console: on iOS a plain `simctl launch` gives the process no pty,
+so a Rust panic's one diagnostic sentence goes nowhere durable. The .ips
+names the frame and never the assert. THE FIX SHAPE, when this recurs: a
+panic hook (or stderr dup) writing into the app container — the flight
+recorder's ONE-FAILURE-IS-ENOUGH rule applied to the guest's own last
+words — wired in pyhost-main or the host entry, so the next single
+occurrence arrives with its sentence attached.

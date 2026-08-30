@@ -541,6 +541,50 @@ final class Tapper {
             "\(xy(point)) down=\(quoted(down)) down_ms=\(downMs) "
                 + "up=\(quoted(up)) up_ms=\(sinceMs(upAt))")
     }
+
+    /// A one-finger drag, the tap's plural: touch down at `from`,
+    /// interpolated down-state messages along the path — idb's own
+    /// encoding of a moving contact — and the release held briefly at
+    /// `to` so no fling inertia follows. Exists because NOTHING ELSE
+    /// REACHES THE DEVICE from the host (measured 2026-08-30: synthetic
+    /// CGEvents open the Simulator's menus and the device content view
+    /// ignores clicks, drags, wheel and keys alike; System Events wants
+    /// an Automation grant; nixpkgs' idb-companion NSException-crashes
+    /// against this CoreSimulator).
+    ///
+    /// WHAT IS MEASURED SO FAR (2026-08-30, iOS 26.5 sim): every send
+    /// answers ok and TAPS LAND (a degenerate swipe moved the table's
+    /// columns drag), but this runtime does not read the repeated
+    /// down-state stream as a PAN — a SwiftUI vertical scroll does not
+    /// move. The scroll-gesture builder was tried and is written up in
+    /// docs/deferred.md (the simulator-input entry); the guaranteed
+    /// path, if pan synthesis is ever needed, is an XCUITest driver.
+    func swipe(from: CGPoint, to: CGPoint, screen: CGSize, steps: Int = 24) {
+        func ratio(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: p.x / screen.width, y: p.y / screen.height)
+        }
+        let started = mark()
+        var bad: [String] = []
+        func deliver(_ result: String) {
+            if result != "ok" { bad.append(result) }
+        }
+        deliver(send(message(ratio: ratio(from), down: true)))
+        for i in 1...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let p = CGPoint(
+                x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+            deliver(send(message(ratio: ratio(p), down: true)))
+            usleep(12_000)
+        }
+        usleep(250_000)
+        deliver(send(message(ratio: ratio(to), down: false)))
+        tapsSent += 1
+        note(
+            "swipe",
+            "\(xy(from)) -> \(xy(to)) steps=\(steps) "
+                + "bad=\(bad.isEmpty ? "none" : bad.joined(separator: ",")) "
+                + "ms=\(sinceMs(started))")
+    }
 }
 
 // MARK: - verbs
@@ -549,7 +593,7 @@ let arguments = CommandLine.arguments
 guard arguments.count >= 4 else {
     fail(
         "usage: simdrive <udid> <app-pid> state|choose <name>|cancel|describe|press <label>"
-            + "|savestate|savename <name>|savepress|savecancel")
+            + "|savestate|savename <name>|savepress|savecancel|swipe <x1> <y1> <x2> <y2>")
 }
 let udid = arguments[1]
 guard let appPid = Int32(arguments[2]) else { fail("app pid must be a number") }
@@ -794,6 +838,19 @@ func cancelSheet(_ what: String) {
 }
 
 switch verb {
+case "swipe":
+    // <x1> <y1> <x2> <y2>, POINTS in the device's own screen space — no
+    // window arithmetic, no focus, no picker involved. The capture aid
+    // the fold's visual checks needed; usable by hand:
+    //   simdrive <udid> 0 swipe 200 600 200 200
+    guard arguments.count >= 8,
+        let x1 = Double(arguments[4]), let y1 = Double(arguments[5]),
+        let x2 = Double(arguments[6]), let y2 = Double(arguments[7])
+    else { fail("swipe needs x1 y1 x2 y2 in screen points") }
+    Tapper(device: sim.device).swipe(
+        from: CGPoint(x: x1, y: y1), to: CGPoint(x: x2, y: y2), screen: screen)
+    print("swiped")
+
 case "navstrip":
     // Diagnosis: what the navigation strip offers right now.
     guard waitForPicker() != nil else { print("no picker"); exit(0) }

@@ -10649,9 +10649,20 @@ private struct KayaSynthesizedTable: View {
                                     // ledger read as two surfaces.
                                     VStack(alignment: .leading, spacing: node.spacing) {
                                         ForEach(node.foldedChildren) { folded in
+                                            // STRETCHED, not offered: Compose
+                                            // measures folded children with the
+                                            // table's width as a hard bound,
+                                            // and a natural-sized column here
+                                            // answered with less — the recents
+                                            // card rendered narrower than the
+                                            // ledger's on iOS while Android's
+                                            // matched (the maintainer's
+                                            // 2026-08-30 screenshot). One
+                                            // semantics: folded content spans
+                                            // the viewport.
                                             KayaRender(
                                                 node: folded, flexVertical: true,
-                                                flexStretch: false
+                                                flexStretch: true
                                             )
                                             .frame(maxWidth: .infinity, alignment: .topLeading)
                                         }
