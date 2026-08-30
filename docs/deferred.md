@@ -8847,6 +8847,26 @@ container layout recorded". TWO consequences, one fixed and one held:
   viewport geometry". Three of the leg's four failures were that.
 
   WHAT STILL BLOCKS IT, both measured, neither a ceiling:
+  0. THE CRASH IS FIXED (2026-08-29, docs/traps.md) and the screen now
+     fails CLEANLY on the zero-WIDTH track below, which the crash had been
+     masking. What is measured since:
+       - the ledger table is handed `maxH=608` where it had INFINITY, and
+         the recent table 432; the height half is healthy.
+       - it is handed `minW=0 maxW=0`, and the track arithmetic is
+         `(maxWidth - 2*padX)/density`, so a zero width IS the -32dp.
+         The number is not a mystery; the zero is.
+       - its CELL receives `maxW=0` while the summary side's cells all
+         receive 288.
+     TWO CONCLUSIONS DRAWN HERE WERE WRONG, both from targets addressed by
+     INDEX. `expect_axis row#1 "vertical"` answered "horizontal" and was
+     read as "the entry's row never flips" — but the trace had already
+     shown a KIND_ROW rendering with `vert=true` on that screen, so row#1
+     was some other row (the mark's, most likely). An `a11y_id` added to
+     name it then answered "no such target row@txnrow" on Compose while
+     the same spelling resolves on iOS, which is its own unwired-lookup
+     question and was NOT chased. NAME THE ROW FIRST, and confirm the name
+     resolves, before believing anything about which container flipped.
+
   1. THE TRANSACTIONS SCREEN'S GROWN LEDGER GETS NO TRACK. THE CAUSE
      RECORDED HERE WAS WRONG, and was disproved 2026-08-29 by four
      experiments that each left the number BYTE-IDENTICAL at `track

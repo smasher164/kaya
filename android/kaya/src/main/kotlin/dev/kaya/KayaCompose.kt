@@ -9144,7 +9144,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 if (kayaLayoutTrace) {
                     Log.i("kaya", "KAYA_TRACE table#${node.id} maxH=" +
                         (if (constraints.hasBoundedHeight) "${constraints.maxHeight}"
-                         else "INFINITY->${bounded.maxHeight}"))
+                         else "INFINITY->${bounded.maxHeight}") +
+                        " minW=${constraints.minWidth} maxW=" +
+                        (if (constraints.hasBoundedWidth) "${constraints.maxWidth}"
+                         else "INFINITY"))
                 }
                 val placeable = measurable.measure(bounded)
                 layout(placeable.width, placeable.height) { placeable.place(0, 0) }
