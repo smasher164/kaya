@@ -1008,7 +1008,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x85185a153afbc4b7uL
+    private const val SPEC_HASH: ULong = 0xa48166396de2f55duL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1233,6 +1233,7 @@ object KayaCompose {
     const val ROLE_DESTRUCTIVE = 1L
     const val ROLE_PROMINENT = 2L
     const val ROLE_HEADING = 3L
+    const val ROLE_CAPTION = 4L
     // THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
     // docs/styling-plan.md D6). Long, like the role values: the prop
     // rides as an i64 and the model's field is what the render arms
@@ -10097,7 +10098,25 @@ private fun KayaRenderCore(
                     onTextLayout = { kayaTypefaceSites["heading"] = it },
                     modifier = boxFill.then(a11y).semantics { heading() },
                 )
+            } else if (node.role == KayaCompose.ROLE_CAPTION) {
+                // The caption role: Material's supporting-text reading —
+                // bodySmall on the variant colour. No semantics half:
+                // Compose (like UIA and Apple) has no caption fact to
+                // publish, the carve-out a11yrows.steps records.
+                Text(
+                    node.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    onTextLayout = { kayaTypefaceSites["caption"] = it },
+                    modifier = boxFill.then(a11y),
+                )
             } else {
+                // A role with no arm above is REFUSED, not quietly worn as
+                // a plain label — the interpreters are the historic miss
+                // layer, and the Rust backends' catch-alls already panic.
+                check(node.role == 0L) {
+                    "kaya: label role ${node.role} has no compose arm"
+                }
                 // And the AMBIENT route's sample: a plain label reads
                 // LocalTextStyle, the write the ramp cannot stand in for.
                 Text(

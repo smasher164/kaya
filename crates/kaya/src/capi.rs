@@ -907,14 +907,17 @@ const _: () = assert!(
 /// The role enum's values (spec enum "role"): semantic emphasis, a
 /// closed set. Which variant fits which KIND is the root's
 /// value-dependent check (destructive/prominent are buttons-only,
-/// heading is labels-only) — one wire slot, the variants divide it.
+/// heading and caption are labels-only) — one wire slot, the variants
+/// divide it.
 pub const KAYA_ROLE_DESTRUCTIVE: u32 = 1;
 pub const KAYA_ROLE_PROMINENT: u32 = 2;
 pub const KAYA_ROLE_HEADING: u32 = 3;
+pub const KAYA_ROLE_CAPTION: u32 = 4;
 const _: () = assert!(
     KAYA_ROLE_DESTRUCTIVE == wire::ROLE_DESTRUCTIVE
         && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
         && KAYA_ROLE_HEADING == wire::ROLE_HEADING
+        && KAYA_ROLE_CAPTION == wire::ROLE_CAPTION
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol";

@@ -37,11 +37,16 @@ with app.window(title="styling", width=480.0, height=360.0, inset=0.0):
     with kaya.column():
         # expect_ax resolves a target through its AUTHORED id into the
         # real tree, so everything the steps read back is identified.
-        kaya.label(bind=heading).role(kaya.Role.HEADING).a11y_id("title")  # label#0
+        kaya.heading(bind=heading).a11y_id("title")  # label#0
         kaya.label(bind=status)  # label#1
         kaya.button("Delete", on_click=delete).role(
             kaya.Role.DESTRUCTIVE).a11y_id("delete")  # button#0
         kaya.button("Save", on_click=save).role(
             kaya.Role.PROMINENT).a11y_id("save")  # button#1
+        # DECLARED SO EVERY BACKEND'S CAPTION ARM RUNS, like the two
+        # button roles above: the look has no universal AX observable
+        # (only GTK has a caption role), so the walls are the arms'
+        # own refusals plus this label's text.
+        kaya.caption("captioned")  # label#2
 
 sys.exit(app.run())

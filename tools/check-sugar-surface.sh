@@ -359,6 +359,76 @@ if [ "$table_fake" -ne 8 ]; then
 fi
 unset table_fake
 
+# --- THE ROLE SUGAR: heading() and caption(), BOTH ZONES --------------
+#
+# One word for label+role (docs/styling-plan.md D4; ratified 2026-08-30).
+# Neither is a KIND, so the kind census cannot see them — the table
+# surface's problem one clause up, and the same answer: the patterns
+# written out per binding, both construction zones each. Python is ONE
+# pattern for both zones (its ambient _widget serves whichever zone is
+# open — the live-only sentence does not apply, both zones are real).
+# Go spells the live pair Text/Signal and the template pair Text/Bound,
+# so it carries four patterns; Swift's LIVE constructor breaks its
+# argument list after the paren, which is what the end-of-line anchor
+# pins against the template overloads.
+want_role() {
+    if ! grep -qE "$4" "$2"; then
+        echo "check-sugar-surface: $1 has no '$3' role sugar" \
+            "(wanted /$4/ in $2)"
+        status=1
+    fi
+}
+
+# check_role_sugar <snake_case> <PascalCase> <camelCase>
+check_role_sugar() {
+    local snake="$1" pascal="$2" camel="$3"
+    want_role rust-live crates/kaya/src/app.rs "$snake" \
+        "pub fn ${snake}\(&mut self, signal: SignalId\)"
+    want_role rust-tpl crates/kaya/src/app.rs "$snake" \
+        "pub fn ${snake}\(&mut self, src: impl Into<TplSource<StrKind>>\)"
+    want_role python bindings/python/kaya/__init__.py "$snake" \
+        "^def ${snake}\(text=None, bind=None, grow=None\)"
+    want_role go-live bindings/go/app.go "$snake" \
+        "func \(tx \*Tx\) ${pascal}Text\(text string\) Widget"
+    want_role go-live bindings/go/app.go "$snake" \
+        "func \(tx \*Tx\) ${pascal}\(s Signal\[string\]\) Widget"
+    want_role go-tpl bindings/go/app.go "$snake" \
+        "func \(t \*Tpl\) ${pascal}Text\("
+    want_role go-tpl bindings/go/app.go "$snake" \
+        "func \(t \*Tpl\) ${pascal}Bound\["
+    want_role csharp-live bindings/csharp/KayaApp.cs "$snake" \
+        "public Widget ${pascal}\(string text = null"
+    want_role csharp-tpl bindings/csharp/KayaApp.cs "$snake" \
+        "public Node ${pascal}\(string text\)"
+    want_role java-live bindings/java/dev/kaya/KayaApp.java "$snake" \
+        "public Widget ${camel}\(String text\)"
+    want_role java-tpl bindings/java/dev/kaya/KayaApp.java "$snake" \
+        "public Node ${camel}\(String text\)"
+    want_role swift-live bindings/swift/KayaApp.swift "$snake" \
+        "func ${camel}\($"
+    want_role swift-tpl bindings/swift/KayaApp.swift "$snake" \
+        "func ${camel}\(_ text: String\) -> KayaNodeHandle"
+    want_role ocaml-live bindings/ocaml/kaya_app.ml "$snake" \
+        "^let ${snake} \?grow \?a11y_id \?a11y_label \?text \?bind \(\)"
+    want_role ocaml-tpl bindings/ocaml/kaya_app.ml "$snake" \
+        "^  let ${snake} \?grow \?a11y_id \?a11y_id_bind"
+    want_role haskell-live bindings/haskell/KayaApp.hs "$snake" \
+        "^${camel}Text :: \(LeafArgs r\) => String -> r"
+    want_role haskell-tpl bindings/haskell/KayaApp.hs "$snake" \
+        "^${camel} :: TplStrSource s => s -> Tpl Node"
+}
+check_role_sugar heading Heading heading
+check_role_sugar caption Caption caption
+
+role_fake=$(check_role_sugar kaya_fake_role KayaFakeRole kayaFakeRole 2>&1 \
+    | grep -c "has no 'kaya_fake_role' role sugar")
+if [ "$role_fake" -ne 17 ]; then
+    echo "check-sugar-surface: self-test failed ($role_fake/17 role-sugar patterns" \
+        "fired for a constructor that exists nowhere)"
+    exit 1
+fi
+unset role_fake
+
 # --- THE SIZE-POLICY SURFACE, in all eight --------------------------
 #
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX

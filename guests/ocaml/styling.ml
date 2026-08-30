@@ -24,7 +24,9 @@ let () =
      brand_accent 0x3584E4;
      window ~title:"styling" ~width:480.0 ~height:360.0 ~inset:0.0 ();
 
-     let heading = signal (Str "Sections") in
+     (* [title], not [heading]: the bare constructor of that name is
+        what label#0 is built with below. *)
+     let title = signal (Str "Sections") in
      let status = signal (Str "ready") in
 
      let on_delete () = write status (Str "deleted") in
@@ -35,12 +37,16 @@ let () =
          [
            (* expect_ax resolves a target through its AUTHORED id into the
               real tree, so everything the script reads back is identified. *)
-           label ~role:Heading ~a11y_id:"title" ~bind:heading (* label#0 *);
+           heading ~a11y_id:"title" ~bind:title (* label#0 *);
            label ~bind:status (* label#1 *);
            button ~role:Destructive ~a11y_id:"delete" ~text:"Delete"
              ~on_click:on_delete (* button#0 *);
            button ~role:Prominent ~a11y_id:"save" ~text:"Save"
              ~on_click:on_save (* button#1 *);
+           (* Declared so every backend's caption arm runs, like the two
+              button roles: no universal AX observable, so the walls are
+              the arms' refusals plus this label's text. *)
+           caption ~text:"captioned" (* label#2 *);
          ]
          ()
      in

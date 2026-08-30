@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x85185a153afbc4b7L
+let spec_hash = 0xa48166396de2f55dL
 
 let value_bool = 1
 let value_i64 = 2
@@ -137,6 +137,7 @@ let axis_vertical = 1
 let role_destructive = 1
 let role_prominent = 2
 let role_heading = 3
+let role_caption = 4
 let symbol_add = 1
 let symbol_remove = 2
 let symbol_delete = 3

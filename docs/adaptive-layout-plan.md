@@ -214,6 +214,35 @@ ids to `window_client_width`, which answered None (eighteen metrics
 passes, not one width reaching the core). The adaptive scene could never
 see it: no entries.
 
+### D7.5 — the grouped screen, general (ratified 2026-08-30)
+
+RATIFIED BY THE MAINTAINER in two steps the same day: first the folded
+screen ("yes" to screen-scoped ground + section carding), then the
+general rule when the dashboard was seen lagging the transactions
+screen. ONE DERIVATION, iOS ONLY: a screen whose content holds a table
+lowers as a grouped screen — `systemGroupedBackground` on the SCREEN,
+edge to edge behind the title, worn by the surface roots off a registry
+(`kayaRecomputeGroupedSurfaces`) rewritten at every apply batch tail.
+The screen's PRIMARY FLOW (highest vertical container whose subtree
+holds a table, reached through wrappers along a single table-bearing
+child) renders as the SECTION STREAM: the flow flattens through its
+vertical containers, then a `heading`-role label opens a section as its
+header, a `caption`-role label closes one as its footer, a table is a
+section body of its own, and every other run of consecutive children is
+one `secondarySystemGroupedBackground` card. Headers and footers sit
+bare on the ground in Settings' own dress (footnote scale, secondary,
+headers uppercased) — full-size content never does. The per-table
+GROUND BAND DIED with this rule: a synthesized card can only ever
+appear on a grouped screen now, so the fold-era suppression machinery
+(the foldHost flag, the folded-ground environment key, the live-pad
+instrument read) collapsed back to constants, and the fold's interior
+speaks the same section grammar through the same renderer. Android and
+the desktops are UNCHANGED BY DESIGN — Material's bare headline on the
+background is the same semantics in that platform's spelling.
+tools/check-table-card.sh pins the screen ground, its two wearers and
+the card's one spelling; a side-by-side screen (two table-bearing
+children, e.g. the pad's unstacked row) grounds but does not section.
+
 ## §1.5 — the milestone landed 2026-08-28
 
 The breadth slice closed the same evening as the depth: the record went

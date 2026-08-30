@@ -24,13 +24,17 @@ main = kayaMain $ \app -> buildTx app $ do
       []
       [ -- expect_ax resolves a target through its AUTHORED id into the
         -- real tree, so everything the steps read back is identified.
-        labelBound heading [Role Heading, A11yId "title"], -- label#0
+        headingBound heading [A11yId "title"], -- label#0
         labelBound status, -- label#1
         buttonOn "Delete" -- button#0
           (submitTx app (writeSignal status (VStr "deleted")))
           [Role Destructive, A11yId "delete"],
         buttonOn "Save" -- button#1
           (submitTx app (writeSignal status (VStr "saved")))
-          [Role Prominent, A11yId "save"]
+          [Role Prominent, A11yId "save"],
+        -- Declared so every backend's caption arm runs, like the two
+        -- button roles: no universal AX observable, so the walls are
+        -- the arms' refusals plus this label's text.
+        captionText "captioned" -- label#2
       ]
   mount root

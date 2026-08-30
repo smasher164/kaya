@@ -117,6 +117,111 @@ func TestRoleOutsideItsBuildTransactionDies(t *testing.T) {
 	label.Role(RoleHeading)
 }
 
+// sugarRole returns the ONE role write a heading/caption call queued,
+// having read the KIND it rode on out of the create_widget that minted
+// it: the whole claim of this sugar is "a label wearing that role", and
+// half of it is the widget kind.
+func sugarRole(t *testing.T, build func(*Tx)) setProp {
+	t.Helper()
+	app := NewApp()
+	kinds := map[uint64]uint32{}
+	var roles []setProp
+	app.Build(func(tx *Tx) {
+		build(tx)
+		for _, rec := range tx.records {
+			switch recKind(rec) {
+			case txCreateWidget:
+				kinds[binary.LittleEndian.Uint64(rec[8:])] = binary.LittleEndian.Uint32(rec[16:])
+			case txSetProperty:
+				if p := decodeSetProp(t, rec); p.prop == PropRole {
+					roles = append(roles, p)
+				}
+			}
+		}
+	})
+	if len(roles) != 1 {
+		t.Fatalf("the sugar queued %d role writes, want exactly 1", len(roles))
+	}
+	if k := kinds[roles[0].widget]; k != KindLabel {
+		t.Fatalf("the role rode on kind %d, want label (%d)", k, KindLabel)
+	}
+	return roles[0]
+}
+
+type sugarRec struct{ Title string }
+
+type sugarNote struct{ Body string }
+
+type sugarTodo struct{ Body string }
+
+// Heading and Caption are one label plus one role, on every surface that
+// hands out a label — and the ROLE NUMBER is what nothing else in this
+// binding reads back, so a heading spelling caption's 4 would ship.
+func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
+	tplRows := func(body func(Row)) func(*Tx) {
+		return func(tx *Tx) {
+			for row := range tx.Rows(tx.Collection()).All() {
+				body(row)
+			}
+		}
+	}
+	recRows := func(body func(RecordCollection[string, sugarRec], *Tpl)) func(*Tx) {
+		return func(tx *Tx) {
+			c := CollectionOf[string, sugarRec](tx)
+			for row := range tx.Rows(c.Collection).All() {
+				body(c, row.Tpl)
+			}
+		}
+	}
+	sumRows := func(body func(SumCase[string, sugarNote])) func(*Tx) {
+		return func(tx *Tx) {
+			c := SumOf[string, any](tx, sugarNote{}, sugarTodo{})
+			for row := range tx.Rows(c.Collection).All() {
+				c.Case[sugarNote](row.Tpl, body)
+				c.Case[sugarTodo](row.Tpl, func(SumCase[string, sugarTodo]) {})
+			}
+		}
+	}
+	title := func(r *sugarRec) *string { return &r.Title }
+	body := func(n *sugarNote) *string { return &n.Body }
+
+	for _, c := range []struct {
+		name  string
+		want  int64
+		build func(*Tx)
+	}{
+		{"Tx.HeadingText", RoleHeading, func(tx *Tx) { tx.HeadingText("Sections") }},
+		{"Tx.Heading", RoleHeading, func(tx *Tx) { tx.Heading(tx.Signal("t")) }},
+		{"Tx.CaptionText", RoleCaption, func(tx *Tx) { tx.CaptionText("Sections") }},
+		{"Tx.Caption", RoleCaption, func(tx *Tx) { tx.Caption(tx.Signal("t")) }},
+		{"Tpl.HeadingText", RoleHeading, tplRows(func(r Row) { r.HeadingText("Sections") })},
+		{"Tpl.HeadingBound", RoleHeading, tplRows(func(r Row) { r.HeadingBound(r.Value()) })},
+		{"Tpl.CaptionText", RoleCaption, tplRows(func(r Row) { r.CaptionText("Sections") })},
+		{"Tpl.CaptionBound", RoleCaption, tplRows(func(r Row) { r.CaptionBound(r.Value()) })},
+		{"Row.Heading", RoleHeading, tplRows(func(r Row) { r.Heading(r.Value()) })},
+		{"Row.Caption", RoleCaption, tplRows(func(r Row) { r.Caption(r.Value()) })},
+		{"RecordCollection.Heading", RoleHeading,
+			recRows(func(c RecordCollection[string, sugarRec], tp *Tpl) { c.Heading(tp, title) })},
+		{"RecordCollection.Caption", RoleCaption,
+			recRows(func(c RecordCollection[string, sugarRec], tp *Tpl) { c.Caption(tp, title) })},
+		{"SumCase.HeadingText", RoleHeading,
+			sumRows(func(sc SumCase[string, sugarNote]) { sc.HeadingText("Sections") })},
+		{"SumCase.Heading", RoleHeading,
+			sumRows(func(sc SumCase[string, sugarNote]) { sc.Heading(body) })},
+		{"SumCase.CaptionText", RoleCaption,
+			sumRows(func(sc SumCase[string, sugarNote]) { sc.CaptionText("Sections") })},
+		{"SumCase.Caption", RoleCaption,
+			sumRows(func(sc SumCase[string, sugarNote]) { sc.Caption(body) })},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := sugarRole(t, c.build)
+			if got.source != SourceConst || got.tag != ValueI64 || got.i64 != c.want {
+				t.Errorf("%s recorded %+v, want a const i64 role %d", c.name, got, c.want)
+			}
+		})
+	}
+}
+
 // ---- the real-root half ------------------------------------------
 
 // stylingTrap builds one scene through the ordinary sugar and pumps it
@@ -192,7 +297,7 @@ func TestTheRootIsTheStylingWall(t *testing.T) {
 		want    string
 	}{
 		{"role-on-label", true, "role destructive does not fit Label"},
-		{"role-unknown", true, "9 is not a role (destructive=1, prominent=2, heading=3)"},
+		{"role-unknown", true, "9 is not a role (destructive=1, prominent=2, heading=3, caption=4)"},
 		{"inset-negative", true, "window inset must be finite and non-negative, got -1"},
 		{"brand-twice", true, "set_brand_accent called twice"},
 		{"role-on-button", false, "THE ROOT ACCEPTED IT"},

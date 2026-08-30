@@ -8116,6 +8116,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     label.add_css_class("heading");
                     label.set_accessible_role(gtk4::AccessibleRole::Heading);
                 }
+                // The caption role, the heading's counterpart: Adwaita's
+                // caption type tier plus dim-label for the secondary
+                // colour — and GTK is the ONE platform with a caption
+                // ACCESSIBLE role to publish beside the style (Apple and
+                // UIA have none; a11yrows.steps records the carve-out).
+                (NativeWidget::Label(label), Prop::Role, Value::I64(4)) => {
+                    use gtk4::prelude::{AccessibleExt, WidgetExt};
+                    label.add_css_class("caption");
+                    label.add_css_class("dim-label");
+                    label.set_accessible_role(gtk4::AccessibleRole::Caption);
+                }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
                     let grid = grid.clone();

@@ -217,6 +217,27 @@ func (sc SumCase[K, V]) Label(sel func(*V) *string) Node {
 	return n
 }
 
+// HeadingText is LabelText wearing the heading role, in one word.
+func (sc SumCase[K, V]) HeadingText(text string) Node { return sc.t.HeadingText(text) }
+
+// Heading is Label wearing the heading role.
+func (sc SumCase[K, V]) Heading(sel func(*V) *string) Node {
+	n := sc.Label(sel)
+	sc.t.SetRole(n, RoleHeading)
+	return n
+}
+
+// CaptionText is LabelText wearing the caption role — the footnote under
+// the content it explains.
+func (sc SumCase[K, V]) CaptionText(text string) Node { return sc.t.CaptionText(text) }
+
+// Caption is Label wearing the caption role.
+func (sc SumCase[K, V]) Caption(sel func(*V) *string) Node {
+	n := sc.Label(sel)
+	sc.t.SetRole(n, RoleCaption)
+	return n
+}
+
 // Checkbox bound to the field the selector names, with its toggle
 // handler co-located (stamped key first, per the template contract).
 func (sc SumCase[K, V]) Checkbox(sel func(*V) *bool, onToggle func(*Tx, K, bool)) Node {

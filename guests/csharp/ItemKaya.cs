@@ -76,6 +76,18 @@ sealed class ItemRow
 
     public Node Label(Field<string> f) => t.Label(f);
 
+    public Node Heading(string text) => t.Heading(text);
+
+    public Node Heading(Signal s) => t.Heading(s);
+
+    public Node Heading(Field<string> f) => t.Heading(f);
+
+    public Node Caption(string text) => t.Caption(text);
+
+    public Node Caption(Signal s) => t.Caption(s);
+
+    public Node Caption(Field<string> f) => t.Caption(f);
+
     public Node Button(string text) => t.Button(text);
 
     public Node Button(Signal s) => t.Button(s);

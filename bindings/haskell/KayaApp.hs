@@ -184,6 +184,10 @@ module KayaApp
     textareaOn,
     labelText,
     labelBound,
+    headingText,
+    headingBound,
+    captionText,
+    captionBound,
     checkboxOn,
     sliderOn,
     sliderBoundOn,
@@ -230,6 +234,8 @@ module KayaApp
     TplAttr (..),
     withTplAttrs,
     label,
+    heading,
+    caption,
     checkbox,
     image,
     rowOf,
@@ -1992,12 +1998,16 @@ data Role
   | -- | A text hierarchy heading — the platform's heading text style AND
     -- the heading trait assistive users skim by. Labels only.
     Heading
+  | -- | The heading's counterpart one tier down: the platform's footnote
+    -- text, under the content it explains. Labels only.
+    Caption
   deriving (Eq, Show)
 
 roleWire :: Role -> Int64
 roleWire Destructive = 1
 roleWire Prominent = 2
 roleWire Heading = 3
+roleWire Caption = 4
 
 -- | The dynamic path; the declarative spelling is the 'Role' attr.
 setRole :: Widget -> Role -> Build ()
@@ -2340,6 +2350,38 @@ labelBound :: (LeafArgs r) => Signal -> r
 labelBound sig = leafish $ do
   w <- widget W.kindLabel
   bindText w sig
+  return w
+
+-- | A label wearing 'Heading', in one word (the h1 tradition): the
+-- platform's heading text style AND the trait assistive users skim by,
+-- and on a grouped screen the section-header seat.
+headingText :: (LeafArgs r) => String -> r
+headingText text = leafish $ do
+  w <- labelText text
+  setRole w Heading
+  return w
+
+-- | 'headingText' with the text bound, as 'labelBound' is to 'labelText'.
+headingBound :: (LeafArgs r) => Signal -> r
+headingBound sig = leafish $ do
+  w <- labelBound sig
+  setRole w Heading
+  return w
+
+-- | A label wearing 'Caption': the platform's footnote tier under the
+-- content it explains, and the section-footer seat. The heading's
+-- counterpart.
+captionText :: (LeafArgs r) => String -> r
+captionText text = leafish $ do
+  w <- labelText text
+  setRole w Caption
+  return w
+
+-- | 'captionText' with the text bound.
+captionBound :: (LeafArgs r) => Signal -> r
+captionBound sig = leafish $ do
+  w <- labelBound sig
+  setRole w Caption
   return w
 
 -- | An image displaying constant encoded bytes (PNG, JPEG, ...): the toolkit
@@ -2730,6 +2772,22 @@ label :: TplStrSource s => s -> Tpl Node
 label src = do
   n <- widget W.kindLabel
   bindTextSource n src
+  return n
+
+-- | A stamped label wearing 'Heading', in one word: the row's own
+-- section title, styled and announced as a heading.
+heading :: TplStrSource s => s -> Tpl Node
+heading src = do
+  n <- label src
+  setNodeRole n Heading
+  return n
+
+-- | Its counterpart, stamped: the footnote under the content it
+-- explains.
+caption :: TplStrSource s => s -> Tpl Node
+caption src = do
+  n <- label src
+  setNodeRole n Caption
   return n
 
 checkbox :: TplBoolSource s => s -> ([W.Value] -> Bool -> IO ()) -> Tpl Node

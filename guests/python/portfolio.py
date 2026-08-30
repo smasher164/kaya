@@ -591,7 +591,12 @@ with app.window(title="portfolio", width=900, height=600):
                     align="stretch", a11y_id="accounts",
                 ):
                     with kaya.column(align="stretch"):
-                        kaya.label(bind=account.name)
+                        # The account's heading/table/caption triple: on a
+                        # grouped screen (iOS) these are the section's
+                        # header and footer seats; everywhere else the
+                        # platform's heading and footnote text tiers, and
+                        # the AX heading trait assistive users skim by.
+                        kaya.heading(bind=account.name)
                         positions = kaya.collection(Position)
                         # UNGROWN since the empty-row ruling: a summary
                         # table hugs its rows (docs/tables-plan.md); grow is
@@ -606,7 +611,7 @@ with app.window(title="portfolio", width=900, height=600):
                                 kaya.label(bind=item.qty)
                                 kaya.label(bind=item.price)
                                 kaya.label(bind=item.value)
-                        kaya.label(bind=account.total)
+                        kaya.caption(bind=account.total)
     for account in ACCOUNT_ORDER:
         name, _ = BOOK[account]
         accounts.insert(

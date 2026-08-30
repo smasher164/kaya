@@ -2145,7 +2145,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         role_signal = kaya.signal("heading")
         for what, value, kind, fragment in (
             ("an unknown name", "shouty", ValueError, "must be one of"),
-            ("a number outside the vocabulary", 4, ValueError, "is not a role"),
+            ("a number outside the vocabulary", 9, ValueError, "is not a role"),
             ("a bool", True, TypeError, "not bool"),
             ("a Signal", role_signal, TypeError, "not Signal"),
             ("a float", 3.0, TypeError, "not float"),

@@ -478,6 +478,7 @@ pub fn platform_name(tag: i64) -> Option<&'static str> {
 pub const ROLE_DESTRUCTIVE: u32 = 1;
 pub const ROLE_PROMINENT: u32 = 2;
 pub const ROLE_HEADING: u32 = 3;
+pub const ROLE_CAPTION: u32 = 4;
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its

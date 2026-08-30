@@ -111,17 +111,10 @@ expect_ink canvas@mark "50,50 = light D2E3F7 dark 212A35"
 # device, so the outer geometry is the panes-band shape — a value the
 # platforms legitimately answer differently, which no shared scene may
 # sample. The scene's contract is the ADAPTIVE behavior (every
-# assertion below is data-shaped and passed unchanged at 375x812);
+# assertion below is data-shaped and passed unchanged at 375x812 —
+# the flex-presentation asserts moved to the cut tail 2026-08-30 when
+# the grouped tier stopped laying those containers out);
 # declared-size honoring is window.steps' mechanism proof, once.
-expect_aligned column@detail "stretch"
-expect_aligned column@accounts "stretch"
-# No expect_fills on column@detail: the breadth rule maximizes this
-# column's height while the hugging dashboard legitimately leaves slack
-# under its content (the empty-row ruling, docs/tables-plan.md).
-# The hug half of that ruling: an ungrown summary table's viewport sits
-# within a row-pitch of its last row — watched failing both ways
-# (content-height frame removed, then inflated 100pt).
-expect_fills column@positions[brokerage]
 expect_column_edges column@positions[brokerage] 4
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
 expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
@@ -271,6 +264,30 @@ click button#1
 expect_title "Transactions"
 resize_window 900x600
 expect_folded column@summary none
+# THE FLEX-PRESENTATION ASSERTS LIVE IN THE CUT TAIL (moved 2026-08-30,
+# with the grouped-screen rule): on iOS a table-bearing screen lowers as
+# grouped SECTIONS — the detail and accounts columns dissolve into the
+# stream and never lay out as containers, so "aligns" has nothing to
+# read there. That is the tier's design, not a miss; these sample the
+# FLEX presentation and run where it exists, exactly as the
+# window-size note above scopes the outer geometry. The records read
+# here were written at the scene's own 900 opening.
+expect_aligned column@detail "stretch"
+expect_aligned column@accounts "stretch"
+# No expect_fills on column@detail: the breadth rule maximizes this
+# column's height while the hugging dashboard legitimately leaves slack
+# under its content (the empty-row ruling, docs/tables-plan.md).
+# The hug half of that ruling: an ungrown summary table's viewport sits
+# within a row-pitch of its last row — watched failing both ways
+# (content-height frame removed, then inflated 100pt). BACK FIRST: the
+# observation is generation-keyed and a covered dashboard cannot
+# re-stamp it, so the read runs on the live screen, then the push is
+# restored for the fold round trip below.
+back
+expect_entries 0
+expect_fills column@positions[brokerage]
+click button#1
+expect_title "Transactions"
 resize_window 640x600
 expect_folded column@summary column@ledger
 resize_window 900x600

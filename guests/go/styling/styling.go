@@ -26,7 +26,7 @@ func App() *kaya.App {
 		tx.Mount(tx.Column(func() {
 			// expect_ax resolves a target through its AUTHORED id into
 			// the real tree.
-			tx.Label(heading).Role(kaya.RoleHeading).A11yID("title") // label#0
+			tx.Heading(heading).A11yID("title") // label#0
 			tx.Label(status)                                         // label#1
 			tx.Button("Delete", func(tx *kaya.Tx) {                  // button#0
 				tx.Write(status, "deleted")
@@ -34,6 +34,10 @@ func App() *kaya.App {
 			tx.Button("Save", func(tx *kaya.Tx) { // button#1
 				tx.Write(status, "saved")
 			}).Role(kaya.RoleProminent).A11yID("save")
+			// Declared so every backend's caption arm runs, like the
+			// two button roles: no universal AX observable, so the
+			// walls are the arms' refusals plus this label's text.
+			tx.CaptionText("captioned") // label#2
 		}))
 	})
 

@@ -25,8 +25,9 @@
 #define W_COLUMN 1
 #define W_TITLE 2  /* label#0 */
 #define W_STATUS 3 /* label#1 */
-#define W_DELETE 4 /* button#0 */
-#define W_SAVE 5   /* button#1 */
+#define W_DELETE 4  /* button#0 */
+#define W_SAVE 5    /* button#1 */
+#define W_CAPTION 6 /* label#2 */
 
 /* A window prop with its value, packed by hand: the generated
  * kaya_tx_set_window_prop closes the record BEFORE the value. */
@@ -74,11 +75,18 @@ static void build_scene(void) {
     kaya_tx_set_text(&tx, W_SAVE, "Save");
     kaya_tx_set_role(&tx, W_SAVE, KAYA_ROLE_PROMINENT);
     kaya_tx_set_a11y_id(&tx, W_SAVE, "save");
+    /* Declared so every backend's caption arm runs, like the two button
+     * roles: no universal AX observable, so the walls are the arms'
+     * refusals plus this label's text. */
+    kaya_tx_create_widget(&tx, W_CAPTION, KAYA_KIND_LABEL);
+    kaya_tx_set_text(&tx, W_CAPTION, "captioned");
+    kaya_tx_set_role(&tx, W_CAPTION, KAYA_ROLE_CAPTION);
 
     kaya_tx_add_child(&tx, W_COLUMN, W_TITLE);
     kaya_tx_add_child(&tx, W_COLUMN, W_STATUS);
     kaya_tx_add_child(&tx, W_COLUMN, W_DELETE);
     kaya_tx_add_child(&tx, W_COLUMN, W_SAVE);
+    kaya_tx_add_child(&tx, W_COLUMN, W_CAPTION);
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);

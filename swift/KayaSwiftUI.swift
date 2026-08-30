@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x85185a153afbc4b7
+let kayaSpecHash: UInt64 = 0xa48166396de2f55d
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -135,6 +135,7 @@ private let propInset: UInt32 = 17
 private let roleDestructive: Int64 = 1
 private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
+private let roleCaption: Int64 = 4
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol"). APPEND-ONLY wire
 /// values; the SF Symbols spelling each maps to is kayaSFSymbol below.
 private let symbolAdd: Int64 = 1
@@ -628,13 +629,17 @@ final class KayaSceneModel {
     /// Live navigation entries by surface id. `navEntries`, not `entries` —
     /// that name is the ENTRY-widget registry below.
     var navEntries: [UInt64: KayaEntryModel] = [:]
-    /// Surfaces hosting a LIVE fold (D7's presentation half, ratified
-    /// 2026-08-30): a folded screen is a grouped screen, and these are
-    /// what the surface roots consult to paint the grouped ground edge
-    /// to edge. Rewritten by the fold apply arm, never derived in a
-    /// body.
+    /// GROUPED SCREENS (ratified 2026-08-30, twice: the fold's screen at
+    /// midday, the general rule in the evening): on this platform a
+    /// screen whose content holds a TABLE lowers as a grouped screen —
+    /// ground on the screen, sections on the flow. These sets are what
+    /// the surface roots consult; `groupedFlows` names each grouped
+    /// screen's PRIMARY FLOW, the one container whose children become
+    /// the section stream. Rewritten at every apply batch tail, never
+    /// derived in a body.
     var groupedEntries: Set<UInt64> = []
     var groupedWindows: Set<UInt64> = []
+    var groupedFlows: Set<UInt64> = []
     /// entry id -> the window whose stack holds it.
     var entryWindow: [UInt64: UInt64] = [:]
     /// Live sections by surface id (the one surface namespace), and section
@@ -3983,7 +3988,6 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     if table != 0, let dest = kayaScene.nodes[table] {
                         dest.foldedChildren.append(node)
                     }
-                    kayaRecomputeGroupedSurfaces()
                 }
             case applyMount:
                 // The target is a SURFACE: the primary, an auxiliary
@@ -4268,6 +4272,15 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
             at += size
         }
     }
+    #if !os(macOS)
+        // Any batch can create, remove, mount, fold or re-column the
+        // widget that decides a screen's grouped verdict, so the registry
+        // is recomputed at every batch tail — a walk over REALIZED nodes
+        // only, virtualization's gift, and never on macOS, which has no
+        // grouped tier to consult it. BEFORE the admission drive, whose
+        // pinned tail is the batch boundary (tools/check-steps.sh).
+        kayaRecomputeGroupedSurfaces()
+    #endif
     if menusTouched {
         kayaMenuChanged()
     }
@@ -5933,15 +5946,14 @@ private func kayaRunScript(_ script: String) {
                 // "A table viewport contains rows".
                 let want = Int(parts[2]) ?? -1
                 let got = DispatchQueue.main.sync {
-                    () -> (KayaCurrentTableGeometry, Double?, Bool, CGFloat)? in
+                    () -> (KayaCurrentTableGeometry, Double?, Bool)? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return nil
                     }
                     let trackWidth = kayaCurrentTableTrackWidth(node)
                     return (
                         kayaCurrentTableGeometry(node), trackWidth,
-                        kayaCurrentTableSynthesized(node),
-                        kayaTableCardPadLive(node)
+                        kayaCurrentTableSynthesized(node)
                     )
                 }
                 guard let got else {
@@ -5990,10 +6002,9 @@ private func kayaRunScript(_ script: String) {
                             break
                         }
                         // The card's own span comes off the track first, or
-                        // every carded table convicts itself. The LIVE pad:
-                        // fold-tier tables paint no band (D7).
+                        // every carded table convicts itself.
                         let track = kayaTableContentTrack(
-                            assigned, pad: got.3, synthesized: got.2)
+                            assigned, pad: kayaTableCardPad, synthesized: got.2)
                         let frames = columns.flatMap { $0 }
                         // TRACK, THEN THE LEADING EDGE, THEN THE TRAILING
                         // ONE — one precedence in all four backends
@@ -8532,22 +8543,6 @@ func kayaTableContentTrack(_ track: Double, pad: CGFloat, synthesized: Bool) -> 
     synthesized ? track - 2 * Double(pad) : track
 }
 
-/// What the card ACTUALLY spends on this table's track: a fold host and
-/// folded content paint no band (D7), so the pad the edge instrument
-/// subtracts is insetX alone there — the constant would convict a
-/// correct fold-tier layout of drawing a viewport 32pt wider than its
-/// track. Folded content is found by the model (`foldedInto` up the
-/// parent chain), never by the render's environment flag, which the
-/// harness thread cannot read.
-func kayaTableCardPadLive(_ table: KayaNode) -> CGFloat {
-    if !table.foldedChildren.isEmpty { return kayaTableCardInsetX }
-    var at: KayaNode? = table
-    while let node = at {
-        if node.foldedInto != 0 { return kayaTableCardInsetX }
-        at = kayaScene.parents[node.id].flatMap { kayaScene.nodes[$0] }
-    }
-    return kayaTableCardPad
-}
 
 /// THE CELLS' OWN BOX inside a carded SCROLL CLIP. The card's interior lives
 /// INSIDE the scrolling content (KayaTableCardFace) — it has to end with the
@@ -10220,7 +10215,20 @@ typealias KayaTablePlaced = () -> Void
     /// The layout placed a band. THE THIRD TRIGGER, and the one the other
     /// two cannot stand in for: a scroll does not re-run the layout, and
     /// a band change does not move the content's box.
+    ///
+    /// AND THE REGISTRATION HEALS HERE: a transient duplicate view of the
+    /// same table can attach after this one and die, and its detach takes
+    /// the registry entry with it — the `===` guard protects an entry
+    /// against the WRONG remover, not the survivor against an empty slot
+    /// (measured on the varied leg, 2026-08-30: two window objects
+    /// attached 2ms apart, the second detached, scroll_to_row then read
+    /// an empty registry for a live windowed table). This runs on every
+    /// generation, so the live view re-asserts itself within one batch.
     func placed(_ node: KayaNode) {
+        if proxy != nil, kayaTableWindows[node.id] == nil {
+            kayaTableWindows[node.id] = self
+            kayaTableColumnAxes[node.id] = self
+        }
         arrived(node)
     }
 
@@ -10497,14 +10505,9 @@ private struct KayaTableContentReporter: View {
 /// instrument subtracts what these say the card spends, so a mac that
 /// declared them would convict every mac table.
 #if os(macOS)
-    let kayaTableCardBand: CGFloat = 0
     let kayaTableCardInsetX: CGFloat = 0
     let kayaTableCardInsetY: CGFloat = 0
 #else
-    /// The grouped ground's band around the card. iOS insets a grouped
-    /// section from the SCREEN edge; a kaya table already sits inside the
-    /// guest's own container inset, so the band is the family's 16.
-    let kayaTableCardBand: CGFloat = 16
     /// UIKit's cell layout margin — and the 16 the mac native tier's inset
     /// NSTableView measured at (kayaTableLeadingUnderfill's note).
     let kayaTableCardInsetX: CGFloat = 16
@@ -10514,11 +10517,12 @@ private struct KayaTableContentReporter: View {
 #endif
 /// iOS's inset-grouped section radius.
 let kayaTableCardRadius: CGFloat = 10
-/// What the card spends per side, ACROSS BOTH LAYERS — the band outside the
-/// scroll clip and the interior inside it, on the content — and therefore
-/// the number the edge instrument takes off the assigned track
-/// (kayaTableContentTrack; kayaTableCellsBox is the interior half alone).
-let kayaTableCardPad: CGFloat = kayaTableCardBand + kayaTableCardInsetX
+/// What the card spends per side — the interior alone, since the band
+/// died with the grouped-screen rule (every synthesized card sits on a
+/// SCREEN ground now) — and therefore the number the edge instrument
+/// takes off the assigned track (kayaTableContentTrack;
+/// kayaTableCellsBox reads the same interior).
+let kayaTableCardPad: CGFloat = kayaTableCardInsetX
 
 /// THE FOLD SEAM (docs/adaptive-layout-plan.md D7): the gap between the
 /// last folded child and the table's own grammar. A SECTION gap, not the
@@ -10543,109 +10547,212 @@ let kayaFoldSeamGap: CGFloat = 16
 /// page by background contrast, not by an outline. Semantic colours, so dark
 /// mode is free. tools/check-table-card.sh holds the layer as well as the
 /// look.
-/// Which surfaces host a live fold, recomputed at each Fold op (rare —
-/// breakpoint crossings): every table holding folded children walks its
-/// parent chain to a root, and the entry or window owning that root is
-/// a grouped screen.
+/// THE GROUPED-SCREEN RULE, derived and general: a screen containing a
+/// table is a grouped screen (iOS's own reading — Settings, Health —
+/// ratified 2026-08-30 over the fold-only special case this replaces).
+/// The primary flow is the highest vertical container whose subtree
+/// holds a table, reached by descending through wrappers (a scroll, an
+/// unstacked row) along a SINGLE table-bearing child; two carriers side
+/// by side mean a side-by-side screen, which grounds but does not
+/// section.
+/// Whether this container is a grouped screen's registered primary flow —
+/// false on macOS by construction, which keeps the mac lane byte-stable.
+func kayaIsGroupedFlow(_ node: KayaNode) -> Bool {
+    #if os(macOS)
+        return false
+    #else
+        return kayaScene.groupedFlows.contains(node.id)
+    #endif
+}
+
 func kayaRecomputeGroupedSurfaces() {
     var entries = Set<UInt64>()
     var windows = Set<UInt64>()
-    for (id, node) in kayaScene.nodes where !node.foldedChildren.isEmpty {
-        var at = id
-        while let parent = kayaScene.parents[at] { at = parent }
-        for (eid, model) in kayaScene.navEntries where model.root?.id == at {
-            entries.insert(eid)
-        }
-        for (wid, model) in kayaScene.windows where model.root?.id == at {
-            windows.insert(wid)
-        }
-        if kayaScene.root?.id == at { windows.insert(0) }
+    var flows = Set<UInt64>()
+    func containsTable(_ node: KayaNode) -> Bool {
+        if !node.tableColumns.isEmpty { return true }
+        return node.laidOut.contains(where: containsTable)
+            || node.foldedChildren.contains(where: containsTable)
     }
+    func primaryFlow(_ node: KayaNode) -> KayaNode? {
+        let vertical = (node.axis ?? (node.kind == kindColumn ? 1 : 0)) == 1
+        if vertical, node.kind == kindColumn || node.kind == kindRow,
+            node.tableColumns.isEmpty
+        {
+            return node
+        }
+        let carriers = node.laidOut.filter(containsTable)
+        if carriers.count == 1 { return primaryFlow(carriers[0]) }
+        return nil
+    }
+    func register(_ root: KayaNode?, entry: UInt64?, window: UInt64?) {
+        guard let root, containsTable(root) else { return }
+        if let entry { entries.insert(entry) }
+        if let window { windows.insert(window) }
+        if let flow = primaryFlow(root) { flows.insert(flow.id) }
+    }
+    for (eid, model) in kayaScene.navEntries {
+        register(model.root, entry: eid, window: nil)
+    }
+    for (wid, model) in kayaScene.windows {
+        register(model.root, entry: nil, window: wid)
+    }
+    register(kayaScene.root, entry: nil, window: 0)
     kayaScene.groupedEntries = entries
     kayaScene.groupedWindows = windows
+    kayaScene.groupedFlows = flows
 }
 
-/// A section card's interior (D7's section lowering): the standard
-/// grouped-row rhythm, 16 leading like a Settings row, a hair tighter
-/// vertically since labels carry their own line height.
+/// A section card's interior (the grouped section lowering): the
+/// standard grouped-row rhythm, 16 leading like a Settings row, a hair
+/// tighter vertically since labels carry their own line height. The
+/// header gap is Settings' tight attach — a header belongs to its card,
+/// not to the space between sections.
 let kayaFoldSectionPadX: CGFloat = 16
 let kayaFoldSectionPadY: CGFloat = 12
+let kayaGroupedHeaderGap: CGFloat = 6
 
-/// D7's SECTION LOWERING (the maintainer, 2026-08-30): folded content
-/// on the grouped ground presents as SECTIONS — each run of consecutive
-/// non-table children is one card, and a nested table is its own. The
-/// native reading, verbatim: SwiftUI's inset-grouped List cards every
-/// Section, arbitrary views included, and only small-caps headers and
-/// footnotes sit directly on the ground — full-size text never does,
-/// which is exactly what our bare summary block was.
-private enum KayaFoldSection: Identifiable {
-    case run([KayaNode])
-    case table(KayaNode)
+/// THE GROUPED SECTION GRAMMAR (ratified 2026-08-30): a grouped
+/// screen's flow flattens through its vertical containers into one
+/// stream, and the stream reads as SwiftUI's own Section triple — a
+/// heading label opens a section as its header, a caption label closes
+/// one as its footer, a table is a section body of its own, and every
+/// other run of consecutive children is one card. Headers and footers
+/// sit bare on the ground in the grouped text style; full-size content
+/// never does, which is what the bare summary block was.
+private struct KayaGroupedSection: Identifiable {
+    enum Content {
+        case run([KayaNode])
+        case table(KayaNode)
+        case none
+    }
+    var header: KayaNode?
+    var content: Content = .none
+    var footer: KayaNode?
     var id: UInt64 {
-        switch self {
+        if let header { return header.id }
+        switch content {
         case .run(let nodes): return nodes[0].id
         case .table(let node): return node.id
+        case .none: return footer?.id ?? 0
         }
     }
 }
 
-private func kayaFoldSections(_ folded: KayaNode) -> [KayaFoldSection] {
-    // Only a VERTICAL non-table container splits; anything else is one
-    // section whole (a folded leaf, a horizontal row, a table).
-    let vertical = (folded.axis ?? (folded.kind == kindColumn ? 1 : 0)) == 1
-    if !vertical || !folded.tableColumns.isEmpty || folded.laidOut.isEmpty {
-        return folded.tableColumns.isEmpty ? [.run([folded])] : [.table(folded)]
-    }
-    var out: [KayaFoldSection] = []
-    var run: [KayaNode] = []
-    for child in folded.laidOut {
-        if !child.tableColumns.isEmpty {
-            if !run.isEmpty {
-                out.append(.run(run))
-                run = []
-            }
-            out.append(.table(child))
+/// Flatten a flow: vertical non-table containers dissolve into their
+/// children (a For's stamped instance most of all — that is where a
+/// row's heading/table/caption triple lives); tables, leaves and
+/// horizontal containers are stream members that lay themselves out.
+private func kayaGroupedFlatten(_ node: KayaNode, into out: inout [KayaNode]) {
+    for child in node.laidOut {
+        let vertical = (child.axis ?? (child.kind == kindColumn ? 1 : 0)) == 1
+        if vertical, child.kind == kindColumn || child.kind == kindRow,
+            child.tableColumns.isEmpty, !child.laidOut.isEmpty
+        {
+            kayaGroupedFlatten(child, into: &out)
         } else {
-            run.append(child)
+            out.append(child)
         }
     }
-    if !run.isEmpty { out.append(.run(run)) }
+}
+
+private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
+    var flat: [KayaNode] = []
+    kayaGroupedFlatten(flow, into: &flat)
+    // A folded LEAF (or an empty container) is its own one-member stream.
+    if flat.isEmpty { flat = [flow] }
+    var out: [KayaGroupedSection] = []
+    var run: [KayaNode] = []
+    var header: KayaNode?
+    func flush() {
+        if header != nil || !run.isEmpty {
+            out.append(
+                KayaGroupedSection(
+                    header: header, content: run.isEmpty ? .none : .run(run)))
+            run = []
+            header = nil
+        }
+    }
+    for node in flat {
+        if !node.tableColumns.isEmpty {
+            if run.isEmpty, header != nil {
+                out.append(KayaGroupedSection(header: header, content: .table(node)))
+                header = nil
+            } else {
+                flush()
+                out.append(KayaGroupedSection(content: .table(node)))
+            }
+        } else if node.role == roleHeading {
+            flush()
+            header = node
+        } else if node.role == roleCaption {
+            flush()
+            if !out.isEmpty, out[out.count - 1].footer == nil {
+                out[out.count - 1].footer = node
+            } else {
+                out.append(KayaGroupedSection(content: .run([node])))
+            }
+        } else {
+            run.append(node)
+        }
+    }
+    flush()
     return out
 }
 
-private struct KayaFoldedSections: View {
-    let folded: KayaNode
+private struct KayaGroupedSections: View {
+    let flow: KayaNode
 
     var body: some View {
+        let sections = kayaGroupedSections(flow)
         VStack(alignment: .leading, spacing: kayaFoldSeamGap) {
-            ForEach(kayaFoldSections(folded)) { section in
-                switch section {
-                case .table(let table):
-                    KayaRender(node: table, flexVertical: true, flexStretch: true)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                case .run(let nodes):
-                    kayaCarded(
-                        VStack(alignment: .leading, spacing: folded.spacing) {
-                            ForEach(nodes) { child in
-                                KayaRender(
-                                    node: child, flexVertical: true,
-                                    flexStretch: folded.align == alignStretch
-                                )
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                            }
-                        })
+            ForEach(sections) { section in
+                VStack(alignment: .leading, spacing: kayaGroupedHeaderGap) {
+                    if let header = section.header {
+                        kayaBare(header)
+                    }
+                    switch section.content {
+                    case .table(let table):
+                        KayaRender(node: table, flexVertical: true, flexStretch: true)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .background(
+                                KayaTrackReader(
+                                    id: table.id, vertical: true,
+                                    tableGeneration: kayaTableGeometryGeneration(table)))
+                    case .run(let nodes):
+                        kayaCarded(nodes)
+                    case .none:
+                        EmptyView()
+                    }
+                    if let footer = section.footer {
+                        kayaBare(footer)
+                    }
                 }
             }
         }
     }
 
+    /// A header or footer, bare on the ground in the grouped text style,
+    /// aligned with the cards' interior text.
+    @ViewBuilder private func kayaBare(_ node: KayaNode) -> some View {
+        KayaRender(node: node, flexVertical: true)
+            .environment(\.kayaGroupedSectionText, true)
+            .padding(.horizontal, kayaFoldSectionPadX)
+    }
+
     /// The card, the FACE's colours and radius on a run of ordinary
     /// content — macOS keeps its flat look exactly as the face does.
-    @ViewBuilder private func kayaCarded(_ content: some View) -> some View {
+    @ViewBuilder private func kayaCarded(_ nodes: [KayaNode]) -> some View {
+        let body = VStack(alignment: .leading, spacing: flow.spacing) {
+            ForEach(nodes) { child in
+                KayaRender(node: child, flexVertical: true, flexStretch: true)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
         #if os(macOS)
-            content
+            body
         #else
-            content
+            body
                 .padding(.horizontal, kayaFoldSectionPadX)
                 .padding(.vertical, kayaFoldSectionPadY)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -10676,21 +10783,18 @@ private struct KayaGroupedScreenGround: ViewModifier {
     }
 }
 
-/// Set for the render of FOLDED children (D7): they already sit on the
-/// host table's grouped ground, and a nested table drawing its own
-/// band spends a second 16pt inset — the recents card rendered exactly
-/// one cardInsetX narrower per side than the ledger's while Android's
-/// matched (the maintainer's screenshot, 2026-08-30; the trace closes
-/// the arithmetic: 370 -> 338 at the host's ground, 338 -> 306 at the
-/// nested one).
-private struct KayaOnFoldedGroundKey: EnvironmentKey {
+/// Set for a section HEADER or FOOTER render (the grouped section
+/// grammar): the label arm answers with the grouped text style —
+/// footnote scale, secondary, headers uppercased — which is Settings'
+/// own dress for bare text on the ground.
+private struct KayaGroupedSectionTextKey: EnvironmentKey {
     static let defaultValue = false
 }
 
 extension EnvironmentValues {
-    var kayaOnFoldedGround: Bool {
-        get { self[KayaOnFoldedGroundKey.self] }
-        set { self[KayaOnFoldedGroundKey.self] = newValue }
+    var kayaGroupedSectionText: Bool {
+        get { self[KayaGroupedSectionTextKey.self] }
+        set { self[KayaGroupedSectionTextKey.self] = newValue }
     }
 }
 
@@ -10714,48 +10818,6 @@ private struct KayaTableCardFace: ViewModifier {
                 .padding(.horizontal, kayaTableCardInsetX)
                 .padding(.vertical, kayaTableCardInsetY)
                 .background(kayaCardShape())
-        #endif
-    }
-}
-
-/// THE PAGE GROUND the card sits on, scoped to the TABLE'S OWN REGION and
-/// never the window's: painting the window grouped would move every
-/// non-table scene's pixels. It is not decoration —
-/// secondarySystemGroupedBackground IS white in light mode, so without the
-/// ground behind it a strokeless card would have no edge at all.
-///
-/// OUTSIDE THE SCROLL CLIP, unlike the face: the band frames the table's
-/// extent and may not scroll away, and it is the half that keeps the card
-/// from ever touching the region's edge. Together with the face's interior
-/// it is what the edge instrument subtracts (kayaTableCardPad).
-private struct KayaTableCardGround: ViewModifier {
-    @Environment(\.kayaOnFoldedGround) private var onFoldedGround
-
-    /// A FOLD HOST paints no band either: its screen carries the ground
-    /// (KayaGroupedScreenGround), and the band's one job — keeping the
-    /// card off the region's edge — is the window inset's on a grouped
-    /// screen.
-    let foldHost: Bool
-
-    init(foldHost: Bool = false) {
-        self.foldHost = foldHost
-    }
-
-    func body(content: Content) -> some View {
-        #if os(macOS)
-            content
-        #else
-            if onFoldedGround || foldHost {
-                // Folded content's ground is the VIEWPORT's, a fold
-                // host's the SCREEN's (D7): a band here is a second
-                // inset, not a second colour — grey on grey draws
-                // nothing and still narrows the card.
-                content
-            } else {
-                content
-                    .padding(kayaTableCardBand)
-                    .background(Color(uiColor: .systemGroupedBackground))
-            }
         #endif
     }
 }
@@ -10852,21 +10914,16 @@ private struct KayaSynthesizedTable: View {
                                     // The seam is the folded side's: a
                                     // section gap under the last folded
                                     // child, so the summary and the
-                                    // ledger read as two surfaces.
-                                    // SECTIONS, not bare content (D7's
-                                    // section lowering): each folded
-                                    // child presents as grouped cards —
-                                    // runs of ordinary content carded,
-                                    // nested tables their own. Stretch
-                                    // is Compose's hard width bound,
-                                    // spelled SwiftUI.
+                                    // ledger read as two surfaces. The
+                                    // folded stream speaks the same
+                                    // section grammar as the screen's
+                                    // flow — one renderer for both.
                                     VStack(alignment: .leading, spacing: kayaFoldSeamGap) {
                                         ForEach(node.foldedChildren) { folded in
-                                            KayaFoldedSections(folded: folded)
+                                            KayaGroupedSections(flow: folded)
                                         }
                                     }
                                     .padding(.bottom, kayaFoldSeamGap)
-                                    .environment(\.kayaOnFoldedGround, true)
                                 }
                                 rows(generation)
                                     .background(
@@ -10911,8 +10968,6 @@ private struct KayaSynthesizedTable: View {
                     .onAppear { window.registerColumns(node) }
             }
         }
-        // A TABLE BOUNDS ITS OWN EXTENT — this tier's spelling of it.
-        .modifier(KayaTableCardGround(foldHost: !node.foldedChildren.isEmpty))
         // task(id:), not onChange: this tier compiles at the macOS 13 /
         // iOS 16 floor, below the zero-parameter onChange.
         .task(id: presented) { node.tablePresented = presented }
@@ -12125,6 +12180,8 @@ struct KayaRender: View {
     /// half of the question `flexVertical` answers for the main one. Only the
     /// widgets whose natural size is a fixed frame need it.
     var flexStretch = false
+    /// Grouped section header/footer dress (KayaGroupedSections.kayaBare).
+    @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
 
     var body: some View {
         // The widget/node anchor: a context catalog attached to this node rides
@@ -12193,6 +12250,11 @@ struct KayaRender: View {
                     // KayaTableSurface picks the tier. Tables declare on
                     // columns; the core holds the templates to the arity.
                     KayaTableSurface(node: node)
+                } else if kayaIsGroupedFlow(node) {
+                    // A grouped screen's PRIMARY FLOW (the grouped-screen
+                    // rule): the flow's subtree renders as the section
+                    // stream instead of its own flex layout.
+                    KayaGroupedSections(flow: node)
                 } else if boxFills || node.laidOut.contains(where: { $0.grow > 0 }) {
                     KayaFlex(
                         vertical: vertical, spacing: node.spacing, nodes: node.laidOut,
@@ -12293,21 +12355,47 @@ struct KayaRender: View {
             // The heading role (docs/styling-plan.md D4) is BOTH facts at once:
             // the platform's heading TEXT STYLE (.headline — the scale's own
             // tier, never a raw size) and the AX heading trait, which is what
-            // assistive users skim by.
-            Text(node.text)
-                // THE SWAPPED .headline, not the platform's: a text style set
-                // here OVERRIDES the root font, so a heading in a branded app
-                // would be the one label still in the system face (measured).
-                // Non-headings pass nil and inherit the root's.
-                .font(
-                    node.role == roleHeading
-                        ? (kayaBrandFont(.headline) ?? .headline) : nil)
-                .accessibilityAddTraits(
-                    node.role == roleHeading ? .isHeader : [])
-                .alignmentGuide(.top) { d in
-                    kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
-                    return d[.top]
+            // assistive users skim by. The caption role is the tier under it,
+            // .footnote and secondary. AS A SECTION HEADER OR FOOTER on a
+            // grouped screen both wear Settings' own dress instead — footnote
+            // scale, secondary, the header uppercased — while the AX facts
+            // stay exactly where they were.
+            // A role with no arm here is REFUSED, not quietly worn as a
+            // plain label — the interpreters are the historic miss layer,
+            // and the Rust backends' catch-alls already panic (invariant 3).
+            let _ = precondition(
+                node.role == 0 || node.role == roleHeading
+                    || node.role == roleCaption,
+                "kaya: label role \(node.role) has no swiftui arm")
+            let sectionText = kayaGroupedSectionText
+            // THE SWAPPED style, not the platform's: a text style set here
+            // OVERRIDES the root font, so a heading in a branded app would
+            // be the one label still in the system face (measured). Unroled
+            // labels pass nil and inherit the root's.
+            let font: Font? =
+                node.role == roleHeading
+                    ? (sectionText
+                        ? (kayaBrandFont(.footnote) ?? .footnote)
+                        : (kayaBrandFont(.headline) ?? .headline))
+                    : node.role == roleCaption
+                        ? (kayaBrandFont(.footnote) ?? .footnote) : nil
+            let base = Text(node.text)
+                .font(font)
+                .textCase(
+                    node.role == roleHeading && sectionText ? .uppercase : nil)
+            Group {
+                if node.role == roleCaption || (node.role == roleHeading && sectionText) {
+                    base.foregroundStyle(.secondary)
+                } else {
+                    base
                 }
+            }
+            .accessibilityAddTraits(
+                node.role == roleHeading ? .isHeader : [])
+            .alignmentGuide(.top) { d in
+                kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                return d[.top]
+            }
         case kindCheckbox:
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (SwiftUI needs the binding), and
@@ -17564,9 +17652,6 @@ struct KayaRoot: View {
             Group {
                 if let root = scene.root {
                     KayaRender(node: root, isRoot: true)
-                        .modifier(
-                            KayaGroupedScreenGround(
-                                on: scene.groupedWindows.contains(0)))
                         .background(
                             GeometryReader { geo in
                                 Color.clear
@@ -17602,6 +17687,14 @@ struct KayaRoot: View {
         // Normalized: pack content to the top-leading corner of the
         // surface rather than letting the window center it.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // OUTSIDE the window inset, like KayaEntryRoot's: a background
+        // cannot escape explicit padding, only safe-area insets, so worn
+        // any lower the grouped ground stops at the content box and the
+        // title area stays the window's own colour (measured on the
+        // dashboard, 2026-08-30).
+        .modifier(
+            KayaGroupedScreenGround(
+                on: scene.groupedWindows.contains(0)))
         // The primary surface's title (initially the process name, so an unset
         // prop changes nothing): SwiftUI's blessed window titling path on macOS;
         // harmless on iOS, where the switcher label is stamped in the apply arm.

@@ -532,6 +532,25 @@ func (c RecordCollection[K, T]) Label[S interface {
 	return n
 }
 
+// Heading is Label wearing the heading role, in one word.
+func (c RecordCollection[K, T]) Heading[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S) Node {
+	n := c.Label(t, src)
+	t.SetRole(n, RoleHeading)
+	return n
+}
+
+// Caption is Label wearing the caption role — the footnote under the
+// content it explains.
+func (c RecordCollection[K, T]) Caption[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S) Node {
+	n := c.Label(t, src)
+	t.SetRole(n, RoleCaption)
+	return n
+}
+
 // Button creates a button whose caption comes from any addressable
 // source, with its click handler (nil for none).
 func (c RecordCollection[K, T]) Button[S interface {

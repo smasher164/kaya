@@ -133,6 +133,15 @@ sealed class SumCase<V>
     public Node Label(Tpl t, Expression<Func<V, string>> selector) =>
         t.Label(KayaRecords.FieldOf(selector));
 
+    /// Label wearing the heading role, in one word.
+    public Node Heading(Tpl t, Expression<Func<V, string>> selector) =>
+        t.Heading(KayaRecords.FieldOf(selector));
+
+    /// Label wearing the caption role — the footnote under the content
+    /// it explains.
+    public Node Caption(Tpl t, Expression<Func<V, string>> selector) =>
+        t.Caption(KayaRecords.FieldOf(selector));
+
     /// A checkbox bound to the field the selector names.
     public Node Checkbox(Tpl t, Expression<Func<V, bool>> selector,
         Action<Tx, List<object>, bool> onToggle = null) =>

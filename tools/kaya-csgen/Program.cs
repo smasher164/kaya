@@ -328,6 +328,12 @@ static class Program
         Fwd("Label", ["string text"], "text");
         Fwd("Label", ["Signal s"], "s");
         Fwd("Label", ["Field<string> f"], "f");
+        Fwd("Heading", ["string text"], "text");
+        Fwd("Heading", ["Signal s"], "s");
+        Fwd("Heading", ["Field<string> f"], "f");
+        Fwd("Caption", ["string text"], "text");
+        Fwd("Caption", ["Signal s"], "s");
+        Fwd("Caption", ["Field<string> f"], "f");
         Fwd("Button", ["string text"], "text");
         Fwd("Button", ["Signal s"], "s");
         Fwd("Button", ["Field<string> f"], "f");

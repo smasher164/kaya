@@ -2628,6 +2628,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("destructive", 1),
                 ("prominent", 2),
                 ("heading", 3),
+                ("caption", 4),
             ],
         },
         EnumSpec {
@@ -3206,6 +3207,7 @@ mod tests {
                     ("role", "destructive") => wire::ROLE_DESTRUCTIVE,
                     ("role", "prominent") => wire::ROLE_PROMINENT,
                     ("role", "heading") => wire::ROLE_HEADING,
+                    ("role", "caption") => wire::ROLE_CAPTION,
                     ("symbol", "add") => wire::SYMBOL_ADD,
                     ("symbol", "remove") => wire::SYMBOL_REMOVE,
                     ("symbol", "delete") => wire::SYMBOL_DELETE,

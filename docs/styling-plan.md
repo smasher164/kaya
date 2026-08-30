@@ -163,7 +163,17 @@ the knob is fully honorable.
 
 `destructive` (buttons), `prominent` (buttons — the one-primary-action
 affordance), `heading` (labels). Per-widget, closed set, never a raw
-value — the menu-role grammar one tier over. Lowerings:
+value — the menu-role grammar one tier over. `caption` (labels) joined
+2026-08-30 as heading's counterpart: the platform's footnote/caption
+text tier under the content it explains (SwiftUI .footnote+secondary,
+Material bodySmall on onSurfaceVariant, Adwaita .caption+.dim-label,
+Fluent CaptionTextBlockStyle on the secondary fill). Its AX fact rides
+only where the platform HAS one — GTK's Caption accessible role; Apple,
+UIA and Compose have none — the destructive/prominent carve-out one
+role over, so the scene does not pretend to freeze it. On a grouped
+screen (adaptive-layout-plan D7.5) heading and caption are the section
+header and footer seats, and `heading()`/`caption()` are one-word sugar
+for label+role in all eight bindings. Lowerings:
 
 - destructive: `.buttonRole(.destructive)` / M3 error-role container /
   `.destructive-action` / (WinUI has no first-class destructive

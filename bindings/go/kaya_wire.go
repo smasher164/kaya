@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x85185a153afbc4b7
+	SpecHash uint64 = 0xa48166396de2f55d
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -136,6 +136,7 @@ const (
 	RoleDestructive = 1
 	RoleProminent = 2
 	RoleHeading = 3
+	RoleCaption = 4
 	SymbolAdd = 1
 	SymbolRemove = 2
 	SymbolDelete = 3

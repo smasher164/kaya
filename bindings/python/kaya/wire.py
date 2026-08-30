@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x85185a153afbc4b7
+SPEC_HASH = 0xa48166396de2f55d
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -132,6 +132,7 @@ AXIS_VERTICAL = 1
 ROLE_DESTRUCTIVE = 1
 ROLE_PROMINENT = 2
 ROLE_HEADING = 3
+ROLE_CAPTION = 4
 SYMBOL_ADD = 1
 SYMBOL_REMOVE = 2
 SYMBOL_DELETE = 3

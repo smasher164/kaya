@@ -19,7 +19,7 @@ app.build { tx in
     status = tx.signal(.str("ready"))
     let root = tx.column {
         // Everything the steps read back is addressed by its AUTHORED id.
-        let title = tx.label(bind: heading, role: .heading)  // label#0
+        let title = tx.heading(bind: heading)  // label#0
         tx.setA11yId(title, "title")
         tx.label(bind: status)  // label#1
         let delete = tx.button("Delete", role: .destructive) { tx in  // button#0
@@ -30,6 +30,10 @@ app.build { tx in
             tx.write(status, .str("saved"))
         }
         tx.setA11yId(save, "save")
+        // Declared so every backend's caption arm runs, like the two
+        // button roles: no universal AX observable, so the walls are
+        // the arms' refusals plus this label's text.
+        tx.caption("captioned")  // label#2
     }
     tx.mount(root)
 }

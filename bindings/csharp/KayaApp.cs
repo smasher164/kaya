@@ -399,6 +399,9 @@ enum Role : long
     /// A text hierarchy heading: the platform's heading text style AND
     /// the accessibility heading trait.
     Heading = KayaWire.RoleHeading,
+    /// A heading's counterpart under the content it explains: the
+    /// platform's caption/footnote text tier.
+    Caption = KayaWire.RoleCaption,
 }
 
 /// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
@@ -1650,9 +1653,9 @@ sealed class Tx
         Records.Add(KayaWire.TxSetA11yHint(w.Id, hint));
 
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
-    /// looks. Destructive and Prominent are button emphasis, Heading is
-    /// label hierarchy, and the root refuses a role on a kind it does
-    /// not fit.
+    /// looks. Destructive and Prominent are button emphasis, Heading and
+    /// Caption are label hierarchy, and the root refuses a role on a kind
+    /// it does not fit.
     public void SetRole(Widget w, Role role) =>
         Records.Add(KayaWire.TxSetRole(w.Id, (long)role));
 
@@ -1783,6 +1786,18 @@ sealed class Tx
         if (role is Role r) SetRole(w, r);
         return w;
     }
+
+    /// A label wearing the heading role, in one word (the h1 tradition):
+    /// the platform's heading text style AND the accessibility heading
+    /// trait, and on a grouped screen the section-header seat.
+    public Widget Heading(string text = null, Signal? bind = null, double? grow = null) =>
+        Label(text, bind, grow, Role.Heading);
+
+    /// A label wearing the caption role: the platform's footnote tier
+    /// under the content it explains, and on a grouped screen the
+    /// section-footer seat. The heading's counterpart.
+    public Widget Caption(string text = null, Signal? bind = null, double? grow = null) =>
+        Label(text, bind, grow, Role.Caption);
 
     /// A progress bar: display-only, like Label and Image. value is
     /// the determinate fraction (0..=1); indeterminate: true switches
@@ -3326,6 +3341,28 @@ sealed class Tpl
     {
         var n = Widget(KayaWire.KindLabel);
         BindTextField(n, 0, f);
+        return n;
+    }
+
+    /// A stamped label wearing the heading role — the h1 tradition, in
+    /// one word. Caption below is its counterpart.
+    public Node Heading(string text) => WithRole(Label(text), Role.Heading);
+
+    public Node Heading(Signal s) => WithRole(Label(s), Role.Heading);
+
+    public Node Heading(Field<string> f) => WithRole(Label(f), Role.Heading);
+
+    /// A stamped label wearing the caption role: the footnote tier under
+    /// the content it explains.
+    public Node Caption(string text) => WithRole(Label(text), Role.Caption);
+
+    public Node Caption(Signal s) => WithRole(Label(s), Role.Caption);
+
+    public Node Caption(Field<string> f) => WithRole(Label(f), Role.Caption);
+
+    Node WithRole(Node n, Role role)
+    {
+        SetRole(n, role);
         return n;
     }
 

@@ -21,12 +21,16 @@ final class Styling {
             tx.mount(tx.column(() -> {
                 // expect_ax resolves a target through its AUTHORED id,
                 // so everything the steps read back is identified.
-                tx.label("Sections").role(KayaApp.Role.HEADING).a11yId("title"); // label#0
+                tx.heading("Sections").a11yId("title"); // label#0
                 tx.label(status); // label#1
                 tx.button("Delete", t -> t.write(status, "deleted")) // button#0
                         .role(KayaApp.Role.DESTRUCTIVE).a11yId("delete");
                 tx.button("Save", t -> t.write(status, "saved")) // button#1
                         .role(KayaApp.Role.PROMINENT).a11yId("save");
+                // Declared so every backend's caption arm runs, like the
+                // two button roles: no universal AX observable, so the
+                // walls are the arms' refusals plus this label's text.
+                tx.caption("captioned"); // label#2
             }));
         });
 

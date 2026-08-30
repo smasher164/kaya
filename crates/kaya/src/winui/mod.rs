@@ -12854,6 +12854,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // ramp is exactly what D4's ceiling refuses.
                     label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
                 }
+                (NativeWidget::Label(label), Prop::Role, Value::I64(4)) => {
+                    // The caption role, the heading's counterpart:
+                    // Fluent's own caption step of the type ramp, on the
+                    // secondary text fill. STYLE ONLY — UIA has no caption
+                    // fact to publish (SetHeadingLevel is headings alone),
+                    // the same carve-out Apple's stack has and
+                    // a11yrows.steps records.
+                    label.SetStyle(&theme_resource::<Style>("CaptionTextBlockStyle")?)?;
+                    label.SetForeground(&theme_resource::<Brush>(
+                        "TextFillColorSecondaryBrush",
+                    )?)?;
+                }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }

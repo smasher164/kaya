@@ -2199,6 +2199,20 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A label wearing the heading role, in one word (the h1 tradition):
+    /// the platform's heading text style AND the accessibility heading
+    /// trait, and on a grouped screen the section-header seat.
+    pub fn heading(&mut self, signal: SignalId) -> Widget<'_, 'a> {
+        self.label(signal).role(crate::Role::Heading)
+    }
+
+    /// A label wearing the caption role: the platform's footnote tier
+    /// under the content it explains, and on a grouped screen the
+    /// section-footer seat.
+    pub fn caption(&mut self, signal: SignalId) -> Widget<'_, 'a> {
+        self.label(signal).role(crate::Role::Caption)
+    }
+
     /// A single-line text field; edits arrive in the occurrence loop.
     pub fn entry(&mut self) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Entry);
@@ -3377,6 +3391,14 @@ impl<'b> Row<'_, 'b> {
 
     pub fn label(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         self.tpl().label(src)
+    }
+
+    pub fn heading(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().heading(src)
+    }
+
+    pub fn caption(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().caption(src)
     }
 
     pub fn checkbox(&mut self, src: impl Into<TplSource<BoolKind>>) -> TemplateNodeId {
@@ -5022,6 +5044,12 @@ pub enum Role {
     /// A text hierarchy heading — the platform's heading text style AND
     /// the accessibility heading trait assistive users skim by.
     Heading = 3,
+    /// A heading's counterpart under the content it explains: the
+    /// platform's caption/footnote text tier. The AX fact rides only
+    /// where the platform has one (GTK's Caption role) — the other
+    /// stacks have no caption trait to set, the same carve-out
+    /// destructive and prominent live under (tools/scenes/a11yrows.steps).
+    Caption = 4,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum "platform";
@@ -5695,6 +5723,21 @@ impl Tpl<'_, '_> {
     pub fn label(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         let n = self.widget(WidgetKind::Label);
         self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
+    /// A label wearing the heading role — the h1 tradition, stamped.
+    pub fn heading(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.label(src);
+        self.role(n, crate::Role::Heading);
+        n
+    }
+
+    /// A label wearing the caption role — the footnote under the
+    /// content it explains, stamped.
+    pub fn caption(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.label(src);
+        self.role(n, crate::Role::Caption);
         n
     }
 

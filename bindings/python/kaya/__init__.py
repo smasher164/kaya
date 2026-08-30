@@ -2765,17 +2765,20 @@ class Role:
     DESTRUCTIVE marks the press that destroys something; PROMINENT marks
     THE primary action, one per dialog's worth of emphasis; HEADING marks
     a text hierarchy heading, which is both the platform's heading style
-    and the accessibility heading trait."""
+    and the accessibility heading trait; CAPTION marks the footnote tier
+    under the content it explains, the heading's counterpart."""
 
     DESTRUCTIVE = wire.ROLE_DESTRUCTIVE
     PROMINENT = wire.ROLE_PROMINENT
     HEADING = wire.ROLE_HEADING
+    CAPTION = wire.ROLE_CAPTION
 
 
 _ROLE_NAMES = {
     "destructive": wire.ROLE_DESTRUCTIVE,
     "prominent": wire.ROLE_PROMINENT,
     "heading": wire.ROLE_HEADING,
+    "caption": wire.ROLE_CAPTION,
 }
 
 
@@ -2805,7 +2808,8 @@ def _role_value(role):
     if role not in _ROLE_NAMES.values():
         raise ValueError(
             f"kaya: {role} is not a role — the vocabulary is "
-            f"{sorted(_ROLE_NAMES)} (kaya.Role.DESTRUCTIVE/PROMINENT/HEADING)"
+            f"{sorted(_ROLE_NAMES)} "
+            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION)"
         )
     return role
 
@@ -3212,6 +3216,22 @@ def label(text=None, bind=None, grow=None):
         )
     _set_grow(handle, grow)
     return handle
+
+
+def heading(text=None, bind=None, grow=None):
+    """A label wearing the heading role, in one word (the h1 tradition):
+    the platform's heading text style AND the accessibility heading trait
+    assistive users skim by — and on a grouped screen, the section-header
+    seat (docs/styling-plan.md D4). `kaya.label(...).role("heading")`,
+    spelled the way every framework's own vocabulary spells it."""
+    return label(text=text, bind=bind, grow=grow).role("heading")
+
+
+def caption(text=None, bind=None, grow=None):
+    """A label wearing the caption role: the platform's footnote text
+    tier under the content it explains — and on a grouped screen, the
+    section-footer seat. The heading's counterpart."""
+    return label(text=text, bind=bind, grow=grow).role("caption")
 
 
 def image(source=None, grow=None):

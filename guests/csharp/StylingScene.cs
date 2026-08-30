@@ -23,7 +23,7 @@ static class StylingScene
             {
                 // expect_ax resolves its target through the AUTHORED id,
                 // so everything the steps read back is identified.
-                tx.SetA11yId(tx.Label(bind: heading, role: Role.Heading), "title"); // label#0
+                tx.SetA11yId(tx.Heading(bind: heading), "title"); // label#0
                 tx.Label(bind: status);                                             // label#1
                 tx.SetA11yId(
                     tx.Button("Delete", role: Role.Destructive,
@@ -33,6 +33,10 @@ static class StylingScene
                     tx.Button("Save", role: Role.Prominent,
                         onClick: t => t.Write(status, "saved")),
                     "save"); // button#1
+                // Declared so every backend's caption arm runs, like the
+                // two button roles: no universal AX observable, so the
+                // walls are the arms' refusals plus this label's text.
+                tx.Caption("captioned"); // label#2
             }));
         });
 

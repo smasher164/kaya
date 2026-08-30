@@ -54,12 +54,8 @@ COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 SWIFTUI = "swift/KayaSwiftUI.swift"
 
 FACE_CALL = ".modifier(KayaTableCardFace())"
-# The fold-host flag joined the call 2026-08-30 (D7's presentation
-# half): a fold host's screen carries the ground, so the call names it.
-GROUND_CALL = ".modifier(KayaTableCardGround(foldHost: !node.foldedChildren.isEmpty))"
 TIER_HEAD = "private struct KayaSynthesizedTable: View {"
 FACE_HEAD = "private struct KayaTableCardFace: ViewModifier {"
-GROUND_HEAD = "private struct KayaTableCardGround: ViewModifier {"
 CLIP_HEAD = "ScrollView(.vertical) {"
 
 # --- THE CARD IS THERE -------------------------------------------------
@@ -180,9 +176,19 @@ PRESENT = (
     ("ios card fill", SWIFTUI,
      ".fill(Color(uiColor: .secondarySystemGroupedBackground))",
      ".fill(Color(white: 1.0))"),
-    ("ios page ground", SWIFTUI,
-     ".background(Color(uiColor: .systemGroupedBackground))",
-     ".background(Color(white: 0.95))"),
+    # THE GROUND IS THE SCREEN'S (the grouped-screen rule, ratified
+    # 2026-08-30): edge to edge behind the title, worn by every surface
+    # root the registry marks, never a band around a table's region.
+    ("ios screen ground", SWIFTUI,
+     "Color(uiColor: .systemGroupedBackground).ignoresSafeArea())",
+     "Color(white: 0.95).ignoresSafeArea())"),
+    ("ios screen ground worn by pushed entries", SWIFTUI,
+     ".modifier(KayaGroupedScreenGround(on: scene.groupedEntries.contains(entryId)))",
+     ".modifier(EmptyModifier())"),
+    ("ios screen ground worn by the primary window", SWIFTUI,
+     "KayaGroupedScreenGround(\n"
+     "                on: scene.groupedWindows.contains(0))",
+     "EmptyModifier()"),
     ("ios card radius", SWIFTUI,
      "RoundedRectangle(cornerRadius: kayaTableCardRadius, style: .continuous)",
      "Rectangle()"),
@@ -192,41 +198,21 @@ PRESENT = (
     ("ios card interior, vertical", SWIFTUI,
      ".padding(.vertical, kayaTableCardInsetY)",
      ".padding(.vertical, 0)"),
-    # The band is what MAKES the ground visible: without it the ground
-    # is painted entirely under the card and a strokeless card has no
-    # edge at all in light mode.
-    ("ios ground band", SWIFTUI,
-     ".padding(kayaTableCardBand)",
-     ".padding(0)"),
+
     # And the one number that has to follow it, GTK's `css_inset_span`
     # clause in this file's spelling: the reporters read the card's
     # CONTENT box and KayaTrackReader the flex cell's OUTER one, so the
     # card's own span comes off the track or every carded table convicts
     # itself at expect_column_edges.
-    # THE LIVE PAD, not the constant (D7, 2026-08-30): fold-tier tables
-    # paint no band, so the instrument reads what the card actually
-    # spends — the constant convicted a correct fold host of a viewport
-    # 32pt wider than its track.
     ("ios card interior off the assigned track", SWIFTUI,
-     "assigned, pad: got.3, synthesized: got.2)",
+     "assigned, pad: kayaTableCardPad, synthesized: got.2)",
      "assigned, pad: 0, synthesized: got.2)"),
-    ("ios live pad read by the edge instrument", SWIFTUI,
-     "kayaTableCardPadLive(node)",
-     "kayaTableCardPad"),
-    ("ios fold host spends no band", SWIFTUI,
-     "if !table.foldedChildren.isEmpty { return kayaTableCardInsetX }",
-     "if false { return kayaTableCardInsetX }"),
-    ("ios folded content spends no band", SWIFTUI,
-     "if node.foldedInto != 0 { return kayaTableCardInsetX }",
-     "if false { return kayaTableCardInsetX }"),
-    # BOTH numbers are between the track and the cells, and the interior
-    # alone is the plausible half-answer.
-    ("ios card span is the band and the interior", SWIFTUI,
-     "let kayaTableCardPad: CGFloat = kayaTableCardBand + kayaTableCardInsetX",
-     "let kayaTableCardPad: CGFloat = kayaTableCardInsetX"),
-    ("ios ground worn by the synthesized tier", SWIFTUI,
-     GROUND_CALL,
-     ".modifier(EmptyModifier())"),
+    # The pad IS the interior since the band died with the grouped-screen
+    # rule: every synthesized card sits on a SCREEN ground now, so the
+    # only span between track and cells is the card's own 16.
+    ("ios card span is the interior", SWIFTUI,
+     "let kayaTableCardPad: CGFloat = kayaTableCardInsetX",
+     "let kayaTableCardPad: CGFloat = 0"),
     # THE TWO VIEWPORT WRITERS OF A GROWN TABLE, which the content-layer
     # card is what forces apart: the card's interior scrolls INSIDE the
     # clip, so the clip is wider than the cells' box and both writers
@@ -238,12 +224,9 @@ PRESENT = (
     ("ios carded viewport, the window's own writer", SWIFTUI,
      "inScrollClip: viewportRect, interior: kayaTableCardInsetX)",
      "inScrollClip: viewportRect, interior: 0)"),
-    # THE MAC SPENDS NOTHING. These two are the numbers the instrument
-    # subtracts; non-zero on a mac, they take 32pt off every mac table's
-    # track and convict a tier that draws no card at all.
-    ("mac card band is zero", SWIFTUI,
-     "let kayaTableCardBand: CGFloat = 0",
-     "let kayaTableCardBand: CGFloat = 4"),
+    # THE MAC SPENDS NOTHING. This is the number the instrument
+    # subtracts; non-zero on a mac, it takes 32pt off every mac table's
+    # track and convicts a tier that draws no card at all.
     ("mac card interior is zero", SWIFTUI,
      "let kayaTableCardInsetX: CGFloat = 0",
      "let kayaTableCardInsetX: CGFloat = 4"),
@@ -286,7 +269,6 @@ NAMED = (
      "private val KAYA_TABLE_SEGMENT_GAP = 2.dp"),
     ("ios card interior x", SWIFTUI, "let kayaTableCardInsetX: CGFloat = 16"),
     ("ios card interior y", SWIFTUI, "let kayaTableCardInsetY: CGFloat = 8"),
-    ("ios card band", SWIFTUI, "let kayaTableCardBand: CGFloat = 16"),
     ("ios card radius constant", SWIFTUI, "let kayaTableCardRadius: CGFloat = 10"),
 )
 
@@ -361,11 +343,6 @@ ZONE = (
      "                        .coordinateSpace(name: kayaTableScrollSpace(node))\n"
      "                        " + FACE_CALL,
      "is not inside the scroll clip's content"),
-    ("the ground moved inside the scroll clip", SWIFTUI,
-     FACE_CALL + "\n                            }",
-     FACE_CALL + "\n                                " + GROUND_CALL
-     + "\n                            }",
-     "the grouped ground is INSIDE the scroll clip"),
     ("the card wrapped around the mac's native tier", SWIFTUI,
      "case .native: KayaNativeTable(node: node)",
      "case .native: KayaNativeTable(node: node).modifier(KayaTableCardFace())",
@@ -488,10 +465,10 @@ def zones(text):
             "is applied would pass by reading nothing"
         )
     else:
-        # BOTH ARMS wear the face (grown and ungrown), the ground once.
+        # BOTH ARMS wear the face (grown and ungrown). No ground call:
+        # the screen carries the ground since the grouped-screen rule.
         for call, want, what in (
             (FACE_CALL, 2, "the card face, once per arm"),
-            (GROUND_CALL, 1, "the grouped ground, once around the tier"),
         ):
             worn, here = text.count(call), tier.count(call)
             if worn != want or here != want:
@@ -520,13 +497,7 @@ def zones(text):
                     "table and cannot scroll with a tall one (the capture of "
                     "2026-08-25)"
                 )
-            if clip.count(GROUND_CALL) != 0:
-                out.append(
-                    f"check-table-card: {SWIFTUI}: the grouped ground is INSIDE "
-                    "the scroll clip — the band frames the table's extent and may "
-                    "not scroll away with the rows"
-                )
-    for head, name in ((FACE_HEAD, "KayaTableCardFace"), (GROUND_HEAD, "KayaTableCardGround")):
+    for head, name in ((FACE_HEAD, "KayaTableCardFace"),):
         card = swift_block(text, head)
         if card is None:
             out.append(

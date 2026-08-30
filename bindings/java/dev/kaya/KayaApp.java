@@ -146,7 +146,11 @@ public final class KayaApp {
         PROMINENT(KayaWire.ROLE_PROMINENT),
         /** A text hierarchy heading — labels. The platform's heading
          * text style AND the accessibility heading trait. */
-        HEADING(KayaWire.ROLE_HEADING);
+        HEADING(KayaWire.ROLE_HEADING),
+        /** The footnote tier under the content it explains — labels.
+         * The heading's counterpart, and the section-footer seat on a
+         * grouped screen. */
+        CAPTION(KayaWire.ROLE_CAPTION);
 
         final long wire;
 
@@ -2589,6 +2593,30 @@ public final class KayaApp {
             return t.label(f);
         }
 
+        public Node heading(String text) {
+            return t.heading(text);
+        }
+
+        public Node heading(Signal<String> s) {
+            return t.heading(s);
+        }
+
+        public Node heading(KayaRecords.Field<String> f) {
+            return t.heading(f);
+        }
+
+        public Node caption(String text) {
+            return t.caption(text);
+        }
+
+        public Node caption(Signal<String> s) {
+            return t.caption(s);
+        }
+
+        public Node caption(KayaRecords.Field<String> f) {
+            return t.caption(f);
+        }
+
         public Node button(String text) {
             return t.button(text);
         }
@@ -3782,6 +3810,29 @@ public final class KayaApp {
             Widget w = widget(KayaWire.KIND_LABEL);
             bindText(w, s);
             return w;
+        }
+
+        /** A label wearing the heading role, in one word (the h1
+         * tradition): the platform's heading text style AND the
+         * accessibility heading trait, and on a grouped screen the
+         * section-header seat. */
+        public Widget heading(String text) {
+            return label(text).role(Role.HEADING);
+        }
+
+        public Widget heading(Signal<String> s) {
+            return label(s).role(Role.HEADING);
+        }
+
+        /** A label wearing the caption role: the platform's footnote
+         * tier under the content it explains, and on a grouped screen
+         * the section-footer seat. */
+        public Widget caption(String text) {
+            return label(text).role(Role.CAPTION);
+        }
+
+        public Widget caption(Signal<String> s) {
+            return label(s).role(Role.CAPTION);
         }
 
         /** A text field; register its handler with app.onChange. */
@@ -4998,6 +5049,46 @@ public final class KayaApp {
         public Node label(KayaRecords.Field<String> f) {
             Node n = widget(KayaWire.KIND_LABEL);
             bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** A label wearing the heading role — the h1 tradition,
+         * stamped. */
+        public Node heading(String text) {
+            Node n = label(text);
+            setRole(n, Role.HEADING);
+            return n;
+        }
+
+        public Node heading(Signal<String> s) {
+            Node n = label(s);
+            setRole(n, Role.HEADING);
+            return n;
+        }
+
+        public Node heading(KayaRecords.Field<String> f) {
+            Node n = label(f);
+            setRole(n, Role.HEADING);
+            return n;
+        }
+
+        /** A label wearing the caption role — the footnote under the
+         * content it explains, stamped. */
+        public Node caption(String text) {
+            Node n = label(text);
+            setRole(n, Role.CAPTION);
+            return n;
+        }
+
+        public Node caption(Signal<String> s) {
+            Node n = label(s);
+            setRole(n, Role.CAPTION);
+            return n;
+        }
+
+        public Node caption(KayaRecords.Field<String> f) {
+            Node n = label(f);
+            setRole(n, Role.CAPTION);
             return n;
         }
 

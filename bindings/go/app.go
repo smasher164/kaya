@@ -1071,6 +1071,30 @@ func (tx *Tx) Label(s Signal[string]) Widget {
 	return w
 }
 
+// HeadingText creates a label wearing the heading role, in one word (the
+// h1 tradition): the platform's heading text style AND the accessibility
+// heading trait, and on a grouped screen the section-header seat.
+func (tx *Tx) HeadingText(text string) Widget {
+	return tx.LabelText(text).Role(RoleHeading)
+}
+
+// Heading is HeadingText's signal-bound flavor.
+func (tx *Tx) Heading(s Signal[string]) Widget {
+	return tx.Label(s).Role(RoleHeading)
+}
+
+// CaptionText creates a label wearing the caption role: the platform's
+// footnote tier under the content it explains, and on a grouped screen
+// the section-footer seat. The heading's counterpart.
+func (tx *Tx) CaptionText(text string) Widget {
+	return tx.LabelText(text).Role(RoleCaption)
+}
+
+// Caption is CaptionText's signal-bound flavor.
+func (tx *Tx) Caption(s Signal[string]) Widget {
+	return tx.Label(s).Role(RoleCaption)
+}
+
 // Entry creates a text field with its change handler (nil for none).
 func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindEntry)
@@ -1556,6 +1580,21 @@ func (r Row) Value() Field[string] { return FieldAt[string](0) }
 func (r Row) Label(f Field[string]) Node {
 	n := r.Tpl.Widget(KindLabel)
 	r.Tpl.BindTextField(n, 0, f)
+	return n
+}
+
+// Heading is Label wearing the heading role, in one word.
+func (r Row) Heading(f Field[string]) Node {
+	n := r.Label(f)
+	r.Tpl.SetRole(n, RoleHeading)
+	return n
+}
+
+// Caption is Label wearing the caption role — the footnote under the
+// content it explains.
+func (r Row) Caption(f Field[string]) Node {
+	n := r.Label(f)
+	r.Tpl.SetRole(n, RoleCaption)
 	return n
 }
 
@@ -3292,6 +3331,41 @@ func (t *Tpl) LabelBound[S interface {
 }](src S) Node {
 	n := t.Widget(KindLabel)
 	t.applyText(n, src)
+	return n
+}
+
+// HeadingText stamps a label wearing the heading role — the h1
+// tradition, in one word. HeadingBound is the varying flavor.
+func (t *Tpl) HeadingText(text string) Node {
+	n := t.LabelText(text)
+	t.SetRole(n, RoleHeading)
+	return n
+}
+
+// HeadingBound is HeadingText from a VARYING source; see Tpl.LabelBound
+// for what the base surface takes.
+func (t *Tpl) HeadingBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.LabelBound(src)
+	t.SetRole(n, RoleHeading)
+	return n
+}
+
+// CaptionText stamps a label wearing the caption role — the footnote
+// under the content it explains. CaptionBound is the varying flavor.
+func (t *Tpl) CaptionText(text string) Node {
+	n := t.LabelText(text)
+	t.SetRole(n, RoleCaption)
+	return n
+}
+
+// CaptionBound is CaptionText from a VARYING source; see Tpl.LabelBound.
+func (t *Tpl) CaptionBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.LabelBound(src)
+	t.SetRole(n, RoleCaption)
 	return n
 }
 

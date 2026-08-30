@@ -652,6 +652,8 @@
 
 #define ROLE_HEADING 3
 
+#define ROLE_CAPTION 4
+
 /**
  * The semantic icon vocabulary's wire values (spec enum "symbol";
  * docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
@@ -1520,13 +1522,16 @@
  * The role enum's values (spec enum "role"): semantic emphasis, a
  * closed set. Which variant fits which KIND is the root's
  * value-dependent check (destructive/prominent are buttons-only,
- * heading is labels-only) — one wire slot, the variants divide it.
+ * heading and caption are labels-only) — one wire slot, the variants
+ * divide it.
  */
 #define KAYA_ROLE_DESTRUCTIVE 1
 
 #define KAYA_ROLE_PROMINENT 2
 
 #define KAYA_ROLE_HEADING 3
+
+#define KAYA_ROLE_CAPTION 4
 
 /**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol";

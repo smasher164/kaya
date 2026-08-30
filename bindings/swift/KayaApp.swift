@@ -343,9 +343,10 @@ final class KayaDraw {
 
 /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
 /// never how it looks — a closed vocabulary, so there is no raw value to
-/// reach for. Destructive and prominent are BUTTON emphasis, heading is
-/// LABEL hierarchy, and the root refuses the other combinations at
-/// declare time, in one sentence naming both the role and the kind.
+/// reach for. Destructive and prominent are BUTTON emphasis, heading and
+/// caption are LABEL hierarchy, and the root refuses the other
+/// combinations at declare time, in one sentence naming both the role and
+/// the kind.
 enum KayaRole: Int64 {
     /// An action whose press destroys something: the platform's own
     /// destructive affordance (red title on Apple, the error-role
@@ -357,6 +358,10 @@ enum KayaRole: Int64 {
     /// A text hierarchy heading — the platform's heading text style AND
     /// the accessibility heading trait assistive users skim by.
     case heading = 3
+    /// A heading's counterpart under the content it explains: the
+    /// platform's caption/footnote text tier. The AX fact rides only
+    /// where the platform has one (GTK's Caption role).
+    case caption = 4
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the `platform` spec
@@ -2398,7 +2403,7 @@ final class KayaAppTx {
     }
 
     /// A widget's SEMANTIC EMPHASIS: destructive/prominent on buttons,
-    /// heading on labels — what it means, never how it looks.
+    /// heading/caption on labels — what it means, never how it looks.
     func setRole(_ w: KayaWidget, _ role: KayaRole) {
         tx.setRole(w.id, role.rawValue)
     }
@@ -2588,9 +2593,9 @@ final class KayaAppTx {
     }
 
     /// `role:` is this label's place in the text hierarchy — `.heading`
-    /// is the one that fits a label, and it is a semantic fact (the
-    /// platform's heading style AND the trait assistive users skim by),
-    /// not a font size.
+    /// and `.caption` are the two that fit a label, and each is a
+    /// semantic fact (the platform's heading style AND the trait
+    /// assistive users skim by), not a font size.
     func label(
         _ text: String? = nil, bind: KayaSignal? = nil, role: KayaRole? = nil,
         grow: Double? = nil
@@ -2601,6 +2606,24 @@ final class KayaAppTx {
         if let role { setRole(w, role) }
         if let grow { setGrow(w, grow) }
         return w
+    }
+
+    /// A label wearing the heading role, in one word (the h1 tradition):
+    /// the platform's heading text style AND the accessibility heading
+    /// trait, and on a grouped screen the section-header seat.
+    func heading(
+        _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
+    ) -> KayaWidget {
+        label(text, bind: bind, role: .heading, grow: grow)
+    }
+
+    /// A label wearing the caption role: the platform's footnote tier
+    /// under the content it explains, and on a grouped screen the
+    /// section-footer seat.
+    func caption(
+        _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
+    ) -> KayaWidget {
+        label(text, bind: bind, role: .caption, grow: grow)
     }
 
     /// A progress bar: display-only, like label and image. value is
@@ -3923,6 +3946,45 @@ final class KayaTpl {
     func label(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_LABEL))
         bindTextField(n, f)
+        return n
+    }
+
+    /// A label wearing the heading role — the h1 tradition, stamped.
+    func heading(_ text: String) -> KayaNodeHandle {
+        let n = label(text)
+        setRole(n, .heading)
+        return n
+    }
+
+    func heading(_ s: KayaSignal) -> KayaNodeHandle {
+        let n = label(s)
+        setRole(n, .heading)
+        return n
+    }
+
+    func heading(_ f: KayaField<String>) -> KayaNodeHandle {
+        let n = label(f)
+        setRole(n, .heading)
+        return n
+    }
+
+    /// A label wearing the caption role — the footnote under the content
+    /// it explains, stamped.
+    func caption(_ text: String) -> KayaNodeHandle {
+        let n = label(text)
+        setRole(n, .caption)
+        return n
+    }
+
+    func caption(_ s: KayaSignal) -> KayaNodeHandle {
+        let n = label(s)
+        setRole(n, .caption)
+        return n
+    }
+
+    func caption(_ f: KayaField<String>) -> KayaNodeHandle {
+        let n = label(f)
+        setRole(n, .caption)
         return n
     }
 

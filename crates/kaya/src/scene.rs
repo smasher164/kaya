@@ -1244,17 +1244,20 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             // destructive, prominent: an ACTION's emphasis — what
             // pressing it means. Only a button presses.
             1 | 2 => kind == WidgetKind::Button,
-            // heading: a text hierarchy fact — what assistive users
-            // skim by. Only a label heads a section.
-            3 => kind == WidgetKind::Label,
+            // heading and caption: text hierarchy facts — what assistive
+            // users skim by, and the footnote under it. Only a label
+            // carries either.
+            3 | 4 => kind == WidgetKind::Label,
             other => panic!(
-                "kaya: {other} is not a role (destructive=1, prominent=2, heading=3)"
+                "kaya: {other} is not a role (destructive=1, prominent=2, \
+                 heading=3, caption=4)"
             ),
         };
         let name = match *role {
             1 => "destructive",
             2 => "prominent",
-            _ => "heading",
+            3 => "heading",
+            _ => "caption",
         };
         assert!(
             ok,

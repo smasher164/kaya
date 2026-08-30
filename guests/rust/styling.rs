@@ -27,7 +27,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .column(|tx| {
                 // expect_ax resolves a target through its AUTHORED id,
                 // so everything the steps read back is identified.
-                tx.label(heading).role(kaya::Role::Heading).a11y_id("title"); // label#0
+                tx.heading(heading).a11y_id("title"); // label#0
                 tx.label(status); // label#1
                 let delete = tx
                     .button("Delete")
@@ -41,6 +41,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .a11y_id("save")
                     .id(); // button#1
                 msgs.on_click(save, Msg::Save);
+                // Declared so every backend's caption arm runs, like the
+                // two button roles: no universal AX observable, so the
+                // walls are the arms' refusals plus this label's text.
+                let cap = tx.signal("captioned");
+                tx.caption(cap); // label#2
             })
             .id();
         tx.mount(root);

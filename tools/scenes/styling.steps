@@ -27,6 +27,10 @@ expect label#0 "Sections"
 expect_ax label#0 "heading/Sections"
 expect_inset 0
 expect label#1 "ready"
+# The caption role's presence proof (styling-plan D4): its LOOK has no
+# universal AX observable (GTK alone has a caption role), so the walls
+# are each backend arm's own refusal of an unarmed role, and this text.
+expect label#2 "captioned"
 expect_ax button#0 "button/Delete"
 expect_ax button#1 "button/Save"
 # A ROLE NEVER CHANGES WHAT A BUTTON DOES: destructive and prominent

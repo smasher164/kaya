@@ -641,13 +641,16 @@ let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wi
    surface's actions is THE one — so they belong to a button and nothing
    else. [Heading] is a text hierarchy fact: the platform's own heading
    text style AND the trait assistive users skim a screen by, which is
-   why it is a role and not a font size. *)
-type role = Destructive | Prominent | Heading
+   why it is a role and not a font size. [Caption] is its counterpart
+   one tier down — the platform's footnote text, under the content it
+   explains — so it too belongs to a label and not to a button. *)
+type role = Destructive | Prominent | Heading | Caption
 
 let role_wire = function
   | Destructive -> Int64.of_int Kaya_wire.role_destructive
   | Prominent -> Int64.of_int Kaya_wire.role_prominent
   | Heading -> Int64.of_int Kaya_wire.role_heading
+  | Caption -> Int64.of_int Kaya_wire.role_caption
 
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 
@@ -811,7 +814,8 @@ let button ?grow ?a11y_id ?a11y_label ?a11y_hint ?role ?text ?on_click () =
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
-  (* [Destructive] or [Prominent]; a [Heading] button dies at the root. *)
+  (* [Destructive] or [Prominent]; a [Heading] or [Caption] button dies
+     at the root. *)
   Option.iter (fun r -> set_role w r) role;
   Option.iter (fun t -> set_text w t) text;
   (match on_click with
@@ -839,11 +843,23 @@ let label ?grow ?a11y_id ?a11y_label ?role ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
-  (* [Heading] is the label's role; the two button emphases die here. *)
+  (* [Heading] and [Caption] are the label's roles; the two button
+     emphases die here. *)
   Option.iter (fun r -> set_role w r) role;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun s -> bind_text w s) bind;
   w
+
+(* A label wearing [Heading], in one word (the h1 tradition): the
+   platform's heading text style AND the trait assistive users skim by,
+   and on a grouped screen the section-header seat. *)
+let heading ?grow ?a11y_id ?a11y_label ?text ?bind () =
+  label ?grow ?a11y_id ?a11y_label ~role:Heading ?text ?bind ()
+
+(* The heading's counterpart in one word: the platform's footnote tier
+   under the content it explains, and the section-footer seat. *)
+let caption ?grow ?a11y_id ?a11y_label ?text ?bind () =
+  label ?grow ?a11y_id ?a11y_label ~role:Caption ?text ?bind ()
 
 let entry ?grow ?a11y_id ?a11y_label ?on_change () =
   let tx = the_tx () in
@@ -2715,7 +2731,7 @@ module Tpl = struct
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     (* [Destructive] or [Prominent] — the stamped row's own delete
        button, which is what this prop reaching the zone is for; a
-       [Heading] button dies at the root, as it does live. *)
+       [Heading] or [Caption] button dies at the root, as it does live. *)
     Option.iter (fun r -> Floor.set_role n r) role;
     Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
     Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
@@ -2757,14 +2773,33 @@ module Tpl = struct
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
-    (* [Heading] is the label's role — the platform's own heading text style
-       AND the trait assistive users skim by, which is what makes a stamped
-       section title readable as one. *)
+    (* [Heading] and [Caption] are the label's roles — the platform's own
+       heading text style AND the trait assistive users skim by, and the
+       footnote tier under it, which is what makes a stamped section
+       title and its note readable as such. *)
     Option.iter (fun r -> Floor.set_role n r) role;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
     Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
     n
+
+  (* A stamped label wearing [Heading], in one word: the section title of
+     a row, styled and announced as a heading. *)
+  let heading ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?text ?bind ?bind_field ?level
+      ?a11y_level () =
+    label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~role:Heading ?text ?bind ?bind_field
+      ?level ?a11y_level ()
+
+  (* Its counterpart: the stamped row's footnote, under the content it
+     explains. *)
+  let caption ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?text ?bind ?bind_field ?level
+      ?a11y_level () =
+    label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~role:Caption ?text ?bind ?bind_field
+      ?level ?a11y_level ()
 
   (* A single-line text field per stamped copy. UNCONTROLLED exactly as
      its live twin is: the copy owns its text, every edit arrives at
