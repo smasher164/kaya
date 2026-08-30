@@ -6211,10 +6211,19 @@ reading the packaged bytes back:
 against the same count in the tree. When they disagree, every conclusion
 drawn from that APK is about a file nobody edited.
 
-STAGE IT YOURSELF before any hand-built android experiment, and verify
-the packaged bytes rather than the build's exit status — this is
-invariant 4's "validation scripts build and verify what they ship" one
-directory over, and the lane obeys it while a hand build does not.
+FIXED THE SAME DAY, and the advice this entry first carried ("stage it
+yourself") is struck: staging a build's input by hand is the defect, not
+the remedy. `android/pyhost/build.gradle.kts` has a `stageGuestPython`
+task that `preBuild` depends on, so EVERY build — lane or hand — copies
+`tools/pyhost-main.py`, the scene guests and `bindings/python/kaya` out
+of the tree first. Watched both ways: a marker added to the guest reaches
+the packaged APK on a plain `gradle assembleDebug`, and removing it takes
+it back out.
+
+WHAT STAYS WITH THE RUNNER is the CPython stdlib, which comes from a nix
+store path and is far too big to sync per build. Its absence is loud —
+the app dies at `ModuleNotFoundError` on first launch — where a stale
+GUEST was silent, which is the whole difference.
 
 
 ## Compose REFUSES kaya's portfolio Transactions screen outright (2026-08-29)
