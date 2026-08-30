@@ -702,6 +702,31 @@ the same patterns return through interpreter drop-downs
 
 ## Process / testing
 
+- **The FIRST dialog a scene opens pays DocumentsUI's COLD start, and it
+  was given a frame-sized budget.** Android's `expect_file_dialog` and
+  `expect_save_dialog` retried on the generic 5s step deadline, which is
+  the budget for an assertion waiting on a FRAME. A dialog that is not up
+  yet is waiting on an APP LAUNCH — DocumentsUI is another process — and
+  `SAVE_PANEL_TRIES` already says so in its own comment for the save
+  panel's reader while the two expect arms did not. THE FIRST ONE IS THE
+  ONLY ONE THAT PAYS: measured on the android lane 2026-08-30 under the
+  full matrix, save-jvm's `OPEN_DOCUMENT` PickActivity was Displayed
+  +4s603ms and became a11y-readable at 6983ms — 511ms past the deadline —
+  while the two `CREATE_DOCUMENT` panels after it were Displayed in 160ms
+  and 74ms and passed in the same leg. So the red was over a picker that
+  worked, the failing verb is whichever dialog expect happens to be first
+  in the .steps file, and the leg is a load meter rather than a test:
+  save-jvm had passed its three previous recorded runs, and `save-compose`
+  and `save-go` passed on the same lane in the same run. THE INSTRUMENTS
+  ARE WHAT MADE THIS THREE COMMANDS INSTEAD OF A SESSION — `KAYA_DIALOG_UNSEEN
+  ms=6472` followed by `KAYA_DIALOG_SEEN ms=6983` names late-presentation
+  and separates it from a dialog that presented and could not be read,
+  which is the pair those two lines exist for. Fixed by extending the
+  deadline inside the two dialog arms only, `expect_ax`'s own shape, so
+  the allowance is spent only while a dialog arm is actually missing its
+  dialog. Contention is the multiplier, not the cause: the guest's own
+  MainActivity took +4s85ms on the same emulator.
+
 - **A shipped `.ps1` must be ASCII on its code lines.** Windows
   PowerShell 5.1 reads a script in the machine's ANSI CODEPAGE, not as
   UTF-8, so an em-dash in a **string literal** arrives as three CP1252

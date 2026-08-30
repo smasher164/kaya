@@ -178,6 +178,60 @@ for label, text in texts.items():
             bad.append(f"{paths[label]} does not carry the {what} the other harnesses "
                        f"carry — one wedge reads one way everywhere. Wanted: {want!r}")
 
+# A DIALOG THAT IS NOT UP YET IS WAITING ON AN APP LAUNCH. Android's two
+# dialog arms retried on the generic step deadline, which is the budget
+# for an assertion waiting on a FRAME — and DocumentsUI is another
+# process, whose COLD start the FIRST dialog in a scene pays while every
+# later one is warm. Measured 2026-08-30 (docs/traps.md): save-jvm's
+# picker was Displayed +4s603ms and a11y-readable at 6983ms, 511ms past
+# the deadline, while the two save panels after it took 160ms and 74ms.
+# NO SCENE CAN HOLD THIS — the leg is green whenever the emulator is
+# quiet, so it fails only under a full matrix and only for whichever
+# dialog expect happens to be first in the .steps file.
+compose = texts.get("KayaCompose.kt")
+if compose is not None:
+    # Each arm's own block, so a sibling arm's extension cannot answer
+    # for a missing one — the block reader check-canvas-blit's first
+    # draft got wrong by stopping at the first bracket it found.
+    arm_starts = [(m.start(), m.group(1))
+                  for m in re.finditer(r'^ {20}"(\w+)" ->', compose, re.M)]
+    blocks = {}
+    for idx, (pos, name) in enumerate(arm_starts):
+        end = arm_starts[idx + 1][0] if idx + 1 < len(arm_starts) else len(compose)
+        blocks[name] = compose[pos:end]
+    for arm in ("expect_file_dialog", "expect_save_dialog"):
+        block = blocks.get(arm)
+        if block is None:
+            bad.append(f"{paths['KayaCompose.kt']}: the {arm} arm is gone — re-point this "
+                       f"clause at whatever replaced it")
+            continue
+        note = block.find("kayaNoteDialogUnseen")
+        if note < 0:
+            bad.append(f"{paths['KayaCompose.kt']}'s {arm} arm no longer records an unseen "
+                       f"dialog — that instrument is what tells a late presentation from a "
+                       f"dialog that presented and could not be read")
+            continue
+        extend = block.find("stepStart + DIALOG_LAUNCH_BUDGET_NS")
+        if extend < 0 or extend > note:
+            bad.append(f"{paths['KayaCompose.kt']}'s {arm} arm reports a missing dialog on "
+                       f"the generic step deadline — that is a FRAME's budget, and a dialog "
+                       f"that is not up yet is waiting on DocumentsUI's cold APP LAUNCH "
+                       f"(measured 4s603ms to Displayed, 6983ms to readable). Extend with "
+                       f"`stepDeadline = maxOf(stepDeadline, stepStart + "
+                       f"DIALOG_LAUNCH_BUDGET_NS)` before the report, as expect_ax does.")
+    # AND IT MAY NOT BE SHRUNK BACK toward the number that was measured
+    # failing: a budget at the observed time is a budget that fails the
+    # next time the lane is busier.
+    m = re.search(r"DIALOG_LAUNCH_BUDGET_NS = ([\d_]+)L", compose)
+    if not m:
+        bad.append(f"{paths['KayaCompose.kt']} declares no DIALOG_LAUNCH_BUDGET_NS — the "
+                   f"two dialog arms above have nothing to extend to")
+    elif int(m.group(1).replace("_", "")) < 10_000_000_000:
+        bad.append(f"{paths['KayaCompose.kt']}'s DIALOG_LAUNCH_BUDGET_NS is "
+                   f"{int(m.group(1).replace('_', '')) / 1e9}s — the presentation this "
+                   f"covers was MEASURED at 6.983s on a loaded lane, so a budget near it "
+                   f"buys nothing. Keep it well clear (and under STEP_CEILING).")
+
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 PY
@@ -268,6 +322,36 @@ applied "$hits" "the KayaSwiftUI.swift sentence-drift perturbation"
 refuses "$HARNESS" "$T/swiftui-drifted.swift" "$COMPOSE" \
     "does not carry the verdict's sentence the other harnesses carry" \
     "a wedge that reads differently on one platform"
+
+# THE TWO DIALOG ARMS. One perturbation per arm, because a sibling arm's
+# extension answering for a missing one is exactly the shape this reads
+# per-block to avoid.
+hits="$(perturb "$COMPOSE" \
+    'stepDeadline = maxOf\(\n +stepDeadline,\n +stepStart \+ DIALOG_LAUNCH_BUDGET_NS,\n +\)\n +val lastLook = System\.nanoTime\(\) \+ RETRY_PERIOD_NS >= stepDeadline\n +if \(lastLook\) kayaNoteDialogUnseen\(DIALOG_KIND_OPEN\)' \
+    'val lastLook = System.nanoTime() + RETRY_PERIOD_NS >= stepDeadline
+                            if (lastLook) kayaNoteDialogUnseen(DIALOG_KIND_OPEN)' \
+    "$T/compose-nofiledlg.kt")"
+applied "$hits" "the KayaCompose.kt file-dialog launch-budget perturbation"
+refuses "$HARNESS" "$SWIFTUI" "$T/compose-nofiledlg.kt" \
+    "expect_file_dialog arm reports a missing dialog on the generic step deadline" \
+    "an Android picker assertion given a frame's budget for an app launch"
+
+hits="$(perturb "$COMPOSE" \
+    'stepDeadline = maxOf\(\n +stepDeadline,\n +stepStart \+ DIALOG_LAUNCH_BUDGET_NS,\n +\)\n +val lastLook = System\.nanoTime\(\) \+ RETRY_PERIOD_NS >= stepDeadline\n +if \(lastLook\) kayaNoteDialogUnseen\(DIALOG_KIND_SAVE\)' \
+    'val lastLook = System.nanoTime() + RETRY_PERIOD_NS >= stepDeadline
+                                if (lastLook) kayaNoteDialogUnseen(DIALOG_KIND_SAVE)' \
+    "$T/compose-nosavedlg.kt")"
+applied "$hits" "the KayaCompose.kt save-dialog launch-budget perturbation"
+refuses "$HARNESS" "$SWIFTUI" "$T/compose-nosavedlg.kt" \
+    "expect_save_dialog arm reports a missing dialog on the generic step deadline" \
+    "an Android save-panel assertion given a frame's budget for an app launch"
+
+hits="$(perturb "$COMPOSE" 'DIALOG_LAUNCH_BUDGET_NS = 20_000_000_000L' \
+    'DIALOG_LAUNCH_BUDGET_NS = 7_000_000_000L' "$T/compose-tightdlg.kt")"
+applied "$hits" "the KayaCompose.kt launch-budget shrink perturbation"
+refuses "$HARNESS" "$SWIFTUI" "$T/compose-tightdlg.kt" \
+    "the presentation this covers was MEASURED at 6.983s" \
+    "a launch budget shrunk back to the number that was measured failing"
 
 # An ABSENT harness is a failure that NAMES IT, never a skip.
 gone="$(check "$HARNESS" "$SWIFTUI" "$T/no-such-harness.kt")"

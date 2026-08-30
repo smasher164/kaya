@@ -5497,6 +5497,27 @@ object KayaCompose {
     private const val RETRY_PERIOD_NS = RETRY_PERIOD_MS * 1_000_000
 
     /**
+     * A DIALOG THAT IS NOT UP YET IS WAITING ON AN APP LAUNCH, not on a
+     * frame — the reason SAVE_PANEL_TRIES already spends 5s on the save
+     * panel's own reader. DocumentsUI is another process, and the FIRST
+     * dialog a scene opens pays its COLD start while every later one is
+     * warm, so the one step that must absorb a cross-process launch was
+     * the one given the frame-sized 5s deadline.
+     *
+     * Measured on the android lane 2026-08-30 (docs/traps.md), save-jvm
+     * under the full matrix: OPEN_DOCUMENT Displayed +4s603ms cold and
+     * a11y-readable at 6983ms — 511ms past the budget — while the two
+     * CREATE_DOCUMENT panels after it were Displayed in 160ms and 74ms
+     * and passed. So the leg was red over a picker that worked, and the
+     * verb that fails is whichever one happens to be first in the file.
+     *
+     * Shaped like expect_ax's own extension below rather than a bigger
+     * number for every step: it is spent only while a dialog arm is
+     * actually missing its dialog, and it stays far under STEP_CEILING.
+     */
+    private const val DIALOG_LAUNCH_BUDGET_NS = 20_000_000_000L
+
+    /**
      * THE CEILING ON ONE STEP, HOP INCLUDED — harness.rs's
      * STEP_CEILING, the same number in all three harnesses
      * (tools/check-harness-ceiling.sh). The retry deadline above is read only
@@ -6450,6 +6471,10 @@ object KayaCompose {
                             // wrapper's own retry period, so the look
                             // whose sentence is PRINTED always carries
                             // one.
+                            stepDeadline = maxOf(
+                                stepDeadline,
+                                stepStart + DIALOG_LAUNCH_BUDGET_NS,
+                            )
                             val lastLook = System.nanoTime() + RETRY_PERIOD_NS >= stepDeadline
                             if (lastLook) kayaNoteDialogUnseen(DIALOG_KIND_OPEN)
                             failures.add(
@@ -6507,6 +6532,10 @@ object KayaCompose {
                                 // did, and those want opposite fixes.
                                 // The census only on the last looks, for
                                 // expect_file_dialog's reason above.
+                                stepDeadline = maxOf(
+                                    stepDeadline,
+                                    stepStart + DIALOG_LAUNCH_BUDGET_NS,
+                                )
                                 val lastLook = System.nanoTime() + RETRY_PERIOD_NS >= stepDeadline
                                 if (lastLook) kayaNoteDialogUnseen(DIALOG_KIND_SAVE)
                                 failures.add(
