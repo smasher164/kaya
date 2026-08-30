@@ -6382,3 +6382,16 @@ is the third shape of the same defect in one session — the android guest
 staging, the android extraction stamp, and this — and the rule they share
 is invariant 4's: a thing that shows you an artifact must build the
 artifact it shows you.
+
+## A Compose click within ~half a second of a pane's ENTRANCE ANIMATION can drop (measured 2026-08-20)
+
+Measured on the tablet probe during the multi-column milestone: `click
+button#1` straight after `expect_entries 1` and the push never arrived,
+twice; the same click after an `expect_panes` retry or a `settle 800`
+landed, every time. No frozen scene can reach it — they all assert
+between actions, which is the idiom — and the emit path is tag-routed,
+so the drop is downstream of KayaPresent.emitClicked. If an android leg
+ever fails with "click reported ok, no push", this is the signature;
+instrument the go side's occurrence queue before blaming the scene.
+(Carried 2026-08-31 from the struck multi-column ledger entry, whose
+body was this measurement's only copy.)

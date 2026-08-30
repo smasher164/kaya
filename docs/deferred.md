@@ -19,9 +19,12 @@ that. ONE FAILURE MUST BE ENOUGH EVIDENCE: every leg is journalled, and
 every FAIL collects the state that was live at the time.
 
 DEPTH LANDED 2026-08-27 — journal + windows + mac + the Rust verb trace.
-BREADTH IS OPEN and is what keeps this entry unstruck: linux, iOS and
-Android runners are not wired, and the two interpreter harnesses
-(KayaSwiftUI.swift, KayaCompose.kt) have no ring.
+RUNNER BREADTH CLOSED 2026-08-29: all five lanes journal and print a
+terminal verdict, held by check-gates (refreshed 2026-08-31 — all six
+runner scripts reference flightrec). WHAT KEEPS THIS ENTRY UNSTRUCK:
+the two interpreter harnesses (KayaSwiftUI.swift, KayaCompose.kt)
+still have no verb-trace ring, so a FAIL inside either interpreter's
+own harness carries less state than a Rust-backend FAIL does.
 
 WHAT LANDED
 - THE JOURNAL, `tools/lib/flightrec.py` + `tools/lib/flightrec.sh`. JSONL
@@ -156,8 +159,18 @@ WHAT IS OPEN
   above), so the standing wall is the bundle report's own printed counts
   on every failure. If that proves too quiet, the answer is a gate.
 
-## CHORE — storage cleanup: the host is nearing disk capacity (Akhil, 2026-08-27)
+## ~~CHORE — storage cleanup: the host is nearing disk capacity (Akhil, 2026-08-27)~~
 KEY: disk cleanup, target directory size, scratchpad growth, docker prune, nix store gc, validate-failures logs
+
+CLOSED 2026-08-31 by ruling, both open halves resolved as deliberate
+non-actions: NO NIX GC POLICY — the store measured 77G on a disk at
+43% used (536G free of 927G), not pressing; revisit only if disk
+pressure returns — and the standing tools/ cleanup recipe DECLINED;
+cleanup stays ad hoc under this entry's own doctrine (measure first,
+nothing cleared while a matrix runs). Measured at close: repo target/
+29G (regrown since the sweep, normal), target-linux 6.7G,
+.claude/worktrees gone, docker 18G images + 8.1G build cache with
+kaya-linux (8.3G) kept, scratchpads 88M.
 
 Akhil is nearing the disk's capacity, and last time the culprit was
 temporary data in this project (the standing doctrine from the
@@ -462,24 +475,22 @@ to refuse and every gate green.
 
 ## Next milestones (in rough priority order)
 
-THE NAMED FORCING ARTIFACT IS A **TEXT EDITOR** (Akhil, 2026-07-24).
-This is a roadmap-selection decision, not a build order — the editor is
-written once enough features exist. Its purpose is to resolve the
-admission policy: this ledger is full of items that "wait for an
-artifact", and until one is named those triggers cannot fire, so the
-items sit unordered. Anything the editor needs is now trigger-SATISFIED
-and can be scheduled on its merits; anything it does not need stays
-gated. What it forces: file dialogs, clipboard, the edit roles
-(cut/copy/paste, currently deferred past `settings`), undo/redo,
-dirty-state window titles (the close veto already exists), and find.
-Chosen over chat / todo / media on COMPOUNDING — those four features
-are wanted by every other candidate app too, whereas media's are wanted
-by exactly one, and todo is largely proven already by the `todos`,
-`reorder`, and `feed` scenes. Two further reasons: the editor is the
-field's standard litmus test for the text/IME stack, which kaya passes
-by construction and has never demonstrated; and it forces undo/redo,
-which core can offer far more cheaply than any framework that does not
-own the state (see the undo note in this file).
+THE NAMED FORCING ARTIFACT WAS A **TEXT EDITOR** (Akhil, 2026-07-24),
+chosen to resolve this ledger's admission policy: items "waiting for
+an artifact" could not fire until one was named. IT SHIPPED 2026-08-10
+(`47bd2ab`: guests/go/editor/editor.go + tools/scenes/editor.steps,
+legs on all five lanes; design record docs/editor-plan.md, toolbar
+follow-on docs/chrome-plan.md). Everything it was chosen to force
+landed — file dialogs, clipboard, the edit roles, undo/redo,
+dirty-state titles, text ranges and find — and the struck bullets
+below are that record. The forcing framing is DISCHARGED: no open item
+below waits on "the editor" as its trigger; each open bullet names its
+own trigger (the bookmark/persistence bullet's RECENT FILES trigger,
+docs/editor-plan.md §3, is now one the shipped editor can fire).
+The SECOND forcing artifact was the PORTFOLIO (guests/python/
+portfolio.py), which drove tables, canvas, adaptive layout and the
+grouped iOS tier through 2026-08-30. The section remains the roadmap
+list, in rough priority order; chat / todo / media stay unpicked.
 
 - ~~**Clipboard**~~ — COMPLETE 2026-08-04: all five backends, all
   eight bindings, every lane green in the full matrix (mac 232, linux
@@ -1290,14 +1301,13 @@ own the state (see the undo note in this file).
   keeping: `resize_window` was originally filed as the menus
   milestone's gate, but a verb that drives a transition no code
   specializes gates nothing, so it shipped WITH the feature it gates.
-  MULTI-COLUMN is the part of "adaptive layout" that did NOT land —
-  this entry covered two surfaces and only list-detail is done. A
-  regular window wanting several columns where a compact one wants
-  one is still unbuilt, and it wants its own admission pass (the
-  4/4 test list-detail passed is not automatic for a column grammar).
+  MULTI-COLUMN was the part of "adaptive layout" that had NOT landed —
+  this entry covered two surfaces and only list-detail was done then.
   PROMOTED 2026-08-19 to its own entry ("Multi-column adaptive layout
-  — the unbuilt half, now the ACTIVE milestone"), same reason: live
-  work inside struck text is invisible to every skim.
+  — the unbuilt half"), same reason: live work inside struck text is
+  invisible to every skim. That milestone SHIPPED and was struck
+  2026-08-31; its residue lives in "Multi-column residue" further
+  down.
   Encouraging for admission: the adaptive split IS a 4/4 native
   intersection, unlike the DRAGGABLE splitter (2/4) it is easily
   confused with — SwiftUI `NavigationSplitView`, Compose's Material 3
@@ -3559,7 +3569,9 @@ sides.
 ## MAYBE: read Windows accessibility client-side, like the other platforms
 
 Raised 2026-07-31, NOT decided. Recorded so a green lane does not read
-as a settled question.
+as a settled question. RE-AFFIRMED 2026-08-31 (maintainer): stays a
+MAYBE on its recorded trigger — a defect slipping past the Windows
+a11y legs that a client-side read would have caught.
 
 The Windows `expect_ax` read is IN-PROCESS and PROVIDER-SIDE: it asks
 XAML what it publishes, through FrameworkElementAutomationPeer. mac
@@ -3588,7 +3600,9 @@ being a maybe.
 ## MAYBE: the WinUI seed writes once too, on a board with a relay on it
 
 Raised 2026-08-04, alongside the mac seed's fix (docs/traps.md,
-docs/clipboard-plan.md §9). The macOS seed was measured LOSING its
+docs/clipboard-plan.md §9). RE-AFFIRMED 2026-08-31 (maintainer):
+stays a MAYBE on its recorded trigger — KAYA_SEED_LOST or "never
+appeared on the clipboard" on a windows clipboard leg. The macOS seed was measured LOSING its
 write, silently, whenever another process touched the pasteboard inside
 `osascript`'s clear-then-put window — 12 of 12 writes gone against a
 competitor writing every 10ms, rc=0 and no stderr each time. Its remedy
@@ -3613,7 +3627,10 @@ green lane's seed buys nothing.
 ## MAYBE: the other three backends say nothing when a standard command is inert
 
 Raised 2026-08-04 with the mac paste fix (docs/traps.md, "A standard
-clipboard command that is DISABLED does nothing"). A role item works out
+clipboard command that is DISABLED does nothing"). RE-AFFIRMED
+2026-08-31 (maintainer): the triple-defer stands per backend — GTK
+and Compose structurally cannot fire the note in their lanes, WinUI
+builds it on the first stale-label sighting. A role item works out
 its own enablement — what the clipboard offers intersected with what the
 focused widget accepts — and a disabled item is inert on every backend,
 which is right and matches native chrome. What only the SwiftUI
@@ -3910,7 +3927,20 @@ interpreter carries slice 1's one real brand lowering
 KEY: HCT, chroma clamp, material-color-utilities, secondaryContainer,
 seed palette, M3 scheme, materialkolor
 
-Open, and it is Akhil's: a dependency choice, not a coding one. Measured
+RULED 2026-08-31 (maintainer), AND PICKED THE SAME DAY AS THE NEXT
+BUILD MILESTONE: ROUTE (b) — pin
+`com.materialkolor:material-color-utilities`, one gradle line
+(check-pins' gradle clause covers it), and complete the derivation:
+the four HCT-clamped palettes join the hand-derived primary family so
+a branded kaya app reads the way a native Material app with that seed
+does. Now scheduled work, not a question; entry stays open until the
+slice lands. In the same ruling: NO authored multi-color brand
+vocabulary — one seed stays the whole surface (the other four
+platforms have one accent slot each; Material's own idiom derives the
+rest), revisited only if a real app hits the wall.
+
+As filed — open, and it is Akhil's: a dependency choice, not a coding
+one. Measured
 2026-08-12 while landing the Compose styling arm; lifted out of that
 tracker 2026-08-19 when the tracker closed, so it is not read as part of
 a finished slice. TRIGGER: someone wanting a brand seed to reach the
@@ -4746,10 +4776,12 @@ was scoped to the defect and its ledger.
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
 the `platform` enum) + the SwiftUI mac arm + the Rust binding
 (`brand_typeface` / `brand_typeface_with`) + the `typeface` scene, mac
-only. Four backends decode the record and refuse through the depth-stub
-helper, which is what holds the other lanes' legs off in check-steps and
-check-stubs (docs/styling-plan.md Slice 2b — depth then breadth, the
-standing pattern):
+only. ONE arm remains (refreshed 2026-08-31): `kayaDepthStub("typeface",
+on: "ios")` in swift/KayaSwiftUI.swift is the last depth stub in the
+whole repo — GTK, WinUI and Compose all landed (struck below) and the
+linux/windows/android lanes run typeface legs; the stub is what holds
+the iOS legs off in check-steps and check-stubs (docs/styling-plan.md
+Slice 2b — depth then breadth, the standing pattern):
 
 - **DEPTH STUB: typeface on swiftui/ios** — the APPLY side is already
   live on iOS (the same fresh-descriptor route, plus UIFontMetrics for
@@ -5677,8 +5709,20 @@ sites. The witness's same-line route clause is CORRECT and unchanged:
 with atomic lines it reads truth, and its refusal sentence is what
 cracked the case.
 
-## Tables — backend and flat-guest breadth landed; residuals below (2026-08-20)
+## ~~Tables — backend and flat-guest breadth landed; residuals below (2026-08-20)~~
 KEY: table columns, set_column_headers, sort_requested, header_click, expect_columns, expect_rows, expect_column_edges, column_edges, KayaSynthesizedTable, KayaTableSurface, GtkColumnView, SizeGroup, TABLES thread_local
+
+STRUCK 2026-08-31: every bullet below closed on its own date, and the
+tail's "the other six bindings remain open" is FALSE since 2026-08-24
+— all eight bindings' template-zone columns/on_sort/keyed
+re-declaration are censused (tools/tpl-surfaces.py TABLE_POINTS;
+check-sugar-surface's live-zone clauses; docs/tables-plan.md:550
+"BREADTH CLOSED 2026-08-24"). Two residuals outlive the strike in
+their own homes: the physical-device size-class question is in
+docs/traps.md and CLAUDE.md's check-table-tier paragraph; the WinUI
+resize hook's reason lives at its site (winui/mod.rs's LayoutUpdated
+comment — the entry's "width stamp" detail was stale; idempotency is
+`table.stamped == table.rows` plus the dirty flag today).
 
 The plan is docs/tables-plan.md (DESIGN.md's ratified column-props
 shape); the wire (TX 45 set_column_headers, APPLY 35, occurrence 19
@@ -5865,7 +5909,9 @@ remembering. The landing, per backend and surface:
   binding that had lost its spelling. This original claim deliberately
   covered the live zone only. The 2026-08-23 dynamic-table depth slice
   extended the census to Rust and Python's nested columns/on_sort and
-  keyed re-declaration spellings; the other six bindings remain open.)
+  keyed re-declaration spellings; ~~the other six bindings remain
+  open~~ — all eight closed 2026-08-24 with the dynamic-tables
+  breadth, censused in tools/tpl-surfaces.py's TABLE_POINTS.)
 
 ## ~~Dynamically created tables — HIGH PRIORITY (maintainer, 2026-08-21)~~
 KEY: nested tables, template-zone set_column_headers, per-copy sort, dynamic table instances, forcing app
@@ -5957,6 +6003,12 @@ paths resolve to one widget. Portfolio uses named account keys, so the
 dynamic-tables forcing scene loses nothing. An app that needs to target
 an I64-keyed copy requires a separately approved typed spelling; dots
 and brackets inside string keys need that same escaping decision.
+RE-RULED 2026-08-31 (maintainer): DEFERRED ON A TRIGGER — the first
+scene or app that keys copies by integer buys the grammar decision
+(tag-prefix spelling like `[i64:3]` plus the string-key escaping rule,
+decided together). Harness-side only: the three harness
+implementations parse the target; guest bindings never see it, and
+all eight can already declare I64 keys on the wire.
 
 ## ~~GAP — the dynamic portfolio's GTK rows overlap and its macOS tables clip horizontally (found 2026-08-23, by artifact review)~~
 KEY: portfolio screenshot overlap, GTK required_grow_pool, accounts.rows align stretch, table viewport containment, cellEdgeRightX
@@ -6275,6 +6327,26 @@ back, appResumed, KAYA_DIALOG_SEEN, KAYA_DIALOG_UNSEEN, windowCensus,
 dialogReport, wait for adding window timeout, OnPreDrawListener,
 first-draw admission, android lane barrier, four-phone Android pool,
 greedy makespan, nice -n 10, a11y_hygiene
+
+AMENDED 2026-08-31, three facts newer than the body below. (1) A 14th
+sighting, 2026-08-30 02:27 under a matrix: save-jvm FAIL at 27s,
+preserved in target/validate-failures/android-save-jvm-* — and it is
+a DIFFERENT defect from both the AccessDenied headline and the
+lost-result ghost: `KAYA_DIALOG_UNSEEN ms=6472` then `KAYA_DIALOG_SEEN
+ms=6983` is DocumentsUI's COLD start against a 5s frame-sized
+deadline (dialogs 2 and 3 in the same leg: 1375ms, 285ms). Its wall
+shipped the same day: `DIALOG_LAUNCH_BUDGET_NS = 20s` in
+KayaCompose.kt, used in both dialog arms, held by
+check-harness-ceiling.sh (extension precedes kayaNoteDialogUnseen,
+budget may not shrink below 10s), measurement in docs/traps.md. (2)
+The ghost proper (lost result / straggler back) is quiet since the
+13th sighting 2026-08-27 — 21 android dialog-family leg samples on
+2026-08-30, all PASS at 8-37s. (3) The DURATION-ANOMALY HALF IS
+CLOSED: three all-at-t0 five-lane matrices on 2026-08-30 put the
+android lane at 283s/191s/227s against its 310s ceiling, every leg
+green — the "stays open until a real all-five-at-t0 matrix pass"
+condition is met, three times over. What keeps the entry open is the
+WATCH on the ghost family alone.
 
 One pool device, one matrix run, 4s-green solo on either side. The
 validation apps hold NO storage permission BY MEASUREMENT
@@ -6783,10 +6855,28 @@ ceiling move or scheduler change. Whole-host contention, thermal state
 and unrelated applications were uncontrolled variables, not measured
 causes.
 
-## WATCH — a windows dialog leg's process is held ~60s from ITS OWN START, intermittently (2026-08-27)
+## ~~WATCH — a windows dialog leg's process is held ~60s from ITS OWN START, intermittently (2026-08-27)~~
 KEY: dialog leg 64s, TerminateProcess, harness_exit, exit grace hostage,
 FileChoose stall, loader lock, DLL_PROCESS_DETACH, win_exit_tests,
 windows duration anomaly
+
+SUPERSEDED 2026-08-27/28 and measured quiet 2026-08-30, struck
+2026-08-31. The captor was characterised to the bottom: `ExitProcess`
+runs loader shutdown and a wedged thread holds the exit itself, and
+below that a synchronous kernel IO holds even `TerminateProcess`
+(docs/traps.md "exit() is not final on Windows"). The walls:
+`harness_exit` uses TerminateProcess (crates/kaya/src/harness.rs),
+proven on the guest against a real FLS-callback wedge by
+`harness::win_exit_tests` in deploy-win.sh's unit phase, and the
+runner stopped waiting for the corpse (wait-exit.ps1's KAYA_LINGER).
+Measured 2026-08-30 over three full windows lane runs (201 legs each,
+load1 65.0/7.4/9.4): the seven dialog legs cost 33s/21s/26s COMBINED —
+at or under this entry's own 43s-combined healthy baseline, none above
+7s — and the contended run's log carries zero KAYA_LINGER lines across
+202 EXIT= records. Residual, unclosed but costless: the captor's
+identity (which IO — WebDAV or cloud-files) was never named, and the
+20.8s mid-scene FileChoose stall class is uncapped — unobserved in 21
+dialog-leg samples.
 
 First seen in the 12:28 matrix and in every windows lane run through the
 afternoon: all seven dialog-family legs (filedialog x5, save_rust,
@@ -6818,11 +6908,28 @@ WebClient/WebDAV service state and shell cloud-file endpoints beside it.
 A sighting where the wait sits in LdrShutdownProcess confirms the
 loader-lock half; one where it sits in a network wait names the captor.
 
-## WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)
+## ~~WATCH — the iOS sheets shrug off single taps under a concurrent matrix (2026-08-20)~~
 KEY: ios save sheet, presses of Save, rounds of choosing, simdrive
 retap, KAYA_SIMDRIVE_LOG, ios-simdrive-logs, LocalStorage, FP -1005,
 Index out of sync, empty didPickDocumentURLs, export preflight, simctl
 listapps, dev.kaya. bundle cleanup, retained app data
+
+STRUCK 2026-08-31: the tap-dropping reading was FALSIFIED by its own
+instruments, and the family has been quiet since 2026-08-27. Every
+instrumented sighting showed taps DELIVERED, the runloop alive,
+dismissals honest, and the hit-test owner logging named the "extra"
+taps as intentional navigation inside the picker (AXButtons "On My
+iPhone", "Browse", "Cancel"); the residual FP -1005 / empty
+didPickDocumentURLs face was closed by the per-phone `dev.kaya.*`
+uninstall census and the known-byte export/reopen admission probe
+(tools/ios/run-sim.sh). Measured 2026-08-30: three iOS lane runs (113
+legs each, one at load1 62.3), all ten sheet-family legs PASS in each,
+and the day's simdrive logs show every `wait_picker ok=yes` in 1-4
+tries with `read_timeouts=0` on all 105 reads sampled. The instruments
+(KAYA_SIMDRIVE_LOG, per-tap hit-test owner) STAY, so a recurrence
+self-diagnoses; the only thing this strike leaves unexplained is the
+original uninstrumented 2026-08-20 sighting, which no later evidence
+reproduces.
 
 Three matrices in a row, a different leg each time, every one 100%
 green solo: save-go's Save tap dropped twice (the sheet stayed up and
@@ -7080,8 +7187,18 @@ green. The full story is in the icons README, beside the file a future
 hand would swap.
 
 
-## Multi-column adaptive layout — the unbuilt half, now the ACTIVE milestone (promoted 2026-08-19)
+## ~~Multi-column adaptive layout — the unbuilt half, now the ACTIVE milestone (promoted 2026-08-19)~~
 KEY: multi-column, adaptive layout, three-pane, NavigationSplitView, pane roles
+
+SHIPPED, struck 2026-08-31: all four backends present a declared
+ceiling of three (KayaSplitRoot3 with the mac ladder gate, GTK's
+nested split views, WinUI's nested TwoPaneViews, Compose adaptive
+1.2.0), `panes` at wprop 6 in all eight bindings, expect_panes in all
+three harnesses, the eight-language guest fan-out, every slice
+matrix-validated — the body below is the record. The live residue
+moved to its own entry below ("Multi-column residue"); the Compose
+entrance-animation click-drop WATCH moved to docs/traps.md, whose
+copy is now the original.
 
 Promoted out of the struck adaptive entry whose body filed it "rather
 than done": the part of adaptive layout that never landed. kaya has the
@@ -7121,31 +7238,30 @@ authority. The stub records below are the per-backend closes:
   destination history, the extra pane, and expect_panes reading the
   stashed ThreePaneScaffoldValue role by role)
 
-The residue, each with its trigger (the milestone's tail, not its
-body): PHONE-LANE FROZEN SCENES — panes.steps is desktop-only by
-policy (it resizes), so the iPad and android three-pane observations
-are live probes on the record (the 1280dp tablet read
-`regular/0,1,2` from the scaffold's own value 2026-08-20; the iPad
-three-column form was measured live at 1032pt during the research
-pass) rather than frozen legs; a no-resize three-pane scene in
-listdetail.steps' mold needs the tablet-AVD/band ruling first.
-MEASURED FLOORS — before any shared literal below 1400, the Windows
-nest's real three-pane floor and the GTK lane's at pinned text scale
-must be measured (the band's 1400 top is safe by construction).
-LISTDETAIL.STEPS stays at panes 2 deliberately: it is the two-pane
-bare-invariant scene and every lane runs it; whether it grows a
-three-pane sibling is the same AVD/band decision.
+The residue moved to "Multi-column residue" below (2026-08-31), so
+live work is not invisible inside this struck text; the WATCH moved
+to docs/traps.md.
 
-WATCH — a Compose click emitted within ~half a second of a pane's
-ENTRANCE ANIMATION can drop: measured on the tablet probe (click
-button#1 straight after expect_entries 1 → the push never arrived,
-twice; the same click after an expect_panes retry or a settle 800 →
-landed, every time). No frozen scene can reach it — they all assert
-between actions, which is the idiom — and the emit path is
-tag-routed, so the drop is downstream of KayaPresent.emitClicked. If
-an android leg ever fails with "click reported ok, no push", this is
-the signature; instrument the go side's occurrence queue before
-blaming the scene.
+## Multi-column residue — phone-lane frozen scenes and the unmeasured floors (carried 2026-08-31 from the shipped milestone)
+KEY: panes phone lanes, tablet AVD band ruling, three-pane floor measurement, listdetail three-pane sibling
+
+Carried out of the struck milestone entry above. PHONE-LANE FROZEN
+SCENES — panes.steps is desktop-only by policy (it resizes), so the
+iPad and android three-pane observations are live probes on the
+record (the 1280dp tablet read `regular/0,1,2` from the scaffold's
+own value 2026-08-20; the iPad three-column form was measured live at
+1032pt during the research pass) rather than frozen legs; a no-resize
+three-pane scene in listdetail.steps' mold needs the tablet-AVD/band
+ruling first. MEASURED FLOORS — before any shared literal below 1400,
+the Windows nest's real three-pane floor and the GTK lane's at pinned
+text scale must be measured (the band's 1400 top is safe by
+construction; check-steps refuses any literal in the 400..1400 band
+meanwhile). LISTDETAIL.STEPS stays at panes 2 deliberately: it is the
+two-pane bare-invariant scene and every lane runs it; whether it
+grows a three-pane sibling is the same AVD/band decision. The Compose
+entrance-animation click-drop signature is in docs/traps.md ("A
+Compose click within ~half a second of a pane's ENTRANCE ANIMATION
+can drop").
 
 ## The refusal affordances are never asserted PRESENT (promoted 2026-08-19)
 KEY: affordance presence, refuse-when-absent, four backends
@@ -7173,8 +7289,19 @@ When it fires: fan the vocabulary out to all eight. If a full milestone
 cycle passes without the trigger, strip Python's instead — either way
 the divergence ends.
 
-## WATCH — typeface-haskell-wayland segfaulted at exit after an OK verdict (2026-08-19)
+## ~~WATCH — typeface-haskell-wayland segfaulted at exit after an OK verdict (2026-08-19)~~
 KEY: haskell segfault, typeface wayland, RTS teardown, exit path
+
+AGED OUT — CLOSED 2026-08-31: one sighting, no recurrence in 11 days.
+Measured 2026-08-30 across three linux lane runs (604 legs each,
+1,812 legs, zero non-PASS): typeface-haskell-{wayland,x11} passed in
+1-2s in every run. Absence is evidence here because a segfault after
+an OK verdict is recorded FAIL — run-suites.sh takes run_one's exit
+status, tools/linux/a11y-leg.sh propagates the guest's, and
+run-suites.sh prints the "verdict was OK but the leg exited nonzero"
+note for exactly this shape. The body below is the sole record of the
+signature; the recorded next step (core-dump the container, RTS
+finalizer ordering vs gtk/pango teardown) stands if it returns.
 
 Once, under a five-lane matrix; 20/20 green solo immediately after. The
 reworded runner note plus the leg log carried the whole signature this
@@ -7188,8 +7315,19 @@ clause — this leg has no wrapper beyond a11y-leg.sh. If it repeats:
 core-dump the container (ulimit -c unlimited, coredumpctl or
 /proc/sys/kernel/core_pattern in docker), and look at the RTS's
 foreign-finalizer ordering against gtk_main teardown, not at the scene.
-## Test-speed profile 2026-08-20, and the two speedups that need a ruling
+## Test-speed profile 2026-08-20 — the measured map; both speedups ratified and landed (headline refreshed 2026-08-31)
 KEY: test speed, keyed cache, matrix bound, save panel cost, clipboard prompt cost
+
+HEADLINE REFRESHED 2026-08-31: the old headline said the two speedups
+"need a ruling", but the body's own record says both were RATIFIED AND
+LANDED 2026-08-20 — it sat stale for eleven days, the check-ledger
+class with a softer spelling. What the entry remains open FOR is the
+measured map itself (the per-leg cost profile nobody should re-measure
+blind) — and its one open thread, the 2026-08-23 scheduler anomaly, is
+CLOSED as of 2026-08-30: three all-at-t0 five-lane matrices put
+android at 283s/191s/227s against the 310s ceiling with every leg
+green (the same evidence is in the save-jvm entry's 2026-08-31
+amendment).
 
 The maintainer asked for faster feature iteration; the day's runs were
 profiled before anything was touched. The measured map, so nobody
@@ -7272,7 +7410,8 @@ presentation, the iOS paste prompt, the stall scene's deliberate block
    contract remains: start all five platform lanes together, wait for
    Android's recorded pid, then launch `nice -n 10 tools/gates.sh` while
    longer lanes continue. The four-phone runner/probe default and 310s
-   ceiling remain; the 350s result leaves the duration anomaly open.
+   ceiling remain; the 350s result left the duration anomaly open
+   until the 2026-08-30 closure in this entry's head note.
    A follow-up source/log census found two in-run work removals: 112 repeated
    APK installs became 13 suite/device installs, and the ranges IME
    requirement moved inside its claimed device slot instead of draining the
@@ -7283,8 +7422,9 @@ presentation, the iOS paste prompt, the stall scene's deliberate block
    starve Android past both its duration ceiling and first draw," and in the
    Android WATCH above. The first all-at-t0 attempt on those removals is
    recorded there: Android passed 112 legs in 268s/310, but Linux and
-   Windows duration guards refused the full record. This remains an open
-   anomaly rather than an accepted scheduler pass.
+   Windows duration guards refused the full record. This remained an
+   open anomaly until 2026-08-30's three accepted all-at-t0 matrices
+   (this entry's head note).
 
 THE BELOW-400 PUSH, 2026-08-20 (the maintainer asked for the matrix
 under ~400s; it reached 422 and three lanes now cluster at the bound):
@@ -8286,7 +8426,15 @@ design entry's constraints, recorded so the proposal argues from
 measurements.
 
 
-## Row-window breadth (§6.3) — the depth stubs it will strike
+## ~~Row-window breadth (§6.3) — the depth stubs it will strike~~
+KEY: depth_stub ledger, depth_stub varied, spacer+band lowering, ledger_python, varied.steps
+
+CLOSED 2026-08-31: all four stubs below closed 2026-08-25 and the
+tree agrees — zero `depth_stub(` calls remain in the Rust backends,
+varied runs python-only on all three desktop lanes, and the ledger
+scene retired into portfolio.steps 2026-08-26.
+docs/virtualization-plan.md's §6.2 sentence claiming GTK and WinUI
+still carry the stubs was corrected in the same edit.
 
 - ~~**DEPTH STUB: ledger on gtk**~~ — CLOSED 2026-08-25: the spacer+band
   lowering landed; ledger-python runs green on both rings.
@@ -8627,6 +8775,17 @@ visual iteration proves otherwise this entry is the design to build.
 
 ## DESIGN — THE BREAKPOINT IS A RAW NUMBER, WHERE EVERY OTHER TOOLKIT NAMES A CLASS (2026-08-29)
 KEY: stack_below 700, size class, WindowSizeClass, compact regular expanded, breakpoint vocabulary
+
+RULED 2026-08-31 (maintainer): NAMED CLASSES, and the raw-number
+spelling DIES with the slice (churn is free — no compat argument).
+The breakpoint speaks the class vocabulary (`stack_when="compact"`
+shape, exact spelling decided at design time): iOS reads the
+platform's own class; the desktops get kaya-owned thresholds at the
+Material boundary (compact below 600), since no desktop platform
+defines one. The build slice — spec prop, all eight bindings, four
+backends, the portfolio's own declaration and the scenes that freeze
+it — is scheduled work now, not a question. Entry stays open until
+the slice lands.
 
 `stack_below=700` makes the AUTHOR invent the number. Nobody else does
 that, and the maintainer's question — "how is the user supposed to know

@@ -199,9 +199,10 @@ One machine, two paths, chosen per For by measurement:
    then, where an un-windowed 15k-row stamp still choked; the view joins
    the portfolio when §6.3 lands (amended 2026-08-25). varied.steps is a
    ONE-COLUMN TABLE, not a plain For — §6.2 windows the mac table
-   tier; the plain-For band is §6.3's. GTK and WinUI carry the
-   depth_stub calls meanwhile, and the python guests keep the two scenes
-   on the mobile lanes' UNWIRED lists. validate-mac green.
+   tier; the plain-For band is §6.3's. (The GTK and WinUI depth_stub
+   calls this step left behind closed 2026-08-25 with item 3's breadth,
+   and the ledger scene retired into portfolio.steps 2026-08-26 — no
+   stub call remains in either backend.) validate-mac green.
 3. Breadth: the four synthesized spacer+band tiers in parallel
    worktrees; no binding surface moves (there is nothing to spell —
    the census's job is confirming NOTHING appeared). Matrix.
