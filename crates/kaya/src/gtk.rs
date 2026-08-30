@@ -1223,6 +1223,12 @@ const TABLE_SPACER_CLASS: &str = "kaya-table-spacer";
 /// every reader of that box skips this class exactly as it skips the
 /// spacers'.
 const KAYA_FOLDED_CLASS: &str = "kaya-folded";
+/// THE FOLD SEAM (docs/adaptive-layout-plan.md D7): the gap under each
+/// folded child — a SECTION gap, not the table's internal spacing, so
+/// the folded summary and the rows read as two surfaces (the
+/// maintainer's 2026-08-30 read of the phone captures). One number,
+/// four backends.
+const KAYA_FOLD_SEAM_GAP: i32 = 16;
 
 /// How much of an UNGROWN table this tier shows before the rest scrolls
 /// — GTK's spelling of tools/scenes/table.steps' "a table is a
@@ -2157,12 +2163,10 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     if let Some(index) = anchor.get().filter(|i| *i < total) {
         // row_position speaks the COLLECTION's coordinates; the folded
         // children above the top spacer (D7) shift every allocation down
-        // by their own extent, so the adjustment write adds it back.
-        let folded_extra: f64 = children_of(&content)
-            .into_iter()
-            .filter(|w| w.has_css_class(KAYA_FOLDED_CLASS))
-            .map(|w| f64::from(w.allocation().height()) + spacing)
-            .sum();
+        // by their own extent, so the adjustment write adds it back. THE
+        // TOP SPACER'S OWN Y IS THAT EXTENT — heights, spacing, and the
+        // seam margins, all measured at once, and 0 with nothing folded.
+        let folded_extra = f64::from(top.allocation().y());
         let want = row_position(scene, id, index, &band);
         if let Some(want) = want.map(|w| w + folded_extra) {
             if (adjustment.value() - want).abs() > 0.5 {
@@ -6804,6 +6808,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // Spanning, like a scroll viewport's one child; the
                 // unfold's reconcile restores the authored alignment.
                 child_widget.set_halign(gtk4::Align::Fill);
+                child_widget.set_margin_bottom(KAYA_FOLD_SEAM_GAP);
                 let mut after: Option<gtk4::Widget> = None;
                 for w in children_of(&content) {
                     if w.has_css_class(KAYA_FOLDED_CLASS) {
@@ -6813,6 +6818,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 content.insert_child_after(&child_widget, after.as_ref());
             } else if let Some(tid) = core.folded_into.remove(&child.0) {
                 child_widget.remove_css_class(KAYA_FOLDED_CLASS);
+                child_widget.set_margin_bottom(0);
                 if let Some(t) = core.tables.get(&tid) {
                     t.content.remove(&child_widget);
                 }

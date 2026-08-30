@@ -2479,6 +2479,15 @@ fn baseline_compensate(
 /// folded element in sibling order, then the band. Its only callers are
 /// the Fold arm's two directions.
 fn fold_restack(table: &WinTable) -> windows_core::Result<()> {
+    // THE FOLD SEAM (D7): a SECTION gap between the folded children and
+    // the band, not the table's internal spacing — at nothing, the
+    // folded summary and the rows read as one surface (the maintainer's
+    // 2026-08-30 read of the phone captures). RowSpacing, so it clears
+    // itself when the last unfold empties the list. One number, four
+    // backends.
+    table
+        .wrap
+        .SetRowSpacing(if table.folded.is_empty() { 0.0 } else { 16.0 })?;
     let defs = table.wrap.RowDefinitions()?;
     defs.Clear()?;
     for _ in 0..=table.folded.len() {
@@ -2495,13 +2504,21 @@ fn fold_restack(table: &WinTable) -> windows_core::Result<()> {
 
 /// The folded block's extent above the band (D7): what every band-space
 /// coordinate must add to reach host space, and 0.0 with nothing folded.
+/// MEASURED as the band's own Y inside the wrap — heights, the seam's
+/// row spacing, everything the layout actually spent — rather than a
+/// second sum that would drift from it.
 fn fold_extent(id: u64) -> f64 {
     TABLES.with_borrow(|tables| {
         tables.get(&id).map_or(0.0, |t| {
-            t.folded
-                .iter()
-                .map(|e| e.ActualHeight().unwrap_or(0.0))
-                .sum()
+            if t.folded.is_empty() {
+                return 0.0;
+            }
+            t.band
+                .TransformToVisual(&t.wrap)
+                .and_then(|tr| {
+                    tr.TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })
+                })
+                .map_or(0.0, |p| f64::from(p.Y))
         })
     })
 }

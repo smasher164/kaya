@@ -9096,6 +9096,15 @@ internal class KayaTableWindow(private val node: KayaNode) {
 private val KAYA_TABLE_SEGMENT_OUTER = 16.dp
 private val KAYA_TABLE_SEGMENT_INNER = 4.dp
 private val KAYA_TABLE_SEGMENT_GAP = 2.dp
+
+/**
+ * THE FOLD SEAM (docs/adaptive-layout-plan.md D7): the gap between the
+ * last folded child and the table's own grammar. A SECTION gap, not the
+ * 2dp segment gap — the folded summary and the ledger are two grouped
+ * surfaces, and at the segment gap they read as one (the maintainer's
+ * 2026-08-30 read of the phone captures). One number, four backends.
+ */
+private val KAYA_FOLD_SEAM_GAP = 16.dp
 private val KAYA_TABLE_HEADER_SEGMENT_SHAPE = RoundedCornerShape(
     topStart = KAYA_TABLE_SEGMENT_OUTER,
     topEnd = KAYA_TABLE_SEGMENT_OUTER,
@@ -9385,7 +9394,8 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             measurables[it].measure(Constraints(minWidth = totalW, maxWidth = totalW))
         }
         val foldedH = foldedPlaceables.sumOf { it.height }
-        val foldedBlock = if (foldedH > 0) foldedH + gap else 0
+        val foldedBlock =
+            if (foldedH > 0) foldedH + KAYA_FOLD_SEAM_GAP.roundToPx() else 0
         val headerH = headers.maxOfOrNull { it.height } ?: 0
         // A ROW'S EXTENT IS ITS TOP-TO-TOP REPEAT DISTANCE, spacing
         // included (§2.1): a sum of these IS where the next row starts,

@@ -10493,6 +10493,14 @@ let kayaTableCardRadius: CGFloat = 10
 /// (kayaTableContentTrack; kayaTableCellsBox is the interior half alone).
 let kayaTableCardPad: CGFloat = kayaTableCardBand + kayaTableCardInsetX
 
+/// THE FOLD SEAM (docs/adaptive-layout-plan.md D7): the gap between the
+/// last folded child and the table's own grammar. A SECTION gap, not the
+/// table's internal spacing — the folded summary and the ledger are two
+/// grouped surfaces, and at `node.spacing` they read as one card
+/// (the maintainer's 2026-08-30 read of the phone captures). One
+/// number, four backends.
+let kayaFoldSeamGap: CGFloat = 16
+
 /// THE CARD ITSELF, and it belongs to the CONTENT (ruled 2026-08-25, fixed
 /// the same day by the maintainer's capture: "is the ios table meant to have
 /// the white inset background stretch all the way to the bottom of the
@@ -10633,13 +10641,22 @@ private struct KayaSynthesizedTable: View {
                             // content that happens to share the scroll,
                             // and the band arithmetic reads the rows' own
                             // box wherever it sits.
-                            VStack(alignment: .leading, spacing: node.spacing) {
-                                ForEach(node.foldedChildren) { folded in
-                                    KayaRender(
-                                        node: folded, flexVertical: true,
-                                        flexStretch: false
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                            VStack(alignment: .leading, spacing: 0) {
+                                if !node.foldedChildren.isEmpty {
+                                    // The seam is the folded side's: a
+                                    // section gap under the last folded
+                                    // child, so the summary and the
+                                    // ledger read as two surfaces.
+                                    VStack(alignment: .leading, spacing: node.spacing) {
+                                        ForEach(node.foldedChildren) { folded in
+                                            KayaRender(
+                                                node: folded, flexVertical: true,
+                                                flexStretch: false
+                                            )
+                                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                                        }
+                                    }
+                                    .padding(.bottom, kayaFoldSeamGap)
                                 }
                                 rows(generation)
                                     .background(
