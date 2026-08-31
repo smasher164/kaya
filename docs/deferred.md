@@ -8782,6 +8782,26 @@ check-sugar-surface census row, not a mechanism. Closes when a real
 scene or app asks for the mobile-first spelling.
 
 
+## HOLD — the windows guest-side command scripts convert to python, at some point (Akhil, 2026-08-31)
+KEY: tools/guest cmd scripts, windows vm python, schtasks launcher, shot-window ps1, cmd.exe toml
+
+Filed the day the gate-conversion small tier closed (5b4eddc), from
+Akhil's own aside: the ~40 tools/guest/*.cmd and *.ps1 scripts that
+run ON THE VM (shipped by deploy-win, launched via schtasks /it) are
+the same maintained-at-cost shell surface the gate bodies were, one
+platform over — and python already exists on the VM, since the lane's
+python guests run there. The shape when it happens mirrors the gate
+conversion: python bodies, minimal .cmd stubs kept as the schtasks
+launchables (cmd.exe stays the LAUNCHER — it cannot read TOML, which
+is check-app-identity's recorded exception, and schtasks needs a
+plain launchable). The ps1 family's Win32 calls (shot-window.ps1's
+Add-Type user32 shapes) port to ctypes. NOT SCHEDULED: "at some
+point", verbatim — the trigger is the next time guest-side scripts
+need real work, or the runner-conversion boundary being revisited.
+Until then deploy-win's shipped-file list and check-shell's coverage
+of tools/guest stay as they are.
+
+
 ## HOLD — keyed when/otherwise arms await a use-case (ruled 2026-08-28)
 KEY: keyed arms, when otherwise, arrangements, re-parent, keyed unification, different tree
 
