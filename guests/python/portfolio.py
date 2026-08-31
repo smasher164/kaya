@@ -533,6 +533,9 @@ def open_transactions():
 app = kaya.App()
 
 with app.window(title="portfolio", width=900, height=600):
+    # The mark's blue (guests/assets/identity.toml's 1C71D8), ruled
+    # 2026-08-31. Before the first mount, per the set-once wall.
+    kaya.brand_accent(0x1C71D8)
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
     book_size = kaya.signal(f"Transactions: {len(txns)}")
     # THE DASHBOARD'S TWO COLUMNS STACK ON A PHONE

@@ -17,6 +17,13 @@ fi
 # The Java task is named EXPLICITLY: compileDebugKotlin does not imply
 # it, and the Android SDK is a DIFFERENT java.lang from the desktop JDK
 # java-typecheck uses, so that gate cannot stand in for this one.
+#
+# AND THE MODULE'S HOST-JVM TESTS, since the M3 scheme ruling
+# (docs/deferred.md "THE FULL M3 SCHEME"): KayaColorSchemes.of() is a
+# pure function and KayaColorSchemesTest is its wall — the four seed
+# palettes moving, the error family refusing to — run here because no
+# scene freezes a scheme byte, so the emulator would otherwise be the
+# first and only thing to prove the brand scheme.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,6 +31,10 @@ cd "$ROOT/android" || exit 1
 
 gradle --console=plain -q :kaya:compileDebugKotlin || {
     echo "check-compose: FAIL (KayaCompose.kt does not compile)" >&2
+    exit 1
+}
+gradle --console=plain -q :kaya:testDebugUnitTest || {
+    echo "check-compose: FAIL (the kaya module's host-JVM tests fail — the scheme wall is KayaColorSchemesTest)" >&2
     exit 1
 }
 gradle --console=plain -q :milestone2:compileDebugKotlin \

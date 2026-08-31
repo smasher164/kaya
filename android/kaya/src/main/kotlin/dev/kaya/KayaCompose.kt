@@ -10770,28 +10770,22 @@ private fun kayaRoleTone(nominal: Float, background: Float, desired: Float): Flo
  * for the backends whose platforms have no such model, and this one takes
  * the seed.
  *
- * WHAT IS DERIVED, AND WHAT DELIBERATELY IS NOT. The PRIMARY family —
- * the accent — is computed from the seed: primary, onPrimary,
- * primaryContainer, onPrimaryContainer, inversePrimary and surfaceTint,
- * at the tones color_spec_2021.ts assigns them, with each role's own
- * contrast curve. The secondary/tertiary/neutral palettes and the error
- * palette stay Material's baseline. Two different reasons, and neither is
- * "not yet":
- *
- *  - The ERROR palette is fixed by Material itself (SchemeTonalSpot
- *    hands it a fixed palette rather than deriving one), because red
- *    means destructive whatever an app's brand is. kaya's destructive
- *    role reads those roles, and they must not follow the seed.
- *  - The NEUTRALS carry chroma 4 and 8 in Material's own scheme, i.e.
- *    they are grey with a hint of the seed — the visible difference
- *    between one seed's surfaces and another's is a couple of levels per
- *    channel. Reproducing that hint needs HCT's chroma clamping, which is
- *    a dependency question (material-color-utilities is not published as
- *    a first-party Maven artifact; MDC bundles it @RestrictTo) rather
- *    than a coding one, and it is recorded for Akhil rather than decided
- *    here. What the accent buys and the neutrals do not is the reason the
- *    split is defensible: every other backend applies the accent to its
- *    accent slots and nothing else.
+ * WHAT IS DERIVED, AND WHAT DELIBERATELY IS NOT. ALL FIVE of Material's
+ * seed palettes follow the brand (the M3 ruling, docs/deferred.md "THE
+ * FULL M3 SCHEME", 2026-08-31): the PRIMARY family through kayaToneOf's
+ * CIELab bisection exactly as before the ruling, and the
+ * secondary/tertiary/neutral/neutralVariant families through HCT
+ * (CorePalette.of — the port's chroma constants are Material's own:
+ * secondary 16, tertiary hue+60 at 24, neutrals 4 and 8), each role at
+ * the tone color_spec_2021.ts assigns it, on-roles and outlines through
+ * the same contrast machinery the primary family uses. The ERROR palette
+ * alone stays Material's baseline, and that is not "not yet":
+ * SchemeTonalSpot hands it a fixed palette rather than deriving one,
+ * because red means destructive whatever an app's brand is. kaya's
+ * destructive role reads those roles, and they must not follow the seed.
+ * KayaColorSchemesTest is the wall on all of that — the four families
+ * moving with the seed, the error family refusing to — watched red
+ * against the pre-ruling code.
  *
  * Not a composable and not remembered: a scheme is a value. The caller
  * keys it on (seed, appearance, contrast) — the three inputs it has.
@@ -10814,11 +10808,14 @@ internal object KayaColorSchemes {
         val base = if (dark) this.dark else this.light
         if (seed == null) return base
         val key = Color(0xFF000000.toInt() or seed)
-        // The background these roles are read against. MEASURED off the
-        // scheme actually in force rather than assumed from the spec's
-        // surface tones, because this scheme's neutrals are Material's
-        // and a tone written down here would be a second copy of them.
-        val surfaceTone = base.surface.kayaTone()
+        // The four HCT palettes (a2/a3/n1/n2; a1 stays kayaToneOf's so
+        // the primary family's bytes do not move under the ruling).
+        val core = com.materialkolor.palettes.CorePalette.of(0xFF000000.toInt() or seed)
+        fun com.materialkolor.palettes.TonalPalette.at(tone: Float): Color =
+            Color(this.tone(kotlin.math.round(tone).toInt().coerceIn(0, 100)))
+        // The background the accent roles are read against IS the
+        // derived neutral surface now — spec tone 98/6, from n1.
+        val surfaceTone = if (dark) 6f else 98f
         // Tones and curves verbatim from color_spec_2021.ts (the
         // TONAL_SPOT arm; kaya never exposes another variant):
         //   primary            40/80, ContrastCurve(3, 4.5, 7, 7)
@@ -10847,9 +10844,18 @@ internal object KayaColorSchemes {
             background = containerTone,
             desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 11f),
         )
+        // The neutral grounds, spec tones verbatim (backgrounds carry
+        // no contrast curve in color_spec_2021.ts):
+        //   surface/background      98/6      inverseSurface  20/90
+        //   surfaceDim              87/6      surfaceBright   98/24
+        //   surfaceContainerLowest 100/4      surfaceContainerLow 96/10
+        //   surfaceContainer        94/12     surfaceContainerHigh 92/17
+        //   surfaceContainerHighest 90/22     surfaceVariant (n2) 90/30
+        //   scrim 0
+        val inverseSurfaceTone = if (dark) 90f else 20f
         val inverseTone = kayaRoleTone(
             nominal = if (dark) 40f else 80f,
-            background = base.inverseSurface.kayaTone(),
+            background = inverseSurfaceTone,
             desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 7f),
         )
         val primary = kayaToneOf(key, primaryTone)
@@ -10857,12 +10863,82 @@ internal object KayaColorSchemes {
         val container = kayaToneOf(key, containerTone)
         val onContainer = kayaToneOf(key, onContainerTone)
         val inverse = kayaToneOf(key, inverseTone)
-        // Every role NOT named here keeps its default, and the defaults
-        // of these two builders are exactly the baseline scheme above —
-        // so "the rest stays Material's" is what the call itself says,
-        // rather than thirty copied fields that could drift from it.
+        // The a2/a3 accent families ride the same tones and curves as
+        // the primary family (color_spec_2021.ts gives all three
+        // TONAL_SPOT accents one shape; only the palette differs):
+        fun accent(p: com.materialkolor.palettes.TonalPalette): Array<Color> {
+            val roleTone = kayaRoleTone(
+                nominal = if (dark) 80f else 40f,
+                background = surfaceTone,
+                desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 7f),
+            )
+            val onRoleTone = kayaRoleTone(
+                nominal = if (dark) 20f else 100f,
+                background = roleTone,
+                desired = kayaContrastAt(contrast, 4.5f, 7f, 11f, 21f),
+            )
+            val containerRoleTone = kayaRoleTone(
+                nominal = if (dark) 30f else 90f,
+                background = surfaceTone,
+                desired = kayaContrastAt(contrast, 1f, 1f, 3f, 4.5f),
+            )
+            val onContainerRoleTone = kayaRoleTone(
+                nominal = if (dark) 90f else 30f,
+                background = containerRoleTone,
+                desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 11f),
+            )
+            return arrayOf(
+                p.at(roleTone), p.at(onRoleTone),
+                p.at(containerRoleTone), p.at(onContainerRoleTone),
+            )
+        }
+        val (secondary, onSecondary, secondaryContainer, onSecondaryContainer) = accent(core.a2)
+        val (tertiary, onTertiary, tertiaryContainer, onTertiaryContainer) = accent(core.a3)
+        // The neutral foregrounds and lines, tones and curves verbatim
+        // from color_spec_2021.ts:
+        //   onBackground     10/90, ContrastCurve(3, 3, 4.5, 7)
+        //   onSurface        10/90, ContrastCurve(4.5, 7, 11, 21)
+        //   onSurfaceVariant 30/80, ContrastCurve(3, 4.5, 7, 11)
+        //   inverseOnSurface 95/20, ContrastCurve(4.5, 7, 11, 21)
+        //   outline          50/60, ContrastCurve(1.5, 3, 4.5, 7)
+        //   outlineVariant   80/30, ContrastCurve(1, 1, 3, 4.5)
+        val onBackgroundTone = kayaRoleTone(
+            nominal = if (dark) 90f else 10f,
+            background = surfaceTone,
+            desired = kayaContrastAt(contrast, 3f, 3f, 4.5f, 7f),
+        )
+        val onSurfaceTone = kayaRoleTone(
+            nominal = if (dark) 90f else 10f,
+            background = surfaceTone,
+            desired = kayaContrastAt(contrast, 4.5f, 7f, 11f, 21f),
+        )
+        val onSurfaceVariantTone = kayaRoleTone(
+            nominal = if (dark) 80f else 30f,
+            background = if (dark) 30f else 90f,
+            desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 11f),
+        )
+        val inverseOnSurfaceTone = kayaRoleTone(
+            nominal = if (dark) 20f else 95f,
+            background = inverseSurfaceTone,
+            desired = kayaContrastAt(contrast, 4.5f, 7f, 11f, 21f),
+        )
+        val outlineTone = kayaRoleTone(
+            nominal = if (dark) 60f else 50f,
+            background = surfaceTone,
+            desired = kayaContrastAt(contrast, 1.5f, 3f, 4.5f, 7f),
+        )
+        val outlineVariantTone = kayaRoleTone(
+            nominal = if (dark) 30f else 80f,
+            background = surfaceTone,
+            desired = kayaContrastAt(contrast, 1f, 1f, 3f, 4.5f),
+        )
+        // The ERROR family is deliberately absent from both builder
+        // calls below: red means destructive under any brand, and the
+        // builders' defaults are exactly the baseline error roles.
         // surfaceTint IS primary in Material's spec (same palette, same
         // tone), which is how an elevated surface picks up the brand.
+        val surface = core.n1.at(surfaceTone)
+        val onSurface = core.n1.at(onSurfaceTone)
         return if (dark) {
             darkColorScheme(
                 primary = primary,
@@ -10871,6 +10947,32 @@ internal object KayaColorSchemes {
                 onPrimaryContainer = onContainer,
                 inversePrimary = inverse,
                 surfaceTint = primary,
+                secondary = secondary,
+                onSecondary = onSecondary,
+                secondaryContainer = secondaryContainer,
+                onSecondaryContainer = onSecondaryContainer,
+                tertiary = tertiary,
+                onTertiary = onTertiary,
+                tertiaryContainer = tertiaryContainer,
+                onTertiaryContainer = onTertiaryContainer,
+                background = surface,
+                onBackground = core.n1.at(onBackgroundTone),
+                surface = surface,
+                onSurface = onSurface,
+                surfaceVariant = core.n2.at(30f),
+                onSurfaceVariant = core.n2.at(onSurfaceVariantTone),
+                inverseSurface = core.n1.at(inverseSurfaceTone),
+                inverseOnSurface = core.n1.at(inverseOnSurfaceTone),
+                outline = core.n2.at(outlineTone),
+                outlineVariant = core.n2.at(outlineVariantTone),
+                scrim = core.n1.at(0f),
+                surfaceDim = core.n1.at(6f),
+                surfaceBright = core.n1.at(24f),
+                surfaceContainerLowest = core.n1.at(4f),
+                surfaceContainerLow = core.n1.at(10f),
+                surfaceContainer = core.n1.at(12f),
+                surfaceContainerHigh = core.n1.at(17f),
+                surfaceContainerHighest = core.n1.at(22f),
             )
         } else {
             lightColorScheme(
@@ -10880,6 +10982,32 @@ internal object KayaColorSchemes {
                 onPrimaryContainer = onContainer,
                 inversePrimary = inverse,
                 surfaceTint = primary,
+                secondary = secondary,
+                onSecondary = onSecondary,
+                secondaryContainer = secondaryContainer,
+                onSecondaryContainer = onSecondaryContainer,
+                tertiary = tertiary,
+                onTertiary = onTertiary,
+                tertiaryContainer = tertiaryContainer,
+                onTertiaryContainer = onTertiaryContainer,
+                background = surface,
+                onBackground = core.n1.at(onBackgroundTone),
+                surface = surface,
+                onSurface = onSurface,
+                surfaceVariant = core.n2.at(90f),
+                onSurfaceVariant = core.n2.at(onSurfaceVariantTone),
+                inverseSurface = core.n1.at(inverseSurfaceTone),
+                inverseOnSurface = core.n1.at(inverseOnSurfaceTone),
+                outline = core.n2.at(outlineTone),
+                outlineVariant = core.n2.at(outlineVariantTone),
+                scrim = core.n1.at(0f),
+                surfaceDim = core.n1.at(87f),
+                surfaceBright = core.n1.at(98f),
+                surfaceContainerLowest = core.n1.at(100f),
+                surfaceContainerLow = core.n1.at(96f),
+                surfaceContainer = core.n1.at(94f),
+                surfaceContainerHigh = core.n1.at(92f),
+                surfaceContainerHighest = core.n1.at(90f),
             )
         }
     }

@@ -3659,6 +3659,25 @@ Cheap when it comes: the note needs the focused node's accept list, the
 board's type list, and the changeCount the backend last wrote — all
 three already exist in every backend's clipboard arm.
 
+## MAYBE: identity.toml carries a DEFAULT accent seed (raised 2026-08-31)
+KEY: identity accent default, brand_accent default, identity.toml accent, mark color seed
+
+Raised by the maintainer the night the portfolio's brand landed as the
+mark's blue BY HAND — the coherence was a taste call, and his instinct
+was to make it a mechanism: identity.toml gains an `accent =` line, an
+app that never calls `brand_accent()` inherits it, and the call
+overrides. Uniform by construction, since brand_accent already lowers
+on all five platforms. Two frictions on the record before anyone
+builds it: the identity file is PACKAGING-TIME and the brand is
+RUNTIME STYLING — two subsystems the design keeps deliberately apart,
+each with its own walls — and this repo carries ONE identity file
+shared by every demo guest while their seeds legitimately differ (the
+styling scene brands 0x3584E4 under the same mark), so the default
+only lands cleanly once apps ship their own identity files. WHAT WOULD
+DECIDE IT: a second real app hand-copying a mark color into
+brand_accent — that duplication is exactly what the default would
+erase.
+
 ## SOLVED: template-node props (was "grow, the a11y pair, accepts, on_paste")
 
 Raised 2026-08-10 by the sugar pass; CLOSED 2026-08-11 by the props
@@ -3923,21 +3942,33 @@ interpreter carries slice 1's one real brand lowering
   deriving them needs HCT chroma clamping and that is a dependency
   decision rather than a coding one.
 
-## THE FULL M3 SCHEME FROM A SEED NEEDS A DEPENDENCY DECISION
+## ~~THE FULL M3 SCHEME FROM A SEED NEEDS A DEPENDENCY DECISION~~
 KEY: HCT, chroma clamp, material-color-utilities, secondaryContainer,
 seed palette, M3 scheme, materialkolor
 
-RULED 2026-08-31 (maintainer), AND PICKED THE SAME DAY AS THE NEXT
-BUILD MILESTONE: ROUTE (b) — pin
-`com.materialkolor:material-color-utilities`, one gradle line
-(check-pins' gradle clause covers it), and complete the derivation:
-the four HCT-clamped palettes join the hand-derived primary family so
-a branded kaya app reads the way a native Material app with that seed
-does. Now scheduled work, not a question; entry stays open until the
-slice lands. In the same ruling: NO authored multi-color brand
-vocabulary — one seed stays the whole surface (the other four
-platforms have one accent slot each; Material's own idiom derives the
-rest), revisited only if a real app hits the wall.
+COMPLETE 2026-08-31, ruled and landed the same day. ROUTE (b):
+`com.materialkolor:material-color-utilities` pinned at **2.1.1** —
+NOT the latest, and the ceiling is recorded at the pin
+(android/kaya/build.gradle.kts): Kotlin 2.0.21 reads class metadata
+only one minor ahead, 3.0.0+ ships 2.2+ metadata, and 5.0.x demands
+minCompileSdk 37 against the module's 35; moving the pin means moving
+the Kotlin plugin first. The four palettes derive in
+KayaColorSchemes.of() via CorePalette (its chroma constants are
+byte-identical to 5.0.1's), every role at the 2021 spec's tones
+through kaya's own contrast machinery; the primary family's CIELab
+path did not move; the ERROR family stays baseline by design. The
+wall is KayaColorSchemesTest on the host JVM inside check-compose,
+watched red 3-of-6 against the pre-palette code; its first draft
+demanded 7:1 of a pair Material clamps by design and was itself
+watched failing before the assertion moved to container-vs-page.
+The portfolio now declares `brand_accent(0x1C71D8)` (the mark's
+blue), so the lavender in every earlier Android capture — Material's
+default seed showing through — reads as the brand. In the same
+ruling: NO authored multi-color brand vocabulary — one seed stays the
+whole surface (the other four platforms have one accent slot each;
+Material's own idiom derives the rest), revisited only if a real app
+hits the wall. Matrix ALL PASS: mac 349, linux 604, windows 201, ios
+113, android 123, gates green — 1,390 legs.
 
 As filed — open, and it is Akhil's: a dependency choice, not a coding
 one. Measured

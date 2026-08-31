@@ -90,4 +90,18 @@ dependencies {
     // (docs/styling/symbols-material-symbols.md §4.2).
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    // HCT for the brand scheme's four non-primary palettes (the M3
+    // ruling, docs/deferred.md "THE FULL M3 SCHEME"; route (b), the KMP
+    // port of Google's material-color-utilities, MIT). 2.1.1 IS THE
+    // CEILING FOR THIS MODULE, not the latest: Kotlin 2.0.21 reads
+    // class metadata only one minor ahead (<= 2.1), 3.0.0+ ships 2.2+
+    // metadata, and 5.0.x additionally demands minCompileSdk 37 against
+    // this module's 35. Moving it means moving the Kotlin plugin first.
+    // Transitives: kotlin-stdlib 2.1.20, poko-annotations 0.18.2 — no
+    // Compose, no androidx.
+    implementation("com.materialkolor:material-color-utilities:2.1.1")
+    // The scheme-derivation unit test (KayaColorSchemesTest) — the wall
+    // check-compose runs so the emulator never proves the brand scheme
+    // first. Test scope only; nothing ships.
+    testImplementation("junit:junit:4.13.2")
 }
