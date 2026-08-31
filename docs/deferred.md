@@ -8875,6 +8875,62 @@ and the adaptive scene's 520 both become the ruled 600 boundary, so
 those scenes' frozen widths move with the slice.
 
 
+## DESIGN — THE NINTH BINDING: JS/TS (Akhil, 2026-08-31; design rulings recorded, CODE GATED on the integer contract)
+KEY: js binding, typescript, N-API, worker thread, BigInt, safe integer, 2^53, JSX, kaya-gui npm, event loop
+
+RULED 2026-08-31 (maintainer, design-only session — no code today):
+
+- EMBEDDING: a Node N-API addon (ABI-stable across Node versions, one
+  binary per platform, Bun-compatible), a GENERATED TypeScript wire
+  layer out of gen-bindings' ninth emitter, hand-written TS sugar,
+  shipped as `kaya-gui` on npm (bare `kaya` is squatted; the packaging
+  ruling already names this). Desktop-first: Node does not run on the
+  phones, so JS starts where Python did before packaging-mobile.
+- THREADING: the WORKER-THREAD model. Every platform demands its UI
+  loop on the process main thread and Node's JS also lives there —
+  NodeGui ships a forked Node binary (Qode) to merge Qt's loop in, and
+  Electron does deep libuv integration, both to run app JS on the UI
+  thread. kaya refuses the premise instead: the app's JS runs in a
+  worker_thread, which IS the kaya-app thread; the main thread is
+  surrendered to the platform loop exactly as in every other binding;
+  occurrences arrive in the worker as callbacks via thread-safe
+  functions. Uniform threading semantics — a wedged handler stalls the
+  app thread and the UI stays live — at the cost of a small bootstrap
+  dance in the entry module. An ASYNC handler's transaction dies at
+  its first await (an async function returns there), and the liveness
+  refusal says so — the check-tx-liveness rule, JS spelling.
+- JSX/TSX: DESIGNED FOR, SHIPPED LATER. kaya's model is SolidJS's
+  model (components run once to build the tree, no virtual DOM,
+  signals update in place; Solid's For/Show are kaya's For/when), so
+  a run-once JSX factory (`jsxImportSource: "kaya-gui"`) compiles 1:1
+  onto the function sugar. Day one is the function sugar, shaped so
+  that factory needs nothing changed; React's re-render model is
+  ruled out as fighting the retained core.
+- Transaction style: AMBIENT (module-level constructors against the
+  implicit current transaction, nested arrow bodies) is the
+  recommendation consistent with the worker and JSX rulings; formal
+  ruling rides with the integer one.
+
+OPEN AND GATING — THE INTEGER CONTRACT. JS numbers are doubles, exact
+only to ±2^53−1; kaya's wire integers are i64. The maintainer's read
+(2026-08-31): kaya's integers are mainly structural — TRUE in-tree
+(ids, enum tags, counts; the portfolio carries money as f64) — but
+the SURFACE admits arbitrary app i64 through record fields and
+signals, which is the only place the contract bites. Candidates, with
+the analysis on record: (a) SAFE-INTEGER — kaya integers exact to
+±2^53−1, refused beyond at the root in EVERY binding; JS becomes pure
+`number`, all nine languages identical, timestamps/money/file sizes
+fit with ~1000x headroom, 64-bit database ids ride as strings (the
+JSON ecosystem's own convention); (b) FULL i64 — JS accepts
+number|BigInt and returns BigInt past 2^53; full snowflake ids, a
+permanently asymmetric ninth binding; (c) i32 — REJECTED: ms
+timestamps (~1.8e12), money-in-cents past $21M and files past 2GB
+stop fitting integers at all. Maintainer leans (a), wants more
+thought, and does not want kaya hamstrung. CLOSES TO CODE only after
+this is ruled: the guard's home is the root chokepoint, so it must
+precede the first wire byte of the ninth binding.
+
+
 ## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31)
 KEY: linux default typeface, embedded plex, script companions, fontconfig fallback pin, headerbar chrome, windowcontrols
 
