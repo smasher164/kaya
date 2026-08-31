@@ -146,7 +146,13 @@ public final class NestedTableCheck {
 }
 PROBE
 
-if run_javac -encoding UTF-8 -d "$TMP/classes" \
+# -Xlint:unchecked -Werror ON THE MAIN COMPILE ONLY (2026-08-31): an
+# unchecked warning is a compile failure here, so raw-generics slips
+# die at the gate instead of scrolling past as javac notes for weeks —
+# which is what the Signal<V> raw local and the generated eliminator's
+# raw Arm[] did. A legitimate erasure idiom carries its own
+# @SuppressWarnings at the site, which is the discipline.
+if run_javac -encoding UTF-8 -Xlint:unchecked -Werror -d "$TMP/classes" \
     bindings/java-desktop/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/*.java \
     guests/java/dev/kaya/milestone2kt/*.java \

@@ -123,7 +123,11 @@
             # Toolchain policy: LLVM/clang everywhere. Windows builds use
             # the msvc ABI through clang-cl + lld-link via cargo-xwin;
             # cl.exe is never required.
-            (rust-bin.stable.latest.default.override {
+            # Exact on purpose (2026-08-31): `latest` floated with the
+            # rust-overlay input, so an input update to fix overlay
+            # packaging would bump rustc as a side effect. The compiler
+            # moves by editing this version, never by `nix flake update`.
+            (rust-bin.stable."1.97.0".default.override {
               targets = [
                 "aarch64-pc-windows-msvc"
                 "x86_64-pc-windows-msvc"

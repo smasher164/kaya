@@ -16,8 +16,9 @@ final class PostKaya {
         return KayaSums.sumOf(tx, Feed.Post.class, Feed.Note.class, Feed.Todo.class);
     }
 
+    @SuppressWarnings("unchecked") // no generic array creation in Java; the raw array never escapes uncast
     static Stage2 eachSum(KayaApp.Tx tx, KayaSums.SumCollection<String, Feed.Post> c) {
-        return new Stage2(tx, c, new KayaSums.Arm[2]);
+        return new Stage2(tx, c, (KayaSums.Arm<String, Feed.Post>[]) new KayaSums.Arm[2]);
     }
 
     static final class Stage2 {

@@ -3356,7 +3356,7 @@ public final class KayaApp {
         }
 
         public <V> Signal<V> signal(V initial) {
-            Signal s = new Signal<>(++signals);
+            Signal<V> s = new Signal<>(++signals);
             emit(KayaWire.txCreateSignal(s.id, initial));
             return s;
         }

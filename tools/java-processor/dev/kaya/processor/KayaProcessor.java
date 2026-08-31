@@ -103,10 +103,11 @@ public final class KayaProcessor extends AbstractProcessor {
         w(b, "");
 
         // The staged eliminator.
+        w(b, "    @SuppressWarnings(\"unchecked\") // no generic array creation in Java; the raw array never escapes uncast");
         w(b, "    static Stage%d eachSum(KayaApp.Tx tx, KayaSums.SumCollection<%s, %s> c) {",
                 permitted.size(), key, sumRef);
-        w(b, "        return new Stage%d(tx, c, new KayaSums.Arm[%d]);",
-                permitted.size(), permitted.size());
+        w(b, "        return new Stage%d(tx, c, (KayaSums.Arm<%s, %s>[]) new KayaSums.Arm[%d]);",
+                permitted.size(), key, sumRef, permitted.size());
         w(b, "    }");
         for (int i = permitted.size(); i >= 1; i--) {
             TypeMirror sub = permitted.get(permitted.size() - i);
