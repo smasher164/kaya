@@ -8875,7 +8875,7 @@ and the adaptive scene's 520 both become the ruled 600 boundary, so
 those scenes' frozen widths move with the slice.
 
 
-## DESIGN — THE NINTH BINDING: JS/TS (Akhil, 2026-08-31; design rulings recorded, CODE GATED on the integer contract)
+## DESIGN — THE NINTH BINDING: JS/TS (Akhil, 2026-08-31; every day-one ruling recorded, integer contract included — BUILD READY)
 KEY: js binding, typescript, N-API, worker thread, BigInt, safe integer, 2^53, JSX, kaya-gui npm, event loop
 
 RULED 2026-08-31 (maintainer, design-only session — no code today):
@@ -8908,27 +8908,34 @@ RULED 2026-08-31 (maintainer, design-only session — no code today):
   ruled out as fighting the retained core.
 - Transaction style: AMBIENT (module-level constructors against the
   implicit current transaction, nested arrow bodies) is the
-  recommendation consistent with the worker and JSX rulings; formal
-  ruling rides with the integer one.
+  recommendation consistent with the worker and JSX rulings; confirmed
+  at build kickoff.
 
-OPEN AND GATING — THE INTEGER CONTRACT. JS numbers are doubles, exact
-only to ±2^53−1; kaya's wire integers are i64. The maintainer's read
-(2026-08-31): kaya's integers are mainly structural — TRUE in-tree
-(ids, enum tags, counts; the portfolio carries money as f64) — but
-the SURFACE admits arbitrary app i64 through record fields and
-signals, which is the only place the contract bites. Candidates, with
-the analysis on record: (a) SAFE-INTEGER — kaya integers exact to
-±2^53−1, refused beyond at the root in EVERY binding; JS becomes pure
-`number`, all nine languages identical, timestamps/money/file sizes
-fit with ~1000x headroom, 64-bit database ids ride as strings (the
-JSON ecosystem's own convention); (b) FULL i64 — JS accepts
-number|BigInt and returns BigInt past 2^53; full snowflake ids, a
-permanently asymmetric ninth binding; (c) i32 — REJECTED: ms
-timestamps (~1.8e12), money-in-cents past $21M and files past 2GB
-stop fitting integers at all. Maintainer leans (a), wants more
-thought, and does not want kaya hamstrung. CLOSES TO CODE only after
-this is ruled: the guard's home is the root chokepoint, so it must
-precede the first wire byte of the ninth binding.
+THE INTEGER CONTRACT — RULED 2026-08-31 (maintainer, same evening):
+SAFE-INTEGER. Kaya integers are COUNTS AND QUANTITIES, exact to
+±2^53−1, refused beyond that at the root in EVERY binding; identity
+rides as strings or tags. The ruling followed the maintainer's own
+question ("we're a GUI framework — why would kaya care about database
+ids or timestamps?") and the tree's answer: the portfolio, the most
+data-heavy app in-tree, sends ZERO integers (every record field is a
+string including qty; money lives as integer cents in the app's OWN
+book and is formatted before the wire; even row keys are the
+app-minted string "t00042", and key_of's docstring notes the scene
+grammar's untyped key segment matches string keys only); click tags
+are opaque bytes, so a 64-bit backend id already round-trips without
+kaya having an opinion; the only integer signal anywhere in-tree is
+milestone2's step counter; and the core never computes with app
+integers (sorting is app-side). i32 was REJECTED — the tagged value
+slot stays 8 bytes so it saves nothing, and it would refuse plausible
+raw counts (bytes, cents, ms) for zero benefit. FULL i64 was declined:
+it preserves exact >2^53 fields nobody uses at the price of a
+permanently BigInt-asymmetric ninth binding. BUILD SHAPE, first step
+of the ninth-binding milestone: the spec doc sentence, the root guard
+at the value-decode chokepoint (refusal names the fix: identity as
+strings/tags), a watched negative, and the eight existing bindings
+audited for any path that could emit past 2^53 (none expected).
+Ambient tx style stands as the recommendation, to be confirmed at
+build kickoff.
 
 
 ## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31)
