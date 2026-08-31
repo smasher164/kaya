@@ -394,13 +394,13 @@ Adding any verb touches **five** places, and check-verbs enforces three of them:
 4. **swift/KayaSwiftUI.swift** — string-matched, not compile-checked.
 5. **android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt** — same.
 
-tools/check-verbs.sh:247-255 extracts every verb from `parse()` and demands the
-literal string in BOTH interpreter files. tools/check-verbs.sh:353-392 (gone) demands
+tools/check-verbs.py:868-880 extracts every verb from `parse()` and demands the
+literal string in BOTH interpreter files. tools/check-verbs.py:1098-1134 demands
 every `expect_*` arm actually append to `observed` — "an expect that records
 nothing passes without verifying anything", the defect measured on the Compose
-`expect_ax` arm 2026-07-25 (check-verbs.sh:353-361). And any new scene
+`expect_ax` arm 2026-07-25 (check-verbs.py:1098-1134). And any new scene
 substitution token (`$TMP`, `$PID`-style) must expand in all THREE
-implementations, interpreters plus harness.rs (check-verbs.sh:257-293).
+implementations, interpreters plus harness.rs (check-verbs.py:961-981).
 
 ### 2.4 Which gates hold the milestone open mid-fan-out — the clipboard pattern
 
@@ -409,14 +409,14 @@ ran it end to end (docs/deferred.md:33-40: "COMPLETE 2026-08-04: all five
 backends, all eight bindings, every lane green").
 
 **check-verbs (tools/check-verbs.sh)** goes red the moment a verb exists in
-`parse()` and not in an interpreter (check-verbs.sh:247-255). It also pins
-private constant mirrors by NAME AND VALUE together (check-verbs.sh:315-337),
+`parse()` and not in an interpreter (check-verbs.py:868-880). It also pins
+private constant mirrors by NAME AND VALUE together (check-verbs.py:1036-1080),
 and specifically added a `CLIP_*` clause for the clipboard's five bit-position
-masks because the generic sweep could not see them (check-verbs.sh:30-60). An
+masks because the generic sweep could not see them (check-verbs.py:57-94). An
 undo milestone that introduces its own constants (a group flag, an
 undoability mask) should expect to need the same bespoke clause, with the same
 perturbation-scored self-test (`named/total`, only `1/1` passes,
-check-verbs.sh:140-152).
+check-verbs.py:640-651).
 
 **check-sugar-surface (tools/check-sugar-surface.sh)** goes red for any binding
 that has not spelled the new surface. Two loops track the spec by construction
