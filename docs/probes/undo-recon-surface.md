@@ -158,7 +158,9 @@ Four candidates, ascending in invasiveness:
    in its own transaction — Rust "Run everything posted, each in its own
    transaction" app.rs:530-541; Go "dispatch runs one handler inside its own
    Build" app.go:453-455; OCaml `let dispatch app` kaya_app.ml:419; Python's
-   `_dispatch` is the subject of tools/check-ambient-tx.sh:18-28. So "one
+   `_dispatch` is the subject of tools/check-ambient-tx.py:10-26 (the
+   gate's body is python since the 2026-08-27 conversion ruling; the .sh
+   is its exec shim). So "one
    gesture = one transaction = one undo step" costs no new binding surface at
    all. It is also probably wrong at the edges: a per-keystroke text editor
    would get one undo step per character, which is exactly the coalescing
