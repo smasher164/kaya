@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+from kaya_gate import Gate, dev_shell_or_die
+
+dev_shell_or_die()
+
+# THE TWO NATIVE-TIER GUARDS NO SCENE CAN FAIL (CLAUDE.md's gate list).
+#
+# Observing either one needs TWO CONSECUTIVE NATIVE WALKS: the first walk
+# spends the frontier episode (`note_native_undo`, crates/kaya/src/
+# scene.rs) and the next Edit>Undo routes CORE by construction. The scene
+# cannot be reshaped to reach it either — that would assert FRONTIER
+# GRANULARITY, which tools/scenes/undo.steps refuses because keystroke
+# coalescing differs per platform. So static pairing is the only wall:
+#
+#   1. A backend that takes the core's native-undo SAMPLE must mark the
+#      emission its own walk provokes LEDGER-QUIET, or the same walk is
+#      banked twice and the redo side loses the run.
+#   2. That mark must be CONSUMED where the edit is reported: the read
+#      and the report are one block.
+#   3. A backend handling the ClearUndo apply op must call the platform's
+#      clear in that arm (A1's keystone).
+#
+# WHAT IT DOES NOT PIN: a call that is present but disabled satisfies
+# clause 3, and no text gate can do better. What it pins is that the arm
+# and the clear are ONE UNIT.
+
+import re
+
+GTK = "crates/kaya/src/gtk.rs"
+WINUI = "crates/kaya/src/winui/mod.rs"
+SWIFTUI = "swift/KayaSwiftUI.swift"
+COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+gate = Gate("check-native-undo")
+
+# Five backends, four files: KayaSwiftUI.swift serves mac AND iOS, whose
+# brackets differ in spelling and not in rule — so `mark` is a LIST and
+# any one entry satisfies the file.
+#
+# ANCHORS ARE CALL SHAPES, not bare names: a bare `note_native_undo`
+# matches gtk.rs's own helper DEFINITION as well as the core call, and a
+# gate that matches a definition passes when the call is deleted.
+BACKENDS = [
+    dict(
+        path=GTK, name="gtk",
+        sample=r"core\.scene\.note_native_undo\(",
+        mark=[r"ledger_quiet\.set\(true\)"],
+        readback=r"ledger_quiet\.get\(\)",
+        bank=r"bank_text_changed\(",
+        arm=r"ApplyOp::ClearUndo\b",
+        clear=r"clear_native_undo\(",
+    ),
+    dict(
+        path=WINUI, name="winui",
+        sample=r"core\.scene\.note_native_undo\(",
+        mark=[r"core\.ledger_quiet\.insert\("],
+        readback=r"core\.ledger_quiet\.get\(",
+        bank=r"\.note_text_changed\(",
+        arm=r"ApplyOp::ClearUndo\b",
+        clear=r"clear_native_undo\(",
+    ),
+    dict(
+        path=SWIFTUI, name="swiftui",
+        sample=r"api\.note_native_undo\(",
+        mark=[r"kayaNoteNativeUndoEcho\(",
+              r"kayaRoutedNativeUndoDepth \+= 1"],
+        readback=r"kayaTakeNativeUndoEcho\(",
+        bank=r"api\.emit_text_changed\(",
+        arm=r"case applyClearUndo:",
+        clear=r"kayaClearUndoForGroup\(",
+    ),
+    dict(
+        path=COMPOSE, name="compose",
+        sample=r"KayaPresent\.noteNativeUndo\(",
+        mark=[r"kayaNativeUndoEcho\[[^\]]*\] = "],
+        readback=r"kayaTakeNativeUndoEcho\(",
+        bank=r"KayaPresent\.emitTextChanged\(",
+        arm=r"APPLY_CLEAR_UNDO ->",
+        clear=r"kayaClearUndoForGroup\(",
+    ),
+]
+
+DECL = re.compile(r"(?:func|fun|fn)\s+$")
+
+# How far a ClearUndo arm's body may reach before the pairing stops
+# being one.
+ARM_LINES = 25
+
+
+def hits(text, pattern):
+    """Every occurrence of `pattern` that is a USE rather than a
+    DECLARATION. Reading a function's own definition as a call is how a
+    clause goes vacuous the moment the call is deleted."""
+    out = []
+    for m in re.finditer(pattern, text):
+        head = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[m.start():])
+        before = text[:m.start()]
+        if head and DECL.search(before[-24:]):
+            continue
+        out.append(m)
+    return out
+
+
+def skip_string(text, j):
+    """Past the string literal starting at `j`, INTERPOLATIONS AND ALL.
+
+    The naive version — scan to the next quote — desynced this reader on
+    both interpreted files, and the balance check below is what caught
+    it: Kotlin's `"…(${list.joinToString("; ")})"` and Swift's
+    `"can\\(redo ? "Redo" : "Undo")"` each nest a string inside an
+    expression inside a string, so the next quote is the START of the
+    inner one and everything after it is read as code."""
+    n = len(text)
+    j += 1
+    while j < n:
+        c = text[j]
+        if c == "\\" and not text.startswith("\\(", j):
+            j += 2
+            continue
+        if c == '"':
+            return j + 1
+        # Kotlin `${…}` and Swift `\(…)`: a code region inside a string.
+        opener = "${" if text.startswith("${", j) else (
+            "\\(" if text.startswith("\\(", j) else None)
+        if opener:
+            close = "}" if opener == "${" else ")"
+            open_ch = "{" if opener == "${" else "("
+            depth = 0
+            j += len(opener) - 1
+            while j < n:
+                if text[j] == '"':
+                    j = skip_string(text, j)
+                    continue
+                if text[j] == open_ch:
+                    depth += 1
+                elif text[j] == close:
+                    depth -= 1
+                    if depth == 0:
+                        j += 1
+                        break
+                j += 1
+            continue
+        j += 1
+    return j
+
+
+def blocks(text):
+    """Every {..} block in the file, comments and string literals
+    skipped. Returns None if the scan lost sync — an unbalanced result
+    means this gate's reader stopped understanding the file, and a
+    reader that is lost must fail rather than report a clean bill."""
+    stack, out, j, n = [], [], 0, len(text)
+    while j < n:
+        c = text[j]
+        if c == "/" and text.startswith("//", j):
+            j = text.find("\n", j)
+            if j < 0:
+                break
+            continue
+        if c == "/" and text.startswith("/*", j):
+            j = text.find("*/", j)
+            if j < 0:
+                break
+            j += 2
+            continue
+        if text.startswith('r#"', j):
+            j = text.find('"#', j)
+            if j < 0:
+                break
+            j += 2
+            continue
+        if text.startswith('"""', j):
+            j = text.find('"""', j + 3)
+            if j < 0:
+                break
+            j += 3
+            continue
+        if c == '"':
+            j = skip_string(text, j)
+            continue
+        # A CHARACTER LITERAL, and only a real one: `'"'` in Kotlin's
+        # quoted-argument parser was reading as the START of a string
+        # here, and everything after it as prose — the balance check is
+        # what found that. The pattern deliberately does not match a
+        # Rust LIFETIME (`&'a str`), which has no closing quote and
+        # would eat the rest of the file.
+        if c == "'":
+            lit = re.match(r"'(?:\\.|[^\\'])'", text[j:])
+            if lit:
+                j += lit.end()
+                continue
+        if c == "{":
+            stack.append(j)
+        elif c == "}":
+            if not stack:
+                return None
+            out.append((stack.pop(), j))
+        j += 1
+    return None if stack else out
+
+
+def innermost(spans, at):
+    """The smallest block containing `at`, or None at file scope."""
+    best = None
+    for a, b in spans:
+        if a < at < b and (best is None or (b - a) < (best[1] - best[0])):
+            best = (a, b)
+    return best
+
+
+def line(text, at):
+    return text.count("\n", 0, at) + 1
+
+
+def check(texts):
+    """texts: {site: text}. Offender sentences."""
+    bad = []
+    for be in BACKENDS:
+        path, name = be["path"], be["name"]
+        text = texts[path]
+        spans = blocks(text)
+        if spans is None:
+            bad.append(f"{path}: this gate's block reader lost sync with "
+                       "the file (unbalanced braces after skipping "
+                       "comments and strings) — every clause below would "
+                       "be guesswork")
+            continue
+
+        # 0. VACUITY. Every anchor must still match: a clause whose
+        #    anchor stopped matching reports a clean bill about nothing.
+        missing = [what for what in ("sample", "readback", "bank", "arm",
+                                     "clear")
+                   if not hits(text, be[what])]
+        if not any(hits(text, m) for m in be["mark"]):
+            missing.append("mark")
+        if missing:
+            bad.append(
+                f"{path}: this gate looks for {', '.join(sorted(missing))} "
+                f"in the {name} arm and no longer finds "
+                f"{'it' if len(missing) == 1 else 'them'} — either the "
+                "native-undo tier left this backend (say so here) or its "
+                "spelling moved and the clause went vacuous")
+            continue
+
+        # 1. SAMPLE ⇒ MARK.
+        if not any(hits(text, m) for m in be["mark"]):
+            bad.append(
+                f"{path}: the {name} arm calls the core's native-undo "
+                "sample but marks no emission ledger-quiet — the ordinary "
+                "text_changed its own walk provokes is banked a second "
+                "time, which restates the walk's position as a new "
+                "high-water and loses the run the redo side needs")
+
+        # 2. THE MARK IS CONSUMED WHERE THE EDIT IS REPORTED — not "the
+        #    token appears somewhere": a read that drifts away from the
+        #    report is a bracket that decides nothing.
+        for m in hits(text, be["readback"]):
+            span = innermost(spans, m.start())
+            where = text[span[0]:span[1]] if span else ""
+            if not hits(where, be["bank"]):
+                bad.append(
+                    f"{path}:{line(text, m.start())}: the ledger-quiet "
+                    f"read is not in the block that reports the edit "
+                    f"({be['bank']}) — a bracket read away from the "
+                    "report suppresses nothing, and the walk is banked "
+                    "twice")
+
+        # 3. THE CLEAR ARM CLEARS. The core drives the clear as an apply
+        #    op because only the backend knows what is focused.
+        #
+        #    THE ARM'S BODY IS A WINDOW, not a block, deliberately: the
+        #    three languages spell an arm three ways — Rust's `=> { … }`
+        #    (whose first brace after the head is the PATTERN's,
+        #    `{ window }`, not the body's), Kotlin's `-> { … }`, and
+        #    Swift's `case x:` with no braces at all. A window bounded
+        #    by the enclosing block and by ARM_LINES reads all three.
+        for m in hits(text, be["arm"]):
+            span = innermost(spans, m.start())
+            stop = len(text) if span is None else span[1]
+            cut = text.find("\n", m.start())
+            for _ in range(ARM_LINES):
+                if cut < 0:
+                    break
+                cut = text.find("\n", cut + 1)
+            if cut >= 0:
+                stop = min(stop, cut)
+            where = text[m.start():stop]
+            if not hits(where, be["clear"]):
+                bad.append(
+                    f"{path}:{line(text, m.start())}: the ClearUndo arm "
+                    f"does not call the platform's clear ({be['clear']}) "
+                    "— A1's keystone is what makes every episode begin "
+                    "with an empty native stack, so without it a native "
+                    "undo can reach back past the frontier episode's "
+                    "start and the ledger stops being ordered")
+    return bad
+
+
+REAL = {p: gate.read(p) for p in (GTK, WINUI, SWIFTUI, COMPOSE)}
+
+
+# THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES rather
+# than synthetic samples (docs/traps.md: the wayland seat guard passed
+# VACUOUSLY TWICE). Every perturbation goes through the prelude's doctor
+# — its count printed, an unapplied one refused — and every refusal is
+# checked for its REASON — an exit code alone is satisfied by any
+# unrelated finding.
+def refuses(texts, fragment, label):
+    out = check(texts)
+    if not out:
+        print(f"check-native-undo: SELF-TEST FAIL ({label} passed)",
+              file=sys.stderr)
+        sys.exit(1)
+    blob = "\n".join(out)
+    if fragment not in blob:
+        print(f"check-native-undo: SELF-TEST FAIL ({label} failed for "
+              f"another reason: {blob})", file=sys.stderr)
+        sys.exit(1)
+    # Said out loud on every run: the gate watching its own clauses fail.
+    print(f"check-native-undo: watched failing: {label}", file=sys.stderr)
+
+
+# 1. THE BRACKET DELETED — the perturbation no lane can fail.
+no_bracket = gate.doctor(
+    "the compose bracket-deletion perturbation", REAL[COMPOSE],
+    r"val quiet = kayaTakeNativeUndoEcho\([^)]*\)", "val quiet = false",
+    flags=re.S)
+refuses({**REAL, COMPOSE: no_bracket}, "no longer finds",
+        "a Compose arm whose ledger-quiet read is gone")
+
+# 2. THE BRACKET DRIFTED AWAY FROM THE REPORT — present, deciding
+#    nothing, the shape a presence check would pass. Two substitutions,
+#    because the read has to LEAVE the emission and land somewhere real.
+half = gate.doctor(
+    "the swiftui bracket-deletion half", REAL[SWIFTUI],
+    r"let quiet = kayaTakeNativeUndoEcho\(node\.id, text\)",
+    "let quiet = false", flags=re.S)
+stranded = gate.doctor(
+    "the swiftui stranded-read half", half,
+    r"func kayaCoreUndo\(_ window: UInt64\) \{",
+    'func kayaCoreUndo(_ window: UInt64) {\n'
+    '    _ = kayaTakeNativeUndoEcho(window, "")', flags=re.S)
+refuses({**REAL, SWIFTUI: stranded},
+        "is not in the block that reports the edit",
+        "a SwiftUI arm whose bracket read drifted off the emission")
+
+# 3. THE CLEAR DROPPED FROM THE APPLY ARM — the other guard no lane can
+#    fail.
+no_clear = gate.doctor(
+    "the gtk clear-arm perturbation", REAL[GTK],
+    r"ApplyOp::ClearUndo \{ window \} => \{\n            "
+    r"if let Some\(id\) = focused_text_in\(core, window\) \{\n"
+    r"                core\.clear_native_undo\(id\);\n            \}",
+    "ApplyOp::ClearUndo { window } => {\n            let _ = window;",
+    flags=re.S)
+refuses({**REAL, GTK: no_clear}, "does not call the platform's clear",
+        "a GTK ClearUndo arm that clears nothing")
+
+# 4. THE SAMPLE'S OWN ANCHOR MOVED — the vacuity direction. A backend
+#    that stops calling the core seam must SAY so here.
+moved = gate.doctor(
+    "the winui anchor-rename perturbation", REAL[WINUI],
+    r"core\.scene\.note_native_undo\(",
+    "core.scene.note_native_undo_renamed(", flags=re.S)
+refuses({**REAL, WINUI: moved}, "no longer finds",
+        "a WinUI backend whose core seam moved")
+
+offenders = check(REAL)
+if offenders:
+    print("\n".join(offenders))
+    print("check-native-undo: FAIL")
+    sys.exit(1)
+print("check-native-undo: OK")
