@@ -8846,6 +8846,61 @@ these entries is derived, never typed. The breakpoint is the one number
 an author writes, which is exactly why it is the one that should be a
 name.
 
+SPELLING RATIFIED 2026-08-31 (maintainer): `stack_when` taking a TYPED
+size-class name in every binding's idiom — Rust
+`.stack_when(SizeClass::Compact)`, Swift `.stackWhen(.compact)`, Python
+`stack_when=kaya.COMPACT` — never a string literal, so a typo is a
+compile error in the six compiled languages (precedent: platforms are
+already `kaya.Platform.LINUX`, not `"linux"`). `compact` is the only
+accepted value day one; the vocabulary can grow. The portfolio's 700
+and the adaptive scene's 520 both become the ruled 600 boundary, so
+those scenes' frozen widths move with the slice.
+
+
+## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31)
+KEY: linux default typeface, embedded plex, script companions, fontconfig fallback pin, headerbar chrome, windowcontrols
+
+RULED 2026-08-31 (maintainer), scope only — the build is sequenced
+behind the breakpoint slice and the JS/TS design work. Two halves,
+both LINUX ONLY: every other platform keeps its platform font and its
+platform chrome (San Francisco, Segoe UI Variable and Roboto are
+deliberate designs, and the mac/windows chrome APIs stop at sanctioned
+knobs anyway — caption buttons and traffic lights are system-drawn).
+
+ONE: an app that declares no `brand_typeface` gets kaya's own embedded
+default on the GTK backend — IBM Plex Sans, FAMILY ONLY, the user's
+font size kept. Linux is the one platform whose "system font" is not
+one thing (Adwaita Sans on GNOME 48, DejaVu on a bare box), which is
+why a framework default is defensible there and nowhere else. The
+maintainer wants the FULL script set, not the Latin core alone: the
+Plex superfamily covers CJK completely since late 2024 (Sans JP, KR,
+TC, SC), plus Arabic, Hebrew, Thai and Devanagari; the Indic scripts
+beyond Devanagari (Tamil, Bengali, Telugu, Kannada, …) have no Plex
+face, so their fallback is PINNED (Noto Sans per script) rather than
+left to the distro lottery. The mechanism is a fontconfig prefer list
+per script beside the installed companions — Pango itemizes text per
+script run, so mixed-script text picks each face by script — and the
+wire already carries font bytes (`set_brand_typeface`), so the
+framework default rides the machinery the brand typeface built. Cost
+on the record, accepted by the maintainer: the CJK companions run
+~30k glyphs each, tens of MB across weights; where that weight LIVES
+(each app bundle vs a shared kaya font pack) belongs to the deferred
+distribution story and is the first question the build must answer.
+The lane fixture (10fcc83) is the separate, already-shipped half: it
+pins the CONTAINER's system font so legs are deterministic, and says
+nothing about what a user's app looks like.
+
+TWO: the chrome, GTK ONLY by the maintainer's scope ruling — headerbar
+height, window-control (min/max/close) styling and spacing, via the
+CSS provider the backend already owns. Client-side decorations mean
+kaya draws its own titlebar on Linux, so this is ordinary styling
+work, not a platform fight.
+
+Closes when both halves ship with their proofs: the typeface half
+wants an `expect_typeface` leg for the undeclared-app default plus a
+pinned-fallback story, the chrome half a frozen observation of the
+styled headerbar.
+
 
 ## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO (2026-08-29; the header half CLOSED 2026-08-30)
 KEY: grow inside scroll, unbounded main axis, sliver header, tableHeaderView, LazyColumn item, nested scroll, interim portfolio fix
