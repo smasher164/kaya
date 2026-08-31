@@ -6395,3 +6395,29 @@ ever fails with "click reported ok, no push", this is the signature;
 instrument the go side's occurrence queue before blaming the scene.
 (Carried 2026-08-31 from the struck multi-column ledger entry, whose
 body was this measurement's only copy.)
+
+## The Linux font fixture has two settings routes (measured 2026-08-30)
+
+`/etc/gtk-4.0/settings.ini` is not one system-wide answer on this lane.
+Measured in the pinned Debian 13.6 image with GTK 4.18.6, after that file
+requested `Adwaita Sans 11`:
+
+    X11:     Adwaita Sans 11
+    Wayland: Cantarell 11
+
+The bare Xvfb session has no XSettings manager, so GTK keeps the file
+fallback. The Wayland backend reads `org.gnome.desktop.interface` through
+GSettings, where Debian's `10_gsettings-desktop-schemas.gschema.override`
+supplies `Cantarell 11` at the higher desktop-setting priority. Installing
+Adwaita Sans alone changes neither route; naming it in the GTK file changes
+only X11.
+
+The current fixture selects `IBM Plex Sans 11` through both routes; the
+measured priority split is unchanged.
+
+A deterministic font fixture therefore has three inseparable parts: the
+face installed, the GTK file fallback for X11, and a later GSettings schema
+override for Wayland. `tools/linux/font-preflight.py`, reached by every
+Linux lane before its first leg, reads the real `Gtk.Settings` once per
+protocol and resolves that description through Pango. The second read is
+what catches an installed setting whose absent face silently falls back.

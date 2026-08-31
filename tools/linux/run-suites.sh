@@ -242,6 +242,17 @@ if ! swaymsg -t get_seats 2>/dev/null | grep -q '"name"'; then
     exit 1
 fi
 
+# docs/traps.md, "The Linux font fixture has two settings routes".
+if ! GTK_A11Y=none GDK_BACKEND=x11 timeout 15 \
+    xvfb-run -a -s "-screen 0 1600x1000x24" \
+    python3 /work/tools/linux/font-preflight.py; then
+    exit 1
+fi
+if ! GTK_A11Y=none GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \
+    timeout 15 python3 /work/tools/linux/font-preflight.py; then
+    exit 1
+fi
+
 # AND THE SEAT MUST STAY KEYBOARDLESS WHILE THE POOL RUNS. The seat does
 # need key events for the clipboard legs — Wayland charges an
 # input-event serial for TAKING the selection, freshly per copy

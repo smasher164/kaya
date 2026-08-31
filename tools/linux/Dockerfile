@@ -152,4 +152,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdotool \
     && rm -rf /var/lib/apt/lists/*
 
+# The lane's system-font fixture; docs/traps.md, "The Linux font fixture
+# has two settings routes".
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        fontconfig \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL -o /tmp/ibm-plex-sans.zip \
+        https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans%401.1.0/ibm-plex-sans.zip \
+    && echo "fb365d910566e6d199cc2c15579a7dd9a267128e18431a394ed81f1970c69200  /tmp/ibm-plex-sans.zip" \
+        | sha256sum -c - \
+    && mkdir -p /tmp/ibm-plex-sans \
+        /usr/local/share/fonts/IBM/PlexSans \
+        /usr/local/share/doc/ibm-plex-sans \
+        /etc/gtk-4.0 \
+    && python3 -m zipfile -e /tmp/ibm-plex-sans.zip /tmp/ibm-plex-sans \
+    && install -m 0644 \
+        /tmp/ibm-plex-sans/ibm-plex-sans/fonts/complete/otf/IBMPlexSans-*.otf \
+        /usr/local/share/fonts/IBM/PlexSans/ \
+    && install -m 0644 /tmp/ibm-plex-sans/ibm-plex-sans/LICENSE.txt \
+        /usr/local/share/doc/ibm-plex-sans/LICENSE.txt \
+    && fc-cache -f \
+    && test "$(fc-match --format='%{family[0]}|%{style[0]}' 'IBM Plex Sans:style=Regular')" = "IBM Plex Sans|Regular" \
+    && test "$(fc-match --format='%{family[0]}|%{style[0]}' 'IBM Plex Sans:style=Bold')" = "IBM Plex Sans|Bold" \
+    && rm -rf /tmp/ibm-plex-sans /tmp/ibm-plex-sans.zip
+
+COPY gtk-settings.ini /etc/gtk-4.0/settings.ini
+COPY 99-kaya-font.gschema.override \
+    /usr/share/glib-2.0/schemas/99-kaya-font.gschema.override
+RUN glib-compile-schemas /usr/share/glib-2.0/schemas
+
 WORKDIR /work

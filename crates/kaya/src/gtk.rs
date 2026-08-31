@@ -4930,15 +4930,11 @@ struct TypefaceSeen {
 }
 
 /// ONE WIDGET'S TWO FONT NUMBERS: the CSS-computed REQUEST, and the family
-/// Pango RESOLVED it to. Both, because the resolved family ALONE is the same
-/// string whether the rule applied to a family nobody has installed or never
-/// reached the widget at all.
-///
-/// `pango_context().font_description()` IS THE REQUEST AND IT LIES —
-/// measured: an unbranded label's context says `Sans` while the text system
-/// is using `DejaVu Sans`, and a branded one echoes `KayaNoSuchFamily-9x`
-/// back verbatim for a family this image does not have. The honest number
-/// comes from LOADING that request and asking the FONT what it is.
+/// Pango RESOLVED it to. Both, because a platform may resolve an absent family
+/// and an unapplied rule to the same fallback. docs/styling/typeface-gtk.md
+/// §2/§3 holds the measured proof; docs/traps.md holds the current lane
+/// default. The honest number comes from LOADING the request and asking the
+/// FONT what it is.
 #[cfg(feature = "harness")]
 fn widget_typeface(widget: &gtk4::Widget) -> Option<(String, String)> {
     use gtk4::pango::prelude::{FontExt, FontFaceExt, FontFamilyExt};
@@ -5004,20 +5000,11 @@ fn walk_typefaces(core: &CoreState) -> TypefaceSeen {
 /// The answer `expect_typeface` compares, and — when it is not the one
 /// the app asked for — a diagnosis printed beside it.
 ///
-/// THE DIAGNOSIS PRINTS ONLY WHAT THIS PROCESS MEASURED, and it exists
-/// because the resolved family ALONE cannot tell the two causes apart
-/// (invariant 3; the `kayaOpenPanelWhyNot` shape). On this image both
-/// failures answer `DejaVu Sans`:
-///
-/// ```text
-/// asked "KayaNoSuchFamily-9x", css "KayaNoSuchFamily-9x", resolved "DejaVu Sans"
-///     -> the rule applied; fontconfig has no such family
-/// asked "DejaVu Serif",        css "Sans",                resolved "DejaVu Sans"
-///     -> the rule never reached the widget
-/// ```
-///
-/// A sentence naming only the resolved family is a sentence printed for
-/// both, and the reader would chase whichever it named.
+/// THE DIAGNOSIS PRINTS ONLY WHAT THIS PROCESS MEASURED. A platform may give
+/// more than one cause the same resolved family, so that family is not causal
+/// evidence even when the current fixture happens to distinguish the cases.
+/// docs/styling/typeface-gtk.md §3 holds the watched proof (invariant 3; the
+/// `kayaOpenPanelWhyNot` shape).
 #[cfg(feature = "harness")]
 fn typeface_verdict(core: &CoreState, seen: &TypefaceSeen) -> String {
     let answer = match seen.families.len() {

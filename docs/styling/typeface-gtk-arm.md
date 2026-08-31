@@ -6,6 +6,11 @@ crates/kaya/src/gtk.rs (linux platform row), replace the loud
 both display legs in the container. NO commits; no tools/** or *.steps
 edits.
 
+This is a historical arm record. Its font inventory and default-font
+measurements predate the 2026-08-30 system-font fixture; see docs/traps.md,
+"The Linux font fixture has two settings routes". They remain here as the
+measurements that shaped this arm, not as current-image claims.
+
 Mechanics from the PROBE (docs/styling/typeface-gtk.md): `:root`
 at APPLICATION priority in its OWN provider, `ctx.load_font` +
 `describe().family()` for the honest read, `ctx.font_description()`

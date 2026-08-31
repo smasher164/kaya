@@ -3,6 +3,12 @@
 Measure-first probe for docs/styling-plan.md Slice 2b. NO repo files
 touched; every artifact lives under the session scratchpad.
 
+This is a historical record of the lane image identified below. It predates
+the system-font fixture, which installs and selects IBM Plex Sans;
+see docs/traps.md, "The Linux font fixture has two settings routes". The
+inventory and default-font values below are retained as measured evidence,
+not as a description of the current image.
+
 Platform under test: `kaya-linux` image (debian trixie
 @sha256:fac46bff…), GTK 4.18.6, libadwaita 1.7.6, Pango 1.56.3,
 fontconfig 2.15.0, on BOTH lane display backends — `GDK_BACKEND=x11`
