@@ -1317,24 +1317,29 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             name: "create_breakpoint",
             fields: &[
                 f("window", FieldTy::U64),
-                f("below", FieldTy::Value),
+                f("size_class", FieldTy::Value),
                 f("count", FieldTy::U32),
                 f("reserved", FieldTy::U32),
                 f("setters", FieldTy::Values),
             ],
             payload: None,
-            doc: "A width breakpoint on a window: when the window's width \
-                  drops below the f64 threshold (logical points), the core \
-                  applies the setter list; crossing back it restores the \
+            doc: "A size-class breakpoint on a window: while the window's \
+                  size class equals `size_class` (i64; SIZE_CLASS_COMPACT is \
+                  the only class a guest may name today), the core applies the \
+                  setter list; leaving the class it restores the \
                   guest-authored value, or the widget's own default where the \
                   guest never wrote one — the adaptation is a DIFF against \
-                  the base declaration (docs/adaptive-layout-plan.md D3).\n\n\
+                  the base declaration (docs/adaptive-layout-plan.md D3, \
+                  size classes ruled 2026-08-31). The guest NEVER writes a \
+                  width: iOS answers with the platform's own size class, and \
+                  every other platform derives it from the latched width at \
+                  the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.\n\n\
                   THE CORE EVALUATES THE CONDITION, never the platform's \
-                  breakpoint machinery and never a guest round trip: the \
-                  width is LATCHED from the backend's metrics reports, a \
-                  breakpoint declared before any report applies at the \
-                  first — the phone that never resizes — and a same-width \
-                  report moves nothing.\n\n\
+                  breakpoint machinery and never a guest round trip: width \
+                  and platform class are LATCHED from the backend's metrics \
+                  reports, a breakpoint declared before any report applies \
+                  at the first — the phone that never resizes — and a \
+                  same-metrics report moves nothing.\n\n\
                   `setters` is count triples flat: widgets (i64), then props \
                   (i64), then values, thirds by position. Setters may name \
                   `axis` only until the settable-prop ruling widens the list; \
@@ -1930,7 +1935,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   scroll-away content above row 0, in sibling order; `table` \
                   0 restores the child to its structural parent's layout. \
                   APPLY-ONLY AND DERIVED: no guest spells this — the core \
-                  computes it from a `stack_below` row's own shape when the \
+                  computes it from a `stack_when` row's own shape when the \
                   breakpoint crosses, which is why it is a record here and \
                   not a prop (a PROPS entry generates a guest setter in \
                   every binding). The tree does not change: the child keeps \
@@ -2623,6 +2628,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
         },
         EnumSpec {
+            // A window's named size class (ruled 2026-08-31): what a
+            // breakpoint's `size_class` value and the metrics report's
+            // platform class speak. `none` is the report's "this
+            // platform has no class of its own — derive from the
+            // width"; a breakpoint may name `compact` alone today.
+            name: "size_class",
+            variants: &[
+                ("none", 0),
+                ("compact", 1),
+                ("regular", 2),
+            ],
+        },
+        EnumSpec {
             name: "role",
             variants: &[
                 ("destructive", 1),
@@ -3184,6 +3202,9 @@ mod tests {
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,
                     ("axis", "horizontal") => wire::AXIS_HORIZONTAL,
                     ("axis", "vertical") => wire::AXIS_VERTICAL,
+                    ("size_class", "none") => wire::SIZE_CLASS_NONE,
+                    ("size_class", "compact") => wire::SIZE_CLASS_COMPACT,
+                    ("size_class", "regular") => wire::SIZE_CLASS_REGULAR,
                     ("align", "start") => wire::ALIGN_START,
                     ("align", "center") => wire::ALIGN_CENTER,
                     ("align", "end") => wire::ALIGN_END,

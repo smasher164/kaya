@@ -92,6 +92,19 @@ pub const TX_SET_DRAWING: u16 = 46;
 /// (docs/canvas-plan.md §3.2.1).
 pub const TX_SET_SIZE_POLICY: u16 = 47;
 pub const TX_CREATE_BREAKPOINT: u16 = 48;
+/// The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
+/// docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
+/// width. `compact` is the only class a binding can spell today.
+/// NONE is the metrics channel's "platform reports no size class" —
+/// the core then derives the class from the width at
+/// SIZE_CLASS_COMPACT_BELOW; iOS reports its own class and the
+/// boundary is never consulted there.
+pub const SIZE_CLASS_NONE: u32 = 0;
+pub const SIZE_CLASS_COMPACT: u32 = 1;
+pub const SIZE_CLASS_REGULAR: u32 = 2;
+/// The kaya-owned boundary (Material's compact edge) for platforms
+/// that report no class of their own.
+pub const SIZE_CLASS_COMPACT_BELOW: f64 = 600.0;
 /// `sorted`'s no-column sentinel (alert_choice's cancel precedent).
 pub const SORT_NONE: u32 = u32::MAX;
 /// `direction`'s two values, read only when `sorted` names a column.
@@ -157,7 +170,7 @@ pub const APPLY_SET_DRAWING: u16 = 36;
 /// The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child;
 /// u64 table } — render the child inside the grown table's viewport as
 /// scroll-away content above row 0; table 0 restores it. Core-derived
-/// from a stack_below row's own shape; no guest record spells it.
+/// from a stack_when row's own shape; no guest record spells it.
 pub const APPLY_FOLD: u16 = 37;
 
 // Value types.
@@ -1194,10 +1207,13 @@ pub fn decode_transaction_with_blobs(
             }
             TX_CREATE_BREAKPOINT => {
                 let window = WindowId(r.u64());
-                let below = match r.value() {
-                    Value::F64(n) => n,
+                let when = match r.value() {
+                    Value::I64(n) => n,
                     other => {
-                        panic!("kaya: create_breakpoint's threshold is {other:?}, wanted f64")
+                        panic!(
+                            "kaya: create_breakpoint's size class is {other:?}, \
+                             wanted i64 (SIZE_CLASS_COMPACT)"
+                        )
                     }
                 };
                 let n = r.u32() as usize;
@@ -1229,7 +1245,7 @@ pub fn decode_transaction_with_blobs(
                         (w, p, flat[2 * n + i].clone())
                     })
                     .collect();
-                TxOp::CreateBreakpoint { window, below, setters }
+                TxOp::CreateBreakpoint { window, when, setters }
             }
             TX_SET_COLUMN_HEADERS => {
                 let widget = WidgetId(r.u64());
@@ -2728,10 +2744,10 @@ impl Writer {
                     }
                 })
             }
-            TxOp::CreateBreakpoint { window, below, setters } => {
+            TxOp::CreateBreakpoint { window, when, setters } => {
                 self.record(TX_CREATE_BREAKPOINT, |b, blobs| {
                     b.extend_from_slice(&window.0.to_le_bytes());
-                    write_value(b, &Value::F64(*below), blobs);
+                    write_value(b, &Value::I64(*when), blobs);
                     b.extend_from_slice(&(setters.len() as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     b.extend_from_slice(&((setters.len() * 3) as u32).to_le_bytes());
@@ -3310,7 +3326,7 @@ mod tests {
             },
             TxOp::CreateBreakpoint {
                 window: WindowId(0),
-                below: 520.0,
+                when: i64::from(SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
             TxOp::AddChild {

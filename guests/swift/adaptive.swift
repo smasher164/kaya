@@ -1,8 +1,9 @@
 // The adaptive conformance scene, Swift port — see guests/rust/adaptive.rs
 // for the full rationale. row@dash flips by a HANDLER (D2's user-driven
-// toggle); row@narrow carries the chained breakpoint (D3): stackBelow(520)
-// stacks it vertically while the window is narrower than 520 logical points
-// and reverts crossing back. The byte-frozen contract is
+// toggle); row@narrow carries the chained breakpoint (D3, size classes
+// ruled 2026-08-31): stackWhen(.compact) stacks it vertically while the
+// window's size class is compact (below 600 points on every desktop)
+// and reverts on leaving the class. The byte-frozen contract is
 // tools/scenes/adaptive.steps.
 
 import Foundation
@@ -48,7 +49,7 @@ app.build { tx in
             tx.label(bind: two)  // label#4
         }
         tx.setA11yId(narrow, "narrow")
-        narrow.stackBelow(520)
+        narrow.stackWhen(.compact)
     }
     tx.mount(root)
 }

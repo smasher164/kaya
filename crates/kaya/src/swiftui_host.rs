@@ -253,10 +253,13 @@ pub struct KayaHostApi {
     /// the raster is, which is the only canvas observable a size policy
     /// can move.
     pub canvas_track: extern "C" fn(u64, f64, f64),
-    /// The window's content size (docs/adaptive-layout-plan.md D3): the
-    /// fact every declared breakpoint evaluates against, reported
-    /// whenever it changes.
-    pub window_metrics: extern "C" fn(u64, f64, f64),
+    /// The window's content size plus the platform's own size class
+    /// (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31): the
+    /// facts every declared breakpoint evaluates against, reported
+    /// whenever either changes. The class is wire::SIZE_CLASS_COMPACT /
+    /// _REGULAR on iOS, SIZE_CLASS_NONE on macOS (the core derives from
+    /// the width there).
+    pub window_metrics: extern "C" fn(u64, f64, f64, i64),
     pub frame: extern "C" fn(f64),
     pub harness_frame: extern "C" fn(),
     pub canvas_raster_shape: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,

@@ -131,6 +131,23 @@ public final class KayaApp {
     }
 
     /**
+     * A window's named size class (spec enum "size_class"; ruled
+     * 2026-08-31): what {@link Widget#stackWhen} speaks in place of an
+     * author-invented width. COMPACT is the whole surface today — the
+     * platform's own class on iOS, narrower than 600 points everywhere
+     * else. An app names a class, it never asks which one the window is.
+     */
+    public enum SizeClass {
+        COMPACT(KayaWire.SIZE_CLASS_COMPACT);
+
+        final long wire;
+
+        SizeClass(long wire) {
+            this.wire = wire;
+        }
+    }
+
+    /**
      * SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
      * never how it looks. Each variant fits one kind, and the ROOT
      * refuses the misfits at declare time.
@@ -2126,22 +2143,24 @@ public final class KayaApp {
         }
 
         /**
-         * Stack this container's children vertically while the window is
-         * narrower than {@code width} logical points, reverting crossing
-         * back — one core-evaluated width breakpoint
-         * (docs/adaptive-layout-plan.md D3).
+         * Stack this container's children vertically while the window's
+         * SIZE CLASS is {@code when} ({@link SizeClass#COMPACT}, the only
+         * class today), reverting on leaving the class — one
+         * core-evaluated breakpoint (docs/adaptive-layout-plan.md D3;
+         * classes ruled 2026-08-31: iOS answers with the platform's own
+         * class, every other platform is compact below 600 points).
          *
          * <p>LIVE ZONE ONLY: a breakpoint's setters name live widgets,
          * and a template row is a blueprint stamped per entry — the
          * template zone has no spelling for it.
          */
-        public Widget stackBelow(double width) {
+        public Widget stackWhen(SizeClass when) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
-                    "kaya: stackBelow on a widget outside its build transaction"
+                    "kaya: stackWhen on a widget outside its build transaction"
                     + " — a breakpoint is declared where the container is built");
             }
-            tx.stackBelow(id, width);
+            tx.stackWhen(id, when);
             return this;
         }
 
@@ -3463,15 +3482,16 @@ public final class KayaApp {
         }
 
         /**
-         * The one-prop breakpoint {@link Widget#stackBelow} declares, on
+         * The one-prop breakpoint {@link Widget#stackWhen} declares, on
          * the primary window: setters are count triples flat — widgets,
          * then props, then values, thirds by position.
          *
          * <p>PRIVATE, like {@link #sizePolicy}: a guest names a
-         * container and a width, never the prop number the core diffs.
+         * container and a size class, never the prop number the core
+         * diffs.
          */
-        private void stackBelow(long widget, double width) {
-            emit(KayaWire.txCreateBreakpoint(0, width, 1, new Object[] {
+        private void stackWhen(long widget, SizeClass when) {
+            emit(KayaWire.txCreateBreakpoint(0, when.wire, 1, new Object[] {
                 widget, (long) KayaWire.PROP_AXIS, (long) KayaWire.AXIS_VERTICAL }));
         }
 

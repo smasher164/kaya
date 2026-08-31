@@ -102,7 +102,8 @@ spellings lower to the record:
   overwhelmingly common one-prop case; the portfolio dashboard's whole
   phone fix is this one keyword on its outer row. Keys on WINDOW
   width: self-measurement is the circularity trap CSS and libadwaita
-  both had to legislate around.
+  both had to legislate around. (SUPERSEDED 2026-08-31: the authored
+  width died — the spelling is `stack_when(compact)`, D8.)
 - `with kaya.when(win.width < 600): dash.axis = "vertical"` — the
   general spelling for multi-prop diffs and shared thresholds,
   extending `kaya.when`'s existing contract (traced, not taken):
@@ -144,6 +145,8 @@ serve actually exists.
 1. Threshold spelling and unit: `stack_below=` reads naturally; the
    general form's comparison direction (below vs at-least) and the
    unit's name (logical points, matching the platforms' convergence).
+   (Settled 2026-08-28 as `stack_below=<points>`, then SUPERSEDED
+   2026-08-31 by the size-class ruling — D8.)
 2. The settable-prop list: which properties a setter body may touch
    day one (axis, grow, visibility are the survey's usual trio).
 3. Day-one scope: sugar alone, or sugar plus the general `when`
@@ -156,11 +159,13 @@ portfolio's visual iteration.
 ### D7 — the adaptive fold (ratified 2026-08-30)
 
 RATIFIED BY THE MAINTAINER 2026-08-30, choosing the derived fold over an
-explicit `header=` slot: when a `stack_below` row is STACKED, its leading
+explicit `header=` slot: when a stacked-breakpoint row (`stack_when`
+today; `stack_below` when ratified) is STACKED, its leading
 hugging children fold into the viewport of its one grown table as
 scroll-away content above row 0 — one scroll where the interim shape had
 two — and crossing back restores them. NO NEW SPELLING ANYWHERE: the
-surface is `stack_below` itself, already in all eight bindings, and the
+surface is the stacking breakpoint itself, already in all eight
+bindings, and the
 fold is derived from the row's own shape, which is why the portfolio's
 guest change was a deletion (the interim `scroll(grow=1)` wrapper came
 out). An explicit header slot was rejected because a header renders
@@ -180,7 +185,7 @@ two-viewport split; a grown non-table keeps stacking; everything that
 fails the shape is exactly what it was before.
 
 EVALUATION IS AT THE BATCH TAIL, not at the CreateBreakpoint op: the
-sugar spells `stack_below` in the row's constructor, so at that op the
+sugar spells `stack_when` in the row's constructor, so at that op the
 row has no children and the rule would read an empty shape — watched
 failing under the op-time evaluation (scene.rs's
 `stacked_fold_computed_at_the_batch_tail_sees_the_rows_children`).
@@ -243,6 +248,43 @@ tools/check-table-card.sh pins the screen ground, its two wearers and
 the card's one spelling; a side-by-side screen (two table-bearing
 children, e.g. the pad's unstacked row) grounds but does not section.
 
+### D8 — the breakpoint speaks size classes (ruled and built 2026-08-31)
+
+THE RAW NUMBER DIED. `stack_below=<points>` made the author invent the
+one number every platform then had to honor; the maintainer's question
+("how is the user supposed to know what the breakpoint value is?") is
+the same one that moved Apple, Material and the CSS frameworks to NAMED
+CLASSES, and kaya followed: `stack_when(compact)` in every binding's own
+idiom (Rust `SizeClass::Compact`, Swift `.stackWhen(.compact)`, Python
+`stack_when=kaya.COMPACT`, Go `StackWhen(kaya.SizeClassCompact)`, Java
+`stackWhen(SizeClass.COMPACT)`, C# `stackWhen: SizeClass.Compact`,
+OCaml `~stack_when:Compact`, Haskell `StackWhen Compact`) — a TYPED
+name, so a typo is a compile error in the six compiled languages.
+`compact` is the only class a guest may name day one; the root refuses
+the rest by name.
+
+WHO ANSWERS "IS THE WINDOW COMPACT": iOS reports the platform's own
+horizontal size class with every metrics report — kaya_window_metrics
+grew a `size_class` argument, one call carrying width and class so a
+rotation never evaluates a stale pair — and every other platform
+reports NONE, the core deriving the class from the latched width at the
+kaya-owned 600-point boundary (wire::SIZE_CLASS_COMPACT_BELOW,
+Material's compact edge). A reported platform class BEATS the width —
+an iPad split-view pane can be compact at widths the boundary calls
+regular — which is the one behavior separating this design from a
+renamed threshold (scene.rs's
+`a_reported_platform_class_beats_the_width_boundary`). An unresolved
+environment class reports NONE rather than a guess.
+
+On the wire, record 48's threshold field became `size_class` (i64; the
+spec enum "size_class" generates the vocabulary into all eight bindings
+and both headers, and capi.rs carries the KAYA_-prefixed copies pinned
+by const-assert). The interpreters never see the record — the core
+evaluates, as D3 always said; their only change is the metrics report.
+The portfolio's `stack_below=700` and the adaptive scene's 520 became
+`stack_when(compact)`, and portfolio.steps' stacked assert moved inside
+the boundary (640 -> 560).
+
 ## §1.5 — the milestone landed 2026-08-28
 
 The breadth slice closed the same evening as the depth: the record went
@@ -265,7 +307,8 @@ D6's three rulings, settled by building: the threshold spelling is
 convergence); the setter list is axis-only, refused at the root by name;
 and day one is the SUGAR ALONE — the general `when` spelling is D4's
 neighbour on the ledger, unbuilt, since no scene or app needs a
-multi-prop diff yet.
+multi-prop diff yet. (The threshold half is SUPERSEDED 2026-08-31 by
+D8: the record's f64 width became the i64 spec enum "size_class".)
 
 ## §2 — validation shape (sketch, firmed at build time)
 
@@ -276,8 +319,9 @@ the half a one-way test would miss); on the phones the narrow side is
 asserted natively — each side proven where it naturally occurs, no
 platform asserting a width it cannot reach (the panes-band rule).
 `expect_axis` joins all three harnesses (check-verbs holds the
-coverage). check-sugar-surface grows the `stack_below` prop census and
-the axis-addressability census across the eight bindings and both
-construction zones. The portfolio gains its one keyword only after the
+coverage). The eight-language wall on the sugar is the adaptive guests
+themselves — every binding's `stack_when` spelling is exercised by a
+compiled (or run) guest on the mac lane, so a dropped constructor fails
+a build, not a census. The portfolio gains its one keyword only after the
 scene is green — the forcing artifact adopts the feature, never
 debuts it.

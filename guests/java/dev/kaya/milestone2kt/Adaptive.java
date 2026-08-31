@@ -52,7 +52,7 @@ final class Adaptive {
                     KayaApp.Signal<String> two = tx.signal("a wider two");
                     tx.label(one); // label#3
                     tx.label(two); // label#4
-                }).a11yId("narrow").stackBelow(520.0);
+                }).a11yId("narrow").stackWhen(KayaApp.SizeClass.COMPACT);
             }));
             return null;
         });

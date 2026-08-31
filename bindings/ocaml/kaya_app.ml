@@ -629,6 +629,13 @@ let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align
    spells it; the runtime toggle and a breakpoint's setters do. *)
 type axis = Horizontal | Vertical
 
+(* A window's named SIZE CLASS (spec enum "size_class"; ruled
+   2026-08-31): what [~stack_when] speaks in place of an author-invented
+   width. [Compact] is the whole surface today — the platform's own
+   class on iOS, narrower than 600 points everywhere else. An app names
+   a class, it never asks which one the window is. *)
+type size_class = Compact
+
 let axis_wire = function
   | Horizontal -> Int64.of_int Kaya_wire.axis_horizontal
   | Vertical -> Int64.of_int Kaya_wire.axis_vertical
@@ -1234,29 +1241,33 @@ let column ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset children =
 let scroll ?grow ?a11y_id ?a11y_label children =
   container ?grow ?a11y_id ?a11y_label Kaya_wire.kind_scroll children
 
-(* [~stack_below] stacks this row's children vertically while the window
-   is narrower than that many logical points, reverting on the way back
-   up — a core-evaluated width breakpoint, the one-prop sugar over
-   [Kaya_wire.tx_create_breakpoint] (docs/adaptive-layout-plan.md D3).
+(* [~stack_when] stacks this row's children vertically while the
+   window's SIZE CLASS is the named one ([Compact], the only class
+   today), reverting on leaving the class — a core-evaluated
+   breakpoint, the one-label sugar over
+   [Kaya_wire.tx_create_breakpoint] (docs/adaptive-layout-plan.md D3;
+   classes ruled 2026-08-31: iOS answers with the platform's own class,
+   every other platform is compact below 600 points).
    LIVE ONLY: [Tpl.row] carries no such label, so a blueprint cannot ask
    for one — a breakpoint's setters name live widgets, and a template
    row is stamped per entry. *)
-let row ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset ?stack_below children () =
+let row ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset ?stack_when children () =
   let parent =
     container ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset Kaya_wire.kind_row
       children ()
   in
   Option.iter
-    (fun width ->
+    (fun Compact ->
       let (Widget id) = parent in
       emit (the_tx ())
-        (Kaya_wire.tx_create_breakpoint 0L (Kaya_wire.F64 width) 1
+        (Kaya_wire.tx_create_breakpoint 0L
+           (Kaya_wire.I64 (Int64.of_int Kaya_wire.size_class_compact)) 1
            [
              Kaya_wire.I64 id;
              Kaya_wire.I64 (Int64.of_int Kaya_wire.prop_axis);
              Kaya_wire.I64 (Int64.of_int Kaya_wire.axis_vertical);
            ]))
-    stack_below;
+    stack_when;
   parent
 
 (* An existing widget as a child: [w field] wraps an already-realized

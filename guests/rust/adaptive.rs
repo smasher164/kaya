@@ -46,9 +46,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let flip = tx.button("flip").id(); // button#0
                 msgs.on_click(flip, Msg::Flip);
                 // row#1: the BREAKPOINT subject (D3) — declared data,
-                // core-evaluated: below 520 points of window width its
-                // axis goes vertical, and crossing back it reverts to
-                // the creation kind's own. The handler never touches it.
+                // core-evaluated: while the window's size class is
+                // compact its axis goes vertical, and leaving the class
+                // it reverts to the creation kind's own. The handler
+                // never touches it.
                 tx.row(|tx| {
                     let one = tx.signal("one");
                     let two = tx.signal("a wider two");
@@ -56,7 +57,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.label(two); // label#4
                 })
                 .a11y_id("narrow")
-                .stack_below(520.0);
+                .stack_when(kaya::SizeClass::Compact);
             })
             .id();
         tx.mount(root);

@@ -1836,7 +1836,11 @@ fn window_metrics_report(core: &mut CoreState) {
     }
     let scene = &mut core.scene;
     let Some(ops) = crate::fault::guard("reporting the window's content size", || {
-        scene.set_window_metrics(crate::protocol::WindowId(0), f64::from(width))
+        scene.set_window_metrics(
+            crate::protocol::WindowId(0),
+            f64::from(width),
+            i64::from(crate::wire::SIZE_CLASS_NONE),
+        )
     }) else {
         return;
     };

@@ -710,19 +710,27 @@ func (w Widget) Grow(weight float64) Widget {
 	return w
 }
 
-// StackBelow stacks this row's children vertically while the window is
-// narrower than width logical points, reverting crossing back — the
-// container-riding spelling of a core-evaluated width breakpoint
-// (docs/adaptive-layout-plan.md D3). Same transaction discipline as
-// Grow. Live zone only: a template row is a blueprint stamped per
-// entry, and Node carries no chain to spell this on.
-func (w Widget) StackBelow(width float64) Widget {
+// SizeClass is a window's named size class (spec enum "size_class";
+// ruled 2026-08-31): what StackWhen speaks in place of an
+// author-invented width. SizeClassCompact is the whole surface today —
+// the platform's own class on iOS, narrower than 600 points everywhere
+// else. An app names a class, it never asks which one the window is.
+type SizeClass int64
+
+// StackWhen stacks this row's children vertically while the window's
+// SIZE CLASS is the named one (SizeClassCompact, the only class today),
+// reverting on leaving the class — the container-riding spelling of a
+// core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). Same
+// transaction discipline as Grow. Live zone only: a template row is a
+// blueprint stamped per entry, and Node carries no chain to spell this
+// on.
+func (w Widget) StackWhen(when SizeClass) Widget {
 	if w.tx == nil || w.tx.closed {
-		panic("kaya: StackBelow on a widget outside its build transaction — a breakpoint's setters name live widgets, so it belongs in the build expression that created the row")
+		panic("kaya: StackWhen on a widget outside its build transaction — a breakpoint's setters name live widgets, so it belongs in the build expression that created the row")
 	}
 	// Setters flat: widgets, then props, then values — thirds by
 	// position, the encode's contract.
-	w.tx.emit(TxCreateBreakpoint(0, width, 1,
+	w.tx.emit(TxCreateBreakpoint(0, int64(when), 1,
 		[]any{int64(w.id), int64(PropAxis), int64(AxisVertical)}))
 	return w
 }
@@ -748,8 +756,8 @@ func (w Widget) Align(mode int64) Widget {
 // AxisVertical. One node, two constructor spellings: a widget created
 // as a row stays addressable as row#N whatever its axis says today
 // (docs/adaptive-layout-plan.md D1, D2). No constructor spells it, so
-// this is the only path; the declarative width-driven one is
-// Widget.StackBelow.
+// this is the only path; the declarative class-driven one is
+// Widget.StackWhen.
 func (tx *Tx) SetAxis(w Widget, axis int64) {
 	tx.emit(TxSetAxis(w.id, axis))
 }

@@ -1,8 +1,9 @@
 """The adaptive conformance scene, Python port — see
 guests/rust/adaptive.rs for the full rationale. row@dash flips by a
 HANDLER (D2's user-driven toggle); row@narrow carries the ONE-KEYWORD
-breakpoint (D3): `stack_below=520` stacks it vertically while the
-window is narrower than 520 logical points and reverts crossing back.
+breakpoint (D3, size classes ruled 2026-08-31): `stack_when=kaya.COMPACT`
+stacks it vertically while the window's size class is compact (below
+600 points on every desktop) and reverts on leaving the class.
 The harness (KAYA_SELFTEST=adaptive) reads the RENDERED axis both
 sides of the threshold, byte-for-byte against every other language.
 """
@@ -41,7 +42,7 @@ with app.window(title="adaptive", width=900, height=600):
         kaya.button("flip", on_click=flip)  # button#0
         # row#1: the BREAKPOINT subject (D3) — the handler never
         # touches it.
-        with kaya.row(stack_below=520) as narrow:
+        with kaya.row(stack_when=kaya.COMPACT) as narrow:
             one = kaya.signal("one")
             two = kaya.signal("a wider two")
             kaya.label(bind=one)  # label#3

@@ -341,7 +341,7 @@ on every runner, and a leg that cannot pass is not a leg.
 columns, or the reverse). A flip would render the rows as a plain row and
 drop the header, silently, on every backend — legal until this ruling
 because a For's container is a Column and `axis` is legal on Columns.
-`stack_below` lowers to a breakpoint whose only setter is `axis`, so one
+`stack_when` lowers to a breakpoint whose only setter is `axis`, so one
 refusal covers both spellings; the sentence says what a table does
 instead. Three watched negatives in scene.rs, plus one that holds a plain
 container still flipping.

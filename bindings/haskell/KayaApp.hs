@@ -133,13 +133,14 @@ module KayaApp
     setInset,
     setAlign,
     setAxis,
-    stackBelow,
+    stackWhen,
     setA11yId,
     setA11yLabel,
     setA11yHint,
     setRole,
     Align (..),
     Axis (..),
+    SizeClass (..),
     Role (..),
     Attr (..),
     WClass (..),
@@ -1968,18 +1969,31 @@ axisWire AxisVertical = fromIntegral W.axisVertical
 setAxis :: Widget -> Axis -> Build ()
 setAxis (Widget w) a = emitB (W.txSetAxis w (axisWire a))
 
--- | Stack this row's children vertically while the window is narrower
--- than @width@ logical points, reverting on the way back up — ONE
--- core-evaluated breakpoint record (docs\/adaptive-layout-plan.md D3).
--- The declarative spelling is the 'StackBelow' attr; taking a 'Widget'
+-- | A window's named SIZE CLASS (spec enum "size_class"; ruled
+-- 2026-08-31): what 'stackWhen' speaks in place of an author-invented
+-- width. 'Compact' is the whole surface today — the platform's own
+-- class on iOS, narrower than 600 points everywhere else. An app names
+-- a class, it never asks which one the window is.
+data SizeClass = Compact
+
+sizeClassWire :: SizeClass -> Int64
+sizeClassWire Compact = fromIntegral W.sizeClassCompact
+
+-- | Stack this row's children vertically while the window's SIZE CLASS
+-- is the named one ('Compact', the only class today), reverting on
+-- leaving the class — ONE core-evaluated breakpoint record
+-- (docs\/adaptive-layout-plan.md D3; classes ruled 2026-08-31: iOS
+-- answers with the platform's own class, every other platform is
+-- compact below 600 points).
+-- The declarative spelling is the 'StackWhen' attr; taking a 'Widget'
 -- is the template zone's refusal, since a breakpoint's setters name live
 -- widgets and a template row is a blueprint stamped per entry.
-stackBelow :: Widget -> Double -> Build ()
-stackBelow (Widget w) width =
+stackWhen :: Widget -> SizeClass -> Build ()
+stackWhen (Widget w) when =
   emitB
     ( W.txCreateBreakpoint
         0
-        (W.VF64 width)
+        (W.VI64 (sizeClassWire when))
         1
         [ W.VI64 (fromIntegral w),
           W.VI64 (fromIntegral W.propAxis),
@@ -2043,10 +2057,10 @@ data Attr (c :: WClass) where
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
   Align :: Align -> Attr 'BoxW
-  -- | Stack this row's children vertically while the window is narrower
-  -- than this many logical points. Containers only, and LIVE ZONE ONLY —
+  -- | Stack this row's children vertically while the window's size
+  -- class is the named one. Containers only, and LIVE ZONE ONLY —
   -- 'TplAttr' has no counterpart.
-  StackBelow :: Double -> Attr 'BoxW
+  StackWhen :: SizeClass -> Attr 'BoxW
   -- | This widget's accessibility identifier — any widget class, like
   -- 'Grow': the two accessibility props are universal, so the index
   -- must not narrow them.
@@ -2070,7 +2084,7 @@ applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
-applyAttr (StackBelow width) w = stackBelow w width
+applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yLabel l) w = setA11yLabel w l
 applyAttr (A11yHint h) w = setA11yHint w h

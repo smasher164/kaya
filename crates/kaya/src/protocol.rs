@@ -1482,17 +1482,18 @@ pub enum TxOp {
     /// For's TEMPLATE NODE — path empty declares every copy's bar,
     /// keys outermost-first re-declare ONE stamped copy's (the
     /// per-copy sort indicator; the dynamic-tables section).
-    /// A DECLARED BREAKPOINT (docs/adaptive-layout-plan.md D3): when the
-    /// window's content width is BELOW the threshold, the setters apply;
-    /// crossing back, they auto-revert to the guest-authored value or the
-    /// kind's own default — the diff-against-base rule. THE CORE
-    /// EVALUATES (kaya_window_metrics reports the width), never a
-    /// platform's breakpoint machinery and never a guest-side lambda.
-    /// Setters are limited to the ruled list (axis alone today; the root
-    /// refuses others until D6 widens it).
+    /// A DECLARED BREAKPOINT (docs/adaptive-layout-plan.md D3; size
+    /// classes ruled 2026-08-31): while the window's SIZE CLASS equals
+    /// `when` (wire::SIZE_CLASS_COMPACT alone today), the setters apply;
+    /// leaving the class, they auto-revert to the guest-authored value or
+    /// the kind's own default — the diff-against-base rule. THE CORE
+    /// EVALUATES (kaya_window_metrics reports width and platform class),
+    /// never a platform's breakpoint machinery and never a guest-side
+    /// lambda. Setters are limited to the ruled list (axis alone today;
+    /// the root refuses others until D6 widens it).
     CreateBreakpoint {
         window: WindowId,
-        below: f64,
+        when: i64,
         setters: Vec<(WidgetId, Prop, Value)>,
     },
     SetColumnHeaders {
@@ -1602,7 +1603,7 @@ pub enum ApplyOp {
     /// The stacked fold (docs/adaptive-layout-plan.md D7): render `child`
     /// inside grown table `table`'s viewport as scroll-away content above
     /// row 0, in sibling order; `table` 0 restores it. Derived by the
-    /// core from a `stack_below` row's own shape — no guest spells it —
+    /// core from a `stack_when` row's own shape — no guest spells it —
     /// and identity does not move: the child keeps its parent and its
     /// addressing, only where it renders changes.
     Fold { child: WidgetId, table: WidgetId },

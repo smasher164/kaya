@@ -21,14 +21,16 @@ expect_axis row@dash "vertical"
 # And BACK — the revert half a one-way flip would leave unproven.
 click button#0
 expect_axis row@dash "horizontal"
-# THE BREAKPOINT HALF (docs/adaptive-layout-plan.md D3): row@narrow's axis
-# is DECLARED data — below 520 points it is vertical — and THE CORE
-# does the one comparison, so this is the same arithmetic on every
-# platform. Every assert here sits AFTER a resize because the initial
-# state is width-dependent (the panes-band rule): the desktop legs
-# cross the threshold both ways, and the phone leg CUTS at
-# resize_window and asserts its own always-narrow truth as a per-leg
-# extra step (tools/ios/run-sim.sh's adaptive entry).
+# THE BREAKPOINT HALF (docs/adaptive-layout-plan.md D3; size classes
+# ruled 2026-08-31): row@narrow's axis is DECLARED data — while the
+# window's size class is COMPACT it is vertical. iOS reports the
+# platform's own class; every other platform derives compact below 600
+# points; THE CORE does the one comparison either way. Every assert
+# here sits AFTER a resize because the initial state is
+# width-dependent (the panes-band rule): the desktop legs cross the
+# boundary both ways, and the phone leg CUTS at resize_window and
+# asserts its own always-narrow truth as a per-leg extra step
+# (tools/ios/run-sim.sh's adaptive entry).
 resize_window 480x400
 expect_axis row@narrow "vertical"
 # Crossing back AUTO-REVERTS — the diff-against-base rule, no second

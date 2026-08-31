@@ -215,6 +215,27 @@
 #define TX_CREATE_BREAKPOINT 48
 
 /**
+ * The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
+ * docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
+ * width. `compact` is the only class a binding can spell today.
+ * NONE is the metrics channel's "platform reports no size class" —
+ * the core then derives the class from the width at
+ * SIZE_CLASS_COMPACT_BELOW; iOS reports its own class and the
+ * boundary is never consulted there.
+ */
+#define SIZE_CLASS_NONE 0
+
+#define SIZE_CLASS_COMPACT 1
+
+#define SIZE_CLASS_REGULAR 2
+
+/**
+ * The kaya-owned boundary (Material's compact edge) for platforms
+ * that report no class of their own.
+ */
+#define SIZE_CLASS_COMPACT_BELOW 600.0
+
+/**
  * `sorted`'s no-column sentinel (alert_choice's cancel precedent).
  */
 #define SORT_NONE UINT32_MAX
@@ -331,7 +352,7 @@
  * The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child;
  * u64 table } — render the child inside the grown table's viewport as
  * scroll-away content above row 0; table 0 restores it. Core-derived
- * from a stack_below row's own shape; no guest record spells it.
+ * from a stack_when row's own shape; no guest record spells it.
  */
 #define APPLY_FOLD 37
 
@@ -1010,11 +1031,24 @@
 #define KAYA_TX_SET_SIZE_POLICY 47
 
 /**
- * A width breakpoint on a window (docs/adaptive-layout-plan.md D3):
- * { u64 window; value below(f64); u32 count; u32 pad; values setters } —
- * count triples flat, widgets then props then values, thirds by position.
+ * A size-class breakpoint on a window (docs/adaptive-layout-plan.md D3;
+ * classes ruled 2026-08-31):
+ * { u64 window; value size_class(i64); u32 count; u32 pad; values setters }
+ * — count triples flat, widgets then props then values, thirds by position.
  */
 #define KAYA_TX_CREATE_BREAKPOINT 48
+
+/**
+ * The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
+ * `size_class` value and kaya_window_metrics' `size_class` argument
+ * speak. COMPACT is the only class a breakpoint may name today; NONE is
+ * the metrics report's "this platform has no size class of its own".
+ */
+#define KAYA_SIZE_CLASS_NONE 0
+
+#define KAYA_SIZE_CLASS_COMPACT 1
+
+#define KAYA_SIZE_CLASS_REGULAR 2
 
 /**
  * `sorted`'s no-column sentinel, and `direction`'s two values.
@@ -1903,11 +1937,14 @@ typedef struct KayaHostApi {
    */
   void (*canvas_track)(uint64_t, double, double);
   /**
-   * The window's content size (docs/adaptive-layout-plan.md D3): the
-   * fact every declared breakpoint evaluates against, reported
-   * whenever it changes.
+   * The window's content size plus the platform's own size class
+   * (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31): the
+   * facts every declared breakpoint evaluates against, reported
+   * whenever either changes. The class is wire::SIZE_CLASS_COMPACT /
+   * _REGULAR on iOS, SIZE_CLASS_NONE on macOS (the core derives from
+   * the width there).
    */
-  void (*window_metrics)(uint64_t, double, double);
+  void (*window_metrics)(uint64_t, double, double, int64_t);
   void (*frame)(double);
   void (*harness_frame)(void);
   uintptr_t (*canvas_raster_shape)(uint64_t, uint8_t*, uintptr_t);
@@ -2522,15 +2559,19 @@ void kaya_presentation(double scale, bool dark);
  * the held display list under a uniform fit, `redraw` and `tick` are
  * asked for a drawing at this size, and `fixed` records the number and
  * changes nothing. A report that changes nothing emits nothing.
- * THE WINDOW'S CONTENT SIZE in device-independent points, reported by
- * the backend whenever it changes — the fact every declared breakpoint
- * evaluates against (docs/adaptive-layout-plan.md D3). THE CORE does
- * the one comparison, so the switch point is identical arithmetic on
- * every platform; a report that changes nothing emits nothing. Height
- * rides along for the day a height threshold is ruled; nothing reads
- * it yet.
+ * THE WINDOW'S CONTENT SIZE in device-independent points plus the
+ * platform's own SIZE CLASS, reported by the backend whenever either
+ * changes — the facts every declared breakpoint evaluates against
+ * (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31).
+ * `size_class` is wire::SIZE_CLASS_COMPACT / _REGULAR where the
+ * platform defines one (iOS alone today), SIZE_CLASS_NONE everywhere
+ * else — the core then derives the class from the width at the
+ * kaya-owned 600 boundary. One call carries both so a rotation never
+ * evaluates a stale (width, class) pair. A report that changes
+ * nothing emits nothing. Height rides along for the day a height
+ * threshold is ruled; nothing reads it yet.
  */
-void kaya_window_metrics(uint64_t window, double width, double height);
+void kaya_window_metrics(uint64_t window, double width, double height, int64_t size_class);
 
 void kaya_canvas_track(uint64_t widget, double width, double height);
 

@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xa48166396de2f55d
+let kayaSpecHash: UInt64 = 0x2d485dd5237b14c3
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -3119,15 +3119,20 @@ enum KayaHost {
     /// backend measured, going the other way from every apply record.
     /// The core decides what to do with it — re-raster, ask the guest, or
     /// nothing at all — which is the size policy.
-    /// THE WIDTH A BREAKPOINT WAITS ON, and when it arrived. A phone
-    /// never resizes, so the FIRST report is the only one a breakpoint
-    /// gets, and `adaptive-swiftui` fails intermittently with its row
-    /// still horizontal (docs/deferred.md's ios-flaky entry). Both
-    /// reporters funnel through here, so one line covers appear and
-    /// change both; the recorder keeps it on a failing leg now.
-    static func windowMetrics(_ window: UInt64, _ size: CGSize) {
-        kayaDiag("metrics window=\(window) \(Int(size.width))x\(Int(size.height))")
-        api.window_metrics(window, Double(size.width), Double(size.height))
+    /// THE METRICS A BREAKPOINT WAITS ON — width plus the platform's own
+    /// size class — and when they arrived. A phone never resizes, so the
+    /// FIRST report is the only one a breakpoint gets, and
+    /// `adaptive-swiftui` fails intermittently with its row still
+    /// horizontal (docs/deferred.md's ios-flaky entry). Both reporters
+    /// funnel through here, so one line covers appear and change both;
+    /// the recorder keeps it on a failing leg now. `sizeClass` is
+    /// KAYA_SIZE_CLASS_COMPACT/_REGULAR on iOS (the platform's class,
+    /// ruled 2026-08-31) and _NONE on macOS, where the core derives the
+    /// class from the width.
+    static func windowMetrics(_ window: UInt64, _ size: CGSize, _ sizeClass: Int64) {
+        kayaDiag(
+            "metrics window=\(window) \(Int(size.width))x\(Int(size.height)) class=\(sizeClass)")
+        api.window_metrics(window, Double(size.width), Double(size.height), sizeClass)
     }
 
     static func canvasTrack(_ widget: UInt64, _ size: CGSize) {
@@ -15633,25 +15638,57 @@ struct KayaContextMenuItems: View {
 /// It also stamps the window's live FORM FACTOR, once, for everyone: the
 /// platform's own size class where there is one, and the window's OWN WIDTH
 /// against the same 600 boundary GTK, WinUI and Compose draw where there is not.
-/// The window's content size, reported to the CORE whenever it changes
-/// (kaya_window_metrics) — the fact every declared breakpoint evaluates
-/// against (docs/adaptive-layout-plan.md D3). Whole-window, outside the
-/// arm chain, for the form factor's reason: the reading must not depend
-/// on which arm rendered.
+/// The window's content size AND the platform's own size class, reported
+/// to the CORE whenever either changes (kaya_window_metrics) — the facts
+/// every declared breakpoint evaluates against
+/// (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31: iOS
+/// reports the platform's class, macOS reports NONE and the core derives
+/// it from the width). Whole-window, outside the arm chain, for the form
+/// factor's reason: the reading must not depend on which arm rendered.
+/// An unresolved environment class reports NONE rather than a guess —
+/// NONE is the channel's word for "no class measured".
 struct KayaWindowMetricsReporter: ViewModifier {
     let windowId: UInt64
+    #if !os(macOS)
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    private var sizeClass: Int64 {
+        #if os(macOS)
+            return Int64(KAYA_SIZE_CLASS_NONE)
+        #else
+            switch horizontalSizeClass {
+            case .compact: return Int64(KAYA_SIZE_CLASS_COMPACT)
+            case .regular: return Int64(KAYA_SIZE_CLASS_REGULAR)
+            default: return Int64(KAYA_SIZE_CLASS_NONE)
+            }
+        #endif
+    }
 
     func body(content: Content) -> some View {
         content
             .background(
                 GeometryReader { geo in
-                    Color.clear
-                        .onAppear {
-                            KayaHost.windowMetrics(windowId, geo.size)
-                        }
-                        .onChange(of: geo.size) { _, size in
-                            KayaHost.windowMetrics(windowId, size)
-                        }
+                    #if os(macOS)
+                        Color.clear
+                            .onAppear {
+                                KayaHost.windowMetrics(windowId, geo.size, sizeClass)
+                            }
+                            .onChange(of: geo.size) { _, size in
+                                KayaHost.windowMetrics(windowId, size, sizeClass)
+                            }
+                    #else
+                        Color.clear
+                            .onAppear {
+                                KayaHost.windowMetrics(windowId, geo.size, sizeClass)
+                            }
+                            .onChange(of: geo.size) { _, size in
+                                KayaHost.windowMetrics(windowId, size, sizeClass)
+                            }
+                            .onChange(of: horizontalSizeClass) {
+                                KayaHost.windowMetrics(windowId, geo.size, sizeClass)
+                            }
+                    #endif
                 }
             )
     }

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xa48166396de2f55dL;
+    public static final long SPEC_HASH = 0x2d485dd5237b14c3L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -132,6 +132,9 @@ public final class KayaWire {
     public static final int ALIGN_BASELINE = 4;
     public static final int AXIS_HORIZONTAL = 0;
     public static final int AXIS_VERTICAL = 1;
+    public static final int SIZE_CLASS_NONE = 0;
+    public static final int SIZE_CLASS_COMPACT = 1;
+    public static final int SIZE_CLASS_REGULAR = 2;
     public static final int ROLE_DESTRUCTIVE = 1;
     public static final int ROLE_PROMINENT = 2;
     public static final int ROLE_HEADING = 3;
@@ -795,11 +798,11 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. */
-    public static byte[] txCreateBreakpoint(long window, Object below, int count, Object[] setters) {
+    /** A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. */
+    public static byte[] txCreateBreakpoint(long window, Object sizeClass, int count, Object[] setters) {
         Enc b = begin(TX_KIND_CREATE_BREAKPOINT);
         b.putLong(window);
-        encodeValue(b, below);
+        encodeValue(b, sizeClass);
         b.putInt(count);
         b.putInt(0);
         encodeValues(b, setters);

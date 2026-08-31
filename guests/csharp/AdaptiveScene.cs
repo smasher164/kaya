@@ -55,7 +55,7 @@ static class AdaptiveScene
                     var two = tx.Signal("a wider two");
                     tx.Label(bind: one); // label#3
                     tx.Label(bind: two); // label#4
-                }, stackBelow: 520);
+                }, stackWhen: SizeClass.Compact);
                 tx.SetA11yId(narrow, "narrow");
             }));
         });

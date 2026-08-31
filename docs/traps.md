@@ -709,7 +709,8 @@ the same patterns return through interpreter drop-downs
   `report_window_metrics` handed those keys straight to
   `window_client_width`. An entry id is not a Win32 window, so the moment
   a navigation entry was the mounted surface, no width ever reached the
-  core and no `stack_below` on that screen could apply OR revert. Measured
+  core and no stacking breakpoint (`stack_below` then, `stack_when` since
+  2026-08-31) on that screen could apply OR revert. Measured
   2026-08-30 on the portfolio's fold block: eighteen metrics passes over
   `mounted_roots=[7]`, every one answering `client_width=None`, while
   `expect_window_size 640x600` proved the resize itself had landed. THE

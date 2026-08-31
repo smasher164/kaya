@@ -487,7 +487,7 @@ def open_transactions():
         first_line = kaya.signal("")
         last_line = kaya.signal("")
         net_signal = kaya.signal("")
-        with kaya.row(stack_below=700):
+        with kaya.row(stack_when=kaya.COMPACT):
             # A HUGGING SUMMARY, THEN THE ONE GROWN TABLE — the stacked
             # fold's shape (docs/adaptive-layout-plan.md D7). Side by side
             # on a desktop these are two columns; stacked on a phone the
@@ -551,7 +551,7 @@ with app.window(title="portfolio", width=900, height=600):
     # window fits the content and a viewport that fits does not
     # scroll, so one declaration serves every platform.
     with kaya.scroll(grow=1):
-        with kaya.row(stack_below=700):
+        with kaya.row(stack_when=kaya.COMPACT):
             with kaya.column():
                 # THE DRAWN MARK, inline with the title (the placement ruling,
                 # 2026-08-28): a row hugs its content, so the chip can take no

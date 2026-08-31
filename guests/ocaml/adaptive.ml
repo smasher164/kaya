@@ -1,9 +1,10 @@
 (* The adaptive conformance scene, OCaml port — see guests/rust/adaptive.rs
    for the full rationale and tools/scenes/adaptive.steps for the
    byte-frozen contract. row@dash flips by a HANDLER (D2's user-driven
-   toggle); row@narrow carries the ONE-LABEL breakpoint (D3):
-   [~stack_below] stacks it vertically while the window is narrower than
-   520 logical points and reverts crossing back.
+   toggle); row@narrow carries the ONE-LABEL breakpoint (D3, size
+   classes ruled 2026-08-31): [~stack_when:Compact] stacks it vertically
+   while the window's size class is compact (below 600 points on every
+   desktop) and reverts on leaving the class.
 
    The two labels' naturals DIFFER on purpose: the flip then always moves
    the container's box, so the geometry reader re-records on every
@@ -50,7 +51,7 @@ let () =
            button ~text:"flip" ~on_click:flip (* button#0 *);
            (* row#1: the BREAKPOINT subject (D3) — declared data,
               core-evaluated. The handler never touches it. *)
-           row ~a11y_id:"narrow" ~stack_below:520.0
+           row ~a11y_id:"narrow" ~stack_when:Compact
              [ label ~bind:one (* label#3 *); label ~bind:two (* label#4 *) ];
          ]
          ()

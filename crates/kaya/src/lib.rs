@@ -80,7 +80,8 @@ pub use app::{
     capabilities,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    CatalogHome, MenuRole, Platform, Role, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx, ValueKind,
+    CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,
+    ValueKind,
     props,
 };
 

@@ -1008,7 +1008,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xa48166396de2f55duL
+    private const val SPEC_HASH: ULong = 0x2d485dd5237b14c3uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2

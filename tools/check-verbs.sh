@@ -763,8 +763,138 @@ if [ "$score" != "1/1" ]; then
     exit 1
 fi
 
+# THE METRICS CLASS CHANNEL (docs/adaptive-layout-plan.md D8, ruled
+# 2026-08-31): iOS is the ONE platform whose size class the platform
+# itself decides, and the only route it reaches the core is
+# KayaWindowMetricsReporter's report. NO LANE CAN SEE THE READ: the
+# simulator pool is phones, where deriving from the width answers
+# compact exactly as the platform does — a reporter that silently
+# hardcoded NONE (or a mac arm that invented a class) is green on every
+# leg and wrong on an iPad split view. So the reporter's block is held
+# to the shape: the environment read present, both platform classes
+# mapped, every report passing the DERIVED class, a re-report on class
+# change, and the mac arm answering NONE alone. Beside it the RULED
+# BOUNDARY is pinned at 600.0 (the ink tolerance's shape): the scenes
+# hold it only to (560, 900] — portfolio.steps' 560 stack and the
+# adaptive scene's 900 unstack — so a drift inside that band reddens
+# nothing anywhere.
+METRICS_SWIFT="swift/KayaSwiftUI.swift"
+METRICS_WIRE="crates/kaya/src/wire.rs"
+
+metrics_class() { # [swift wire]; either may be "-" for stdin
+    python3 -c '
+import re
+import sys
+
+SWIFT = "swift/KayaSwiftUI.swift"
+WIRE = "crates/kaya/src/wire.rs"
+
+srcs = sys.argv[1:] or [SWIFT, WIRE]
+bad = []
+
+
+def read(src, label):
+    if src == "-":
+        return sys.stdin.read()
+    try:
+        with open(src, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        bad.append(f"{label} cannot be read ({e}) — the metrics class channel is unverifiable, which is a failure and never a skip")
+        return ""
+
+
+swift = read(srcs[0], SWIFT)
+wire = read(srcs[1], WIRE)
+
+m = re.search(r"^struct KayaWindowMetricsReporter: ViewModifier \{$", swift, re.M)
+if swift and not m:
+    bad.append("KayaSwiftUI.swift has no KayaWindowMetricsReporter block this clause can read — the metrics class channel moved out from under it (a finding, never a skip)")
+if m:
+    tail = swift[m.end():]
+    end = re.search(r"^\}$", tail, re.M)
+    block = tail[: end.start()] if end else tail
+    # Comments carry the rule words too (check-appearance: a guard named
+    # in the PROSE beside its call passed a negative), so they go first.
+    block = re.sub(r"//[^\n]*", "", block)
+    if not re.search(r"@Environment\(\\\.horizontalSizeClass\)", block):
+        bad.append("KayaWindowMetricsReporter never reads the environment horizontal size class — iOS then reports a class it never measured")
+    if not re.search(r"case \.compact: return Int64\(KAYA_SIZE_CLASS_COMPACT\)", block):
+        bad.append("KayaWindowMetricsReporter does not map .compact to KAYA_SIZE_CLASS_COMPACT — the platform class never reaches the core")
+    if not re.search(r"case \.regular: return Int64\(KAYA_SIZE_CLASS_REGULAR\)", block):
+        bad.append("KayaWindowMetricsReporter does not map .regular to KAYA_SIZE_CLASS_REGULAR — the platform class never reaches the core")
+    if not re.search(r"\.onChange\(of: horizontalSizeClass\)", block):
+        bad.append("KayaWindowMetricsReporter never re-reports on a size-class change — an iPad split drag that keeps the width moves no breakpoint")
+    calls = re.findall(r"KayaHost\.windowMetrics\([^)]*\)", block)
+    if not calls:
+        bad.append("KayaWindowMetricsReporter never calls KayaHost.windowMetrics — the report this modifier exists for")
+    for c in calls:
+        if not re.search(r",\s*sizeClass\)$", c):
+            bad.append(f"a KayaWindowMetricsReporter report does not pass the derived class: `{c}` — a literal there is the platform class silently dropped")
+    prop = re.search(r"private var sizeClass: Int64 \{(.*?)\n    \}", block, re.S)
+    if not prop:
+        bad.append("KayaWindowMetricsReporter has no sizeClass property this clause can read (a finding, never a skip)")
+    else:
+        mac = re.search(r"#if os\(macOS\)(.*?)#else", prop.group(1), re.S)
+        if not mac or "KAYA_SIZE_CLASS_NONE" not in mac.group(1):
+            bad.append("KayaWindowMetricsReporter macOS arm does not answer KAYA_SIZE_CLASS_NONE — macOS has no platform class and must say so")
+        elif re.search(r"KAYA_SIZE_CLASS_(COMPACT|REGULAR)", mac.group(1)):
+            bad.append("KayaWindowMetricsReporter macOS arm names a real class — macOS has no platform class; the core derives from the width")
+
+if wire and not re.search(r"pub const SIZE_CLASS_COMPACT_BELOW: f64 = 600\.0;", wire):
+    bad.append("wire.rs does not pin SIZE_CLASS_COMPACT_BELOW at the ruled 600.0 — the scenes hold the boundary only to (560, 900], so a drift inside that band reddens nothing")
+
+for b in bad:
+    print(b)
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
+metrics_status=0
+metrics_out="$(metrics_class)" || {
+    echo "check-verbs: the metrics class channel is broken — iOS reports its platform size class through KayaWindowMetricsReporter and NO lane can see that read (the phone pool answers compact by width too):" >&2
+    echo "$metrics_out" >&2
+    metrics_status=1
+}
+
+metrics_negative() { # <src slot: swift|wire> <pattern> <repl> <copy> <want-hits> <label> <finding regex>
+    local hits drift score
+    hits="$(perturb "$([ "$1" = swift ] && echo "$METRICS_SWIFT" || echo "$METRICS_WIRE")" "$2" "$3" "$4")"
+    if [ "$hits" != "$5" ]; then
+        echo "check-verbs: SELF-TEST FAIL (the $6 perturbation applied $hits times, want $5 — an unchanged copy cannot prove the rule fires)" >&2
+        exit 1
+    fi
+    echo "check-verbs: metrics-class self-test ($6) applied $hits substitution(s)"
+    if [ "$1" = swift ]; then
+        drift="$(metrics_class - "$METRICS_WIRE" <"$4")"
+    else
+        drift="$(metrics_class "$METRICS_SWIFT" - <"$4")"
+    fi
+    score="$(introduced "$drift" "$metrics_out" "$7")"
+    if [ "${score%%/*}" = 0 ] || [ "${score%%/*}" != "${score##*/}" ]; then
+        echo "check-verbs: SELF-TEST FAIL ($6 scored $score named/introduced findings, want them equal and nonzero)" >&2
+        exit 1
+    fi
+}
+
+metrics_negative swift '(case \.compact: return Int64\(KAYA_SIZE_CLASS_)COMPACT\)' 'NONE)' \
+    "$T/metrics-compact.swift" 1 "compact mapped to NONE" "does not map \.compact"
+metrics_negative swift '(\.onChange\(of: horizontalSizeClass\) \{\n\s+KayaHost\.windowMetrics\(windowId, geo\.size, )sizeClass\)' \
+    'Int64(KAYA_SIZE_CLASS_NONE))' "$T/metrics-literal.swift" 1 "one report passing a literal" \
+    "does not pass the derived class"
+metrics_negative swift '(\.onChange\(of: )horizontalSizeClass\)' 'geo.size)' \
+    "$T/metrics-rereport.swift" 3 "the class re-report removed (3 structs share the pattern)" \
+    "never re-reports on a size-class change"
+metrics_negative swift '(#if os\(macOS\)\n\s+return Int64\(KAYA_SIZE_CLASS_)NONE\)' 'COMPACT)' \
+    "$T/metrics-macarm.swift" 1 "the mac arm inventing a class" "macOS arm"
+metrics_negative swift '(struct KayaWindowMetricsReporter: ViewModifier \{\n    let windowId: UInt64\n)    #if !os\(macOS\)\n        @Environment\(\\\.horizontalSizeClass\) private var horizontalSizeClass\n    #endif\n' \
+    '' "$T/metrics-noenv.swift" 1 "the environment read deleted" "never reads the environment"
+metrics_negative wire '(SIZE_CLASS_COMPACT_BELOW: f64 = )600\.0' '650.0' \
+    "$T/metrics-boundary.rs" 1 "the ruled boundary drifted to 650" "ruled 600"
+
 KAYA_CLIP_MIRRORS="$clip_status" KAYA_WINDOW_TIER="$window_status" \
     KAYA_AX_SPELLING="$ax_status" \
+    KAYA_METRICS_CLASS="$metrics_status" \
     KAYA_INK_TOLERANCE="$ink_status" python3 - <<'EOF'
 import os
 import pathlib
@@ -1090,5 +1220,7 @@ if os.environ["KAYA_INK_TOLERANCE"] != "0":
     sys.exit(1)
 if os.environ["KAYA_AX_SPELLING"] != "0":
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the ink tolerance in 3 harnesses + the ax spelling in 3 harnesses + the windowed tier's loop + spec hash against 2 interpreters)")
+if os.environ["KAYA_METRICS_CLASS"] != "0":
+    sys.exit(1)
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants ({len(canvas_rows)} of them the canvas vocabularies) + the CLIP_* mirrors + the ink tolerance in 3 harnesses + the ax spelling in 3 harnesses + the windowed tier's loop + the metrics class channel + spec hash against 2 interpreters)")
 EOF

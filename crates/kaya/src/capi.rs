@@ -266,11 +266,24 @@ const _: () = assert!(KAYA_TX_SET_DRAWING == wire::TX_SET_DRAWING);
 /// Never sent for `scale`, which is what a canvas with no record is.
 pub const KAYA_TX_SET_SIZE_POLICY: u16 = 47;
 const _: () = assert!(KAYA_TX_SET_SIZE_POLICY == wire::TX_SET_SIZE_POLICY);
-/// A width breakpoint on a window (docs/adaptive-layout-plan.md D3):
-/// { u64 window; value below(f64); u32 count; u32 pad; values setters } —
-/// count triples flat, widgets then props then values, thirds by position.
+/// A size-class breakpoint on a window (docs/adaptive-layout-plan.md D3;
+/// classes ruled 2026-08-31):
+/// { u64 window; value size_class(i64); u32 count; u32 pad; values setters }
+/// — count triples flat, widgets then props then values, thirds by position.
 pub const KAYA_TX_CREATE_BREAKPOINT: u16 = 48;
 const _: () = assert!(KAYA_TX_CREATE_BREAKPOINT == wire::TX_CREATE_BREAKPOINT);
+/// The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
+/// `size_class` value and kaya_window_metrics' `size_class` argument
+/// speak. COMPACT is the only class a breakpoint may name today; NONE is
+/// the metrics report's "this platform has no size class of its own".
+pub const KAYA_SIZE_CLASS_NONE: i64 = 0;
+pub const KAYA_SIZE_CLASS_COMPACT: i64 = 1;
+pub const KAYA_SIZE_CLASS_REGULAR: i64 = 2;
+const _: () = assert!(
+    KAYA_SIZE_CLASS_NONE == wire::SIZE_CLASS_NONE as i64
+        && KAYA_SIZE_CLASS_COMPACT == wire::SIZE_CLASS_COMPACT as i64
+        && KAYA_SIZE_CLASS_REGULAR == wire::SIZE_CLASS_REGULAR as i64
+);
 /// `sorted`'s no-column sentinel, and `direction`'s two values.
 pub const KAYA_SORT_NONE: u32 = u32::MAX;
 pub const KAYA_SORT_ASC: u32 = 0;
@@ -3249,21 +3262,34 @@ pub extern "C" fn kaya_presentation(scale: f64, dark: bool) {
 /// the held display list under a uniform fit, `redraw` and `tick` are
 /// asked for a drawing at this size, and `fixed` records the number and
 /// changes nothing. A report that changes nothing emits nothing.
-/// THE WINDOW'S CONTENT SIZE in device-independent points, reported by
-/// the backend whenever it changes — the fact every declared breakpoint
-/// evaluates against (docs/adaptive-layout-plan.md D3). THE CORE does
-/// the one comparison, so the switch point is identical arithmetic on
-/// every platform; a report that changes nothing emits nothing. Height
-/// rides along for the day a height threshold is ruled; nothing reads
-/// it yet.
+/// THE WINDOW'S CONTENT SIZE in device-independent points plus the
+/// platform's own SIZE CLASS, reported by the backend whenever either
+/// changes — the facts every declared breakpoint evaluates against
+/// (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31).
+/// `size_class` is wire::SIZE_CLASS_COMPACT / _REGULAR where the
+/// platform defines one (iOS alone today), SIZE_CLASS_NONE everywhere
+/// else — the core then derives the class from the width at the
+/// kaya-owned 600 boundary. One call carries both so a rotation never
+/// evaluates a stale (width, class) pair. A report that changes
+/// nothing emits nothing. Height rides along for the day a height
+/// threshold is ruled; nothing reads it yet.
 #[unsafe(no_mangle)]
-pub extern "C" fn kaya_window_metrics(window: u64, width: f64, height: f64) {
+pub extern "C" fn kaya_window_metrics(window: u64, width: f64, height: f64, size_class: i64) {
     let _ = height;
     if !width.is_finite() || width <= 0.0 {
         return;
     }
+    if !matches!(
+        size_class,
+        KAYA_SIZE_CLASS_NONE | KAYA_SIZE_CLASS_COMPACT | KAYA_SIZE_CLASS_REGULAR
+    ) {
+        return;
+    }
     with_window_scene("reporting a window's content size", |scene| {
-        (scene.set_window_metrics(crate::protocol::WindowId(window), width), ())
+        (
+            scene.set_window_metrics(crate::protocol::WindowId(window), width, size_class),
+            (),
+        )
     });
 }
 

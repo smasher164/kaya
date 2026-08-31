@@ -602,7 +602,20 @@ in docs/deferred.md.
    `expect_ax_hint`, which carried the identical divergence. An arm it
    cannot read is a finding that names it, never a skip — anchoring on
    `Step::ExpectAx(` alone matches harness.rs's PARSER first and finds
-   ZERO observations there. Five watched negatives, counts printed),
+   ZERO observations there. Five watched negatives, counts printed.
+   AND THE METRICS CLASS CHANNEL, ruled 2026-08-31 (adaptive-layout
+   D8): iOS is the one platform whose size class the platform itself
+   decides, and the only route it reaches the core is
+   KayaWindowMetricsReporter's kaya_window_metrics report — NO lane
+   can see that read, because the simulator pool is phones, where
+   deriving from the width answers compact exactly as the platform
+   does. The reporter's block is held to the shape (environment read,
+   both classes mapped, every report passing the DERIVED class, a
+   re-report on class change, the mac arm answering NONE alone) and
+   wire.rs's 600-point boundary is PINNED at the ruled value, since
+   the scenes hold it only to (560, 900]. Six watched negatives,
+   counts printed, plus the wiring itself watched red once on the
+   real file),
    `tools/check-file-modes.sh` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

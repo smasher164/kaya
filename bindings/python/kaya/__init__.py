@@ -2260,6 +2260,26 @@ class Platform:
     ANDROID = wire.PLATFORM_ANDROID
 
 
+class SizeClass:
+    """A window's named size class (spec enum "size_class"; ruled
+    2026-08-31): what `row(stack_when=...)` speaks in place of an
+    author-invented width. COMPACT is the whole surface today — the
+    platform's own class on iOS, narrower than 600 points everywhere
+    else. An app names a class, it never asks which one the window is.
+    """
+
+    def __init__(self, tag, name):
+        self._tag = tag
+        self._name = name
+
+    def __repr__(self):
+        return f"kaya.{self._name}"
+
+
+#: The one size class an app can name today (`stack_when=kaya.COMPACT`).
+COMPACT = SizeClass(wire.SIZE_CLASS_COMPACT, "COMPACT")
+
+
 #: The name spelling of the same five, DERIVED from the class rather
 #: than typed a second time: a drifted second table would hand a
 #: platform's family to a DIFFERENT platform, with nothing raised and no
@@ -3014,27 +3034,36 @@ def button(text=None, bind=None, on_click=None, grow=None):
     return handle
 
 
-def row(grow=None, spacing=None, align=None, inset=None, stack_below=None):
+def row(grow=None, spacing=None, align=None, inset=None, stack_when=None):
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
     `inset` its own padding.
 
-    `stack_below` stacks the children vertically while the window is
-    narrower than that many logical points — a core-evaluated width
-    breakpoint, reverting on the way back up
-    (docs/adaptive-layout-plan.md D3)."""
+    `stack_when` stacks the children vertically while the window's SIZE
+    CLASS is the named one — `kaya.COMPACT`, the only class today — a
+    core-evaluated breakpoint, reverting when the class is left
+    (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31). The app
+    never writes a width: iOS answers with the platform's own class,
+    every other platform is compact below 600 points."""
     handle = _widget(wire.KIND_ROW)
-    if stack_below is not None:
+    if stack_when is not None:
+        if stack_when is not COMPACT:
+            raise TypeError(
+                f"kaya: stack_when takes a size class — kaya.COMPACT is "
+                f"the only class today — not {stack_when!r}. The raw-width "
+                "breakpoint (stack_below=N) is gone; kaya owns the numbers "
+                "(docs/adaptive-layout-plan.md D3)"
+            )
         if _tpl_depth > 0:
             raise TypeError(
-                "kaya: stack_below is live-only — a breakpoint's setters "
+                "kaya: stack_when is live-only — a breakpoint's setters "
                 "name live widgets, and a template row is a blueprint "
                 "stamped per entry (docs/adaptive-layout-plan.md D3)"
             )
         _records().append(
             wire.tx_create_breakpoint(
                 0,
-                float(stack_below),
+                wire.SIZE_CLASS_COMPACT,
                 1,
                 [handle.id, wire.PROP_AXIS, wire.AXIS_VERTICAL],
             )

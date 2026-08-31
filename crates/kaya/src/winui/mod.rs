@@ -1489,7 +1489,11 @@ fn report_window_metrics(core: &mut CoreState) {
             continue;
         }
         let reported = crate::fault::guard("reporting the window's content size", || {
-            core.scene.set_window_metrics(crate::protocol::WindowId(window), width)
+            core.scene.set_window_metrics(
+                crate::protocol::WindowId(window),
+                width,
+                i64::from(crate::wire::SIZE_CLASS_NONE),
+            )
         });
         let Some(ops) = reported else { continue };
         for op in ops {

@@ -517,13 +517,15 @@ pub(crate) struct Scene {
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
     /// Declared breakpoints (docs/adaptive-layout-plan.md D3), evaluated
-    /// by THE CORE against the latest reported width, in declaration
+    /// by THE CORE against the latest reported metrics, in declaration
     /// order. `applied` is the hysteresis bit.
     breakpoints: Vec<BreakpointState>,
-    /// The last content width each window reported (kaya_window_metrics).
-    /// Latched like the presentation: a breakpoint declared before the
-    /// first report evaluates when it arrives.
-    window_widths: HashMap<WindowId, f64>,
+    /// The last (content width, platform size class) each window
+    /// reported (kaya_window_metrics; the class is SIZE_CLASS_NONE where
+    /// the platform has none and the width derives it). Latched like the
+    /// presentation: a breakpoint declared before the first report
+    /// evaluates when it arrives.
+    window_metrics: HashMap<WindowId, (f64, i64)>,
     /// The last GUEST-AUTHORED axis per widget — what a reverting
     /// breakpoint restores (falling back to the creation kind's own).
     /// Breakpoint applies deliberately do not write here.
@@ -665,10 +667,26 @@ fn is_choice(kind: WidgetKind) -> bool {
     matches!(kind, WidgetKind::Select | WidgetKind::Radio)
 }
 
+/// The window's size class: the platform's own where one was reported,
+/// the kaya-owned width boundary where none is (ruled 2026-08-31 — iOS
+/// is the one platform with a native class; see wire::SIZE_CLASS_*).
+fn window_size_class(width: f64, platform_class: i64) -> i64 {
+    if platform_class != i64::from(crate::wire::SIZE_CLASS_NONE) {
+        return platform_class;
+    }
+    if width < crate::wire::SIZE_CLASS_COMPACT_BELOW {
+        i64::from(crate::wire::SIZE_CLASS_COMPACT)
+    } else {
+        i64::from(crate::wire::SIZE_CLASS_REGULAR)
+    }
+}
+
 /// One declared breakpoint (docs/adaptive-layout-plan.md D3).
 struct BreakpointState {
     window: WindowId,
-    below: f64,
+    /// The size class the setters hold under (wire::SIZE_CLASS_COMPACT
+    /// alone today; the decode arm refuses the rest).
+    when: i64,
     setters: Vec<(WidgetId, Prop, Value)>,
     applied: bool,
     /// The fold assignments currently applied — (child, table) pairs
@@ -1380,38 +1398,49 @@ fn check_type(current: &Value, incoming: &Value, what: &str) {
 }
 
 impl Scene {
-    /// The window's content width, reported by the backend
-    /// (kaya_window_metrics). THE CORE EVALUATES the declared
-    /// breakpoints here — one arithmetic, every platform
-    /// (docs/adaptive-layout-plan.md D3). A report that changes
-    /// nothing emits nothing.
-    pub(crate) fn set_window_metrics(&mut self, window: WindowId, width: f64) -> Vec<ApplyOp> {
-        let previous = self.window_widths.insert(window, width);
-        if previous == Some(width) {
+    /// The window's content width and platform size class, reported by
+    /// the backend (kaya_window_metrics; class SIZE_CLASS_NONE where the
+    /// platform has none). THE CORE EVALUATES the declared breakpoints
+    /// here — one rule, every platform (docs/adaptive-layout-plan.md
+    /// D3). A report that changes nothing emits nothing.
+    pub(crate) fn set_window_metrics(
+        &mut self,
+        window: WindowId,
+        width: f64,
+        platform_class: i64,
+    ) -> Vec<ApplyOp> {
+        let previous = self.window_metrics.insert(window, (width, platform_class));
+        if previous == Some((width, platform_class)) {
             return Vec::new();
         }
         let mut out = Vec::new();
         for i in 0..self.breakpoints.len() {
             if self.breakpoints[i].window == window {
-                out.append(&mut self.evaluate_breakpoint(i, width));
+                out.append(&mut self.evaluate_breakpoint(i, width, platform_class));
             }
         }
         out
     }
 
-    /// One breakpoint against one width: apply crossing below, revert
-    /// crossing back — the revert restoring the guest-authored value or
-    /// the creation kind's own default (diff-against-base).
-    fn evaluate_breakpoint(&mut self, index: usize, width: f64) -> Vec<ApplyOp> {
-        let below = width < self.breakpoints[index].below;
-        if below == self.breakpoints[index].applied {
+    /// One breakpoint against one metrics report: apply entering the
+    /// declared class, revert leaving it — the revert restoring the
+    /// guest-authored value or the creation kind's own default
+    /// (diff-against-base).
+    fn evaluate_breakpoint(
+        &mut self,
+        index: usize,
+        width: f64,
+        platform_class: i64,
+    ) -> Vec<ApplyOp> {
+        let hold = window_size_class(width, platform_class) == self.breakpoints[index].when;
+        if hold == self.breakpoints[index].applied {
             return Vec::new();
         }
-        self.breakpoints[index].applied = below;
+        self.breakpoints[index].applied = hold;
         let setters = self.breakpoints[index].setters.clone();
         let mut out = Vec::new();
         for (widget, prop, value) in &setters {
-            let value = if below {
+            let value = if hold {
                 value.clone()
             } else {
                 match prop {
@@ -1432,14 +1461,14 @@ impl Scene {
             };
             out.push(ApplyOp::SetProp { id: *widget, prop: *prop, value });
         }
-        // THE STACKED FOLD (docs/adaptive-layout-plan.md D7). Crossing
-        // below, each stacked row whose own shape says so folds its
+        // THE STACKED FOLD (docs/adaptive-layout-plan.md D7). Entering
+        // the class, each stacked row whose own shape says so folds its
         // leading hugging children into its one grown table's viewport;
-        // crossing back unfolds exactly what was folded — recorded pairs,
+        // leaving it unfolds exactly what was folded — recorded pairs,
         // not a recomputation, so a shape that changed while stacked
         // still reverts cleanly. Assignments are computed at the
         // crossing and hold until the crossing back.
-        if below {
+        if hold {
             let mut folded = Vec::new();
             for (row, _, _) in &setters {
                 if let Some((table, children)) = self.fold_assignment(*row) {
@@ -2509,10 +2538,15 @@ impl Scene {
                     key,
                     before,
                 } => self.move_entry(id, path, key, before, &mut out),
-                TxOp::CreateBreakpoint { window, below, setters } => {
+                TxOp::CreateBreakpoint { window, when, setters } => {
+                    // THE RULED CLASS LIST (2026-08-31): compact alone.
+                    // `regular` exists in the wire vocabulary for the
+                    // metrics channel, but no binding can spell it as a
+                    // breakpoint and its semantics are unruled.
                     assert!(
-                        below.is_finite() && below > 0.0,
-                        "kaya: a breakpoint threshold must be a positive width, got {below}"
+                        when == i64::from(crate::wire::SIZE_CLASS_COMPACT),
+                        "kaya: a breakpoint's size class must be `compact` \
+                         (the only ruled class), got {when}"
                     );
                     for (widget, prop, value) in &setters {
                         let kind = *self.widgets.get(widget).unwrap_or_else(|| {
@@ -2531,13 +2565,13 @@ impl Scene {
                     }
                     self.breakpoints.push(BreakpointState {
                         window,
-                        below,
+                        when,
                         setters,
                         applied: false,
                         folded: Vec::new(),
                     });
                     // Evaluated at the BATCH TAIL, not here: the sugar
-                    // spells stack_below in the row's constructor, so at
+                    // spells stack_when in the row's constructor, so at
                     // this op the row has no children yet and the fold
                     // rule (D7) would read an empty shape. The latched
                     // width still applies within the same batch — a phone
@@ -2916,14 +2950,14 @@ impl Scene {
             panic!("{}", self.orphan_message(orphan));
         }
 
-        // Breakpoints declared this batch, against the latched width —
+        // Breakpoints declared this batch, against the latched metrics —
         // deferred from their op to here so the fold rule (D7) reads the
         // row's finished shape, and after the barrier so a refused batch
         // evaluates nothing.
         for n in declared_breakpoints {
             let window = self.breakpoints[n].window;
-            if let Some(width) = self.window_widths.get(&window).copied() {
-                let mut ops = self.evaluate_breakpoint(n, width);
+            if let Some((width, class)) = self.window_metrics.get(&window).copied() {
+                let mut ops = self.evaluate_breakpoint(n, width, class);
                 out.append(&mut ops);
             }
         }
@@ -5497,7 +5531,7 @@ impl Scene {
     /// same declaration is what gives a table its overflow behaviour, which
     /// is why no separate property exists to collide with this one.
     ///
-    /// `stack_below` lowers to a breakpoint whose only setter is `axis`, so
+    /// `stack_when` lowers to a breakpoint whose only setter is `axis`, so
     /// this one refusal covers both spellings.
     fn refuse_axis_on_table(tables: &std::collections::HashSet<WidgetId>, widget: WidgetId) {
         assert!(
@@ -6349,17 +6383,18 @@ mod tests {
     /// ambient parent 0 (app.rs:1239 emits no AddChild there), the column
     /// never claims it, and it renders nowhere while answering every read.
     /// The declared breakpoint's whole contract in one walk
-    /// (docs/adaptive-layout-plan.md D3): apply crossing below the
-    /// threshold, auto-revert crossing back — to the GUEST-AUTHORED
+    /// (docs/adaptive-layout-plan.md D3): apply entering the declared
+    /// size class, auto-revert leaving it — to the GUEST-AUTHORED
     /// value where one exists and the creation kind's own otherwise —
-    /// with a same-width report emitting nothing, and a breakpoint
+    /// with a same-metrics report emitting nothing, and a breakpoint
     /// declared before any report applying at the first one.
-    /// A SECOND BREAKPOINT DECLARED AFTER THE WIDTH IS ALREADY LATCHED —
-    /// the portfolio's Transactions screen, whose row is built when the
-    /// entry is PUSHED, long after the window has reported its size. The
-    /// dashboard's row is declared before any report and applies at the
-    /// first one; this one has to apply at DECLARATION, off the latched
-    /// width, or a screen reached by navigation never adapts at all.
+    /// A SECOND BREAKPOINT DECLARED AFTER THE METRICS ARE ALREADY
+    /// LATCHED — the portfolio's Transactions screen, whose row is built
+    /// when the entry is PUSHED, long after the window has reported its
+    /// size. The dashboard's row is declared before any report and
+    /// applies at the first one; this one has to apply at DECLARATION,
+    /// off the latched metrics, or a screen reached by navigation never
+    /// adapts at all.
     #[test]
     fn breakpoint_declared_after_the_width_is_latched_applies_at_once() {
         let mut scene = Scene::new();
@@ -6368,12 +6403,12 @@ mod tests {
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 700.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
         ]);
         // The first report applies the one declared before it.
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             matches!(
                 ops.as_slice(),
@@ -6391,7 +6426,7 @@ mod tests {
             TxOp::Mount { window: WindowId(7), root: WidgetId(2) },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 700.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(2), Prop::Axis, Value::I64(1))],
             },
         ]);
@@ -6412,13 +6447,13 @@ mod tests {
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 520.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
         ]);
         // Declared before any report: the FIRST report applies it —
         // the phone that never resizes.
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 400.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 400.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             matches!(
                 ops.as_slice(),
@@ -6427,10 +6462,10 @@ mod tests {
             "first narrow report must apply the setter, got {ops:?}"
         );
         // Same width again: nothing.
-        assert!(scene.set_window_metrics(DEFAULT_WINDOW, 400.0).is_empty());
+        assert!(scene.set_window_metrics(DEFAULT_WINDOW, 400.0, i64::from(crate::wire::SIZE_CLASS_NONE)).is_empty());
         // Crossing back with NO authored value: the creation kind's own
         // (a Row is horizontal).
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             matches!(
                 ops.as_slice(),
@@ -6445,8 +6480,8 @@ mod tests {
             prop: Prop::Axis,
             value: PropValue::Const(Value::I64(1)),
         }]);
-        scene.set_window_metrics(DEFAULT_WINDOW, 400.0);
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0);
+        scene.set_window_metrics(DEFAULT_WINDOW, 400.0, i64::from(crate::wire::SIZE_CLASS_NONE));
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             matches!(
                 ops.as_slice(),
@@ -6454,6 +6489,71 @@ mod tests {
             ),
             "the revert must restore the guest-authored axis, got {ops:?}"
         );
+    }
+
+    /// THE PLATFORM'S CLASS BEATS THE WIDTH (ruled 2026-08-31): an iPad
+    /// split-view pane can be compact at widths the kaya boundary calls
+    /// regular, so a report that carries a platform class is believed
+    /// over the arithmetic — and only a NONE report derives from the
+    /// width. This is the one behavior that separates the class design
+    /// from a renamed threshold.
+    #[test]
+    fn a_reported_platform_class_beats_the_width_boundary() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]);
+        // 900 points wide, but the platform says COMPACT: applies.
+        let ops =
+            scene.set_window_metrics(DEFAULT_WINDOW, 900.0, i64::from(crate::wire::SIZE_CLASS_COMPACT));
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(1) }]
+            ),
+            "a platform-compact report must apply whatever the width, got {ops:?}"
+        );
+        // Same width, platform now says REGULAR: reverts.
+        let ops =
+            scene.set_window_metrics(DEFAULT_WINDOW, 900.0, i64::from(crate::wire::SIZE_CLASS_REGULAR));
+        assert!(
+            matches!(
+                ops.as_slice(),
+                [ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Axis, value: Value::I64(0) }]
+            ),
+            "a platform-regular report must revert whatever the width, got {ops:?}"
+        );
+        // 400 points wide but platform-REGULAR: still regular — the
+        // boundary is only consulted when the platform reports NONE.
+        assert!(
+            scene
+                .set_window_metrics(DEFAULT_WINDOW, 400.0, i64::from(crate::wire::SIZE_CLASS_REGULAR))
+                .is_empty(),
+            "a platform class must silence the width boundary entirely"
+        );
+    }
+
+    /// The ruled class list is compact alone; `regular` is in the wire
+    /// vocabulary for the metrics channel but no breakpoint may name it.
+    #[test]
+    #[should_panic(expected = "size class must be `compact`")]
+    fn a_non_compact_breakpoint_class_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateBreakpoint {
+                window: DEFAULT_WINDOW,
+                when: i64::from(crate::wire::SIZE_CLASS_REGULAR),
+                setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
+            },
+        ]);
     }
 
     /// The Transactions shape for the fold tests (D7): row 1 holding a
@@ -6516,11 +6616,11 @@ mod tests {
         }]);
         tx.push(TxOp::CreateBreakpoint {
             window: DEFAULT_WINDOW,
-            below: 700.0,
+            when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
             setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
         });
         scene.apply(tx);
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             ops.iter().any(|op| matches!(
                 op,
@@ -6528,7 +6628,7 @@ mod tests {
             )),
             "stacking must fold the summary into the table, got {ops:?}"
         );
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 900.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             ops.iter().any(|op| matches!(
                 op,
@@ -6537,7 +6637,7 @@ mod tests {
             "crossing back must unfold what was folded, got {ops:?}"
         );
         // And nothing lingers: the next stacking folds afresh.
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert_eq!(
             ops.iter()
                 .filter(|op| matches!(op, ApplyOp::Fold { .. }))
@@ -6547,7 +6647,7 @@ mod tests {
         );
     }
 
-    /// D7's deferral: the sugar spells stack_below in the row's
+    /// D7's deferral: the sugar spells stack_when in the row's
     /// CONSTRUCTOR, so CreateBreakpoint lands before any AddChild — and
     /// with the width already latched (the phone's order), an evaluation
     /// at that op would read an empty row and fold nothing. The batch
@@ -6555,12 +6655,12 @@ mod tests {
     #[test]
     fn stacked_fold_computed_at_the_batch_tail_sees_the_rows_children() {
         let mut scene = Scene::new();
-        let _ = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let _ = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         let ops = scene.apply(fold_scene(vec![
             TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 700.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
         ]));
@@ -6591,11 +6691,11 @@ mod tests {
         });
         tx.push(TxOp::CreateBreakpoint {
             window: DEFAULT_WINDOW,
-            below: 700.0,
+            when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
             setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
         });
         scene.apply(tx);
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             !ops.iter().any(|op| matches!(op, ApplyOp::Fold { .. })),
             "two growers must not fold, got {ops:?}"
@@ -6618,11 +6718,11 @@ mod tests {
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 700.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
         ]);
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             !ops.iter().any(|op| matches!(op, ApplyOp::Fold { .. })),
             "a grown non-table must not fold, got {ops:?}"
@@ -6642,11 +6742,11 @@ mod tests {
         tx.push(TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) });
         tx.push(TxOp::CreateBreakpoint {
             window: DEFAULT_WINDOW,
-            below: 700.0,
+            when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
             setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
         });
         scene.apply(tx);
-        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0);
+        let ops = scene.set_window_metrics(DEFAULT_WINDOW, 320.0, i64::from(crate::wire::SIZE_CLASS_NONE));
         assert!(
             !ops.iter().any(|op| matches!(op, ApplyOp::Fold { .. })),
             "a trailing hugging child keeps stacking (header-only rule), got {ops:?}"
@@ -6664,7 +6764,7 @@ mod tests {
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 520.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Grow, Value::F64(1.0))],
             },
         ]);
@@ -6672,7 +6772,7 @@ mod tests {
 
     /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29), reached all three
     /// ways a guest can reach it: the dynamic setter, the breakpoint
-    /// `stack_below` lowers to, and the two declarations in the other
+    /// `stack_when` lowers to, and the two declarations in the other
     /// order. WidgetId(4) is the For's container, which the core registers
     /// as a Column — so `axis` is legal on it by kind, and only the
     /// declared columns make it refusable.
@@ -6696,12 +6796,12 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "`axis` is refused")]
-    fn stack_below_on_a_table_fails_the_batch() {
+    fn stack_when_on_a_table_fails_the_batch() {
         let mut scene = Scene::new();
         scene.apply(declared_table());
         scene.apply(vec![TxOp::CreateBreakpoint {
             window: DEFAULT_WINDOW,
-            below: 520.0,
+            when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
             setters: vec![(WidgetId(4), Prop::Axis, Value::I64(1))],
         }]);
     }
@@ -6743,7 +6843,7 @@ mod tests {
         );
     }
 
-    /// Every chained binding puts `stack_below` on the generic widget
+    /// Every chained binding puts `stack_when` on the generic widget
     /// handle, so the wall that a setter targets a CONTAINER is the
     /// core's — check_prop's axis domain, at batch.
     #[test]
@@ -6755,7 +6855,7 @@ mod tests {
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             TxOp::CreateBreakpoint {
                 window: DEFAULT_WINDOW,
-                below: 520.0,
+                when: i64::from(crate::wire::SIZE_CLASS_COMPACT),
                 setters: vec![(WidgetId(1), Prop::Axis, Value::I64(1))],
             },
         ]);

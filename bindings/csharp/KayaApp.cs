@@ -386,6 +386,16 @@ enum Axis : long
     Vertical = KayaWire.AxisVertical,
 }
 
+/// A window's named SIZE CLASS (spec enum "size_class"; ruled
+/// 2026-08-31): what `Row(stackWhen:)` speaks in place of an
+/// author-invented width. Compact is the whole surface today — the
+/// platform's own class on iOS, narrower than 600 points everywhere
+/// else. An app names a class, it never asks which one the window is.
+enum SizeClass : long
+{
+    Compact = KayaWire.SizeClassCompact,
+}
+
 /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
 /// never how it looks. Each variant belongs to one kind, and the root
 /// refuses the misfits at declare time — which is why `role:` appears
@@ -1979,14 +1989,16 @@ sealed class Tx
         double? inset = null) =>
         ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset);
 
-    /// `stackBelow:` stacks this row's children vertically while the
-    /// window is narrower than that many logical points — a
-    /// core-evaluated width breakpoint, reverting on the way back up
-    /// (docs/adaptive-layout-plan.md D3).
+    /// `stackWhen:` stacks this row's children vertically while the
+    /// window's SIZE CLASS is the named one (SizeClass.Compact, the only
+    /// class today) — a core-evaluated breakpoint, reverting on leaving
+    /// the class (docs/adaptive-layout-plan.md D3; classes ruled
+    /// 2026-08-31: iOS answers with the platform's own class, every
+    /// other platform is compact below 600 points).
     public Widget Row(
         Action body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, double? stackBelow = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackBelow);
+        double? inset = null, SizeClass? stackWhen = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset, stackWhen);
 
     /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
     /// the enclosing track CONSTRAINS it — an unconstrained viewport
@@ -2022,14 +2034,14 @@ sealed class Tx
 
     Widget ContainerOf(
         uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, double? stackBelow = null)
+        double? inset = null, SizeClass? stackWhen = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (align is Align a) SetAlign(parent, a);
         if (inset is double pad) SetInset(parent, pad);
-        if (stackBelow is double below) StackBelow(parent, below);
+        if (stackWhen is SizeClass when) StackWhen(parent, when);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);
@@ -2041,8 +2053,8 @@ sealed class Tx
     // (KayaWire.TxCreateBreakpoint). LIVE ZONE ONLY — a breakpoint's
     // setters name live widgets, and Tpl's Row hands back a Node, so the
     // template zone is refused by type.
-    void StackBelow(Widget w, double width) =>
-        Records.Add(KayaWire.TxCreateBreakpoint(0, width, 1, new object[]
+    void StackWhen(Widget w, SizeClass when) =>
+        Records.Add(KayaWire.TxCreateBreakpoint(0, (long)when, 1, new object[]
         {
             (long)w.Id, (long)KayaWire.PropAxis, (long)KayaWire.AxisVertical,
         }));

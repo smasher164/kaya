@@ -13,28 +13,28 @@ import (
 	"testing"
 )
 
-// StackBelow is ONE record on the PRIMARY window: an f64 threshold and
+// StackWhen is ONE record on the PRIMARY window: an i64 size class and
 // one setter triple flat — widget, prop, value.
-func TestStackBelowRidesOneBreakpointRecord(t *testing.T) {
+func TestStackWhenRidesOneBreakpointRecord(t *testing.T) {
 	app := NewApp()
 	var row uint64
 	recs := queued(t, app, func(tx *Tx) {
-		row = tx.Row(func() {}).A11yID("narrow").StackBelow(520).id
+		row = tx.Row(func() {}).A11yID("narrow").StackWhen(SizeClassCompact).id
 	})
 
 	at := recordsOfKind(recs, txCreateBreakpoint)
 	if len(at) != 1 {
-		t.Fatalf("StackBelow queued %d breakpoint records, want exactly 1", len(at))
+		t.Fatalf("StackWhen queued %d breakpoint records, want exactly 1", len(at))
 	}
 	rec := recs[at[0]]
 	if w := binary.LittleEndian.Uint64(rec[8:]); w != 0 {
 		t.Fatalf("the breakpoint named window %d, want the primary (0) — it keys "+
 			"on WINDOW width, never the container's own", w)
 	}
-	below, next := parseValue(rec, 16)
-	if below != 520.0 {
-		t.Fatalf("threshold rode as %#v, want f64 520 — the core panics on any "+
-			"other tag", below)
+	when, next := parseValue(rec, 16)
+	if when != int64(SizeClassCompact) {
+		t.Fatalf("size class rode as %#v, want i64 SizeClassCompact — the core "+
+			"panics on any other tag", when)
 	}
 	if n := binary.LittleEndian.Uint32(rec[next:]); n != 1 {
 		t.Fatalf("the record declares %d setters, want 1", n)
@@ -88,17 +88,17 @@ func TestSetAxisWritesTheAxisPropConstant(t *testing.T) {
 // that queues a record of its own kind. THE SENTENCE IS THE ASSERTION:
 // emit's own chokepoint panics here too, so a test that only demanded A
 // panic passed with this guard deleted (measured while writing it).
-func TestStackBelowOutsideItsBuildPanicsNamingItself(t *testing.T) {
+func TestStackWhenOutsideItsBuildPanicsNamingItself(t *testing.T) {
 	app := NewApp()
 	var row Widget
 	app.Build(func(tx *Tx) { row = tx.Row(func() {}) })
 
 	defer func() {
 		got, _ := recover().(string)
-		if !strings.Contains(got, "StackBelow on a widget outside its build transaction") {
-			t.Fatalf("a late StackBelow panicked with %q — the breakpoint would never "+
+		if !strings.Contains(got, "StackWhen on a widget outside its build transaction") {
+			t.Fatalf("a late StackWhen panicked with %q — the breakpoint would never "+
 				"ship and the row would never adapt, so the refusal names the call", got)
 		}
 	}()
-	row.StackBelow(520)
+	row.StackWhen(SizeClassCompact)
 }

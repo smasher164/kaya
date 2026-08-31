@@ -859,7 +859,9 @@ extern "system" fn present_canvas_track(
 
 /// KayaPresent.windowMetrics: the window's content size in dp —
 /// breakpoint evaluation's report channel
-/// (docs/adaptive-layout-plan.md D3).
+/// (docs/adaptive-layout-plan.md D3). Android reports NO platform size
+/// class by ruling (2026-08-31): the core derives it from the width at
+/// the kaya-owned 600dp boundary, which is Material's own compact edge.
 extern "system" fn present_window_metrics(
     _env: JNIEnv,
     _class: JClass,
@@ -867,7 +869,12 @@ extern "system" fn present_window_metrics(
     width: jni::sys::jdouble,
     height: jni::sys::jdouble,
 ) {
-    crate::capi::kaya_window_metrics(window as u64, width, height);
+    crate::capi::kaya_window_metrics(
+        window as u64,
+        width,
+        height,
+        i64::from(crate::wire::SIZE_CLASS_NONE),
+    );
 }
 
 /// KayaPresent.frame: the platform's own frame time in seconds, which is

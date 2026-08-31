@@ -902,8 +902,27 @@ impl Axis {
     }
 }
 
+/// A window's named size class (ruled 2026-08-31): the vocabulary a
+/// breakpoint speaks, in place of an author-invented width. `Compact`
+/// is the whole surface today — on iOS it is the platform's own
+/// horizontal size class, everywhere else the window is compact below
+/// the kaya-owned 600-point boundary (wire::SIZE_CLASS_COMPACT_BELOW).
+/// Rides the wire as I64.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SizeClass {
+    Compact,
+}
+
+impl SizeClass {
+    fn wire(self) -> i64 {
+        match self {
+            SizeClass::Compact => i64::from(crate::wire::SIZE_CLASS_COMPACT),
+        }
+    }
+}
+
 /// The setters one breakpoint applies (docs/adaptive-layout-plan.md
-/// D3), recorded by [`Tx::breakpoint_below`]'s build closure. Axis
+/// D3), recorded by [`Tx::breakpoint_when`]'s build closure. Axis
 /// alone until the ruled list widens (the root enforces it).
 pub struct BreakpointSetters {
     setters: Vec<(WidgetId, Prop, Value)>,
@@ -938,15 +957,15 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
-    /// Stack this row's children vertically while the window is
-    /// narrower than `width` logical points — the container-riding
-    /// spelling of [`Tx::breakpoint_below`], which remains the
-    /// multi-setter path (docs/adaptive-layout-plan.md D3). The root
-    /// refuses a non-container target at batch; on a column it sets
-    /// what the kind already is.
-    pub fn stack_below(self, width: f64) -> Self {
+    /// Stack this row's children vertically while the window's size
+    /// class is `when` — the container-riding spelling of
+    /// [`Tx::breakpoint_when`], which remains the multi-setter path
+    /// (docs/adaptive-layout-plan.md D3). The root refuses a
+    /// non-container target at batch; on a column it sets what the
+    /// kind already is.
+    pub fn stack_when(self, when: SizeClass) -> Self {
         let id = self.id;
-        self.tx.breakpoint_below(width, |bp| {
+        self.tx.breakpoint_when(when, |bp| {
             bp.axis(id, Axis::Vertical);
         });
         self
@@ -1969,22 +1988,24 @@ impl<'a> Tx<'a> {
     }
 
     /// A DECLARED BREAKPOINT on the primary window
-    /// (docs/adaptive-layout-plan.md D3): when the window's content
-    /// width is below `width` points, the setters recorded by `build`
-    /// apply; crossing back they auto-revert to the last guest-authored
-    /// value or the creation kind's own default. THE CORE evaluates —
-    /// the same arithmetic on every platform, and a phone that never
-    /// resizes still applies at its first report.
-    pub fn breakpoint_below(
+    /// (docs/adaptive-layout-plan.md D3; size classes ruled
+    /// 2026-08-31): while the window's size class is `when`, the
+    /// setters recorded by `build` apply; leaving it they auto-revert
+    /// to the last guest-authored value or the creation kind's own
+    /// default. THE CORE evaluates — iOS reports the platform's own
+    /// class, every other platform derives it from the width at the
+    /// kaya-owned 600-point boundary — and a phone that never resizes
+    /// still applies at its first report.
+    pub fn breakpoint_when(
         &mut self,
-        width: f64,
+        when: SizeClass,
         build: impl FnOnce(&mut BreakpointSetters),
     ) {
         let mut setters = BreakpointSetters { setters: Vec::new() };
         build(&mut setters);
         self.ops.push(TxOp::CreateBreakpoint {
             window: crate::protocol::DEFAULT_WINDOW,
-            below: width,
+            when: when.wire(),
             setters: setters.setters,
         });
     }

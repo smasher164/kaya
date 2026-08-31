@@ -424,17 +424,19 @@ enum KayaSymbol: Int64 {
 struct KayaWidget {
     let id: UInt64
 
-    /// Stack this row's children vertically while the window is narrower
-    /// than `width` logical points, reverting on the way back up — ONE
-    /// core-evaluated breakpoint record, the container-riding spelling
-    /// (docs/adaptive-layout-plan.md D3). The root refuses a
-    /// non-container target at batch.
+    /// Stack this row's children vertically while the window's SIZE
+    /// CLASS is `when` (`.compact`, the only class today), reverting on
+    /// leaving the class — ONE core-evaluated breakpoint record, the
+    /// container-riding spelling (docs/adaptive-layout-plan.md D3;
+    /// classes ruled 2026-08-31: iOS answers with the platform's own
+    /// class, every other platform is compact below 600 points). The
+    /// root refuses a non-container target at batch.
     @discardableResult
-    func stackBelow(_ width: Double) -> KayaWidget {
+    func stackWhen(_ when: KayaSizeClass) -> KayaWidget {
         let (_, tx) = kayaDeclaring()
         // Widgets, then props, then values — thirds by position.
         tx.tx.createBreakpoint(
-            0, .f64(width), 1,
+            0, .i64(when.wire), 1,
             [.i64(Int64(id)), .i64(Int64(KAYA_PROP_AXIS)), .i64(Int64(KAYA_AXIS_VERTICAL))])
         return self
     }
@@ -489,9 +491,22 @@ struct KayaWidget {
     }
 }
 
+/// A window's named size class (spec enum "size_class"; ruled
+/// 2026-08-31): what `stackWhen` speaks in place of an author-invented
+/// width. `.compact` is the whole surface today.
+enum KayaSizeClass {
+    case compact
+
+    var wire: Int64 {
+        switch self {
+        case .compact: return Int64(KAYA_SIZE_CLASS_COMPACT)
+        }
+    }
+}
+
 /// A template node: a blueprint entry, stamped per collection entry.
 ///
-/// NO `stackBelow`/`fixed`/`onDraw`/`onTick` HERE, and the compiler is
+/// NO `stackWhen`/`fixed`/`onDraw`/`onTick` HERE, and the compiler is
 /// the refusal: a breakpoint's setters name LIVE widgets and a template
 /// row is a blueprint stamped per entry
 /// (docs/adaptive-layout-plan.md D3), and the size policy is a live-zone
@@ -508,7 +523,7 @@ struct KayaNodeHandle {
 private func kayaDeclaring() -> (app: KayaApp, tx: KayaAppTx) {
     guard let app = KayaApp.ambient, let tx = app.currentTx else {
         preconditionFailure(
-            "kaya: a canvas's size policy and stackBelow are declared inside a "
+            "kaya: a canvas's size policy and stackWhen are declared inside a "
                 + "transaction (build or handler)")
     }
     return (app, tx)

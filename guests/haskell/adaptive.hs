@@ -1,8 +1,9 @@
 {- The adaptive conformance scene, Haskell port — see
    guests/rust/adaptive.rs for the full rationale. row@dash flips by a
    HANDLER (D2's user-driven toggle); row@narrow carries the declared
-   breakpoint (D3): 'StackBelow' 520 stacks it vertically while the
-   window is narrower than 520 logical points and reverts crossing back.
+   breakpoint (D3, size classes ruled 2026-08-31): 'StackWhen' Compact
+   stacks it vertically while the window's size class is compact (below
+   600 points on every desktop) and reverts on leaving the class.
    The byte-frozen contract is tools/scenes/adaptive.steps. -}
 
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -45,7 +46,7 @@ main = kayaMain $ \app -> do
     -- The handler never touches it.
     narrow <-
       row
-        [A11yId "narrow", StackBelow 520]
+        [A11yId "narrow", StackWhen Compact]
         [ labelBound one, -- label#3
           labelBound two -- label#4
         ]

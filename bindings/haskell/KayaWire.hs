@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xa48166396de2f55d
+specHash = 0x2d485dd5237b14c3
 
 valueBool :: Word32
 valueBool = 1
@@ -260,6 +260,12 @@ axisHorizontal :: Word32
 axisHorizontal = 0
 axisVertical :: Word32
 axisVertical = 1
+sizeClassNone :: Word32
+sizeClassNone = 0
+sizeClassCompact :: Word32
+sizeClassCompact = 1
+sizeClassRegular :: Word32
+sizeClassRegular = 2
 roleDestructive :: Word32
 roleDestructive = 1
 roleProminent :: Word32
@@ -760,9 +766,9 @@ txSetDrawing widgetId vbW vbH count pathLen ops = wireRecord txKindSetDrawing (w
 txSetSizePolicy :: Word64 -> Word32 -> Builder
 txSetSizePolicy widgetId policy = wireRecord txKindSetSizePolicy (word64LE widgetId <> word32LE policy <> word32LE 0)
 
--- A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
+-- A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
 txCreateBreakpoint :: Word64 -> Value -> Word32 -> [Value] -> Builder
-txCreateBreakpoint window below count setters = wireRecord txKindCreateBreakpoint (word64LE window <> encodeValue below <> word32LE count <> word32LE 0 <> encodeValues setters)
+txCreateBreakpoint window sizeClass count setters = wireRecord txKindCreateBreakpoint (word64LE window <> encodeValue sizeClass <> word32LE count <> word32LE 0 <> encodeValues setters)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

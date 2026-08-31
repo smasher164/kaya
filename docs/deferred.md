@@ -8770,12 +8770,14 @@ struck ASan entry at the top of this file.
 ## HOLD — the mirrored adaptive sugar awaits demand (ruled 2026-08-28)
 KEY: row_above, mirrored sugar, stack_below, adaptive layout, mobile-first
 
-`row(stack_below=N)` ships with the adaptive-layout milestone
-(docs/adaptive-layout-plan.md D3); its mirror — `column(row_above=N)`,
-the web's mobile-first direction, a column that widens into a row above
-a threshold — was ruled LEDGERED, not built: one adaptive sugar until a
-guest wants the other. Both lower to the same wire record, so closing
-this entry is one keyword argument in eight bindings plus its
+`row(stack_below=N)` shipped with the adaptive-layout milestone and
+became `row(stack_when=compact)` with the 2026-08-31 size-class slice
+(docs/adaptive-layout-plan.md D3, D8); its mirror — `column(row_above)`,
+the web's mobile-first direction, a column that widens into a row on
+leaving the compact class — was ruled LEDGERED, not built: one adaptive
+sugar until a guest wants the other. Both lower to the same wire
+record, so closing this entry is one keyword argument in eight
+bindings plus its
 check-sugar-surface census row, not a mechanism. Closes when a real
 scene or app asks for the mobile-first spelling.
 
@@ -8804,8 +8806,27 @@ dashboard is currently believed to need only the axis flip, and if its
 visual iteration proves otherwise this entry is the design to build.
 
 
-## DESIGN — THE BREAKPOINT IS A RAW NUMBER, WHERE EVERY OTHER TOOLKIT NAMES A CLASS (2026-08-29)
+## ~~DESIGN — THE BREAKPOINT IS A RAW NUMBER, WHERE EVERY OTHER TOOLKIT NAMES A CLASS (2026-08-29)~~
 KEY: stack_below 700, size class, WindowSizeClass, compact regular expanded, breakpoint vocabulary
+
+BUILT AND LANDED 2026-08-31, the same day the spelling was ratified
+(docs/adaptive-layout-plan.md D8 is the record): `stack_when` takes a
+TYPED size-class name in all eight bindings, record 48's threshold
+became the i64 spec enum "size_class", kaya_window_metrics carries the
+platform's class (iOS reports UIKit's own; everyone else reports NONE
+and the core derives at the ruled 600), a reported platform class
+BEATS the width (the iPad split-view case, unit-proven), and
+`stack_below` is GONE — the portfolio's 700 and the adaptive scene's
+520 both became `stack_when(compact)`, portfolio.steps' stacked
+assert moved 640 -> 560, and Python's refusal names the dead spelling
+for anyone who types it. check-verbs grew the metrics-class clause
+(the iOS environment read no lane can see, plus the 600 pinned at the
+ruled value — the scenes hold it only to (560, 900]), six watched
+negatives plus the wiring itself watched red on the real file.
+Matrix ALL PASS on the slice: mac 349, linux 604, windows 201, ios
+113, android 123, gates 50/50; the linux/windows duration anomalies
+were the slice's own cold core rebuild (no leaked load; maintainer
+waived them in-session).
 
 RULED 2026-08-31 (maintainer): NAMED CLASSES, and the raw-number
 spelling DIES with the slice (churn is free — no compat argument).
@@ -8813,10 +8834,7 @@ The breakpoint speaks the class vocabulary (`stack_when="compact"`
 shape, exact spelling decided at design time): iOS reads the
 platform's own class; the desktops get kaya-owned thresholds at the
 Material boundary (compact below 600), since no desktop platform
-defines one. The build slice — spec prop, all eight bindings, four
-backends, the portfolio's own declaration and the scenes that freeze
-it — is scheduled work now, not a question. Entry stays open until
-the slice lands.
+defines one.
 
 `stack_below=700` makes the AUTHOR invent the number. Nobody else does
 that, and the maintainer's question — "how is the user supposed to know
@@ -8874,10 +8892,12 @@ one thing (Adwaita Sans on GNOME 48, DejaVu on a bare box), which is
 why a framework default is defensible there and nowhere else. The
 maintainer wants the FULL script set, not the Latin core alone: the
 Plex superfamily covers CJK completely since late 2024 (Sans JP, KR,
-TC, SC), plus Arabic, Hebrew, Thai and Devanagari; the Indic scripts
-beyond Devanagari (Tamil, Bengali, Telugu, Kannada, …) have no Plex
-face, so their fallback is PINNED (Noto Sans per script) rather than
-left to the distro lottery. The mechanism is a fontconfig prefer list
+TC, SC), plus Arabic, Hebrew, Thai and Devanagari. AMENDED BY THE
+MAINTAINER 2026-08-31, same day: even where kaya bundles nothing,
+KAYA PICKS THE FALLBACK FAMILY itself — the framework names the
+preference, never the distro default — and the per-script Noto
+pinning idea is DROPPED; scripts Plex does not cover take whatever
+fontconfig resolves. The mechanism is a fontconfig prefer list
 per script beside the installed companions — Pango itemizes text per
 script run, so mixed-script text picks each face by script — and the
 wire already carries font bytes (`set_brand_typeface`), so the
@@ -8897,17 +8917,18 @@ kaya draws its own titlebar on Linux, so this is ordinary styling
 work, not a platform fight.
 
 Closes when both halves ship with their proofs: the typeface half
-wants an `expect_typeface` leg for the undeclared-app default plus a
-pinned-fallback story, the chrome half a frozen observation of the
-styled headerbar.
+wants an `expect_typeface` leg for the undeclared-app default (the
+fallback family is kaya's pick, per the amendment above), the chrome
+half a frozen observation of the styled headerbar.
 
 
 ## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO (2026-08-29; the header half CLOSED 2026-08-30)
 KEY: grow inside scroll, unbounded main axis, sliver header, tableHeaderView, LazyColumn item, nested scroll, interim portfolio fix
 
 THE SECOND HALF CLOSED 2026-08-30, ratified by the maintainer as the
-ADAPTIVE FOLD (docs/adaptive-layout-plan.md D7): a stacked `stack_below`
-row whose shape is leading hugging children then one grown table folds
+ADAPTIVE FOLD (docs/adaptive-layout-plan.md D7): a stacked breakpoint
+row (`stack_when` since 2026-08-31, D8) whose shape is leading hugging
+children then one grown table folds
 those children into the table's viewport as scroll-away header content —
 DERIVED from the shape, no new spelling in any binding — so "a list
 cannot own its header" is no longer true where it mattered, and the

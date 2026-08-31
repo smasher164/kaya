@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xa48166396de2f55dL
+let spec_hash = 0x2d485dd5237b14c3L
 
 let value_bool = 1
 let value_i64 = 2
@@ -134,6 +134,9 @@ let align_stretch = 3
 let align_baseline = 4
 let axis_horizontal = 0
 let axis_vertical = 1
+let size_class_none = 0
+let size_class_compact = 1
+let size_class_regular = 2
 let role_destructive = 1
 let role_prominent = 2
 let role_heading = 3
@@ -657,11 +660,11 @@ let tx_set_size_policy widget_id policy =
       Buffer.add_int32_le b (Int32.of_int policy);
       Buffer.add_int32_le b 0l)
 
-(* A width breakpoint on a window: when the window's width drops below the f64 threshold (logical points), the core applies the setter list; crossing back it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3).  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: the width is LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-width report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. *)
-let tx_create_breakpoint window below count setters =
+(* A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. *)
+let tx_create_breakpoint window size_class count setters =
   finish tx_kind_create_breakpoint (fun b ->
       Buffer.add_int64_le b window;
-      encode_value b below;
+      encode_value b size_class;
       Buffer.add_int32_le b (Int32.of_int count);
       Buffer.add_int32_le b 0l;
       encode_values b setters)
