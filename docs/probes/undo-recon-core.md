@@ -355,7 +355,7 @@ a real Python defect for months.
 
 ### 4b. The ambient/handle split
 
-`tools/check-tx-liveness.sh:32-48` states the rule and the split verbatim:
+`tools/check-tx-liveness.py:10-30` states the rule and the split verbatim:
 
 - **HANDLE bindings** hand the guest a transaction object, so a stale one can be
   recognised and refused. **Rust at compile time** (`Tx` is `!Send`/`!Sync`,

@@ -67,9 +67,10 @@ compute before-images; the wire simply does not carry them today.
 | Python | ambient | `app.build()` `bindings/python/kaya/__init__.py:2357`, `app.window()` `:2340` | module global `_tx` `__init__.py:93` | `_TxScope.__exit__` `__init__.py:2189` |
 | OCaml | ambient | `Kaya_app.build` bindings/ocaml/kaya_app.ml:369 | global `ambient_tx : tx option ref` kaya_app.ml:184; record type `tx` kaya_app.ml:167-175 | `Kaya_runtime.submit` kaya_app.ml:383 |
 | Haskell | ambient | `buildTx` bindings/haskell/KayaApp.hs:2262 (`submitTx` = the handle-less alias, KayaApp.hs:2318) | the `Build` state monad / `BuildState` KayaApp.hs:2268 | `kayaSubmit [records]` KayaApp.hs:2290 |
-| C floor | neither | — | caller-owned buffers | — (tools/check-tx-liveness.sh:47-48) |
+| C floor | neither | — | caller-owned buffers | — (tools/check-tx-liveness.py:21) |
 
-The split is stated verbatim by the gate, tools/check-tx-liveness.sh:35-48:
+The split is stated verbatim by the gate, tools/check-tx-liveness.py:10-30
+(python since the 2026-08-31 conversion; the .sh is its exec shim):
 
 - HANDLE (Rust, Go, Java, C#, Swift) — "hand the guest a transaction object, so
   a stale one can be recognised and refused" (check-tx-liveness.sh:36-37). Rust

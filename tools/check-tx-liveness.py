@@ -30,8 +30,6 @@ dev_shell_or_die()
 # app_test.go, C#'s AbortCheck.cs, Rust's compile_fail doctest,
 # kaya_app_checks.py).
 
-import re
-
 GO = "bindings/go/app.go"
 JAVA = "bindings/java/dev/kaya/KayaApp.java"
 CS = "bindings/csharp/KayaApp.cs"
