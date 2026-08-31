@@ -8782,6 +8782,41 @@ check-sugar-surface census row, not a mechanism. Closes when a real
 scene or app asks for the mobile-first spelling.
 
 
+## WATCH — the mac portfolio leg's pushed entry popped across the fold round trip, once (2026-08-31)
+KEY: portfolio-python-swiftui, entries 0 wanted 1, expect_folded, back push resize, NavigationStack pop, matrix contention
+
+First sighting, one occurrence: the 2026-08-31 end-of-day matrix
+(five lanes contended) failed mac's portfolio-python-swiftui leg at
+the fold round trip's LAST step — `resize_window 900x600` then
+`expect_folded column@summary none` retried its deadline and failed
+with `entries 0, wanted 1`: the pushed Transactions entry was GONE
+and the harness was reading the dashboard. The leg's own log shows
+the shape: the preceding `back` -> `click button#1` ->
+`expect_title "Transactions"` cycle had its click retrying ~3.6s
+under load before the title matched, then 560-fold PASSED on the
+pushed screen, then the resize back to 900 found the stack empty —
+so the pop happened between the successful fold assert and the next
+observation, around a resize, on an entry pushed ~100ms after a
+back. The same tree passed two full matrices earlier that day
+(aeb4f3f's and 5b4eddc's records) and three solo reruns back to
+back, all with the complete fold round trip; no leaked load beyond
+the standing emulator pool. NOTE the day's steps change rides along:
+portfolio.steps' stacked assert moved 640 -> 560 with the size-class
+slice, so the leg now crosses 600 (the mac chrome form-factor
+boundary and the compact class) where 640 never did — recorded as a
+premise candidate, not a conviction, since the same crossing was
+green in two matrices. IF IT RECURS: instrument the pop at its
+chokepoint before any rerun — the interpreter's pop/entries apply
+arm and navEntries writes are the place to log WHO removed the
+entry (a platform-initiated NavigationStack reset would show as a
+path write the core never sent) — an intermittent leg is a correct
+verdict over an unpinned premise, and the premise gets instrumented
+at its chokepoint, never rerun into the noise. The record-matrix
+rerun that followed the sighting was ALL PASS (mac 349, all lanes
+under their ceilings), so the sighting stands at ONE, under
+contention, watched.
+
+
 ## HOLD — the windows guest-side command scripts convert to python, at some point (Akhil, 2026-08-31)
 KEY: tools/guest cmd scripts, windows vm python, schtasks launcher, shot-window ps1, cmd.exe toml
 
