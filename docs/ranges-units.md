@@ -86,7 +86,7 @@ text *is*, and the byte-offset choice is the one that agrees with it.
 - **The harness verbs carry no offsets.** `set_text(target, text)`
   and `type_text(text)` (`harness.rs:541,594`); `type` is restricted
   to printable ASCII at parse (`harness.rs:1385-1400`,
-  `tools/check-steps.sh:297-343`). `crates/kaya/src/scene.rs:691`
+  `tools/check-steps.py:1333-1397`). `crates/kaya/src/scene.rs:691`
   states outright: "kaya has no selection API".
 - **The two existing near-misses are both ASCII-safe by accident,
   and one is a latent unit bug**:
@@ -552,7 +552,7 @@ strings:**
 **In the scenes (shared verbatim, invariant 6):**
 
 7. **The hazard scene.** `set_text` accepts arbitrary UTF-8 (only
-   `type` is ASCII-restricted — `check-steps.sh:339`, harness
+   `type` is ASCII-restricted — `check-steps.py:1391-1397`, harness
    `unescape` at `harness.rs:1339` passes non-ASCII through), so the
    scene can seed `ab😀cd` and the ZWJ family literally. Declare a
    range over the whole emoji and assert the read-back; declare one

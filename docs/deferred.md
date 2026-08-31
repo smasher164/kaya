@@ -3555,7 +3555,9 @@ is a GENERATION problem rather than a translation one, which changes the
 item's shape as well as its size), tools/deploy-win.sh (the longest
 and the one whose leg ordering is load-bearing), then the rest of
 tools/*.sh — 52 of them today against 2 tools/*.py, so nothing has moved
-yet. Python is the obvious target — it is already the mandated
+yet (overtaken: see the 2026-08-31 progress note below — the gate tier
+is done, the runners and guest .cmd files are what remain). Python is
+the obvious target — it is already the mandated
 language for text processing here, it is in the dev shell, and it has
 real data structures for things the shell fakes with string splicing.
 
@@ -3565,6 +3567,30 @@ tools/check-shell.sh enforces (a rule that exists only because shell
 makes it easy to get wrong — which is itself an argument for leaving).
 See also the portsh work for the cases where one script must run on both
 sides.
+
+PROGRESS 2026-08-31: the GATE tier is fully converted — every gate body
+under tools/ is python against the imported prelude (48 bodies in
+check-python's census; each old body was run beside its replacement on
+the same tree with stdout, stderr and exit compared, and every watched
+negative re-proven red on the converted body; the two largest,
+tools/check-steps.py and tools/check-sugar-surface.py, closed the set
+today, both byte-identical on both streams). The runners, keyed.sh, the
+generators and tools/lib/*.sh stay shell by the 2026-08-27 ruling's
+present-tense boundary. Both things the paragraph above said not to
+lose survived the move: the fingerprint lives in tools/lib/kaya_gate.py
+and is proven against the real shell pipeline in its own self-test, and
+the `$?` discipline retired with the shell bodies — check-python's
+eleven rules are its replacement. A dedicated clause-by-clause audit of
+all 37 non-verbatim conversions
+(docs/measurements/gate-conversion-audit-2026-08-31.md) found four real
+defects: check-wheel's import smoke lost the shell's cd (a standalone
+run from bindings/python could green a wheel shipping nothing),
+check-shell's four per-command rules policed no .py body (restored as
+check-python rule 11, both argv-list and embedded-shell spellings),
+check-case never read git ls-files' exit, and check-ambient-tx's census
+had no floor — all four fixed the same day with watched proofs. What
+remains of this entry: the tools/guest/*.cmd generation problem and the
+runner boundary (the windows half is the 2026-08-31 HOLD entry below).
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
 

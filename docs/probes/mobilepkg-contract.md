@@ -418,7 +418,7 @@ guests on iOS and for the Rust and Kotlin guests on Android — the same
 
 ### 4.4 Where a new language's legs must be declared
 
-`tools/check-steps.sh:434-482` (`wired()`) demands that **every** scene have
+`tools/check-steps.py:1684-1828` (`wired()`) demands that **every** scene have
 live legs in **every** runner, including `tools/ios/run-sim.sh` and
 `tools/android/run-emulator.sh` — name-level for the two mobile runners,
 because "their legs derive mechanically from the scene list, so the name IS
@@ -577,7 +577,7 @@ line. Grouped so a candidate arm can score it.
 | F1 | Produces **byte-identical output strings** to every other language for the shared `tools/scenes/*.steps`. | CLAUDE.md invariant 6 |
 | F2 | **Mounts a root** — an unmounted scene fails with a dedicated diagnosis. | `KayaSwiftUI.swift:6171-6197` |
 | F3 | Does **not** read `KAYA_SELFTEST_SCRIPT`, print a verdict, or exit — the interpreter owns all three. | `KayaSwiftUI.swift:3335-3346`; `KayaCompose.kt:1715-1724` |
-| F4 | Must eventually be wired into **both** mobile runners for **every** scene, or hold scenes off with a backend `depth_stub`. There is no per-language partial wiring. | `check-steps.sh:406-408, 434-482` |
+| F4 | Must eventually be wired into **both** mobile runners for **every** scene, or hold scenes off with a backend `depth_stub`. There is no per-language partial wiring. | `check-steps.py:1659-1670, 1684-1828` |
 | F5 | Carries the language's own layer-2 transport and layer-3 structural core (id allocation, template scoping, occurrence dispatch); layer 1 is generated from the spec. | `bindings/README.md` |
 
 ### G. The two questions that decide a candidate fast

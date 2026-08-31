@@ -346,7 +346,7 @@ sections design refused, arriving through a side door.
 
 **[REPO]** DESIGN.md:1640-1642 — the window anchor *"rides the window
 construct under the window-attribute unification rule; it is not a
-widget in the scene root."* And check-sugar-surface.sh:908-921 enforces
+widget in the scene root."* And check-sugar-surface.py:3666-3671 enforces
 the pair: *"NO WINDOW ATTRIBUTE LIVES AS A LOOSE FUNCTION OUTSIDE THE
 CONSTRUCT"* — swept in both directions since three bindings shipped a
 loose `OnUndone(window, fn)` by transcribing Rust's shape.
@@ -361,11 +361,11 @@ This asymmetry matters for choosing prop-vs-record:
 - **A new WINDOW_PROPS entry is swept AUTOMATICALLY.** The window-prop
   loop reads `WPROP_*` out of the GENERATED `bindings/python/kaya/wire.py`
   and demands a sugar spelling in 7 languages (C exempt)
-  — check-sugar-surface.sh:706-759. *"Props come from the GENERATED wire
+  — check-sugar-surface.py:3418-3478. *"Props come from the GENERATED wire
   file, so this tracks the spec by construction."*
 - **A new RECORD is NOT.** It needs a hand-written `check_styling_point`
   clause, exactly like the one `add_section` eventually got
-  (check-sugar-surface.sh:866-889) — and that clause exists BECAUSE the
+  (check-sugar-surface.py:3633-3649) — and that clause exists BECAUSE the
   sweep was missing: *"add_section grew up primary-only, and six
   bindings gained a window target while two kept the hardcoded 0 — which
   no gate swept, so the divergence surfaced only when the

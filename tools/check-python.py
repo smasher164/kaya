@@ -50,6 +50,14 @@ dev_shell_or_die()
 #
 # AND THE PRELUDE'S OWN NEGATIVES (10), run here rather than left to a
 # gate list nobody reads: kaya_gate.py --selftest, on this sweep.
+#
+# AND COMMAND HYGIENE FOLLOWS THE COMMAND INTO PYTHON (11). check-shell's
+# four per-command rules — cargo --locked, javac -encoding UTF-8, no
+# sed/awk, ffmpeg -nostdin — police *.sh, and the conversion moved 12
+# such invocations into these bodies where they policed nothing (audit
+# 2026-08-31). Both python spellings are read: an argv LIST naming the
+# tool, and EMBEDDED SHELL in a multi-line string, scanned line-wise
+# with check-shell's own command-position patterns.
 
 import ast
 import re
@@ -138,6 +146,91 @@ def converted():
 READ_WRITE = {"read_text", "write_text", "read_bytes", "write_bytes"}
 BINARY = {"read_bytes", "write_bytes"}
 
+# Rule 11's shell-line scanners are check-shell's own patterns verbatim
+# (tools/check-shell.py holds the reasoning beside each): embedded shell
+# is still shell, so the string half of the rule reads it with the same
+# eyes. The tool names are spelled as SETS below and BUILT in the
+# fixtures, because this gate is inside the population it scans and a
+# literal argv would be reported as a real one (check-shell's own
+# fixture lesson).
+SH_CARGO = re.compile(r"(?:^|[^-\w])cargo\s+"
+                      r"(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?"
+                      r"(?:build|check|test)(?!\S)")
+SH_TOOLCMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
+                        r"(sed|awk)\b")
+SH_FFMPEG = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
+                       r"ffmpeg\b")
+RESOLVING = {"build", "check", "test"}
+COMPILING = {"-d", "-proc:only"}
+BANNED_TOOLS = {"sed", "awk"}
+
+
+def shell_logical(text):
+    """A string's lines with backslash continuations joined, numbered by
+    first line — a flag on the next line is still on the same command."""
+    out, start, buf = [], None, []
+    for n, line in enumerate(text.split("\n"), 1):
+        if start is None:
+            start = n
+        if line.endswith("\\"):
+            buf.append(line[:-1])
+            continue
+        buf.append(line)
+        out.append((start, " ".join(p.strip() for p in buf)))
+        start, buf = None, []
+    return out
+
+
+def command_findings(path, node):
+    """Rule 11 over one AST node, both spellings."""
+    bad = []
+    if isinstance(node, (ast.List, ast.Tuple)):
+        elems = [e.value for e in node.elts
+                 if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        got = set(elems)
+        for tool in sorted(BANNED_TOOLS & got):
+            bad.append(f"{path}:{node.lineno}: {tool} in an argv list — "
+                       f"banned, use python3 (repo policy: BSD/GNU "
+                       f"divergence causes recurring breakage).")
+        if "cargo" in got and RESOLVING & got and "--locked" not in got:
+            bad.append(f"{path}:{node.lineno}: a cargo argv without "
+                       f"--locked — it may rewrite Cargo.lock mid-run "
+                       f"(CLAUDE.md; the shell rule follows the command "
+                       f"into python).")
+        if "javac" in got and COMPILING & got and "-encoding" not in got:
+            bad.append(f"{path}:{node.lineno}: a javac compile without "
+                       f"-encoding — javac takes the PLATFORM charset and "
+                       f"the hosts disagree (docs/traps.md).")
+        if "ffmpeg" in got and "-nostdin" not in got:
+            bad.append(f"{path}:{node.lineno}: ffmpeg without -nostdin — "
+                       f"it eats a read loop's stdin (docs/traps.md).")
+    if isinstance(node, ast.Call) \
+            and getattr(node.func, "id", None) == "run_javac":
+        args = {a.value for a in node.args
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)}
+        if COMPILING & args and "-encoding" not in args:
+            bad.append(f"{path}:{node.lineno}: run_javac compiles without "
+                       f"-encoding — javac takes the PLATFORM charset and "
+                       f"the hosts disagree (docs/traps.md).")
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+            and "\n" in node.value:
+        for n, line in shell_logical(node.value):
+            if line.lstrip().startswith("#"):
+                continue
+            if SH_CARGO.search(line) and "--locked" not in line:
+                bad.append(f"{path}:{node.lineno}: line {n} of a string "
+                           f"holds a cargo invocation without --locked — "
+                           f"embedded shell is still shell.")
+            if (m := SH_TOOLCMD.search(line)):
+                bad.append(f"{path}:{node.lineno}: line {n} of a string "
+                           f"invokes {m.group(1)} — banned, use python3 "
+                           f"(embedded shell is still shell).")
+            if SH_FFMPEG.search(line) and "-nostdin" not in line:
+                bad.append(f"{path}:{node.lineno}: line {n} of a string "
+                           f"holds ffmpeg without -nostdin — embedded "
+                           f"shell is still shell.")
+    return bad
+
 
 def census(files):
     """Every rule but ruff's and the prelude's, over {path: text}.
@@ -167,6 +260,9 @@ def census(files):
                        f"replaced; one variant is the whole point.")
 
         for node in ast.walk(tree):
+            # 11. COMMAND HYGIENE FOLLOWS THE COMMAND INTO PYTHON.
+            bad.extend(command_findings(path, node))
+
             # 1. NO SWALLOWED EXCEPTIONS.
             if isinstance(node, ast.ExceptHandler):
                 body = node.body
@@ -253,14 +349,21 @@ def census(files):
                                 f"{path}:{node.lineno}: `raise SystemExit(0)` "
                                 f"is the false-PASS class — see rule 4.")
 
-        # 5. EVERY walk() PAIRED WITH A counted(..., floor=).
-        walks = len(re.findall(r"\.walk\(", text))
+        # 5. EVERY FILESYSTEM walk() PAIRED WITH A counted(..., floor=).
+        # ast.walk is a TREE traversal, not a census, and owes no floor
+        # — the receivers named here are the two the population spells;
+        # an aliased ast import gets a false RED and a rename, never a
+        # silenced one.
+        walks = [m.group(1) for m in
+                 re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\.walk\(", text)
+                 if m.group(1) not in ("ast", "ast_mod")]
         floors = len(re.findall(r"\.counted\(", text))
         if walks and not floors:
             bad.append(
-                f"{path}: calls .walk() {walks} time(s) and .counted(..., "
-                f"floor=) never. A census that read nothing agrees with "
-                f"everything — print the count and refuse below a floor.")
+                f"{path}: calls .walk() {len(walks)} time(s) and "
+                f".counted(..., floor=) never. A census that read nothing "
+                f"agrees with everything — print the count and refuse "
+                f"below a floor.")
 
     return bad
 
@@ -347,6 +450,50 @@ gate.negative("N11 rule 6 — a bare re.subn in a gate",
               lambda: census({"tools/check-not-yet-converted.py": body}),
               want="bare re.subn in a gate")
 
+# N14-N18 — rule 11, one negative per sub-clause, every fixture BUILT
+# rather than written literally: this gate is inside the population it
+# scans, and a literal offending argv here would be reported as a real
+# one (check-shell's own fixture lesson, one language over).
+CARGO_W = "car" + "go"
+SED_W = "s" + "ed"
+for label, planted, want in [
+    ("N14 rule 11 — a cargo argv without --locked",
+     "import re\nimport subprocess\nsubprocess.run(['" + CARGO_W
+     + "', 'build', '--lib'])", "a cargo argv without --locked"),
+    ("N15 rule 11 — sed in an argv list",
+     "import re\nimport subprocess\nsubprocess.run(['" + SED_W
+     + "', '-n', 'p'])", "in an argv list"),
+    ("N16 rule 11 — run_javac compiling without -encoding",
+     "import re\nrun_javac('-d', 'classes', 'A.java')",
+     "run_javac compiles without -encoding"),
+    ("N17 rule 11 — ffmpeg without -nostdin",
+     "import re\nimport subprocess\nsubprocess.run(['ff" + "mpeg"
+     + "', '-i', 'in.mp4', 'out.png'])", "ffmpeg without -nostdin"),
+    ("N18 rule 11 — embedded shell running cargo unlocked",
+     "import re\nPAYLOAD = '''set -e\n" + CARGO_W
+     + " build --lib\n'''", "embedded shell is still shell"),
+]:
+    body = gate.doctor(label, real, r"^import re$", planted, want=1,
+                       flags=re.M)
+    gate.negative(label, lambda b=body: doctored(b), want=want)
+
+# N19 — and rule 11 is not over-eager: the SAME shapes with the flag in
+# place must be quiet, or every future cargo call reddens regardless.
+quiet = gate.doctor(
+    "N19 rule 11 — the compliant spellings are quiet", real,
+    r"^import re$",
+    "import re\nimport subprocess\nsubprocess.run(['" + CARGO_W
+    + "', 'check', '--locked', '--lib'])\nPAYLOAD = '''set -e\n"
+    + CARGO_W + " test --locked --lib\n'''", want=1, flags=re.M)
+loud = [f for f in doctored(quiet) if "cargo" in f]
+if loud:
+    gate.finding("self-test N19: rule 11 fired on a --locked cargo — "
+                 "the rule is over-eager:\n" + "\n".join(loud))
+else:
+    print("check-python: self-test N19 — a --locked cargo argv and a "
+          "--locked embedded line are quiet, so rule 11 keys on the "
+          "flag and not the tool")
+
 # N12 — rule 6's exemption is not a blanket: the SAME body under an EXEMPT
 # name must be quiet, or the table is doing nothing and the rule is off.
 if any("re.subn" in f for f in census({victim: body})):
@@ -365,7 +512,7 @@ else:
     print("check-python: self-test N13 — a shim with one extra line differs "
           "from the pinned bytes, so the comparison is not vacuous")
 
-gate.negatives_ran(11)
+gate.negatives_ran(16)
 
 # --------------------------------------------------------------- clauses
 
@@ -414,4 +561,4 @@ else:
           "count, the census floor, scratch cleanup after an exception)")
 
 gate.verdict(f"{len(files)} converted bodies, {len(files) - 1} shims pinned, "
-             f"10 rules + ruff")
+             f"11 rules + ruff")

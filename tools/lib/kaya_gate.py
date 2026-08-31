@@ -101,6 +101,21 @@ class Refusal(Exception):
     """No verdict at all — the run read too little to have an opinion."""
 
 
+def _excepthook(tp, value, tb, _default=sys.excepthook):
+    """An uncaught Refusal ends the gate with its sentence alone.
+
+    refuse() already printed the sentence; the default hook's traceback
+    after it reads as a crash in the very place the gate is being most
+    deliberate (audit 2026-08-31). The exit code is 1 either way, and a
+    gate that CATCHES Refusal never reaches this."""
+    if issubclass(tp, Refusal):
+        return
+    _default(tp, value, tb)
+
+
+sys.excepthook = _excepthook
+
+
 class Gate:
     """One gate's findings, census floors, scratch space and negatives.
 
@@ -116,6 +131,7 @@ class Gate:
         self._walks = {}
         self._counted = set()
         self._negatives = 0
+        self._perturbs = 0
         self._scratch = None
 
     # ---------------------------------------------------------- census
@@ -248,10 +264,17 @@ class Gate:
         return out
 
     def perturb(self, label, rel, pattern, repl, *, want=1, flags=0):
-        """doctor() onto a COPY IN SCRATCH; returns the copy's path."""
+        """doctor() onto a COPY IN SCRATCH; returns the copy's path.
+
+        Each call gets its OWN file (the suffix keeps the extension for
+        anything that compiles the copy): negatives are evaluated
+        eagerly today, but N perturbations of one source sharing a name
+        means a deferred lambda would read the LAST doctored copy and
+        go green for the wrong reason (audit 2026-08-31)."""
         text = self.doctor(label, self.read(rel), pattern, repl, want=want,
                            flags=flags)
-        out = self.scratch() / pathlib.Path(rel).name
+        self._perturbs += 1
+        out = self.scratch() / f"perturb-{self._perturbs}-{pathlib.Path(rel).name}"
         out.write_text(text, encoding="utf-8")
         return out
 
@@ -442,6 +465,38 @@ def _selftest():  # noqa: PLR0915 — one flat list of watched properties
     check("F8 walk finds the tools scripts", len(scripts) > 50)
     check("F8 walk prunes build directories",
           not any("target" in p.parts for p in scripts))
+
+    # F9. AN UNCAUGHT REFUSAL IS THE SENTENCE ALONE: rc 1, the REFUSAL
+    # line, and no traceback after it — refuse() said everything there
+    # is to say, and a traceback after a correct refusal reads as a
+    # crash (audit 2026-08-31).
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "import pathlib, sys; sys.path.insert(0, "
+         f"{str(pathlib.Path(__file__).resolve().parent)!r}); "
+         "from kaya_gate import Gate; Gate('probe').refuse('no data')"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    print(f"kaya_gate: F9 uncaught refusal rc={probe.returncode}, "
+          f"stderr={probe.stderr.strip()!r}")
+    check("F9 an uncaught refusal exits 1 with its sentence",
+          probe.returncode == 1 and "probe: REFUSAL — no data" in probe.stderr)
+    check("F9 no traceback follows the refusal sentence",
+          "Traceback" not in probe.stderr)
+
+    # F10. TWO PERTURBATIONS OF ONE SOURCE ARE TWO FILES: a shared name
+    # means a deferred negative reads the LAST doctored copy and goes
+    # green for the wrong reason (audit 2026-08-31).
+    g10 = Gate("selftest")
+    sample10 = g10.scratch() / "p.txt"
+    sample10.write_text("alpha beta\n", encoding="utf-8")
+    p1 = g10.perturb("F10 first", sample10, "alpha", "ALPHA")
+    p2 = g10.perturb("F10 second", sample10, "beta", "BETA")
+    check("F10 two perturbations of one source are two files", p1 != p2)
+    check("F10 each copy carries its own doctoring",
+          "ALPHA" in p1.read_text(encoding="utf-8")
+          and "BETA" in p2.read_text(encoding="utf-8")
+          and "BETA" not in p1.read_text(encoding="utf-8"))
 
     print(f"kaya_gate: SELF-TEST {'OK' if not bad else f'FAILED ({bad})'}")
     return bad == 0

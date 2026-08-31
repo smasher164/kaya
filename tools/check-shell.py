@@ -18,7 +18,11 @@ dev_shell_or_die()
 # that DO apply to its body are check-python.sh's, and the shim's exact
 # bytes are pinned there too, so it can never grow logic this file would
 # then have to hold. What stays here is what shell is still for: the
-# runners, keyed.sh, the generators and tools/lib/*.sh.
+# runners, keyed.sh, the generators and tools/lib/*.sh. The four
+# per-command rules (--locked, javac -encoding, sed/awk, ffmpeg
+# -nostdin) follow the commands into the converted bodies as
+# check-python's rule 11 — for four days after the conversion they
+# policed nothing there (audit 2026-08-31).
 
 import re
 import shutil

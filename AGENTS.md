@@ -27,7 +27,8 @@ in docs/deferred.md.
   it, and a `[` overwrites it. shellcheck reports none of those three
   at warning level; check-shell enforces the shape. (`local rc=$?` on
   one line is fine — the expansion beats the command.)
-- Every cargo invocation carries `--locked` (check-shell enforces it):
+- Every cargo invocation carries `--locked` (check-shell enforces it
+  in shell, check-python's rule 11 in the converted gate bodies):
   a bare build may rewrite Cargo.lock mid-run, and the lane then goes
   green against a dependency graph nobody chose.
 - A built artifact carries the id of the sources it came from
@@ -193,7 +194,7 @@ in docs/deferred.md.
    gate the 2026-08-27 ruling asked for: the gate BODIES are python
    now, imported against tools/lib/kaya_gate.py — never a launcher,
    so every gate stays standalone-runnable. That retires the `$?`
-   class and puts ten rules in its place, each mapping to a defect
+   class and puts eleven rules in its place, each mapping to a defect
    this repo has already been bitten by ONE SURFACE OVER: no
    swallowed exception (a caught-and-dropped one is the new false
    green), no shell=True or os.system (the sed/awk rule's
@@ -209,8 +210,13 @@ in docs/deferred.md.
    replace SIX drifted copies of the dev-shell preamble — one of
    which printed ONE sentence for BOTH causes), and `ast.parse` over
    every body, which has no analogue today: a SyntaxError in a
-   rarely-taken heredoc branch was invisible until that branch ran.
-   Rules 1, 2 and 4 come off `ruff` for free, which is why ruff
+   rarely-taken heredoc branch was invisible until that branch ran,
+   and COMMAND HYGIENE FOLLOWING THE COMMAND INTO PYTHON — cargo
+   --locked, javac -encoding, no sed/awk, ffmpeg -nostdin, read
+   from argv lists AND from embedded shell in strings, because the
+   conversion moved twelve such invocations out of check-shell's
+   *.sh population where they were policed by nothing (audit
+   2026-08-31). Rules 1, 2 and 4 come off `ruff` for free, which is why ruff
    joined the flake. A CONVERTED GATE KEEPS ITS `.sh` NAME as a
    two-line exec shim, because ~50 path-shaped citations in
    docs/probes, docs/chrome, docs/traps.md and the plans name it and
@@ -221,7 +227,7 @@ in docs/deferred.md.
    shell pipeline, both dev-shell sentences, a perturbation that
    applied nothing, the census floor, scratch surviving nothing —
    because the file every converted gate imports must prove its
-   refusals somewhere nobody can skip. Eleven watched negatives,
+   refusals somewhere nobody can skip. Sixteen watched negatives,
    counts printed, red demanded on every run),
    `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
    modulo the line-3 comment — they drifted once, silently, for two

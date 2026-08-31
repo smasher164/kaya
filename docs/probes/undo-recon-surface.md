@@ -299,15 +299,15 @@ returns nothing).
 
 Structural rules a new scene inherits, all enforced by tools/check-steps.sh:
 
-- **It must open with an `expect`** (check-steps.sh:75-113). The first
+- **It must open with an `expect`** (check-steps.py:1016-1054). The first
   observation's bounded retry doubles as the scene-ready wait; an action-first
   script races the mount on every platform at once.
 - **Container targets are creation-indexed and therefore banned above index 0**
-  (check-steps.sh:18-26, 32-57) — only `column#0`/`row#0`/`scroll#0`/`grid#0`
+  (check-steps.py:9-18, 155-190) — only `column#0`/`row#0`/`scroll#0`/`grid#0`
   are cross-language stable.
-- **LF only** — a raw CR byte fails (check-steps.sh:220-251), because Swift's
+- **LF only** — a raw CR byte fails (check-steps.py:1270-1293), because Swift's
   grapheme-based split sees CRLF as one cluster.
-- **No `\n`/`\r` into a single-line entry** (check-steps.sh:253-291).
+- **No `\n`/`\r` into a single-line entry** (check-steps.py:1296-1330).
 - **Every assertion must read something REAL.** The house rule is visible all
   over the Step docs: `expect_menu` reads "the platform's REAL menu chrome —
   never the scene model's copy" (harness.rs:353-358); `expect_ax` reads the
@@ -420,18 +420,18 @@ check-verbs.py:640-651).
 
 **check-sugar-surface (tools/check-sugar-surface.sh)** goes red for any binding
 that has not spelled the new surface. Two loops track the spec by construction
-— widget kinds (check-sugar-surface.sh:34-78) and window props
-(check-sugar-surface.sh:294-321), both read from the GENERATED wire file — plus
+— widget kinds (check-sugar-surface.py:90-126) and window props
+(check-sugar-surface.py:3418-3478), both read from the GENERATED wire file — plus
 a hand-written clause per non-kind, non-window-prop surface. The clipboard
 added FOUR such clauses, one per point of its surface, in all eight languages:
-`copy` (check-sugar-surface.sh:166-173), `read_clipboard` (:175-182), `accepts`
-(:184-191), `on_paste` (:193-200), with the header explaining why: "none of
+`copy` (check-sugar-surface.py:3137-3150), `read_clipboard` (:3152-3167), `accepts`
+(:3169-3184), `on_paste` (:3186-3206), with the header explaining why: "none of
 them is a widget kind or a window prop, so nothing above can see them"
-(check-sugar-surface.sh:153-158). **An undo group surface is exactly that
+(check-sugar-surface.py:3127-3136). **An undo group surface is exactly that
 shape**, so it needs its own hand-written 8-row clause and will not be caught by
 either automatic loop. The built-in negative test is the pattern to copy: a
 fake kind must fail in all 8, or the patterns have rotted
-(check-sugar-surface.sh:63-74; the menus variant at :217-237).
+(check-sugar-surface.py:776-789; the menus variant at :3222-3249).
 
 **check-stubs (tools/check-stubs.sh)** is the other half of the depth-slice
 contract: a runner may not wire a scene's legs while its backend still stubs the
@@ -442,22 +442,22 @@ feature (check-stubs.sh:18-30, checks at :72-76). The stub is a CALL —
 (`tools/lib/hand-rolled-stubs.py`, check-stubs.sh:107-113).
 
 **check-steps (tools/check-steps.sh)** reads the same stub from the other side:
-`wired()` (check-steps.sh:331-376) demands every scene have live legs in every
+`wired()` (check-steps.py:1684-1828) demands every scene have live legs in every
 one of the five runners UNLESS the backend declares the stub. Two further
 clauses matter for an undo scene:
-- `SCENES` vs `DEPTH_SCENES` (check-steps.sh:390-399): a scene in `SCENES` must
+- `SCENES` vs `DEPTH_SCENES` (check-steps.py:2129-2160): a scene in `SCENES` must
   have a guest in all six file-per-scene languages plus an arm in the Java and
-  C# selectors (check-steps.sh:404-454). A rust-only depth slice goes in
+  C# selectors (check-steps.py:2173-2193). A rust-only depth slice goes in
   `DEPTH_SCENES`.
-- The mac-only leg check (check-steps.sh:455-482): a guest that exists but no
+- The mac-only leg check (check-steps.py:2195-2214): a guest that exists but no
   leg runs is invisible to every other gate — "clipboard shipped with working
   OCaml and Haskell guests that validate-mac never executed, and nothing
   noticed".
 
 Plus the serialization rules the clipboard needed and undo probably will not:
-menus/filedialog legs run alone between drains (check-steps.sh:571-635), and
-clipboard legs run alone on every lane (check-steps.sh:637-730 desktop,
-:732-831 android, :833-1189 iOS). Undo has no shared system resource, so it
+menus/filedialog legs run alone between drains (check-steps.py:2414-2471), and
+clipboard legs run alone on every lane (check-steps.py:2604-2675 desktop
+and android, :2700-2857 iOS). Undo has no shared system resource, so it
 should be poolable — worth stating explicitly rather than assuming.
 
 **So the mid-fan-out red state is expressible and expected** (CLAUDE.md:209-216:

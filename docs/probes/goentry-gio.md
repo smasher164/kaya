@@ -455,7 +455,7 @@ So the change is mechanical: add an `//go:build android` file to
    pair is invisible to every compiler, which is exactly the shape
    invariant 3 asks for a guard around.
 4. **The scene table stops hiding behind a build tag.** `main_android.go`
-   holds the 31-entry table and `tools/check-steps.sh:1617-1620` parses
+   holds the 31-entry table and `tools/check-steps.py:3342-3441` parses
    that file to learn which scenes the APK carries. With one `main` and
    no tags, the aggregate would be an ordinary package (say
    `guests/go/androidapk/main.go (gone)`) whose `main()` reads

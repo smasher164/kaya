@@ -46,7 +46,18 @@ if lint("-", 'with app.build():\n    groups.insert("g2", "Home")\n'):
     sys.exit(1)
 
 status = 0
-for f in sorted((ROOT / "guests/python").glob("*.py")):
+guests = sorted((ROOT / "guests/python").glob("*.py"))
+# 45 python guests at the time of writing; a moved or renamed
+# directory used to turn the shell's incidental red into a loop that
+# reads nothing and agrees with everything (audit 2026-08-31).
+if len(guests) < 20:
+    print(f"check-ambient-tx: only {len(guests)} python guests reached "
+          f"the census (floor 20) — a census that reads nothing agrees "
+          f"with everything", file=sys.stderr)
+    sys.exit(1)
+print(f"check-ambient-tx: {len(guests)} python guests in the census "
+      f"(floor 20)", file=sys.stderr)
+for f in guests:
     rel = f.relative_to(ROOT)
     bad = lint(str(rel), f.read_text(encoding="utf-8"))
     if bad:

@@ -46,6 +46,18 @@ def lint(paths, cwd):
     return bad
 
 
+def bad_census(r):
+    """The refusal a failed listing earns: the shell's pipefail took
+    git's exit, the port must read it itself — a git that ran and
+    failed hands over an empty population, and an empty census agrees
+    with everything (audit 2026-08-31)."""
+    if r.returncode == 0:
+        return None
+    return (f"check-case: git ls-files failed (exit {r.returncode}) — "
+            f"refusing a verdict from an empty census, which agrees "
+            f"with everything")
+
+
 # Self-test, both directions: a case-only mismatch caught, an exact
 # match not. A REAL fixture on the real filesystem — the case behavior
 # under test is the filesystem's, not python's.
@@ -60,10 +72,35 @@ with scratch_dir("check-case-") as tmp:
         print("check-case: SELF-TEST FAIL (an exact match was rejected)",
               file=sys.stderr)
         sys.exit(1)
+    # And the failed-git refusal, watched on a git driven to fail.
+    broken = subprocess.run(
+        ["git", "--git-dir", str(tmp / "no-such-repo"), "ls-files", "-z"],
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, encoding="utf-8", check=False)
+    if bad_census(broken) is None:
+        print("check-case: SELF-TEST FAIL (a git driven at a missing "
+              "--git-dir was not refused, so the failed-census branch "
+              "has never been seen firing)", file=sys.stderr)
+        sys.exit(1)
+    print(f"check-case: failed-git negative ran (exit "
+          f"{broken.returncode} refused)", file=sys.stderr)
 
 tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
-                         stdout=subprocess.PIPE, text=True, check=False)
-bad = lint(tracked.stdout.split("\0"), str(ROOT))
+                         stdout=subprocess.PIPE, text=True,
+                         encoding="utf-8", check=False)
+census_refusal = bad_census(tracked)
+if census_refusal is not None:
+    print(census_refusal, file=sys.stderr)
+    sys.exit(1)
+paths = [p for p in tracked.stdout.split("\0") if p]
+if len(paths) < 500:
+    print(f"check-case: only {len(paths)} tracked paths reached the "
+          f"census (floor 500) — a census that reads nothing agrees "
+          f"with everything", file=sys.stderr)
+    sys.exit(1)
+print(f"check-case: {len(paths)} tracked paths in the census "
+      f"(floor 500)", file=sys.stderr)
+bad = lint(paths, str(ROOT))
 # The old body printed lint's joined output unconditionally, blank line
 # included on a clean run; kept for byte parity with the shell gate.
 print("\n".join(bad))

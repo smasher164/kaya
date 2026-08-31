@@ -216,7 +216,7 @@ running a lane during this fan-out should expect it and simply re-run.
    `drain_suites`; the save dialog is the same OS-global `#32770` found by
    the same desktop walk, so it needs the same rule. `deploy-win.sh`
    already runs it that way — the gate just cannot see that it must. One
-   token: `(menus|filedialog|save)` at check-steps.sh:915, plus a
+   token: `(menus|filedialog|save)` at check-steps.py:2424, plus a
    self-test line beside the two already there. NOT DONE HERE because
    check-steps.sh is a shared gate file and this is a concurrent fan-out.
 3. **The first-post-is-discarded finding is not Windows trivia.** Any arm

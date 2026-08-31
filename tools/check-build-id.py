@@ -34,6 +34,7 @@ def verify(*args):
     run = subprocess.run(
         ["tools/build-id.sh", "--verify", *args], cwd=ROOT,
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8",
         check=False)
     return run.returncode, run.stderr
 

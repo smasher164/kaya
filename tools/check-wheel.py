@@ -56,8 +56,35 @@ with scratch_dir("check-wheel-") as tmp:
         sys.exit(1)
 
     smoke_env = dict(bare, KAYA_LIB=str(ROOT / "target/debug/libkaya.dylib"))
+
+    # The smoke's cwd is PINNED to the scratch dir: `python -c` puts
+    # the cwd at sys.path[0], so an unpinned run from bindings/python
+    # imports the WORKING TREE ahead of the venv and prints OK for a
+    # wheel that ships nothing (audit 2026-08-31). The decoy watches
+    # the mechanism: the same interpreter run from a cwd carrying a
+    # kaya package must import THAT — which is what the pin prevents.
+    decoy = tmp / "decoy"
+    (decoy / "kaya").mkdir(parents=True)
+    (decoy / "kaya" / "__init__.py").write_text(
+        'raise ImportError("decoy kaya package, cwd shadowing")\n',
+        encoding="utf-8")
+    shadowed = subprocess.run(
+        [str(tmp / "venv/bin/python"), "-c", "import kaya"],
+        env=smoke_env, cwd=decoy, capture_output=True, text=True,
+        encoding="utf-8", check=False)
+    if "decoy kaya package, cwd shadowing" not in shadowed.stderr:
+        print("check-wheel: SELF-TEST FAIL (a decoy kaya package in "
+              "the smoke's cwd was not what the interpreter imported, "
+              "so the cwd-shadowing hazard the pin below exists for "
+              "could not be reproduced and the pin is unproven)",
+              file=sys.stderr)
+        sys.exit(1)
+    print("check-wheel: decoy-cwd negative ran (the shadowing import "
+          "was reproduced, so the smoke's cwd pin is live)",
+          file=sys.stderr)
+
     if subprocess.run([str(tmp / "venv/bin/python"), "-c", SMOKE],
-                      env=smoke_env, check=False).returncode != 0:
+                      env=smoke_env, cwd=tmp, check=False).returncode != 0:
         print("check-wheel: installed package failed its import smoke",
               file=sys.stderr)
         sys.exit(1)

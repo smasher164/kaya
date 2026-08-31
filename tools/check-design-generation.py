@@ -196,7 +196,7 @@ with scratch_dir("check-design-generation-") as tmp:
     cc = subprocess.run(
         ["cc", str(tmp / "probe.c"), "-o", str(tmp / "probe-flake-cc")],
         env=cc_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        text=True, check=False)
+        text=True, encoding="utf-8", check=False)
     if cc.returncode != 0:
         print(f"check-design-generation: the flake-linked C probe did not "
               f"compile with DEVELOPER_DIR={flake_sdk} — so nothing below "
@@ -222,7 +222,7 @@ with scratch_dir("check-design-generation-") as tmp:
          "swift-toolchain", str(ROOT), str(tmp / "probe.swift"),
          str(tmp / "probe-swift")],
         env=swift_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        text=True, check=False)
+        text=True, encoding="utf-8", check=False)
     if swiftc.returncode != 0:
         print("check-design-generation: the swift probe did not compile "
               "through kaya_swiftc (tools/lib/swift-toolchain.sh) — the "
