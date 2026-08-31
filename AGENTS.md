@@ -842,8 +842,10 @@ in docs/deferred.md.
    holds their values and the gate holds coverage, while Swift, Compose
    and the C floor copy the NUMBERS by hand — check-file-modes' trap
    one surface over — so there it holds value, name and coverage all
-   three. Four self-tests perturb copies of the real files, counts
-   printed, red demanded on every run),
+   three. Five self-tests perturb the real files in memory, counts
+   printed, red demanded on every run — the fifth (a drifted C-floor
+   number) added 2026-08-31 when the python conversion's probing found
+   that clause had never been watched firing),
    `tools/check-accent.sh` (the Windows accent near-no-op has a fast
    wall: Fluent fills read six DERIVED stops, never bare
    SystemAccentColor, so writing the bare key moves the text-selection
