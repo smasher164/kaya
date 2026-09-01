@@ -67,3 +67,6 @@ guests/haskell/dist-newstyle/
 /android/kaya/generated
 guests/assets/market/transactions.csv
 guests/assets/market/prices.csv
+# The JS workspace link (guests/js/node_modules/kaya-gui -> bindings/js),
+# written by `npm install --offline` in tools/js-typecheck.py.
+node_modules/

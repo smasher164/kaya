@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -224,6 +224,63 @@ if subprocess.run([sys.executable, "tools/lib/stage-coverage.py"],
 if subprocess.run([sys.executable, "tools/lib/paired-cfg.py"],
                   cwd=ROOT, check=False).returncode != 0:
     status = 1
+
+# EVERY SPAWN IN THE CORE SETS ITS THREE DESCRIPTORS EXPLICITLY. A host
+# runtime may mark its own fds 0-2 close-on-exec — node does — and a
+# child left to inherit one starts with it closed: wl-copy refuses by
+# design, xclip hangs to the step ceiling (measured on the js legs
+# 2026-09-01, docs/traps.md). `Command::output()` sets all three itself;
+# a `.spawn()` chain has to say so. Read as text, since the spawn in
+# question is cfg'd to a platform no compiler here reaches.
+_spawn_gate = Gate("check-targets")
+
+
+def spawn_findings(sources):
+    """(path, first line, missing) per `.spawn()` chain without all three
+    of .stdin/.stdout/.stderr; the number of chains read."""
+    bad, seen = [], 0
+    for rel, text in sources.items():
+        for m in re.finditer(r"Command::new\(", text):
+            tail = text[m.start():]
+            end = tail.find(".spawn()")
+            output = tail.find(".output()")
+            if end < 0 or (0 <= output < end):
+                continue
+            chain = tail[:end]
+            seen += 1
+            missing = [s for s in (".stdin(", ".stdout(", ".stderr(") if s not in chain]
+            if missing:
+                line = text.count("\n", 0, m.start()) + 1
+                bad.append((rel, line, missing))
+    return bad, seen
+
+
+_sources = {}
+for _p in sorted((ROOT / "crates/kaya/src").rglob("*.rs")):
+    _sources[str(_p.relative_to(ROOT))] = _p.read_text(encoding="utf-8")
+_bad, _seen = spawn_findings(_sources)
+print(f"check-targets: spawn chains read: {_seen}")
+if _seen < 2:
+    _spawn_gate.refuse(f"only {_seen} .spawn() chains found in crates/kaya/src — "
+                       f"the harness alone has two, so this census read nothing")
+for _rel, _line, _missing in _bad:
+    print(f"check-targets: {_rel}:{_line}: a Command that .spawn()s without "
+          f"{' '.join(_missing)} — a child inheriting a close-on-exec "
+          f"descriptor starts with it CLOSED (docs/traps.md, 2026-09-01); set "
+          f"all three", file=sys.stderr)
+    status = 1
+# THE WATCHED NEGATIVE: the seed writer's explicit stdout removed from a
+# copy in memory, count printed, the census demanded red.
+_gtk = "crates/kaya/src/gtk.rs"
+_doctored = _spawn_gate.doctor("spawn-stdio negative removed the seed's stdout",
+                               _sources[_gtk], r"\n\s*\.stdout\(Stdio::null\(\)\)", "")
+_nbad, _ = spawn_findings({_gtk: _doctored})
+if not any(".stdout(" in m for _r, _l, m in _nbad):
+    print("check-targets: SELF-TEST FAIL — a spawn without .stdout( passed "
+          "the census", file=sys.stderr)
+    status = 1
+else:
+    print("check-targets: self-test — the doctored spawn is refused, naming .stdout(")
 
 if status == 0:
     print("check-targets: ALL OK")

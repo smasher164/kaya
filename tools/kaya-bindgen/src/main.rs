@@ -16,6 +16,7 @@ mod csharp;
 mod go;
 mod haskell;
 mod java;
+mod js;
 mod ocaml;
 mod python;
 mod swift;
@@ -35,6 +36,7 @@ fn main() {
     validate_identifiers(&SPEC, "haskell", haskell::RESERVED);
     validate_identifiers(&SPEC, "java", java::RESERVED);
     validate_identifiers(&SPEC, "swift", swift::RESERVED);
+    validate_identifiers(&SPEC, "js", js::RESERVED);
 
     let outputs: Vec<(&str, String)> = vec![
         ("bindings/python/kaya/wire.py", python::emit(&SPEC)),
@@ -45,6 +47,7 @@ fn main() {
         ("bindings/haskell/KayaWire.hs", haskell::emit(&SPEC)),
         ("bindings/java/dev/kaya/KayaWire.java", java::emit(&SPEC)),
         ("bindings/swift/KayaWire.swift", swift::emit(&SPEC)),
+        ("bindings/js/kaya/wire.ts", js::emit(&SPEC)),
     ];
 
     let mut stale = false;

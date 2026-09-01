@@ -3802,7 +3802,38 @@ surface width the fold derivation actually used, beside the fold
 verdict) and keep the flight-recorder bundle. Third sighting with
 the instrument in place decides whether this is a Weston sizing race
 or a fold-derivation defect.
+THIRD SIGHTING 2026-09-01 ~20:55, the same sentence, under the first
+linux lane run carrying the JS legs (docs/measurements/
+js-binding-2026-09-01.md) — with NO instrument in place yet, so it
+decides nothing; the bundle is
+linux-portfolio-python-wayland in run 20260901T204811Z-002877 of the
+flight recorder. The instruction stands: instrument the width the
+fold derivation used before anyone reruns to see. A FOURTH sighting
+the same evening (the JS linux rerun) and a SIBLING under the second
+matrix: table-js-wayland read one row of three for 15s at first read,
+then every read after a header click was right — the same
+surface-size premise on a table, so the instrument belongs at the
+surface's first size report, not in the fold alone.
 KEY: portfolio wayland fold, column#9 folded, surface width premise
+
+## The iOS clipboard seed holder never retires, and killing it for real wedges the pasteboard (2026-09-01)
+KEY: clipctl hold, seed holder, simctl spawn leak, pasteboard daemon
+
+tools/ios/run-sim.py seeds the device clipboard through `simctl spawn
+<udid> clipctl write … hold`, a writer held alive because the
+pasteboard daemon fetches item data from the setter (docs/traps.md, §8
+finding 6). `holder.kill()` reaches `timeout` alone; xcrun, simctl and
+the in-simulator writer survive, four per clipboard leg — 192 found
+reparented to PID 1 after two days, and the two-day-old launchd_sim
+they sat in is where the lane's `launchctl list` pipe hung (the same
+day's trap entry). Killing the holder's whole process group instead
+was tried and MEASURED wrong: the next seed timed out and SpringBoard
+denied every launch after it (17 legs at 0s). So the leak stands and
+the fix is in clipctl itself: a `hold` that exits when the pasteboard's
+change count moves past its own write, and after a bounded hold either
+way, so no host process outlives the leg it served. Until then
+`pkill -f "simctl spawn"` between lane runs is the hygiene, and
+tools/probe-env.sh could count them.
 
 ## WATCH — the android portfolio leg reads the pre-navigation title
 
@@ -9269,6 +9300,50 @@ pub(crate), found the hard way: a bare pub had cbindgen exporting
 shift is UB — gen-header's staleness wall refused the sweep's build
 before any gate ran, exactly the on-the-path refusal invariant 3
 asks for.
+
+BUILT 2026-09-01, the mac lane first (docs/js-plan.md is the build
+record): libkaya IS the N-API addon (crates/kaya/src/node.rs exports
+napi_register_module_v1 and resolves Node's API out of the host's
+own symbol table at registration, so there is no node-gyp, no header,
+no link-time dependency and no fourth artifact); gen-bindings' ninth
+emitter writes bindings/js/kaya/wire.ts; runtime.ts surrenders the
+main thread at import and spawns the worker that IS the app thread; a
+native pump hands occurrences over ONE AT A TIME, waiting for each
+handler, which is what keeps the stall watchdog's reading honest;
+index.ts is the ambient sugar in plain-JS clothes (options objects,
+bodies last, `for (const row of coll)` as the For trace, a record type
+that both calls and constructs, ONE handle class with `isNode`). THE
+NUMBER RULE that the safe-integer contract made possible: a bare JS
+number is an F64 on the wire and an I64 travels only where the schema
+says so (keys, kaya.Int fields, op codes), so `signal(0)` is one thing
+and no scene can tell it from Python's `signal(0.0)`. All 42 scene
+guests ported line for line (portfolio and varied stay Python-only
+apps by the lane's own design); the one defect the ports found was a
+breakpoint's size class going out as F64, fixed the same hour. Gates:
+js-typecheck (strict tsc plus the workspace link), js-app-checks (44
+negatives, the python checks' twin, in a worker), and the ninth
+column in check-steps, check-staging, check-ambient-tx,
+check-tx-liveness, check-file-modes, check-design-generation
+(node reads COMPAT, sdk 14.4 — the observed split now has six
+hosts). Node 24 runs the .ts guests directly (type stripping, no build
+step); tsc is the typecheck and nothing else. The linux lane carries
+the JS legs too (node 24 pinned by sha256 into the docker image, a leg
+beside every python leg): its first runs found the ranges pair sharing
+a bracket the scene needs alone (now a check-steps clause for undo and
+ranges) and the clipboard seed's foreign writer starting with CLOSED
+descriptors under node, which marks its own fds 0-2 close-on-exec —
+fixed at the spawn site, held by check-targets' spawn census, recorded
+in docs/traps.md; run 3 ALL PASS. The sugar-surface censuses
+(check-sugar-surface, tpl-surfaces) carry the ninth column with twenty
+watched negatives. STILL OPEN on this entry: the windows lane's JS
+legs (node on the VM, the .cmd launchers) and the Windows picked-file
+redemption (docs/js-plan.md §6); tools/guest-floor.py has no .ts rules
+yet. THE MATRIX IS NOT GREEN YET, twice on environmental causes the
+measurement doc records (the session host's Accessibility grant, the
+simulators' health after forced shutdowns, the android portfolio
+WATCH); the iOS runner's pipe hang found by the first matrix is fixed
+and the lane is 113 green standalone. "Landed" waits on a green
+matrix from a trusted host.
 
 
 ## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31)

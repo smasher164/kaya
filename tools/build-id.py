@@ -140,6 +140,7 @@ GATES = {
                         "guests/swift", "swift"],
     "java-typecheck": ["bindings/java", "bindings/java-desktop",
                        "guests/java", "guests/java-desktop"],
+    "js-typecheck": ["bindings/js", "guests/js"],
     # The five ARTIFACT gates (see ARTIFACT_GATES): sources here, the
     # built bytes below, both in the key.
     "check-abort": ["crates", "bindings", "guests"],

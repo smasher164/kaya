@@ -192,7 +192,19 @@ BUDGETS = {
     # time the other lanes keep — and holding 900 here would let this
     # lane double again before saying a word, which is exactly what
     # let the old cost hide.
-    "mac": 560,
+    #
+    # 620 since 2026-09-01, raised in the commit that made the lane
+    # bigger, as this block asks: the ninth binding added 42 js legs
+    # (349 -> 391). STANDALONE the lane is unchanged in kind — 391
+    # green at legs 275s against 248s the day before, the 27s being
+    # the new legs' own cost at the python legs' per-leg rate. The
+    # first contended matrix after read 546s (under 560 by 14s, with
+    # the dialog legs failing fast on the host's Accessibility gate,
+    # so not a clean reading); the second read 621s under a host at
+    # load 75 from three simulators reseeding. 620 covers the roster
+    # at the ~1.25x-over-quiet-contended headroom this block keeps;
+    # the second reading is an environmental window, not the reason.
+    "mac": 620,
     # 450 since 2026-08-20, raised in the commit that made the lane
     # bigger, as this block asks: the panes scene added 14 legs (seven
     # languages, both protocols), 550 -> 564. STANDALONE the lane is
@@ -225,7 +237,17 @@ BUDGETS = {
     # this block's own signal to recalibrate rather than re-annotate.
     # 530 covers the warm-contended 502 with tight margin so a change
     # in kind still trips it.
-    "linux": 530,
+    #
+    # 600 since 2026-09-01, raised in the commit that made the lane
+    # bigger, as this block asks: the ninth binding added 80 js legs
+    # (604 -> 684, one per python leg on both protocols). STANDALONE
+    # the lane is unchanged in kind — 683 green at legs 235s against
+    # 222s before. The first contended matrix read 459s (under 530);
+    # the second 663s under the same load-75 window as the mac
+    # reading above, with 682 legs green and one wayland table read
+    # a sighting. 600 keeps the ~1.25x-over-quiet-contended headroom
+    # over the roster's own growth; the 663 is not the reason.
+    "linux": 600,
     # 480 since 2026-08-03, and the ceiling moved in the commit that
     # made the lane slower, as this block asks. Two measured reasons,
     # neither a change in kind: filedialog_java used to ABORT at 4s

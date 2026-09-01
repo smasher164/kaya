@@ -2149,6 +2149,7 @@ def sweep_guests():
     LANGS = [
         ("go", "guests/go/{s}/{s}.go"),
         ("python", "guests/python/{s}.py"),
+        ("js", "guests/js/{s}.ts"),
         ("csharp", "guests/csharp/{S}Scene.cs"),
         ("swift", "guests/swift/{s}.swift"),
         ("ocaml", "guests/ocaml/{s}.ml"),
@@ -2532,15 +2533,36 @@ if not family_serial("run layout-java env X\nrun clipboard-rust env "
                      "X\ndrain\n", MAC_LEG, "drain", "clipboard", "-"):
     selftest_fail("undrained-before clipboard leg passed")
 
-for runner, leg, barrier in (
-    ("tools/linux/run-suites.sh", MAC_LEG, "drain"),
-):
-    out = family_serial(read_rel(runner), leg, barrier, "clipboard",
-                        runner)
+# THE LINUX ALONE-FAMILIES, one clause each: clipboard (one system
+# clipboard per session), and undo and ranges (real keystrokes through
+# a virtual keyboard whose seat is EXCLUSIVE across the pooled legs —
+# run-suites.sh's own comment at the undo block). The ranges pair was
+# the measured miss: the ninth binding's leg was inserted inside the
+# python leg's bracket, both wayland legs typed into each other's
+# window, and only clipboard was held here (2026-09-01,
+# docs/measurements/js-binding-2026-09-01.md).
+# (The clipboard rule is docs/clipboard-plan.md §0d; cited here rather
+# than in the message, since a path in a string literal reads as an
+# input to check-keyed.)
+LINUX_ALONE = (
+    ("clipboard", MAC_LEG, "one system clipboard per session"),
+    ("undo", r"run .*undo-[a-z]", "the type verb's virtual keyboard seat "
+                                  "is exclusive across the pool"),
+    ("ranges", r"run .*ranges-[a-z]", "the undo rule: the type verb's "
+                                      "seat is exclusive across the pool"),
+)
+# The guard guards itself against the measured shape: a second
+# language's leg sharing the first's bracket.
+if not family_serial("drain\nrun ranges-python env X\nrun ranges-js env "
+                     "X\ndrain\n", r"run .*ranges-[a-z]", "drain",
+                     "ranges", "-"):
+    selftest_fail("a ranges leg inside another's bracket passed")
+for family, leg, why in LINUX_ALONE:
+    runner = "tools/linux/run-suites.sh"
+    out = family_serial(read_rel(runner), leg, "drain", family, runner)
     if out:
-        print(f"check-steps: {runner} clipboard legs must run ALONE "
-              f"between drains (docs/clipboard-plan.md §0d — one "
-              f"system clipboard per session):", file=sys.stderr)
+        print(f"check-steps: {runner} {family} legs must run ALONE "
+              f"between drains ({why}):", file=sys.stderr)
         print("\n".join(out), file=sys.stderr)
         status = 1
 

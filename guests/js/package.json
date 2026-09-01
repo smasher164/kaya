@@ -1,0 +1,8 @@
+{
+  "name": "kaya-guests",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "kaya-gui": "file:../../bindings/js"
+  }
+}

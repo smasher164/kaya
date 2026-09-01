@@ -62,6 +62,11 @@ mod jvm;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod swiftui_host;
 
+// libkaya is the Node addon (docs/js-plan.md §2): the three desktops,
+// since Node does not run on the phones.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod node;
+
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",

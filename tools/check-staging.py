@@ -80,15 +80,18 @@ def check(root):
                  f"it and the leg dies at run time with 'No such file' "
                  f"— add {stem} to DEPTH_SCENES (or SCENES if every "
                  f"language has the guest)")
-    # ...and every python leg's guest file exists (the runner derives
-    # the path from the module, so the module is the thing to hold).
+    # ...and every python and js leg's guest file exists (the runner
+    # derives the path from the module, so the module is the thing to
+    # hold). The two interpreted guests share the shape.
+    SOURCE_LEGS = {"python": ("python", ".py"), "js": ("js", ".ts")}
     for name, scene, mac_l in mac_lane.legs():
-        if mac_l != "python":
+        if mac_l not in SOURCE_LEGS:
             continue
+        folder, ext = SOURCE_LEGS[mac_l]
         stem = mac_lane.guest_stem(scene)
-        if not (root / "guests" / "python" / f"{stem}.py").is_file():
+        if not (root / "guests" / folder / f"{stem}{ext}").is_file():
             fail(f"tools/lib/lanes/mac.py queues {name} running "
-                 f"guests/python/{stem}.py, which does not exist")
+                 f"guests/{folder}/{stem}{ext}, which does not exist")
 
     # --- deploy-win: the lane module's roster vs its build lists -----
     # The windows tables are DATA since the runner conversion

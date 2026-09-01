@@ -44,8 +44,9 @@ def fail(msg):
 # A GATE'S SCRIPT PATH IS ITS NAME EVERYWHERE, so one pattern serves all
 # three readers. The naming clause below FORCES every gate into a shape
 # this pattern can see, or the prose scan goes quietly blind.
-SHELL_GATE = r"tools/(?:check-[a-z0-9-]+|gen-[a-z0-9-]+|swift-typecheck|java-typecheck)\.sh"
-PY_GATE = r"bindings/python/[a-z0-9_]+\.py"
+SHELL_GATE = (r"tools/(?:check-[a-z0-9-]+|gen-[a-z0-9-]+|swift-typecheck"
+              r"|java-typecheck|js-typecheck)\.sh")
+PY_GATE = r"bindings/(?:python/[a-z0-9_]+\.py|js/[a-z0-9_]+\.ts)"
 TOKEN = re.compile(f"{SHELL_GATE}|{PY_GATE}")
 
 

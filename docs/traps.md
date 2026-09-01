@@ -6442,3 +6442,76 @@ simctl and adb output has the same not-your-encoding character. This
 is the javac `-encoding` trap (check-python rule 3) arriving through
 the OTHER direction: rule 3 covers files this repo opens; a subprocess
 capture is decoded by the same locale machinery and no gate reads it.
+
+## A child that INHERITS a host runtime's standard descriptors can start with them CLOSED (measured 2026-09-01)
+
+The first Linux run of the JS legs failed clipboard-js on wayland
+twice, deterministically, with `wl-copy` dying of SIGABRT inside the
+harness's clipboard_seed step and printing NOTHING — the refusal
+sentence carried only the signal. Capturing the writer's stderr into
+the sentence (crates/kaya/src/gtk.rs, foreign_clip_write) produced its
+own words: "wl-clipboard has been launched with a closed standard file
+descriptor. This is a bug in the software that has launched
+wl-clipboard. Aborting." The measurement that followed, from inside the
+container: node marks its fds 0, 1 and 2 CLOSE-ON-EXEC at startup
+(`/proc/<pid>/fdinfo` flags 02400001 — the O_CLOEXEC bit — on all
+three, in the main thread and in the worker; python leaves them
+inheritable), so a Rust `Command` that leaves stdout or stderr as
+`Stdio::inherit()` — which dup2s nothing — hands the child a descriptor
+that exec closes. wl-copy refuses that by design; xclip, the x11 seed,
+HANGS instead (60s to the step ceiling), which is the same cause
+wearing a different failure. `Command::output()` was never affected: it
+sets all three descriptors itself, which is why every reader and the
+typing tools passed on the same legs. The rule: a spawn in the core sets
+stdin, stdout and stderr EXPLICITLY, never inherits — tools/check-targets.sh
+holds it (the `.spawn()` census) — because the host a libkaya addon
+lives in is not kaya's to configure. And a refusal about a child's
+exit that does not carry the child's stderr is a sentence nobody can
+chase: the writer said exactly what was wrong on the first run it was
+allowed to.
+
+## `simctl spawn` hands the child's stdout to the simulator's launchd, and a pipe read to EOF then waits on launchd (measured 2026-09-01)
+
+The first matrix on the JS binding tree hung its iOS lane for the whole
+1800s ceiling with ZERO legs journaled: tools/ios/run-sim.py sat in a
+`subprocess.run(stdout=PIPE)` of `xcrun simctl spawn <udid> launchctl
+list`, no child alive, and `lsof` showed the pipe's other end held by
+`launchd_sim` of a device booted for two days. simctl passes the spawned
+process's descriptors into the simulator's launchd, which keeps the
+write end after simctl exits, so `communicate()` never sees EOF while
+that launchd lives — and a `timeout` around simctl cannot help, since
+the holder is not simctl. The runner's `out_of` now captures into a
+FILE (the clipboard-seed lesson from the Linux lane the same day, one
+platform over). Beside it, the census that made the launchd suspicious:
+192 `xcrun simctl spawn … clipctl write … hold` processes reparented to
+PID 1 across two days — the seed holder is killed by `holder.kill()`,
+which reaches `timeout` alone and leaves xcrun, simctl and the writer
+inside the simulator alive; every clipboard leg leaves four. THE
+OBVIOUS FIX WAS WRONG AND MEASURED SO: killing the whole process group
+instead made the first clipboard leg's next seed time out (`clip_seed
+rc=1 ms=10334`) and SpringBoard deny every launch after it
+(`FBSOpenApplicationServiceErrorDomain … denied by service delegate
+(SBMainWorkspace)`, 17 legs at 0s) — the pasteboard daemon fetches item
+data from the setter, and a setter killed mid-serve wedges it. The
+leak was load-bearing by accident. The retirement belongs in
+tools/ios/clipctl itself (exit when the change count moves, and after
+a bounded hold), which is docs/deferred.md's open item; until then the
+holders accumulate and a `pkill -f "simctl spawn"` between lane runs is
+the hygiene. When a lane goes quiet, `lsof -p <runner>` for a PIPE and
+`lsof | grep <that pipe>` names the holder in two commands.
+
+## A Node host's exit tears the worker down under a native thread still inside Node-API (measured 2026-09-01)
+
+linux a11yrows-js-x11 printed `KAYA_SELFTEST: OK` and then died of a
+Bus error on the exit path, once in four Linux runs, under the matrix's
+load. The main thread returned from kaya_run and called `process.exit`
+while the pump thread (crates/kaya/src/node.rs) was still delivering the
+core's shutdown to the worker through the threadsafe function; Node's
+teardown of a live worker under a foreign thread mid-call is the crash.
+Now `run()` waits (bounded, 3s — a wedged app thread never consumes the
+last handoff) for the pump to leave before returning, the pump does not
+wait for that last handoff to be consumed, and the main thread exits
+through the addon's own `exit` rather than Node's. The verdict was
+never at risk — the core prints it on the UI thread before kaya_run
+returns — which is why the lane's note said "verdict was OK but the leg
+exited nonzero", the honest shape for an exit-path death.

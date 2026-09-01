@@ -184,7 +184,7 @@ GENERATED = {
     "bindings/go/kaya_wire.go", "bindings/haskell/KayaWire.hs",
     "bindings/java/dev/kaya/KayaWire.java",
     "bindings/ocaml/kaya_wire.ml", "bindings/python/kaya/wire.py",
-    "bindings/swift/KayaWire.swift",
+    "bindings/swift/KayaWire.swift", "bindings/js/kaya/wire.ts",
 }
 SITES = {SPEC, WIRE, PROTOCOL, SWIFTUI, CSHARP, PYRUNTIME}
 # Files that redeem a handle WITHOUT writing a mode number down: they
@@ -209,6 +209,12 @@ PASSTHROUGH = {
         "defaults to FILE_MODE_READ and passes it on",
     "bindings/python/kaya/__init__.py":
         "defaults to wire.FILE_MODE_READ and passes it on",
+    "bindings/js/kaya/index.ts":
+        "defaults to wire.FILE_MODE_READ and passes it on",
+    "bindings/js/kaya/runtime.ts":
+        "hands the number to the addon; refuses win32 by name",
+    "crates/kaya/src/node.rs":
+        "casts the JS number to u32 and calls the core",
     "crates/kaya/src/capi.rs":
         "decodes with the wire.rs CONSTANTS, never a literal",
     "crates/kaya/src/jvm.rs":

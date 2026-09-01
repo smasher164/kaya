@@ -94,6 +94,30 @@
           '';
           cpythonAndroidAarch64 = cpythonAndroid "aarch64" "sha256-fW+yimk2iEFlb5GaCBQbDjcgg3rGeYc4gDfunSpcVJI=";
           cpythonAndroidX86_64 = cpythonAndroid "x86_64" "sha256-8Ej1xgtTjvxk5MJjmaCiEgLOQwlJ1bLBA2nWJFSKXcM=";
+          # Node's type declarations for the JS typecheck gate
+          # (tools/js-typecheck.sh): nixpkgs carries no @types/node, so
+          # the two npm tarballs are pinned HERE like the CPython
+          # archives above — the store's content addressing is the hash
+          # check, the dev-shell fingerprint moves when the pin moves,
+          # and check-pins has nothing to hold. undici-types is
+          # @types/node's one dependency (its fetch globals). Laid out
+          # as a node_modules tree so the bare import inside @types/node
+          # resolves upward the way node's resolution does.
+          nodeTypes = pkgs.runCommand "kaya-node-types-24.13.3"
+            {
+              typesNode = pkgs.fetchurl {
+                url = "https://registry.npmjs.org/@types/node/-/node-24.13.3.tgz";
+                hash = "sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==";
+              };
+              undiciTypes = pkgs.fetchurl {
+                url = "https://registry.npmjs.org/undici-types/-/undici-types-7.18.2.tgz";
+                hash = "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==";
+              };
+            } ''
+            mkdir -p "$out/node_modules/@types/node" "$out/node_modules/undici-types"
+            tar -xzf "$typesNode" -C "$out/node_modules/@types/node" --strip-components=1
+            tar -xzf "$undiciTypes" -C "$out/node_modules/undici-types" --strip-components=1
+          '';
         in
         {
         default = pkgs.mkShell {
@@ -160,6 +184,16 @@
             # Haskell guest (direct ring; base-only, so bare ghc suffices).
             ghc
             cabal-install
+            # The JS guest (docs/deferred.md's ninth-binding entry): node
+            # 24 runs the .ts guests directly — type stripping is on by
+            # default there, and tsconfig's erasableSyntaxOnly keeps the
+            # sources inside what it strips — and libkaya itself is the
+            # N-API addon (crates/kaya/src/node.rs), so no node-gyp, no
+            # node headers, no second artifact. tsc is the typecheck
+            # gate (tools/js-typecheck.sh); npm rides in with node and
+            # links the workspaces offline.
+            nodejs_24
+            typescript
             # Recording mode (KAYA_RECORD=1): screen capture on macOS
             # (avfoundation) and per-step frame extraction everywhere.
             ffmpeg
@@ -207,6 +241,8 @@
             # cpythonAndroid above).
             export KAYA_CPYTHON_ANDROID_AARCH64="${cpythonAndroidAarch64}"
             export KAYA_CPYTHON_ANDROID_X86_64="${cpythonAndroidX86_64}"
+            # The JS typecheck's type roots (see nodeTypes above).
+            export KAYA_NODE_TYPES="${nodeTypes}/node_modules/@types"
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             # The iOS lane's embedded CPython (see cpythonIos above).
             export KAYA_CPYTHON_IOS="${cpythonIos}/Python.xcframework"

@@ -1,0 +1,7 @@
+{
+  "extends": "../../bindings/js/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../.."
+  },
+  "include": ["*.ts", "../../bindings/js/kaya/*.ts"]
+}

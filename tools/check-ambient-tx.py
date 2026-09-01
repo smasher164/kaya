@@ -12,7 +12,7 @@ dev_shell_or_die()
 # does not test the binding; it removes the guests' ability to hide a
 # regression, so the existing scenes become the test.
 #
-# PYTHON ONLY. The handle bindings pass the transaction in, so a missing
+# PYTHON AND JS. The handle bindings pass the transaction in, so a missing
 # one is not expressible. Haskell opens one in every handler by idiom.
 # OCaml is ambient too but has no reliable textual discriminator (its
 # `build app` is itself indented, and appears twice at two depths in
@@ -27,10 +27,13 @@ import re
 
 
 def lint(path, text):
-    """Offender lines, `path:lineno:stripped-line` — empty means clean."""
+    """Offender lines, `path:lineno:stripped-line` — empty means clean.
+    Python's `with app.build():` and JS's `app.build(() =>` share the
+    discriminator: indented, the call sits inside a handler."""
     bad = []
     for lineno, line in enumerate(text.splitlines(), 1):
-        if re.match(r"\s+with\s+app\.build\(\)\s*:", line):
+        if re.match(r"\s+with\s+app\.build\(\)\s*:", line) or \
+                re.match(r"\s+app\.build\(\s*\(\)\s*=>", line):
             bad.append(f"{path}:{lineno}:{line.strip()}")
     return bad
 
@@ -44,9 +47,26 @@ if lint("-", 'with app.build():\n    groups.insert("g2", "Home")\n'):
     print("check-ambient-tx: SELF-TEST FAIL (module-scope build rejected)",
           file=sys.stderr)
     sys.exit(1)
+if not lint("-", 'function popped() {\n  app.build(() => {\n    s.set("x");\n  });\n}\n'):
+    print("check-ambient-tx: SELF-TEST FAIL (js handler-scoped build passed)",
+          file=sys.stderr)
+    sys.exit(1)
+if lint("-", 'app.build(() => {\n  groups.insert("g2", "Home");\n});\n'):
+    print("check-ambient-tx: SELF-TEST FAIL (js module-scope build rejected)",
+          file=sys.stderr)
+    sys.exit(1)
 
 status = 0
 guests = sorted((ROOT / "guests/python").glob("*.py"))
+js_guests = sorted((ROOT / "guests/js").glob("*.ts"))
+if len(js_guests) < 20:
+    print(f"check-ambient-tx: only {len(js_guests)} js guests reached the "
+          f"census (floor 20) — a census that reads nothing agrees with "
+          f"everything", file=sys.stderr)
+    sys.exit(1)
+print(f"check-ambient-tx: {len(js_guests)} js guests in the census "
+      f"(floor 20)", file=sys.stderr)
+guests = guests + js_guests
 # 45 python guests at the time of writing; a moved or renamed
 # directory used to turn the shell's incidental red into a loop that
 # reads nothing and agrees with everything (audit 2026-08-31).
@@ -68,8 +88,8 @@ for f in guests:
 
 if status != 0:
     print("check-ambient-tx: a handler ALREADY runs in a transaction — the "
-          "binding opens it (App._dispatch). Opening another nests and "
-          "raises. If it seemed necessary, the binding regressed: fix "
+          "binding opens it (App._dispatch, both bindings). Opening another "
+          "nests and raises. If it seemed necessary, the binding regressed: fix "
           "_dispatch, do not work around it here — that is exactly how the "
           "original defect stayed green for months.", file=sys.stderr)
     sys.exit(1)

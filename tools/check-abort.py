@@ -12,7 +12,8 @@ dev_shell_or_die()
 # continue. Headless — the core loop is never entered.
 #
 # Not here: Rust's pin is in `cargo test -p kaya`, Python's in
-# kaya_app_checks.py, and C has no mirror to roll back.
+# kaya_app_checks.py, JS's in bindings/js/kaya_app_checks.ts (the
+# js-app-checks gate), and C has no mirror to roll back.
 
 import glob
 import os

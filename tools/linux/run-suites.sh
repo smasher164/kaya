@@ -24,6 +24,11 @@ KAYA_DEV_SHELL="$(cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 export KAYA_DEV_SHELL
 # The one Python import mechanism: the kaya package resolves from here.
 export PYTHONPATH=/work/bindings/python
+# The JS guests import kaya-gui through guests/js/node_modules/kaya-gui,
+# a relative symlink to bindings/js that `npm install --offline` writes
+# (docs/js-plan.md §1); the mount usually carries it from the host's
+# js-typecheck run, and a fresh clone gets it here.
+(cd guests/js && npm install --offline --no-audit --no-fund --no-package-lock --silent)
 # Dune resolves external libraries through OCAMLPATH, which only opam
 # env provides — the image's bare PATH export is enough for ocamlfind
 # but not for dune.
@@ -596,6 +601,7 @@ for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
     run "$proto" c /tmp/c-guests/milestone2
     run "$proto" python env KAYA_LIB="$LIB" python3 guests/python/milestone2.py
+    run "$proto" js env KAYA_LIB="$LIB" node guests/js/milestone2.ts
     run "$proto" go /tmp/go-guests/kaya-go
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
     run "$proto" ocaml env KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/milestone2.exe
@@ -607,6 +613,8 @@ for proto in x11 wayland; do
     run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/c-guests/entry
     run "$proto" entry-python env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
         python3 guests/python/entry.py
+    run "$proto" entry-js env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
+        node guests/js/entry.ts
     run "$proto" entry-go env KAYA_SELFTEST=entry /tmp/go-guests/kaya-go
     run "$proto" entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -618,6 +626,8 @@ for proto in x11 wayland; do
     run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/c-guests/gallery
     run "$proto" gallery-python env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
         python3 guests/python/gallery.py
+    run "$proto" gallery-js env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
+        node guests/js/gallery.ts
     run "$proto" gallery-go env KAYA_SELFTEST=gallery /tmp/go-guests/kaya-go
     run "$proto" gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -629,6 +639,8 @@ for proto in x11 wayland; do
     run "$proto" todos-c env KAYA_SELFTEST=todos /tmp/c-guests/todos
     run "$proto" todos-python env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
         python3 guests/python/todos.py
+    run "$proto" todos-js env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
+        node guests/js/todos.ts
     run "$proto" todos-go env KAYA_SELFTEST=todos /tmp/go-guests/kaya-go
     run "$proto" todos-csharp env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -640,6 +652,8 @@ for proto in x11 wayland; do
     run "$proto" reorder-c env KAYA_SELFTEST=reorder /tmp/c-guests/reorder
     run "$proto" reorder-python env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
         python3 guests/python/reorder.py
+    run "$proto" reorder-js env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
+        node guests/js/reorder.ts
     run "$proto" reorder-go env KAYA_SELFTEST=reorder /tmp/go-guests/kaya-go
     run "$proto" reorder-csharp env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -651,6 +665,8 @@ for proto in x11 wayland; do
     run "$proto" feed-c env KAYA_SELFTEST=feed /tmp/c-guests/feed
     run "$proto" feed-python env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
         python3 guests/python/feed.py
+    run "$proto" feed-js env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
+        node guests/js/feed.ts
     run "$proto" feed-go env KAYA_SELFTEST=feed /tmp/go-guests/kaya-go
     run "$proto" feed-csharp env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -663,6 +679,8 @@ for proto in x11 wayland; do
     run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
     run "$proto" grow-python env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
         python3 guests/python/grow.py
+    run "$proto" grow-js env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
+        node guests/js/grow.ts
     run "$proto" grow-go env KAYA_SELFTEST=grow /tmp/go-guests/kaya-go
     run "$proto" grow-csharp env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -673,6 +691,8 @@ for proto in x11 wayland; do
     run "$proto" align-rust env KAYA_SELFTEST=align "$CARGO_TARGET_DIR/debug/examples/align"
     run "$proto" align-python env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
         python3 guests/python/align.py
+    run "$proto" align-js env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
+        node guests/js/align.ts
     run "$proto" align-go env KAYA_SELFTEST=align /tmp/go-guests/kaya-go
     run "$proto" align-csharp env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -685,6 +705,8 @@ for proto in x11 wayland; do
     run "$proto" window-rust env KAYA_SELFTEST=window "$CARGO_TARGET_DIR/debug/examples/window"
     run "$proto" window-python env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
         python3 guests/python/window.py
+    run "$proto" window-js env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
+        node guests/js/window.ts
     run "$proto" window-go env KAYA_SELFTEST=window /tmp/go-guests/kaya-go
     run "$proto" window-csharp env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -696,6 +718,8 @@ for proto in x11 wayland; do
     run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
     run "$proto" panels-python env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         python3 guests/python/panels.py
+    run "$proto" panels-js env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
+        node guests/js/panels.ts
     run "$proto" panels-go env KAYA_SELFTEST=panels /tmp/go-guests/kaya-go
     run "$proto" panels-csharp env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -719,6 +743,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/dirty"
     run "$proto" dirty-python env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/dirty.py
+    run "$proto" dirty-js env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/dirty.ts
     run "$proto" dirty-go env KAYA_SELFTEST=dirty \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" dirty-csharp env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
@@ -742,6 +768,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/a11yrows"
     run "$proto" a11yrows-python env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/a11yrows.py
+    run "$proto" a11yrows-js env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/a11yrows.ts
     run "$proto" a11yrows-go env KAYA_SELFTEST=a11yrows \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" a11yrows-csharp env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
@@ -762,6 +790,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/styling"
     run "$proto" styling-python env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/styling.py
+    run "$proto" styling-js env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/styling.ts
     run "$proto" styling-go env KAYA_SELFTEST=styling \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" styling-csharp env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
@@ -790,6 +820,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/typeface"
     run "$proto" typeface-python env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/typeface.py
+    run "$proto" typeface-js env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/typeface.ts
     run "$proto" typeface-go env KAYA_SELFTEST=typeface \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" typeface-csharp env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
@@ -808,6 +840,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/assets"
     run "$proto" assets-python env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/assets.py
+    run "$proto" assets-js env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/assets.ts
     run "$proto" assets-go env KAYA_SELFTEST=assets \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" assets-csharp env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
@@ -839,6 +873,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/toolbar"
     run "$proto" toolbar-python env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/toolbar.py
+    run "$proto" toolbar-js env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/toolbar.ts
     run "$proto" toolbar-go env KAYA_SELFTEST=toolbar \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" toolbar-csharp env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
@@ -893,6 +929,9 @@ for proto in x11 wayland; do
             run "$proto" identity-python env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
                 tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh python3 guests/python/identity.py
+            run "$proto" identity-js env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/identity-class-leg.py \
+                tools/linux/a11y-leg.sh node guests/js/identity.ts
             run "$proto" identity-go env KAYA_SELFTEST=identity \
                 tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
@@ -926,6 +965,8 @@ for proto in x11 wayland; do
     run "$proto" stall-rust env KAYA_SELFTEST=stall "$CARGO_TARGET_DIR/debug/examples/stall"
     run "$proto" stall-python env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
         python3 guests/python/stall.py
+    run "$proto" stall-js env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
+        node guests/js/stall.ts
     run "$proto" stall-go env KAYA_SELFTEST=stall /tmp/go-guests/kaya-go
     run "$proto" stall-csharp env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -936,6 +977,8 @@ for proto in x11 wayland; do
     run "$proto" confirm-rust env KAYA_SELFTEST=confirm "$CARGO_TARGET_DIR/debug/examples/confirm"
     run "$proto" confirm-python env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         python3 guests/python/confirm.py
+    run "$proto" confirm-js env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
+        node guests/js/confirm.ts
     run "$proto" confirm-go env KAYA_SELFTEST=confirm /tmp/go-guests/kaya-go
     run "$proto" confirm-csharp env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -962,6 +1005,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/filedialog"
     run "$proto" filedialog-python env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/filedialog.py
+    run "$proto" filedialog-js env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/filedialog.ts
     run "$proto" filedialog-go env KAYA_SELFTEST=filedialog \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" filedialog-csharp env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
@@ -988,6 +1033,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh /tmp/c-guests/save
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
+    run "$proto" background-js env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/background.ts
     run "$proto" background-go env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" background-csharp env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
@@ -1010,6 +1057,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" split-python env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/split.py
+    run "$proto" split-js env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/split.ts
     run "$proto" split-go env KAYA_SELFTEST=split \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" split-csharp env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
@@ -1031,6 +1080,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/panes"
     run "$proto" panes-python env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/panes.py
+    run "$proto" panes-js env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/panes.ts
     run "$proto" panes-go env KAYA_SELFTEST=panes \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" panes-csharp env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
@@ -1045,6 +1096,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" listdetail-python env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/split.py
+    run "$proto" listdetail-js env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/split.ts
     run "$proto" listdetail-go env KAYA_SELFTEST=listdetail \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" listdetail-csharp env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
@@ -1057,6 +1110,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
+    run "$proto" nav-js env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
+        node guests/js/nav.ts
     run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/kaya-go
     run "$proto" nav-csharp env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1071,6 +1126,8 @@ for proto in x11 wayland; do
     run "$proto" table-rust env KAYA_SELFTEST=table "$CARGO_TARGET_DIR/debug/examples/table"
     run "$proto" table-python env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
         python3 guests/python/table.py
+    run "$proto" table-js env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
+        node guests/js/table.ts
     run "$proto" table-go env KAYA_SELFTEST=table /tmp/go-guests/kaya-go
     run "$proto" table-csharp env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1091,6 +1148,8 @@ for proto in x11 wayland; do
         "$CARGO_TARGET_DIR/debug/examples/adaptive"
     run "$proto" adaptive-python env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
         python3 guests/python/adaptive.py
+    run "$proto" adaptive-js env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
+        node guests/js/adaptive.ts
     run "$proto" adaptive-go env KAYA_SELFTEST=adaptive /tmp/go-guests/kaya-go
     run "$proto" adaptive-csharp env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1130,6 +1189,8 @@ for proto in x11 wayland; do
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py
+    run "$proto" scroll-js env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
+        node guests/js/scroll.ts
     run "$proto" scroll-go env KAYA_SELFTEST=scroll /tmp/go-guests/kaya-go
     run "$proto" scroll-csharp env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1146,6 +1207,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh /tmp/c-guests/a11y
     run "$proto" a11y-python env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/a11y.py
+    run "$proto" a11y-js env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/a11y.ts
     run "$proto" a11y-go env KAYA_SELFTEST=a11y \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" a11y-csharp env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
@@ -1159,6 +1222,8 @@ for proto in x11 wayland; do
     run "$proto" progress-rust env KAYA_SELFTEST=progress "$CARGO_TARGET_DIR/debug/examples/progress"
     run "$proto" progress-python env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
         python3 guests/python/progress.py
+    run "$proto" progress-js env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
+        node guests/js/progress.ts
     run "$proto" progress-go env KAYA_SELFTEST=progress /tmp/go-guests/kaya-go
     run "$proto" progress-csharp env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1169,6 +1234,8 @@ for proto in x11 wayland; do
     run "$proto" select-rust env KAYA_SELFTEST=select "$CARGO_TARGET_DIR/debug/examples/select"
     run "$proto" select-python env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
         python3 guests/python/select.py
+    run "$proto" select-js env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
+        node guests/js/select.ts
     run "$proto" select-go env KAYA_SELFTEST=select /tmp/go-guests/kaya-go
     run "$proto" select-csharp env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1179,6 +1246,8 @@ for proto in x11 wayland; do
     run "$proto" radio-rust env KAYA_SELFTEST=radio "$CARGO_TARGET_DIR/debug/examples/radio"
     run "$proto" radio-python env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
         python3 guests/python/radio.py
+    run "$proto" radio-js env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
+        node guests/js/radio.ts
     run "$proto" radio-go env KAYA_SELFTEST=radio /tmp/go-guests/kaya-go
     run "$proto" radio-csharp env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1189,6 +1258,8 @@ for proto in x11 wayland; do
     run "$proto" grid-rust env KAYA_SELFTEST=grid "$CARGO_TARGET_DIR/debug/examples/grid"
     run "$proto" grid-python env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
         python3 guests/python/grid.py
+    run "$proto" grid-js env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
+        node guests/js/grid.ts
     run "$proto" grid-go env KAYA_SELFTEST=grid /tmp/go-guests/kaya-go
     run "$proto" grid-csharp env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1199,6 +1270,8 @@ for proto in x11 wayland; do
     run "$proto" textarea-rust env KAYA_SELFTEST=textarea "$CARGO_TARGET_DIR/debug/examples/textarea"
     run "$proto" textarea-python env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
         python3 guests/python/textarea.py
+    run "$proto" textarea-js env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
+        node guests/js/textarea.ts
     run "$proto" textarea-go env KAYA_SELFTEST=textarea /tmp/go-guests/kaya-go
     run "$proto" textarea-csharp env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1209,6 +1282,8 @@ for proto in x11 wayland; do
     run "$proto" sections-rust env KAYA_SELFTEST=sections "$CARGO_TARGET_DIR/debug/examples/sections"
     run "$proto" sections-python env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         python3 guests/python/sections.py
+    run "$proto" sections-js env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
+        node guests/js/sections.ts
     run "$proto" sections-go env KAYA_SELFTEST=sections /tmp/go-guests/kaya-go
     run "$proto" sections-csharp env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1221,6 +1296,8 @@ for proto in x11 wayland; do
     run "$proto" menus-c env KAYA_SELFTEST=menus /tmp/c-guests/menus
     run "$proto" menus-python env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
         python3 guests/python/menus.py
+    run "$proto" menus-js env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
+        node guests/js/menus.ts
     run "$proto" menus-go env KAYA_SELFTEST=menus /tmp/go-guests/kaya-go
     run "$proto" menus-csharp env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1234,6 +1311,8 @@ for proto in x11 wayland; do
     run "$proto" commands-c env KAYA_SELFTEST=commands /tmp/c-guests/commands
     run "$proto" commands-python env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
         python3 guests/python/commands.py
+    run "$proto" commands-js env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
+        node guests/js/commands.ts
     run "$proto" commands-go env KAYA_SELFTEST=commands /tmp/go-guests/kaya-go
     run "$proto" commands-csharp env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1247,6 +1326,8 @@ for proto in x11 wayland; do
     run "$proto" layout-rust env KAYA_SELFTEST=layout "$CARGO_TARGET_DIR/debug/examples/layout"
     run "$proto" layout-python env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         python3 guests/python/layout.py
+    run "$proto" layout-js env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
+        node guests/js/layout.ts
     run "$proto" layout-go env KAYA_SELFTEST=layout /tmp/go-guests/kaya-go
     run "$proto" layout-csharp env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
@@ -1266,6 +1347,9 @@ for proto in x11 wayland; do
     drain
     run "$proto" clipboard-python env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/clipboard.py
+    drain
+    run "$proto" clipboard-js env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/clipboard.ts
     drain
     run "$proto" clipboard-go env KAYA_SELFTEST=clipboard \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
@@ -1305,6 +1389,9 @@ for proto in x11 wayland; do
     drain
     run "$proto" ranges-python env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/ranges.py
+    drain
+    run "$proto" ranges-js env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/ranges.ts
     drain
     run "$proto" ranges-go env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go

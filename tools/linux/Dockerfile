@@ -34,6 +34,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librsvg2-common adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*
 
+# Node 24 for the JS guests (docs/js-plan.md §1): Debian's nodejs is 18,
+# below the type-stripping floor (22.18), so the official tarball is
+# fetched BY VERSION AND CHECKED BY SHA256 — a curl names bytes as well
+# as a version (tools/fetch-winappsdk.sh's rule) — for both container
+# arches. npm rides in the same tarball; the suites use it offline.
+RUN set -eu; arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      arm64) tarball=node-v24.19.0-linux-arm64.tar.gz; \
+             sum=d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f ;; \
+      amd64) tarball=node-v24.19.0-linux-x64.tar.gz; \
+             sum=f625d97cd707df4ff96254916fbc5ff014f09c09effe5a1e0ca8f6d41a8789d4 ;; \
+      *) echo "no node tarball pinned for $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o "/tmp/$tarball" "https://nodejs.org/dist/v24.19.0/$tarball"; \
+    echo "$sum  /tmp/$tarball" | sha256sum -c -; \
+    tar -xzf "/tmp/$tarball" -C /usr/local --strip-components=1; \
+    rm "/tmp/$tarball"; node --version; npm --version
+
 # ctypes-foreign via opam on the system compiler: Debian's ctypes deb
 # omits the foreign (libffi) half entirely — its META even dangles.
 #

@@ -1,0 +1,14 @@
+{
+  "name": "kaya-gui",
+  "version": "0.0.0",
+  "description": "Cross-platform GUI library that wraps each platform's native widgets",
+  "license": "MIT",
+  "repository": "github:smasher164/kaya",
+  "type": "module",
+  "exports": {
+    ".": "./kaya/index.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

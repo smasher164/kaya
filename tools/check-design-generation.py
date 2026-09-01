@@ -74,7 +74,7 @@ flake_sdk = sdks[0].rstrip("/")
 # DECLARED_READS is the census: the verdict at the bottom refuses unless
 # exactly this many stamps were read. A reader that resolves nothing
 # agrees with everything.
-DECLARED_READS = 5
+DECLARED_READS = 6
 
 MODERN_FLOOR = (26, 0)   # sdk >= this is macOS 26's modern generation
 
@@ -253,6 +253,9 @@ with scratch_dir("check-design-generation-") as tmp:
         ("java", "compat", "which", "java", {},
          "validate-mac.sh's java legs — `java -XstartOnFirstThread -cp "
          "target/java-guests …`, an Azul-built host"),
+        ("node", "compat", "which", "node", {},
+         "validate-mac.sh's js legs — `node guests/js/<scene>.ts`, a "
+         "nixpkgs-prebuilt host kaya does not link (docs/js-plan.md §1)"),
     ]
 
     # -------------------------------------------------- the test seam

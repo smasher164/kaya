@@ -39,10 +39,12 @@ DEPTH_SCENES = ["typeface", "windowed", "canvas"]
 C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             "assets"]
 
-# The eight hosted languages in their DEFAULT group order; a group
-# that deviates spells its own order in ORDER below.
+# The nine hosted languages in their DEFAULT group order; a group
+# that deviates spells its own order in ORDER below. js is the ninth
+# binding (docs/js-plan.md), python's ambient twin, and rides every
+# group python rides.
 LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
-        "java")
+        "java", "js")
 
 # Scene -> the guest STEM its scene-named launchers run, where the two
 # differ: the listdetail legs run split's guests (a scene selects a
@@ -102,7 +104,7 @@ ORDER = [
     ("filedialog", ("csharp", "ocaml", "haskell")),
     ("drain",),
     ("panel_mode", 3, "icons"),
-    ("filedialog", ("swift", "java")),
+    ("filedialog", ("swift", "java", "js")),
     ("drain",),
     ("panel_check",),
     # EACH SAVE LEG ALONE BETWEEN DRAINS: macOS shares a save panel's
@@ -126,6 +128,8 @@ ORDER = [
     ("drain",),
     ("save", ("c",)),
     ("drain",),
+    ("save", ("js",)),
+    ("drain",),
     # The text editor: go alone by design, alone between drains (real
     # panels, real keys).
     ("editor", ("go",)),
@@ -141,7 +145,7 @@ ORDER = [
     ("a11yrows", (*LANGS, "c")),
     ("drain",),
     ("styling", ("rust", "python", "go", "swift", "csharp", "ocaml",
-                 "haskell", "java", "c")),
+                 "haskell", "java", "js", "c")),
     ("drain",),
     ("typeface", ("rust",)),
     ("drain",),
@@ -151,13 +155,13 @@ ORDER = [
     ("sizepolicy", LANGS),
     ("drain",),
     ("toolbar", ("rust", "python", "go", "swift", "csharp", "ocaml",
-                 "haskell", "java")),
+                 "haskell", "java", "js")),
     ("drain",),
     ("identity", ("rust", "python", "go", "swift", "csharp", "ocaml",
-                  "haskell", "java")),
+                  "haskell", "java", "js")),
     ("drain",),
     ("assets", ("rust", "python", "go", "swift", "csharp", "ocaml",
-                "haskell", "java", "c")),
+                "haskell", "java", "js", "c")),
     ("drain",),
     # EACH CLIPBOARD LEG ALONE BETWEEN DRAINS: one system clipboard
     # per session (check-steps pins the drain/run/drain bracket).
@@ -176,6 +180,8 @@ ORDER = [
     ("clipboard", ("haskell",)),
     ("drain",),
     ("clipboard", ("java",)),
+    ("drain",),
+    ("clipboard", ("js",)),
     ("drain",),
     # EACH UNDO LEG ALONE BETWEEN DRAINS: the type verb delivers real
     # keystrokes.
@@ -197,6 +203,8 @@ ORDER = [
     ("drain",),
     ("undo", ("java",)),
     ("drain",),
+    ("undo", ("js",)),
+    ("drain",),
     ("scroll", LANGS),
     ("progress", LANGS),
     ("select", LANGS),
@@ -213,9 +221,9 @@ ORDER = [
     # oversight (the sugar's java arm has no dirty guest yet); order
     # follows the per-binding commentary at the runner's site.
     ("dirty", ("rust", "python", "ocaml", "c", "go", "haskell",
-               "swift", "csharp")),
+               "swift", "csharp", "js")),
     ("ranges", ("rust", "python", "c", "csharp", "go", "java",
-                "haskell", "swift", "ocaml")),
+                "haskell", "swift", "ocaml", "js")),
     ("align", LANGS),
     ("drain",),
     ("layout", LANGS),

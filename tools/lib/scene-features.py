@@ -136,7 +136,7 @@ def stub_spellings(feature: str, platform: str) -> list[str]:
 
 
 LANGS = ("rust", "python", "go", "csharp", "java", "swift", "ocaml",
-         "haskell", "c", "compose", "jvm", "swiftui")
+         "haskell", "js", "c", "compose", "jvm", "swiftui")
 
 
 def significant(text: str):

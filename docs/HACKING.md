@@ -16,7 +16,7 @@ architecture). This file is the how-to layer: the recipes that repeat.
 - `swift/KayaSwiftUI.swift` and
   `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt` — the two
   interpreter backends (own their node trees across the C ABI).
-- `tools/kaya-bindgen/` — emits the 8 generated wire files
+- `tools/kaya-bindgen/` — emits the 9 generated wire files
   (bindings/<lang>/...wire...) from spec.rs.
 - `bindings/<lang>/` — per-language: generated wire file + hand-written
   runtime + layer-3 surface.
@@ -46,7 +46,7 @@ architecture). This file is the how-to layer: the recipes that repeat.
    The compiler's non-exhaustive-match errors are the checklist —
    follow them.
 3. `tools/gen-header.sh` (kaya.h via cbindgen), `tools/gen-bindings.sh`
-   (the 8 wire files). `cargo build --lib` so the dylib carries the new
+   (the 9 wire files). `cargo build --lib` so the dylib carries the new
    hash — every runtime asserts hash agreement at load, so stale
    artifacts fail loudly rather than decoding garbage.
 4. If guest-visible record/sum surfaces changed: `tools/gen-guests.sh`.
@@ -71,7 +71,7 @@ The slider and image commits are the worked examples. The ~30 touchpoints:
 6. harness.rs: TargetKind + parse arm + Stage method (make observation
    methods NO-DEFAULT so backends fail to compile rather than silently
    skip) + MockStage + grammar tests.
-7. Layer-3 constructors in all 8 bindings, in BOTH construction zones —
+7. Layer-3 constructors in all 9 bindings, in BOTH construction zones —
    the LIVE one an app builds in its build closure and the TEMPLATE one
    inside a collection's prototype row (check-sugar-surface enforces
    both once the kind lands in the generated wire.py; the template half
@@ -317,7 +317,7 @@ matching id does not promise two byte-identical binaries.
 
 ## Multi-agent work
 
-The breadth phases (same change across 8 bindings, or across the 4
+The breadth phases (same change across 9 bindings, or across the 4
 backends' 5 platform lanes) parallelize well: give each agent a disjoint file tree, the green
 reference implementation to study, exact verification commands with
 expected verbatim output, and the constraint list of files it must not

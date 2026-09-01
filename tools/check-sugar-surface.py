@@ -124,14 +124,17 @@ def check_kind(kind, findings=None):
           f"^[[:space:]]*{kind}[A-Za-z]* ::", findings)
     check("ocaml", "bindings/ocaml/kaya_app.ml", kind,
           f"^let {kind}[a-z_]* ", findings)
+    # Every kind is one lowercase word, so JS's camelCase IS the kind.
+    check("js", "bindings/js/kaya/index.ts", kind,
+          f"^export function {kind}[A-Za-z]*\\(", findings)
 
 
-# --- THE TEXT-RANGE SURFACE, in all eight -------------------------
+# --- THE TEXT-RANGE SURFACE, in all nine --------------------------
 #
 # The three primitives (docs/ranges-plan.md D1) plus `set_text`. This
 # file's other sweeps cover widget CONSTRUCTORS and WINDOW props, and a
 # widget-level verb is neither, so nothing else would demand these of
-# the seven non-Rust bindings.
+# the eight non-Rust bindings.
 #
 # RED BY DESIGN until the sweep lands (CLAUDE.md, sequencing).
 def want_verb(lang, rel, verb, pattern, findings=None):
@@ -149,13 +152,13 @@ def want_verb(lang, rel, verb, pattern, findings=None):
 def check_range_verb(snake, pascal, camel, findings=None):
     want_verb("rust", "crates/kaya/src/app.rs", snake,
               f"pub fn {snake}\\(", findings)
-    # PYTHON PUTS WIDGET-ADDRESSED VERBS ON THE HANDLE, which is why
-    # this one pattern is keyed on `(self` where the other seven are
-    # not: in seven bindings a widget-addressed one-shot is a
-    # transaction method taking a widget, while Python's transaction is
-    # ambient and has no handle to hang it on. The file's other
-    # handle-verb clauses (a11y_id, accepts, on_paste) are keyed on
-    # `(self` for that reason.
+    # THE AMBIENT BINDINGS PUT WIDGET-ADDRESSED VERBS ON THE HANDLE,
+    # which is why python's pattern is keyed on `(self` and JS's on the
+    # class-member indent where the other seven are keyed on a
+    # transaction method taking a widget: an ambient transaction has no
+    # handle to hang one on. The file's other handle-verb clauses
+    # (a11y_id, accepts, on_paste) are keyed the same way for that
+    # reason.
     want_verb("python", "bindings/python/kaya/__init__.py", snake,
               f"def {snake}\\(self", findings)
     want_verb("go", "bindings/go/app.go", snake,
@@ -170,6 +173,10 @@ def check_range_verb(snake, pascal, camel, findings=None):
               f"^[[:space:]]*{camel} ::", findings)
     want_verb("ocaml", "bindings/ocaml/kaya_app.ml", snake,
               f"^let {snake} ", findings)
+    # JS IS PYTHON'S AMBIENT TWIN, so a widget-addressed one-shot is a
+    # method on the handle here too, keyed on the class-member indent.
+    want_verb("js", "bindings/js/kaya/index.ts", snake,
+              f"^  {camel}\\(", findings)
 
 
 check_range_verb("highlight_ranges", "HighlightRanges",
@@ -180,19 +187,19 @@ check_range_verb("set_text", "SetText", "setText")
 
 # THE BUILT-IN NEGATIVE TEST FOR THIS SWEEP, the same shape as the
 # fake-kind one below: a verb that exists in no binding must fail in
-# all eight, or the eight patterns have rotted into a rule that can
+# all nine, or the nine patterns have rotted into a rule that can
 # only pass. Collected instead of printed, so the fake's failures die
 # with the list (the shell ran it in a subshell for the same reason).
 fake = []
 check_range_verb("kaya_fake_verb", "KayaFakeVerb", "kayaFakeVerb",
                  findings=fake)
 range_fake = sum(1 for m in fake if "has no sugar for" in m)
-if range_fake != 8:
+if range_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({range_fake}/8 range-verb patterns fired for a "
+                  f"({range_fake}/9 range-verb patterns fired for a "
                   f"verb that exists nowhere)")
 
-# --- THE CAPABILITIES SURFACE, in all eight ------------------------
+# --- THE CAPABILITIES SURFACE, in all nine -------------------------
 #
 # `kaya_capabilities()` is a C export every binding must wrap, or a
 # guest derives the answer from its OWN platform predicate instead —
@@ -231,6 +238,8 @@ def check_cap_query(snake, pascal, camel, findings=None):
              f"^{camel} :: IO", findings)
     cap_want("ocaml", "bindings/ocaml/kaya_app.ml", "query",
              f"^let {snake} ", findings)
+    cap_want("js", "bindings/js/kaya/index.ts", "query",
+             f"^export function {camel}\\(", findings)
 
 
 check_cap_query("capabilities", "Capabilities", "capabilities")
@@ -239,7 +248,7 @@ check_cap_query("capabilities", "Capabilities", "capabilities")
 def check_cap_flag(snake, pascal, camel, findings=None):
     """ONE named boolean, in every binding's own
     record/struct/dataclass. This is the line that grows when the core
-    grows a bit: one call here, and eight bindings are held to it."""
+    grows a bit: one call here, and nine bindings are held to it."""
     cap_want("rust", "crates/kaya/src/app.rs", f"flag '{snake}'",
              f"pub {snake}: bool", findings)
     cap_want("python", "bindings/python/kaya/__init__.py",
@@ -256,6 +265,8 @@ def check_cap_flag(snake, pascal, camel, findings=None):
              f"flag '{snake}'", f"{camel} :: Bool", findings)
     cap_want("ocaml", "bindings/ocaml/kaya_app.ml", f"flag '{snake}'",
              f"{snake} : bool", findings)
+    cap_want("js", "bindings/js/kaya/index.ts", f"flag '{snake}'",
+             f"readonly {camel}: boolean", findings)
 
 
 check_cap_flag("aux_windows", "AuxWindows", "auxWindows")
@@ -267,17 +278,17 @@ fake = []
 check_cap_query("kaya_fake_query", "KayaFakeQuery", "kayaFakeQuery",
                 findings=fake)
 cap_fake = sum(1 for m in fake if "has no capabilities" in m)
-if cap_fake != 8:
+if cap_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({cap_fake}/8 capability-query patterns fired for "
+                  f"({cap_fake}/9 capability-query patterns fired for "
                   f"a query that exists nowhere)")
 fake = []
 check_cap_flag("kaya_fake_cap", "KayaFakeCap", "kayaFakeCap",
                findings=fake)
 cap_fake = sum(1 for m in fake if "has no capabilities" in m)
-if cap_fake != 8:
+if cap_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({cap_fake}/8 capability-flag patterns fired for a "
+                  f"({cap_fake}/9 capability-flag patterns fired for a "
                   f"bit that exists nowhere)")
 
 
@@ -314,6 +325,8 @@ def cap_numbers():
                     r"^capAuxWindows = (\d+)$"),
         "ocaml": ("bindings/ocaml/kaya_runtime.ml",
                   r"^let cap_aux_windows = (\d+)L$"),
+        "js": ("bindings/js/kaya/runtime.ts",
+               r"^export const CAP_AUX_WINDOWS = (\d+);$"),
     }
     READERS = {
         "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_AUX_WINDOWS"),
@@ -365,7 +378,7 @@ if not cap_ok:
     print("\n".join(cap_lines))
     status = 1
 
-# --- THE TABLE SURFACE, in all eight -------------------------------
+# --- THE TABLE SURFACE, in all nine --------------------------------
 #
 # A TABLE IS NOT A KIND — it is a For with a header — so neither the
 # constructor sweep above nor the window-prop sweep below can see it,
@@ -382,7 +395,7 @@ if not cap_ok:
 # a binding registers a handler where its OWN click convention does
 # (the maintainer's ruling, 2026-08-24), so its pattern reads
 # `columns`' header and there is no `let on_sort` to find. Same
-# observable semantics, different spelling — which is why the eight
+# observable semantics, different spelling — which is why the nine
 # patterns are written out rather than derived from one casing rule.
 def want_table(lang, rel, what, pattern, findings=None):
     global status
@@ -420,6 +433,11 @@ def check_table_columns(snake, pascal, camel, findings=None):
                findings)
     want_table("ocaml", "bindings/ocaml/kaya_app.ml", snake,
                f"^let {snake} ", findings)
+    # A METHOD ON THE COLLECTION, python's shape: the ambient transaction
+    # has nothing else to hang it on. Keyed past `setColumns`, the keyed
+    # re-declaration one class over, by the first parameter.
+    want_table("js", "bindings/js/kaya/index.ts", snake,
+               f"^  {snake}\\(titles", findings)
 
 
 check_table_columns("columns", "Columns", "columns")
@@ -455,6 +473,10 @@ def check_table_on_sort(snake, pascal, camel, findings=None):
     want_table("ocaml", "bindings/ocaml/kaya_app.ml", snake,
                f"^let columns \\?\\({snake} : \\(int -> unit\\) "
                f"option\\)", findings)
+    # AN OPTION ON THE DECLARATION, python's keyword one language over:
+    # read out of the options TYPE, which is where JS declares it.
+    want_table("js", "bindings/js/kaya/index.ts", snake,
+               f"ColumnsOptions = .*{camel}\\?:", findings)
 
 
 check_table_on_sort("on_sort", "OnSort", "onSort")
@@ -467,18 +489,18 @@ check_table_columns("kaya_fake_cols", "KayaFakeCols", "kayaFakeCols",
                     findings=fake)
 table_fake = sum(1 for m in fake
                  if "has no sugar for the table's" in m)
-if table_fake != 8:
+if table_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({table_fake}/8 table-columns patterns fired for a "
+                  f"({table_fake}/9 table-columns patterns fired for a "
                   f"declaration that exists nowhere)")
 fake = []
 check_table_on_sort("on_kaya_fake", "OnKayaFake", "onKayaFake",
                     findings=fake)
 table_fake = sum(1 for m in fake
                  if "has no sugar for the table's" in m)
-if table_fake != 8:
+if table_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({table_fake}/8 table-on_sort patterns fired for a "
+                  f"({table_fake}/9 table-on_sort patterns fired for a "
                   f"handler that exists nowhere)")
 
 
@@ -551,6 +573,12 @@ def check_role_sugar(snake, pascal, camel, findings=None):
               findings)
     want_role("haskell-tpl", "bindings/haskell/KayaApp.hs", snake,
               f"^{camel} :: TplStrSource s => s -> Tpl Node", findings)
+    # ONE pattern for both zones, python's reason: the ambient
+    # constructor serves whichever zone is open. Keyed on the overload
+    # DECLARATION, which is where the string form is spelled.
+    want_role("js", "bindings/js/kaya/index.ts", snake,
+              f"^export function {snake}\\(text: string, opts\\?: "
+              f"LabelOptions\\): Widget;", findings)
 
 
 check_role_sugar("heading", "Heading", "heading")
@@ -561,25 +589,25 @@ check_role_sugar("kaya_fake_role", "KayaFakeRole", "kayaFakeRole",
                  findings=fake)
 role_fake = sum(1 for m in fake
                 if "has no 'kaya_fake_role' role sugar" in m)
-if role_fake != 17:
+if role_fake != 18:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({role_fake}/17 role-sugar patterns fired for a "
+                  f"({role_fake}/18 role-sugar patterns fired for a "
                   f"constructor that exists nowhere)")
 
 
-# --- THE SIZE-POLICY SURFACE, in all eight --------------------------
+# --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
 #
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
 # (docs/canvas-plan.md §3.2.1). Invisible to every sweep above for the
 # table's reason one surface over: `size_policy` is not a KIND and not
-# a WINDOW PROP, and TX 47 plus occurrences 20/21 reach all eight
+# a WINDOW PROP, and TX 47 plus occurrences 20/21 reach all nine
 # bindings through the GENERATOR whether or not a guest can spell any
 # of them — which is exactly the state this wave found (the records
 # generated, nothing above them).
 #
 # `scale` HAS NO SPELLING ANYWHERE, deliberately: it is what a canvas
 # that declares nothing gets, so there is nothing here to check for
-# it. The other three are one semantics in eight idioms, each riding
+# it. The other three are one semantics in nine idioms, each riding
 # where that binding's OWN handler convention rides (the 2026-08-24
 # ruling `on_sort` was decided by): chained on
 # rust/go/csharp/java/swift, KEYWORD arguments on python's `canvas`,
@@ -620,6 +648,11 @@ def check_policy_fixed(snake, pascal, camel, findings=None):
                 f"^{camel} :: Widget -> Build \\(\\)", findings)
     want_policy("ocaml", "bindings/ocaml/kaya_app.ml", snake,
                 f"\\?\\({snake} = false\\)", findings)
+    # An option on the canvas constructor, python's keyword one language
+    # over — read out of the options TYPE, WITH its `?:`, since a bare
+    # name would match the body that reads it.
+    want_policy("js", "bindings/js/kaya/index.ts", snake,
+                f"CanvasOptions = .*\\b{camel}\\?:", findings)
 
 
 check_policy_fixed("fixed", "Fixed", "fixed")
@@ -649,6 +682,8 @@ def check_policy_handler(snake, pascal, camel, hsarg, findings=None):
                 f"\\(\\)", findings)
     want_policy("ocaml", "bindings/ocaml/kaya_app.ml", snake,
                 f"\\?\\({snake} : \\(draw -> viewbox", findings)
+    want_policy("js", "bindings/js/kaya/index.ts", snake,
+                f"CanvasOptions = .*\\b{camel}\\?:", findings)
 
 
 check_policy_handler("on_draw", "OnDraw", "onDraw",
@@ -657,14 +692,14 @@ check_policy_handler("on_tick", "OnTick", "onTick",
                      "Viewbox -> Double -> \\[DrawOp\\]")
 
 
-# AND THE TEMPLATE ZONE IS REFUSED, all eight, which is the half a
+# AND THE TEMPLATE ZONE IS REFUSED, all nine, which is the half a
 # spelling census cannot see: the size policy is a LIVE-ZONE
 # declaration in this slice and a canvas inside a row template keeps
 # `scale` (docs/deferred.md). Six bindings refuse it with a TYPE — the
 # template zone hands out its own handle and the three declarations do
 # not exist on it — so what is checked there is that the template
 # constructor carries no policy argument and the node type no policy
-# method. The two whose one handle serves both zones raise, and their
+# method. The THREE whose one handle serves both zones raise, and their
 # sentence is frozen BYTE FOR BYTE, because an app reads it and two
 # spellings of one refusal is the divergence invariant 1 forbids.
 #
@@ -687,7 +722,8 @@ def policy_sentence():
         return re.sub(r"\s+", " ", text)
 
     AMBIENT = ["bindings/python/kaya/__init__.py",
-               "bindings/ocaml/kaya_app.ml"]
+               "bindings/ocaml/kaya_app.ml",
+               "bindings/js/kaya/index.ts"]
     out = []
     fails = []
     want = re.sub(r"\s+", " ", SENTENCE)
@@ -696,22 +732,24 @@ def policy_sentence():
             fails.append(f"{name} serves both zones with ONE handle "
                          f"but does not refuse a template-node size "
                          f"policy in the frozen words: \"{want}\"")
-    # THE CLAUSE'S OWN NEGATIVE, watched on every run: a copy with the
-    # sentence perturbed must stop matching, or this is a grep nobody
-    # has seen fail.
-    src = read_rel(AMBIENT[0])
-    doctored, n = sub_count("LIVE-ZONE declaration",
-                            "live-zone declaration", src)
-    out.append(f"check-sugar-surface: template-zone sentence "
-               f"perturbation applied {n} substitution(s)")
-    if n < 1:
-        fails.append("the template-zone sentence self-test perturbed "
-                     "NOTHING — a negative that did not perturb is a "
-                     "failed test")
-    elif want in flat(doctored):
-        fails.append("the template-zone sentence self-test stayed "
-                     "GREEN against a doctored copy — the clause reads "
-                     "something else")
+    # THE CLAUSE'S OWN NEGATIVE, watched on every run AND ONCE PER FILE:
+    # a copy with the sentence perturbed must stop matching, or this is a
+    # grep nobody has seen fail. Per file rather than once, because each
+    # is read through its own splice rule and a clause that had stopped
+    # reading ONE of them would be invisible to a single probe.
+    for name in AMBIENT:
+        doctored, n = sub_count("LIVE-ZONE declaration",
+                                "live-zone declaration", read_rel(name))
+        out.append(f"check-sugar-surface: template-zone sentence "
+                   f"perturbation applied {n} substitution(s) in {name}")
+        if n < 1:
+            fails.append(f"the template-zone sentence self-test perturbed "
+                         f"NOTHING in {name} — a negative that did not "
+                         f"perturb is a failed test")
+        elif want in flat(doctored):
+            fails.append(f"the template-zone sentence self-test stayed "
+                         f"GREEN against a doctored copy of {name} — the "
+                         f"clause reads something else")
     out.extend("check-sugar-surface: " + line for line in fails)
     return out, not fails
 
@@ -759,18 +797,18 @@ check_policy_fixed("kaya_fake_fixed", "KayaFakeFixed", "kayaFakeFixed",
                    findings=fake)
 policy_fake = sum(1 for m in fake
                   if "has no sugar for the canvas's" in m)
-if policy_fake != 8:
+if policy_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({policy_fake}/8 size-policy 'fixed' patterns "
+                  f"({policy_fake}/9 size-policy 'fixed' patterns "
                   f"fired for a declaration that exists nowhere)")
 fake = []
 check_policy_handler("on_kaya_fake", "OnKayaFake", "onKayaFake",
                      "Nope", findings=fake)
 policy_fake = sum(1 for m in fake
                   if "has no sugar for the canvas's" in m)
-if policy_fake != 8:
+if policy_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({policy_fake}/8 size-policy handler patterns "
+                  f"({policy_fake}/9 size-policy handler patterns "
                   f"fired for a handler that exists nowhere)")
 
 # The built-in negative test: a kind that exists nowhere must fail in
@@ -784,9 +822,9 @@ fake = []
 check_kind("kayafakewidget", findings=fake)
 fake_failures = sum(1 for m in fake
                     if "no live-zone constructor" in m)
-if fake_failures != 8:
+if fake_failures != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
-                  f"({fake_failures}/8 patterns fired for a fake kind)")
+                  f"({fake_failures}/9 patterns fired for a fake kind)")
 
 for kind in kinds:
     check_kind(kind)
@@ -979,6 +1017,8 @@ def tpl_table_probe():
                 ("bindings/ocaml", "kaya_app.ml")]
     HS_CHAIN = [("bindings", "haskell"),
                 ("bindings/haskell", "KayaApp.hs")]
+    JS_CHAIN = [("bindings", "js"), ("bindings/js", "kaya"),
+                ("bindings/js/kaya", "index.ts")]
 
     src = read_rel("crates/kaya/src/app.rs")
     text, n = scoped(src,
@@ -1482,6 +1522,67 @@ def tpl_table_probe():
              if n == 1 else hs, n,
              "cannot find haskell's dynamic-table zones")
 
+    # JS, PYTHON'S AMBIENT TWIN: one `rows(opts)` configures the ordinary
+    # For and one `columns(titles, opts)` the table, so its census carries
+    # python's six points and its perturbations are python's, one language
+    # over. Every needle is unique in the file and every one leaves the
+    # LIVE spelling standing.
+    js = read_rel("bindings/js/kaya/index.ts")
+    js_table = "js's TEMPLATE-zone table cannot spell "
+    js_points = (
+        ("js-columns", "columns",
+         "    return new ColumnsTrace(this as Collection<unknown, "
+         "unknown>, [...titles], opts) as unknown as Iterable<R>;",
+         "    return new ColumnsTraceRemoved(this as Collection<unknown, "
+         "unknown>, [...titles], opts) as unknown as Iterable<R>;"),
+        ("js-columns-pathlen", "columns",
+         "sort.direction, this._titles.length, 0, this._titles)",
+         "sort.direction, this._titles.length, 1, this._titles)"),
+        ("js-sort", "on_sort",
+         "app()._register(handle, wire.OCC_SORT_REQUESTED, "
+         "this._opts.onSort)",
+         "app()._register(handle, wire.OCC_SORT_REMOVED, "
+         "this._opts.onSort)"),
+        ("js-keyed-len", "keyed re-declaration",
+         "titles.length, this._path.length, [...keyPath(this._path), "
+         "...titles]",
+         "titles.length, 0, [...keyPath(this._path), ...titles]"),
+        ("js-keyed-order", "keyed re-declaration",
+         "[...keyPath(this._path), ...titles]",
+         "[...titles, ...keyPath(this._path)]"),
+        ("js-rows-grow", "ordinary For grow",
+         "    trace._grow = opts.grow ?? null;",
+         "    trace._grow = null;"),
+        ("js-rows-align", "ordinary For align",
+         "    trace._align = opts.align ?? null;",
+         "    trace._align = null;"),
+        ("js-rows-a11y", "ordinary For a11y id",
+         "    trace._a11yId = opts.a11yId ?? null;",
+         "    trace._a11yId = null;"),
+        ("js-rows-grow-emitter", "ordinary For grow",
+         "records().push(wire.tx_set_grow(handle.id, "
+         "Number(this._grow)))",
+         "records().push(wire.tx_removed_set_grow(handle.id, "
+         "Number(this._grow)))"),
+        # THE HANDLE SETTER, not a const emitter: `rows({a11yId:
+        # row.key})` must reach the ELEMENT arm.
+        ("js-rows-a11y-emitter", "ordinary For a11y id",
+         "if (this._a11yId !== null) handle.a11yId(this._a11yId);",
+         "if (this._a11yId !== null) handle.a11yRemovedId(this._a11yId);"),
+    )
+    for name, point, old, new in js_points:
+        n = js.count(old)
+        run_leaf(name, src, JS_CHAIN,
+                 js.replace(old, new, 1) if n == 1 else js, n,
+                 js_table + point)
+
+    old = "export class BoundCollection<E, R> {"
+    n = js.count(old)
+    run_leaf("js-reader", src, JS_CHAIN,
+             js.replace(old, "export class BoundCollectionRemoved<E, R> {")
+             if n == 1 else js, n,
+             "cannot find js's dynamic-table zones")
+
     return "\n".join(lines)
 
 
@@ -1547,7 +1648,18 @@ haskell-sort-handler=applied:1 rc:1 named:True
 haskell-sort-dispatch=applied:1 rc:1 named:True
 haskell-keyed-len=applied:1 rc:1 named:True
 haskell-keyed-order=applied:1 rc:1 named:True
-haskell-reader=applied:1 rc:1 named:True""".replace("\\\n", "")
+haskell-reader=applied:1 rc:1 named:True
+js-columns=applied:1 rc:1 named:True
+js-columns-pathlen=applied:1 rc:1 named:True
+js-sort=applied:1 rc:1 named:True
+js-keyed-len=applied:1 rc:1 named:True
+js-keyed-order=applied:1 rc:1 named:True
+js-rows-grow=applied:1 rc:1 named:True
+js-rows-align=applied:1 rc:1 named:True
+js-rows-a11y=applied:1 rc:1 named:True
+js-rows-grow-emitter=applied:1 rc:1 named:True
+js-rows-a11y-emitter=applied:1 rc:1 named:True
+js-reader=applied:1 rc:1 named:True""".replace("\\\n", "")
 if tpl_table != WANT_TABLE_PROBE:
     print("check-sugar-surface: SELF-TEST FAIL (the dynamic-table "
           "census did not catch its watched deletions). Wanted:",
@@ -1872,8 +1984,8 @@ def tpl_over(perturb):
 # (c2e) THE ROW'S OWN FIELDS IN THE OTHER SEVEN. The Haskell block
 #       above was written as a Haskell gap; the sweep that closed it
 #       found the same two halves missing in five more bindings, and
-#       the census reads all eight now (docs/deferred.md, closed
-#       2026-08-25).
+#       the census reads all nine now (docs/deferred.md, closed
+#       2026-08-25; js joined with the ninth binding).
 #
 #       EACH PERTURBATION IS A SHAPE THAT COMPILES AND LIES, which is
 #       why a census earns its keep here and a typecheck cannot stand
@@ -2006,6 +2118,20 @@ def record_probe():
            "        return _BoundCollection(_app._collections"
            "[self._id], list(path))",
            "python", "record instance addressing")
+
+    # JS is python's twin here too: an ambient constructor, so the
+    # open-For edge is the only thing that says a collection born inside a
+    # template belongs to the copies rather than to the live tree, and a
+    # narrowing that drops the key addresses the parent.
+    JS = "bindings/js/kaya/index.ts"
+    census("js-record-zone", JS,
+           "if (enclosing !== undefined) enclosing._children.push(handle);",
+           "if (enclosing !== undefined) void enclosing;",
+           "js", "nested record collection")
+    census("js-record-at", JS,
+           "    return new BoundCollection(this, path);",
+           "    return new BoundCollection(this, []);",
+           "js", "record instance addressing")
     return "\n".join(lines)
 
 
@@ -2023,7 +2149,9 @@ swift-record-at=applied:1 rc:1 named:True
 ocaml-record-zone=applied:1 rc:1 named:True
 ocaml-record-at=applied:1 rc:1 named:True
 python-record-zone=applied:1 rc:1 named:True
-python-record-at=applied:1 rc:1 named:True"""
+python-record-at=applied:1 rc:1 named:True
+js-record-zone=applied:1 rc:1 named:True
+js-record-at=applied:1 rc:1 named:True"""
 if record != WANT_RECORD:
     print("check-sugar-surface: SELF-TEST FAIL (the nested-record "
           "census did not catch its watched perturbations). Wanted:",
@@ -2033,7 +2161,7 @@ if record != WANT_RECORD:
     print(record, file=sys.stderr)
     raise SystemExit(1)
 print("check-sugar-surface: nested-record perturbations applied "
-      "(7 bindings):")
+      "(8 bindings):")
 print(record)
 
 
@@ -2631,6 +2759,21 @@ def prop_probe():
         lines.append(f"{name}=applied:1 rc:{r.returncode} "
                      f"named:{want in r.stdout}")
 
+    def probe_many(name, path, pairs, want):
+        """probe with several substitutions, for the clause whose red
+        needs more than one member gone."""
+        text = read_rel(path)
+        for old, new in pairs:
+            n = text.count(old)
+            if n != 1:
+                lines.append(f"{name}=SELFTEST-BROKEN({old[:20]!r} "
+                             f"matched {n}, expected 1)")
+                return
+            text = text.replace(old, new)
+        r = tpl_over({path: text})
+        lines.append(f"{name}=applied:{len(pairs)} rc:{r.returncode} "
+                     f"named:{want in r.stdout}")
+
     probe("d1", "bindings/ocaml/kaya_app.ml",
           "    let set_role (Node id) r = emit (the_tx ()) "
           "(Kaya_wire.tx_set_role id (role_wire r))\n",
@@ -2642,13 +2785,50 @@ def prop_probe():
     probe("d3", "bindings/ocaml/kaya_app.ml",
           "module Tpl = struct\n", "module TplRenamed = struct\n",
           "cannot find ocaml's template zone")
+    # d4..d6 are the js zone's, which is TWO STRUCTURES (tpl-surfaces'
+    # members_js): a chainable setter deleted off the shared base, the
+    # option writer taught to ASK WHICH ZONE IT IS IN — the cut every
+    # other link survives, python's `_set_inset` reading `_tpl_depth` one
+    # language over — and the zone header renamed, which must REFUSE.
+    JS = "bindings/js/kaya/index.ts"
+    probe("d4", JS,
+          "  role(role: RoleValue | RoleName): this {",
+          "  roleRemoved(role: RoleValue | RoleName): this {",
+          "js's TEMPLATE zone cannot spell role")
+    probe("d5", JS,
+          "function setGrow(handle: Handle, opts: GrowOption): void {",
+          "function setGrow(handle: Handle, opts: GrowOption): void {\n"
+          "  if ((handle as Widget).isNode) return;",
+          "js's TEMPLATE zone cannot spell grow")
+    probe("d6", JS, "export class Handle {", "export class HandleRenamed {",
+          "cannot find js's template zone for the prop census")
+    # d7 — THE REFUSE-FLOOR ITSELF, which no zone in this census had ever
+    # been watched printing. THE PERTURBATION IS AN INDENT, not a rename:
+    # a renamed member is still a member the reader counts, so the first
+    # draft of this probe left the count at ten and reddened on the prop
+    # clause instead — the floor branch stayed unseen. Shifting three
+    # declarations out of the member column is what actually starves the
+    # reader, and a census that has stopped seeing its surface must SAY
+    # SO rather than agree with what is left.
+    probe_many("d7", JS, [
+        ("  onPaste(fn: Handler): this {",
+         "    onPaste(fn: Handler): this {"),
+        ("  draw(...args: [...Key[], (d: Draw) => void]): void {",
+         "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
+        ("  accepts(...kinds: string[]): this {",
+         "    accepts(...kinds: string[]): this {"),
+    ], "js's prop reader found only 7 members")
     return "\n".join(lines)
 
 
 prop = prop_probe()
 WANT_PROP = """d1=applied:1 rc:1 named:True
 d2=applied:1 rc:1 named:True
-d3=applied:1 rc:1 named:True"""
+d3=applied:1 rc:1 named:True
+d4=applied:1 rc:1 named:True
+d5=applied:1 rc:1 named:True
+d6=applied:1 rc:1 named:True
+d7=applied:3 rc:1 named:True"""
 if prop != WANT_PROP:
     print("check-sugar-surface: SELF-TEST FAIL (the template PROP "
           "census did not catch a perturbation it must catch). "
@@ -2743,13 +2923,45 @@ def src_probe():
         hit = ("cannot find haskell's template button constructor"
                in r.stdout)
         lines.append(f"e3=applied:1 rc:{r.returncode} named:{hit}")
+
+    # e4 — JS's `{bind}` left DECLARED and never handed to the binder:
+    # the silent-nothing arm python has already shipped once, and the
+    # shape a signature census cannot see.
+    # e5 — and the reader must refuse, not report a binding with no
+    # sources.
+    JS = "bindings/js/kaya/index.ts"
+    src = read_rel(JS)
+    old = '    bindText("button", handle, opts.bind);\n'
+    n = src.count(old)
+    if n != 1:
+        lines.append(f"e4=SELFTEST-BROKEN(matched {n}, expected 1)")
+    else:
+        r = tpl_over({JS: src.replace(old, "")})
+        hit = ("js's TEMPLATE-zone button caption takes no signal or "
+               "field source" in r.stdout)
+        lines.append(f"e4=applied:1 rc:{r.returncode} named:{hit}")
+
+    old = ("export function button(a: string | ButtonOptions, "
+           "b?: ButtonOptions): Widget {")
+    n = src.count(old)
+    if n != 1:
+        lines.append(f"e5=SELFTEST-BROKEN(matched {n}, expected 1)")
+    else:
+        r = tpl_over({JS: src.replace(
+            old, "export function buttonRenamed(a: string | "
+                 "ButtonOptions, b?: ButtonOptions): Widget {")})
+        hit = ("cannot find js's template button constructor"
+               in r.stdout)
+        lines.append(f"e5=applied:1 rc:{r.returncode} named:{hit}")
     return "\n".join(lines)
 
 
 src_out = src_probe()
 WANT_SRC = """e1=applied:3 rc:1 named:csharp,swift,python
 e2=applied:1 rc:1 named:True
-e3=applied:1 rc:1 named:True"""
+e3=applied:1 rc:1 named:True
+e4=applied:1 rc:1 named:True
+e5=applied:1 rc:1 named:True"""
 if src_out != WANT_SRC:
     print("check-sugar-surface: SELF-TEST FAIL (the template "
           "TAKES-A-SOURCE census did not catch a perturbation it must "
@@ -2759,7 +2971,7 @@ if src_out != WANT_SRC:
     print(src_out, file=sys.stderr)
     raise SystemExit(1)
 
-# THE SCALAR ELEMENT HAS A NAME, in all eight.
+# THE SCALAR ELEMENT HAS A NAME, in all nine.
 #
 # A template constructor's element source is a FIELD addressed by
 # index off a record. A SCALAR collection has no record — its element
@@ -2786,13 +2998,19 @@ check("ocaml", "bindings/ocaml/kaya_app.ml", "scalar element",
       r"^let element : \('a, string\) field")
 check("haskell", "bindings/haskell/KayaApp.hs", "scalar element",
       r"^element :: KField String")
+# JS's ambient For yields the element as the loop variable, so its
+# "token" is the class the tracer hands over.
+check("js", "bindings/js/kaya/index.ts", "scalar element",
+      r"^export class Element\b")
 
-# THE TEMPLATE-NODE PROPS, in all eight (docs/tpl-props-plan.md
+# THE TEMPLATE-NODE PROPS, in all nine (docs/tpl-props-plan.md
 # P1/P2): the a11y pair + hint, accepts, and the node paste
 # registrar. Every pattern is RECEIVER-KEYED on the template handle
 # type — a bare-method-name pattern is satisfied by the LIVE twin
-# every time. Python's clause is a separate AST reader
-# (tools/checks/py-node-props.py) because its zones share one surface.
+# every time. THE TWO AMBIENT BINDINGS ARE READ ELSEWHERE, because
+# their zones share one surface and there is no receiver to key on:
+# Python's is tools/checks/py-node-props.py, JS's is
+# tools/tpl-surfaces.py's `members_js`.
 check("rust", "crates/kaya/src/app.rs", "template a11y id",
       r"pub fn a11y_id\(&mut self, node: TemplateNodeId")
 check("rust", "crates/kaya/src/app.rs", "template a11y label",
@@ -2898,7 +3116,7 @@ if py_props.returncode != 0:
           + (py_props.stdout + py_props.stderr).strip())
     status = 1
 
-# A TEMPLATE NODE'S GROW WEIGHT, in all eight.
+# A TEMPLATE NODE'S GROW WEIGHT, in all nine.
 #
 # `scroll` needs a grow weight — an unconstrained viewport hugs its
 # content and nothing ever overflows — so a binding shipping the
@@ -2934,6 +3152,12 @@ check("ocaml", "bindings/ocaml/kaya_app.ml", "template grow",
       r"let set_grow \(Node id\)")
 check("haskell", "bindings/haskell/KayaApp.hs", "template grow",
       r"setGrow[A-Za-z]* ::")
+# JS's is the zone-blind option writer, python's `_set_grow` one
+# language over: `Widget.grow()` refuses a node, so the constructor
+# option is the template zone's only spelling (tools/tpl-surfaces.py,
+# members_js).
+check("js", "bindings/js/kaya/index.ts", "template grow",
+      r"^function setGrow\(handle: Handle")
 
 # --- AND THE OTHER DIRECTION: WHAT THE EXAMPLES USE ------------------
 #
@@ -3025,6 +3249,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "grow",
       r"Grow :: Double -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "grow",
       r"let label \?grow ")
+check("js", "bindings/js/kaya/index.ts", "grow", r"^  grow\(weight: number\)")
 
 # The spacing prop's layer-3 spelling, same rule: a binding shipping
 # wire-only spacing must fail here, not on a reviewer's eye.
@@ -3044,6 +3269,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "spacing",
       r"Spacing :: Double -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "spacing",
       r"let row \?grow \?a11y_id \?a11y_label \?spacing ")
+check("js", "bindings/js/kaya/index.ts", "spacing", r"^  spacing\(gap: number\)")
 
 # The align prop's layer-3 spelling, same rule again.
 check("rust", "crates/kaya/src/app.rs", "align", r"fn align\(self")
@@ -3061,6 +3287,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "align",
       r"Align :: Align -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "align",
       r"let row \?grow \?a11y_id \?a11y_label \?spacing \?align ")
+check("js", "bindings/js/kaya/index.ts", "align", r"^  align\(mode: AlignValue")
 
 # THE UNIVERSAL ACCESSIBILITY PROPS, same rule as grow/spacing/align.
 # These two are the only props every KIND carries, so a binding that
@@ -3084,6 +3311,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "a11y_id",
       r"A11yId :: String -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_id",
       r"let set_a11y_id \(Widget id\)")
+check("js", "bindings/js/kaya/index.ts", "a11y_id", r"^  a11yId\(ident:")
 
 check("rust", "crates/kaya/src/app.rs", "a11y_label",
       r"fn a11y_label\(self")
@@ -3101,6 +3329,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "a11y_label",
       r"A11yLabel :: String -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_label",
       r"let set_a11y_label \(Widget id\)")
+check("js", "bindings/js/kaya/index.ts", "a11y_label", r"^  a11yLabel\(label:")
 
 # The HINT prop, same rule as the two universal ones — but note it is
 # ACTIVATION-KINDS-ONLY by the root's own check (a hint needs
@@ -3123,6 +3352,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "a11y_hint",
       r"A11yHint :: String -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_hint",
       r"let set_a11y_hint \(Widget id\)")
+check("js", "bindings/js/kaya/index.ts", "a11y_hint", r"^  a11yHint\(hint:")
 
 # THE CLIPBOARD SURFACE (DESIGN.md, Clipboard). Four points, none of
 # them a widget kind or a window prop: the copy record, the
@@ -3131,7 +3361,7 @@ check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_hint",
 # THE SPELLINGS DIFFER AND THE SEMANTICS DO NOT: copy is a CHAIN where
 # the language builds by chaining, keyword arguments where it has
 # them, a record where that is the idiom — but at-most-one-per-kind is
-# STRUCTURAL in all eight, never a duplicate check. `accepts` takes
+# STRUCTURAL in all nine, never a duplicate check. `accepts` takes
 # the kinds as VALUES and joins them to the wire's space-separated
 # list.
 check("rust", "crates/kaya/src/app.rs", "copy",
@@ -3148,6 +3378,7 @@ check("swift", "bindings/swift/KayaApp.swift", "copy",
       r"func copy\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "copy", r"^copy ::")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "copy", r"^let copy ")
+check("js", "bindings/js/kaya/index.ts", "copy", r"^export function copy\(")
 
 check("rust", "crates/kaya/src/app.rs", "read_clipboard",
       r"pub fn read_clipboard\(&mut self")
@@ -3165,6 +3396,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "read_clipboard",
       r"^readClipboard ::")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "read_clipboard",
       r"^let read_clipboard ")
+check("js", "bindings/js/kaya/index.ts", "read_clipboard", r"^export function readClipboard\(")
 
 check("rust", "crates/kaya/src/app.rs", "accepts",
       r"pub fn accepts\(self")
@@ -3182,6 +3414,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "accepts",
       r"Accepts :: \[String\] -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "accepts",
       r"^let set_accepts ")
+check("js", "bindings/js/kaya/index.ts", "accepts", r"^  accepts\(\.\.\.kinds: string\[\]\)")
 
 check("rust", "crates/kaya/src/app.rs", "on_paste",
       r"pub fn on_paste\(")
@@ -3204,6 +3437,7 @@ check("haskell", "bindings/haskell/KayaApp.hs", "on_paste",
       r"^  onPaste app \(Widget n\) handler =")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "on_paste",
       r"^let on_paste ")
+check("js", "bindings/js/kaya/index.ts", "on_paste", r"^  onPaste\(fn: Handler\)")
 
 # The menu construction surface (DESIGN.md, Menus): menu items are
 # not widget kinds, so the constructor loop above cannot see them —
@@ -3221,7 +3455,7 @@ def check_menus(lang, rel, points, findings=None):
 
 # The menus clause's own negative test (guard-the-guard, the fake-kind
 # pattern above): an item constructor that exists nowhere must fail in
-# all 8 bindings THROUGH check_menus itself, or the clause's
+# all 9 bindings THROUGH check_menus itself, or the clause's
 # point-splitting has rotted.
 fake = []
 check_menus("rust", "crates/kaya/src/app.rs",
@@ -3241,11 +3475,13 @@ check_menus("haskell", "bindings/haskell/KayaApp.hs",
             [r"kayafakemenu=^kayafakemenuitem ::"], fake)
 check_menus("ocaml", "bindings/ocaml/kaya_app.ml",
             [r"kayafakemenu=^let kayafakemenuitem "], fake)
+check_menus("js", "bindings/js/kaya/index.ts",
+            [r"kayafakemenu=^export function kayafakemenuitem\("], fake)
 fake_menu_failures = sum(1 for m in fake
                          if "no live-zone constructor" in m)
-if fake_menu_failures != 8:
+if fake_menu_failures != 9:
     selftest_exit(f"check-sugar-surface: menus self-test failed "
-                  f"({fake_menu_failures}/8 patterns fired for a fake "
+                  f"({fake_menu_failures}/9 patterns fired for a fake "
                   f"item constructor)")
 
 check_menus("rust", "crates/kaya/src/app.rs", [
@@ -3301,6 +3537,17 @@ check_menus("ocaml", "bindings/ocaml/kaya_app.ml", [
     "radio_group=^let radio_group ", "option=^let option ",
     "separator=^let separator ", "context_menu=^let context_menu ",
     "context_catalog=^let context_catalog "])
+# The context anchor is a HANDLE method here (python's shape); the rest
+# are module-level, since the transaction is ambient and has no surface
+# to hang them on.
+check_menus("js", "bindings/js/kaya/index.ts", [
+    r"menu=^export function menu\(", r"item=^export function item\(",
+    r"toggle=^export function toggle\(",
+    r"radio_group=^export function radioGroup\(",
+    r"option=^export function option\(",
+    r"separator=^export function separator\(",
+    r"context_menu=^  contextMenu\(",
+    r"context_catalog=^export function contextCatalog\("])
 
 # EVERY WINDOW PROP NEEDS A SUGAR SPELLING TOO. Props come from the
 # GENERATED wire file, so this tracks the spec by construction — a
@@ -3353,14 +3600,14 @@ def _haskell_like(s):
 STRIP = {
     "python": _python_like, "go": _c_like, "csharp": _c_like,
     "java": _c_like, "swift": _c_like, "ocaml": _ocaml_like,
-    "haskell": _haskell_like,
+    "haskell": _haskell_like, "js": _c_like,
 }
 
 # A NONCE IN A COMMENT, PER LANGUAGE, and the whole point of the
 # pass: the raw file must satisfy the token and the stripped one must
 # not. It is planted rather than borrowed from a real prop so it
 # cannot rot into a name some binding later spells in code, and it
-# runs for all seven so a stripper that quietly strips nothing is
+# runs for all eight so a stripper that quietly strips nothing is
 # caught where it lives.
 NONCE = "KayaCommentOnlyNonce"
 PLANT = {
@@ -3372,6 +3619,7 @@ PLANT = {
     "swift": f"/* {NONCE} rides in a comment */\n",
     "ocaml": f"(* {NONCE} rides in a (* nested *) comment *)\n",
     "haskell": f"-- {NONCE} rides in a comment\n",
+    "js": f"/** {NONCE} rides in a doc comment */\n",
 }
 
 WPROP_FILES = {
@@ -3382,6 +3630,7 @@ WPROP_FILES = {
     "swift": "bindings/swift/KayaApp.swift",
     "ocaml": "bindings/ocaml/kaya_app.ml",
     "haskell": "bindings/haskell/KayaApp.hs",
+    "js": "bindings/js/kaya/index.ts",
 }
 
 stripped_code = {}
@@ -3478,6 +3727,9 @@ for wprop in wprops:
     hs = "WSize" if wprop in ("width", "height") else f"W{pascal}"
     check_wprop("haskell", "bindings/haskell/KayaApp.hs", wprop,
                 rf"\b{hs}\b")
+    # JS carries width and height separately, so it needs no flavor row:
+    # the camelCase name is the whole rule.
+    check_wprop("js", "bindings/js/kaya/index.ts", wprop, rf"\b{camel}\b")
 
 # ─────────────────────────────────────────────────────────────────────
 # THE STYLING SURFACE (docs/styling-plan.md, slice 1). `inset` is a
@@ -3492,7 +3744,7 @@ for wprop in wprops:
 #     closed vocabulary as a real enum type wherever the language has
 #     one. The root's declare-time wall refuses a misfit kind.
 def check_styling_point(point, rust_re, python_re, go_re, csharp_re,
-                        java_re, swift_re, haskell_re, ocaml_re,
+                        java_re, swift_re, haskell_re, ocaml_re, js_re,
                         findings=None):
     check("rust", "crates/kaya/src/app.rs", point, rust_re, findings)
     check("python", "bindings/python/kaya/__init__.py", point,
@@ -3508,10 +3760,11 @@ def check_styling_point(point, rust_re, python_re, go_re, csharp_re,
           findings)
     check("ocaml", "bindings/ocaml/kaya_app.ml", point, ocaml_re,
           findings)
+    check("js", "bindings/js/kaya/index.ts", point, js_re, findings)
 
 
 # Its negative, the fake-kind pattern above: a point that exists
-# nowhere must fail in all eight THROUGH check_styling_point itself,
+# nowhere must fail in all nine THROUGH check_styling_point itself,
 # or its argument-splitting has rotted.
 fake = []
 check_styling_point(
@@ -3520,12 +3773,13 @@ check_styling_point(
     r"func \(tx \*Tx\) Kayafakestyling\(",
     r"public void Kayafakestyling\(",
     r"public Widget kayafakestyling\(", r"func kayafakestyling\(",
-    r"^kayafakestyling ::", r"^let kayafakestyling ", findings=fake)
+    r"^kayafakestyling ::", r"^let kayafakestyling ",
+    r"^export function kayafakestyling\(", findings=fake)
 fake_styling = sum(1 for m in fake
                    if "no live-zone constructor" in m)
-if fake_styling != 8:
+if fake_styling != 9:
     selftest_exit(f"check-sugar-surface: styling self-test failed "
-                  f"({fake_styling}/8 patterns fired for a styling "
+                  f"({fake_styling}/9 patterns fired for a styling "
                   f"point that exists nowhere)")
 
 check_styling_point(
@@ -3533,7 +3787,8 @@ check_styling_point(
     r"pub fn brand_accent\(&mut self", r"^def brand_accent\(",
     r"func \(tx \*Tx\) BrandAccent\(", r"public void BrandAccent\(",
     r"public void brandAccent\(", r"func brandAccent\(",
-    r"^brandAccent ::", r"^let brand_accent ")
+    r"^brandAccent ::", r"^let brand_accent ",
+    r"^export function brandAccent\(")
 
 # THE BRAND TYPEFACE (Slice 2b), the accent's sibling: a transaction
 # verb no other sweep can see. Same base-name rule as the accent — the
@@ -3545,7 +3800,7 @@ check_styling_point(
     r"func \(tx \*Tx\) BrandTypeface\(",
     r"public void BrandTypeface\(", r"public void brandTypeface\(",
     r"func brandTypeface\(", r"^brandTypeface ::",
-    r"^let brand_typeface ")
+    r"^let brand_typeface ", r"^export function brandTypeface\(")
 
 # THE APP IDENTITY (docs/app-identity-plan.md): a transaction verb no
 # other sweep can see, so a binding shipping it wire-only strands
@@ -3557,7 +3812,8 @@ check_styling_point(
     r"pub fn app_identity\(&mut self", r"^def app_identity\(",
     r"func \(tx \*Tx\) AppIdentity\(", r"public void AppIdentity\(",
     r"public void appIdentity\(", r"func appIdentity\(",
-    r"^appIdentity ::", r"^let app_identity ")
+    r"^appIdentity ::", r"^let app_identity ",
+    r"^export function appIdentity\(")
 
 # `asset(name)` (docs/assets-plan.md): a transaction-tier call no
 # other sweep can see, so a binding shipping the core entry point
@@ -3586,12 +3842,13 @@ check_styling_point(
     r"func \(tx \*Tx\) Asset\(", r"public Asset Asset\(",
     r"public static Asset asset\(",
     r"init\(_ name: String\) throws",
-    r"^asset :: String -> IO Asset", r"^let asset = ")
+    r"^asset :: String -> IO Asset", r"^let asset = ",
+    r"^export function asset\(name: string\)")
 
 # The row above's other half: the sentence a miss WOULD raise,
 # answered TOTALLY, without unwinding. A scene has to OBSERVE that
-# sentence on five platforms in NINE languages — the eight bindings
-# and the C floor — and "catch it" is not one semantics in nine,
+# sentence on five platforms in TEN languages — the nine bindings
+# and the C floor — and "catch it" is not one semantics in ten,
 # because C has no catch at all. A query is. The query also answers
 # what no raise can: for a name that RESOLVES it says so, having
 # opened nothing, which is the second half of what
@@ -3613,7 +3870,8 @@ check_styling_point(
     r"public static String assetMissSentence\(",
     r"static func missSentence\(",
     r"^assetMissSentence :: String -> IO String",
-    r"^let asset_miss_sentence = ")
+    r"^let asset_miss_sentence = ",
+    r"^export function assetMissSentence\(")
 
 # THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
 # bare name: a bare-name pattern is satisfied by Rust's
@@ -3628,9 +3886,10 @@ check_styling_point(
     r"def role\(self, role\)", r"func \(w Widget\) Role\(",
     r"public void SetRole\(", r"public Widget role\(",
     r"func setRole\(", r"Role :: Role -> Attr",
-    r"let (label|button) [^=]*\?role|let set_role \(Widget id\)")
+    r"let (label|button) [^=]*\?role|let set_role \(Widget id\)",
+    r"^  role\(role: RoleValue")
 
-# A SECTION INTO A NAMED WINDOW, in all eight. Idiom decides the
+# A SECTION INTO A NAMED WINDOW, in all nine. Idiom decides the
 # spelling — a second name where there are no optional arguments, a
 # window argument where there are — and each pattern keys on the
 # window-carrying form so the primary-only spelling cannot satisfy
@@ -3646,12 +3905,13 @@ check_styling_point(
     r"func \(tx \*Tx\) AddSectionIn\(", r"AddSection\([^)]*window",
     r"public SectionRef addSectionIn\(|addSectionIn\(",
     r"func addSection\(", r"^addSectionIn ::",
-    r"add_section \?\(window")
+    r"add_section \?\(window",
+    r"^export type SectionOptions = .*window\?: number")
 
 # THE CONTAINER INSET (docs/styling-plan.md D3 one level down, landed
 # 2026-08-12 — the prop the full-bleed editor forced). EVERY ROW IS
 # KEYED PAST ITS WINDOW-INSET TWIN, which shares the bare name in all
-# eight: the window's spelling rides the window construct and the
+# nine: the window's spelling rides the window construct and the
 # container's rides the widget chain beside grow, so the receiver or
 # the parameter is what tells them apart — the menu-role lesson, one
 # prop over.
@@ -3661,7 +3921,8 @@ check_styling_point(
     r"def inset\(self, pad\)", r"func \(w Widget\) Inset\(",
     r"public void SetInset\(", r"public Widget inset\(",
     r"func setInset\(", r"Inset :: Double -> Attr",
-    r"let set_inset \(Widget id\)|let (row|column|grid) [^=]*\?inset")
+    r"let set_inset \(Widget id\)|let (row|column|grid) [^=]*\?inset",
+    r"^  inset\(pad: number\)")
 
 # EVERY WINDOW HANDLER NEEDS A CONSTRUCT SPELLING TOO — AND NO LOOSE
 # ONE: NO WINDOW ATTRIBUTE LIVES AS A LOOSE FUNCTION OUTSIDE THE
@@ -3684,6 +3945,7 @@ WH_JA = "bindings/java/dev/kaya/KayaApp.java"
 WH_SW = "bindings/swift/KayaApp.swift"
 WH_HS = "bindings/haskell/KayaApp.hs"
 WH_ML = "bindings/ocaml/kaya_app.ml"
+WH_JS = "bindings/js/kaya/index.ts"
 
 
 def derive_whandlers():
@@ -3803,6 +4065,31 @@ def paren_region(rel, anchor):
                   f"/{anchor}/ never closes")
 
 
+def brace_region(rel, anchor):
+    """A TypeScript type literal: from the anchor to the brace that
+    closes it. JS spells the construct's attribute set as ONE TYPE both
+    windows take, so — like Go's, Java's and Haskell's — one spelling
+    serves both; what it still needs is a REGION, because a loose
+    `onUndone` elsewhere in the file would satisfy a whole-file grep."""
+    text = read_rel(rel)
+    m = re.search(anchor, text, re.M)
+    if not m:
+        return None, (f"{rel}: no window construct matching "
+                      f"/{anchor}/ — the construct moved and this "
+                      f"sweep would go vacuous")
+    i = text.index("{", m.start())
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[m.start():j + 1], None
+    return None, (f"{rel}: the construct's type literal at /{anchor}/ "
+                  f"never closes")
+
+
 def let_region(rel, anchor):
     """OCaml's labelled arguments have no brackets: the header runs to
     the `=` that ends its line."""
@@ -3830,6 +4117,8 @@ for name, (fn, rel, anchor) in {
     "ocaml-window": (let_region, WH_ML, r"^let window"),
     "ocaml-create-window": (let_region, WH_ML,
                             r"^let create_window"),
+    "js-window-options": (brace_region, WH_JS,
+                          r"^export type WindowOptions = WindowProps & "),
 }.items():
     body, err = fn(rel, anchor)
     if body is None:
@@ -3901,7 +4190,7 @@ def _pascal_h(h):
 
 
 def check_window_handler(h, findings=None):
-    """The construct spells it, in all eight. ONE conversion, and
+    """The construct spells it, in all nine. ONE conversion, and
     every non-snake spelling is built from it: "close_requested" ->
     "CloseRequested", so the handler is `on` plus that in six bindings
     and `On` plus it in Go. A camelCase of the handler alone would
@@ -3956,12 +4245,17 @@ def check_window_handler(h, findings=None):
          f"{WH_ML} (window)", findings)
     want("ocaml", REGIONS["ocaml-create-window"], h, rf"\?on_{h}[ )]",
          f"{WH_ML} (create_window)", findings)
+    # ONE region, not two: `app.window` and `app.createWindow` take the
+    # SAME type, so the two sets cannot drift by construction — which is
+    # what the argument-list four need a region apiece to prove.
+    want("js", REGIONS["js-window-options"], h, rf"^  on{pascal}\?:",
+         f"{WH_JS} (WindowOptions)", findings)
     swift_one_door(f"on{pascal}", swift_app, read_rel(WH_SW), WH_SW,
                    findings)
 
 
 def deny_loose(h, py_text, go_text, cs_text, ja_text, hs_text,
-               ml_text, shown=None, findings=None):
+               ml_text, js_text, shown=None, findings=None):
     """The texts are ARGUMENTS rather than the constants above because
     the self-test runs this clause against DOCTORED COPIES OF THE REAL
     FILES; a rule about six fixed paths could never be watched
@@ -3995,6 +4289,11 @@ def deny_loose(h, py_text, go_text, cs_text, ja_text, hs_text,
          shown.get("haskell", WH_HS), findings)
     deny("ocaml", ml_text, h, rf"^let on_{h}[ (]",
          shown.get("ocaml", WH_ML), findings)
+    # Python's rule, one language over: the DEFINITION itself, module
+    # level or class member alike, since the construct spelling is a
+    # field on the options type and never a definition of this name.
+    deny("js", js_text, h, rf"^ *(export )?(function )?on{pascal}\(",
+         shown.get("js", WH_JS), findings)
 
 
 # The built-in negative test, the fake-kind pattern above: a handler
@@ -4005,11 +4304,12 @@ check_window_handler("kayafakehandler", findings=fake)
 fake_wh_wants = sum(1 for m in fake
                     if "no window-construct spelling" in m)
 fake_wh_doors = sum(1 for m in fake if "ONE DOOR" in m)
-# Twelve, not eight: the four argument-list bindings are read once per
-# construct (the primary's and the auxiliary's).
-if fake_wh_wants != 12 or fake_wh_doors != 1:
+# Thirteen, not nine: the four argument-list bindings are read once per
+# construct (the primary's and the auxiliary's), while JS's one shared
+# type is read once.
+if fake_wh_wants != 13 or fake_wh_doors != 1:
     selftest_exit(f"check-sugar-surface: window-handler self-test "
-                  f"failed ({fake_wh_wants}/12 construct patterns and "
+                  f"failed ({fake_wh_wants}/13 construct patterns and "
                   f"{fake_wh_doors}/1 door clause fired for a handler "
                   f"that exists nowhere)")
 
@@ -4046,18 +4346,19 @@ def refuses_loose(h, texts, fragment, label):
 
 PY_T, GO_T, CS_T = read_rel(WH_PY), read_rel(WH_GO), read_rel(WH_CS)
 JA_T, HS_T, ML_T = read_rel(WH_JA), read_rel(WH_HS), read_rel(WH_ML)
+JS_T = read_rel(WH_JS)
 
 doc = wh_perturb(WH_PY, r"^class App:$",
                  "def on_undone(window_id, fn):\n    pass\n\n\n"
                  "class App:", "python")
-refuses_loose("undone", (doc, GO_T, CS_T, JA_T, HS_T, ML_T),
+refuses_loose("undone", (doc, GO_T, CS_T, JA_T, HS_T, ML_T, JS_T),
               "python spells the 'undone' window handler",
               "a python binding with a loose on_undone")
 
 doc = wh_perturb(WH_GO, r"^package kaya$",
                  "package kaya\n\nfunc (a *App) OnUndone(window "
                  "uint64, fn func(*Tx, string, UndoDelta)) {}", "go")
-refuses_loose("undone", (PY_T, doc, CS_T, JA_T, HS_T, ML_T),
+refuses_loose("undone", (PY_T, doc, CS_T, JA_T, HS_T, ML_T, JS_T),
               "go spells the 'undone' window handler",
               "the Go shape the fan-out actually shipped")
 
@@ -4071,7 +4372,8 @@ doc = wh_perturb(WH_GO, r"^package kaya$",
                  "package kaya\n\nfunc OnCloseRequested(a *App, "
                  "window uint64, fn func(*Tx)) {}",
                  "go-close-requested")
-refuses_loose("close_requested", (PY_T, doc, CS_T, JA_T, HS_T, ML_T),
+refuses_loose("close_requested",
+              (PY_T, doc, CS_T, JA_T, HS_T, ML_T, JS_T),
               "go spells the 'close_requested' window handler",
               "a Go binding with a loose OnCloseRequested")
 
@@ -4079,7 +4381,7 @@ doc = wh_perturb(WH_CS, r"^sealed class KayaApp\n\{$",
                  "sealed class KayaApp\n{\n    public void "
                  "OnUndone(ulong window, Action<Tx, string, "
                  "UndoDelta> fn) { undone[window] = fn; }", "csharp")
-refuses_loose("undone", (PY_T, GO_T, doc, JA_T, HS_T, ML_T),
+refuses_loose("undone", (PY_T, GO_T, doc, JA_T, HS_T, ML_T, JS_T),
               "csharp spells the 'undone' window handler",
               "a C# binding with a loose OnUndone")
 
@@ -4087,7 +4389,7 @@ doc = wh_perturb(WH_JA, r"^public final class KayaApp \{$",
                  "public final class KayaApp {\n    public void "
                  "onUndone(long window, UndoHandler handler) { "
                  "undone.put(window, handler); }", "java")
-refuses_loose("undone", (PY_T, GO_T, CS_T, doc, HS_T, ML_T),
+refuses_loose("undone", (PY_T, GO_T, CS_T, doc, HS_T, ML_T, JS_T),
               "java spells the 'undone' window handler",
               "the Java shape the fan-out actually shipped")
 
@@ -4097,16 +4399,35 @@ doc = wh_perturb(WH_HS,
                  "-> IO ()) -> IO ()\nonUndone _ _ _ = return ()\n\n"
                  "undoableTx :: App -> String -> Build a -> IO a",
                  "haskell")
-refuses_loose("undone", (PY_T, GO_T, CS_T, JA_T, doc, ML_T),
+refuses_loose("undone", (PY_T, GO_T, CS_T, JA_T, doc, ML_T, JS_T),
               "haskell spells the 'undone' window handler",
               "the Haskell shape the fan-out actually shipped")
 
 doc = wh_perturb(WH_ML, r"^let destroy_window id =",
                  "let on_undone _window _f = ()\n\n"
                  "let destroy_window id =", "ocaml")
-refuses_loose("undone", (PY_T, GO_T, CS_T, JA_T, HS_T, doc),
+refuses_loose("undone", (PY_T, GO_T, CS_T, JA_T, HS_T, doc, JS_T),
               "ocaml spells the 'undone' window handler",
               "an OCaml binding with a loose on_undone")
+
+doc = wh_perturb(WH_JS, r"^export class App \{$",
+                 "export function onUndone(windowId: number, fn: "
+                 "Handler): void {}\n\nexport class App {", "js")
+refuses_loose("undone", (PY_T, GO_T, CS_T, JA_T, HS_T, ML_T, doc),
+              "js spells the 'undone' window handler",
+              "a JS binding with a loose onUndone")
+
+# The multi-word handler too, for the reason Go's second row exists: a
+# pattern built wrong from the derived name fires on `undone` and never
+# on `close_requested`.
+doc = wh_perturb(WH_JS, r"^export class App \{$",
+                 "export function onCloseRequested(windowId: number, "
+                 "fn: Handler): void {}\n\nexport class App {",
+                 "js-close-requested")
+refuses_loose("close_requested",
+              (PY_T, GO_T, CS_T, JA_T, HS_T, ML_T, doc),
+              "js spells the 'close_requested' window handler",
+              "a JS binding with a loose onCloseRequested")
 
 # AND SWIFT'S ONE-DOOR CLAUSE FAILS ON A SECOND DOOR, not only on
 # none: the fake handler above proves it fires at zero callsites,
@@ -4130,7 +4451,7 @@ print("check-sugar-surface: window-handler perturbations applied:"
 
 for whandler in whandlers:
     check_window_handler(whandler)
-    deny_loose(whandler, PY_T, GO_T, CS_T, JA_T, HS_T, ML_T)
+    deny_loose(whandler, PY_T, GO_T, CS_T, JA_T, HS_T, ML_T, JS_T)
 
 # THE C FLOOR IS EXEMPT, AND THE EXEMPTION IS CHECKED — an exemption
 # is not an implementation. C registers nothing: a guest reads the
@@ -4152,7 +4473,7 @@ deny("c", read_rel("bindings/c/kaya_wire.h"), "any window handler",
 #
 # So this clause reads both halves, for BOTH carve-out scenes:
 #   (a) no entry and no milestone2 guest spells CONSTRUCTION at the
-#       floor, in any of the eight bindings; and
+#       floor, in any of the nine bindings; and
 #   (b) both rust guests still spell their EVENTS as the raw
 #       `ctx.next()` loop. THE CARVE-OUT IS CHECKED, NOT ASSUMED — a
 #       later session "finishing the job" by folding them onto
@@ -4171,7 +4492,7 @@ deny("c", read_rel("bindings/c/kaya_wire.h"), "any window handler",
 # line the self-test plants its floor snippets after>
 #
 # THE EXPECTED STRING IS THE ANTI-VACUITY ANCHOR: frozen and
-# byte-identical in all eight languages (invariant 6), so a guest that
+# byte-identical in all nine languages (invariant 6), so a guest that
 # was renamed, moved or emptied fails loudly here instead of satisfying
 # every denial below by having nothing in it.
 scene_facts = [
@@ -4197,6 +4518,7 @@ scene_guests = [
     "entry", "swift", "guests/swift/entry.swift",
     "entry", "haskell", "guests/haskell/entry.hs",
     "entry", "ocaml", "guests/ocaml/entry.ml",
+    "entry", "js", "guests/js/entry.ts",
 
     "milestone2", "rust", "guests/rust/milestone2.rs",
     "milestone2", "python", "guests/python/milestone2.py",
@@ -4207,6 +4529,7 @@ scene_guests = [
     "milestone2", "swift", "guests/swift/milestone2.swift",
     "milestone2", "haskell", "guests/haskell/milestone2.hs",
     "milestone2", "ocaml", "guests/ocaml/milestone2.ml",
+    "milestone2", "js", "guests/js/milestone2.ts",
 ]
 
 
@@ -4355,6 +4678,21 @@ scene_rules = [
     r"(^|[^A-Za-z_])add_child[[:space:]]",
     "       add_child column field;",
 
+    # JS HAS NO WIDGET-KIND FLOOR ON ITS OWN SURFACE — python's case —
+    # but it RE-EXPORTS the generated wire module (`export { wire }`), so
+    # the floor a guest can still reach is spelled through it. `forEach`
+    # is real and is the tier below the `for` statement these scenes
+    # trace with, exactly as python's `kaya.for_each` is.
+    "*", "js", "the forEach combinator", r"kaya\.forEach\(",
+    "  kaya.forEach(todos, (todo) => {});",
+    "*", "js", "widget-kind construction", r"wire\.tx_create_widget\(",
+    "  kaya.wire.tx_create_widget(1, kaya.wire.KIND_COLUMN);",
+    "*", "js", "the add_child chain", r"wire\.tx_add_child\(",
+    "  kaya.wire.tx_add_child(1, 2);",
+    "*", "js", "bind_element by index",
+    r"wire\.tx_bind_text_element\(",
+    "  kaya.wire.tx_bind_text_element(1, 0, 0);",
+
     # THE FOR COMBINATOR IS THE FLOOR IN ENTRY AND THE SUGAR IN
     # MILESTONE2, in these two languages only: `each` IS the combinator
     # with the body's RESULT THROWN AWAY. entry's template body returns
@@ -4435,7 +4773,7 @@ def scene_one(scene, lang, f):
     # renamed or deleted guest would satisfy every denial below at
     # once. Each file therefore proves it IS the scene it is filed
     # under first, by carrying that scene script's own expected string
-    # — frozen by invariant 6, and byte-identical in all eight
+    # — frozen by invariant 6, and byte-identical in all nine
     # languages by invariant 6's whole point.
     if raw is None or fact_anchor not in raw:
         print(f"check-sugar-surface: {f} is not the {scene} scene — "
@@ -4447,7 +4785,7 @@ def scene_one(scene, lang, f):
     # RUST IS READ WITH ITS COMMENT LINES DROPPED, and only rust: both
     # its headers NAME `ctx.next()` in prose, so the positive pin below
     # would be satisfied by the sentence describing the loop rather than
-    # by the loop. The other seven are read whole — a comment spelling a
+    # by the loop. The other eight are read whole — a comment spelling a
     # floor call in a graduated scene teaches the floor.
     if lang == "rust":
         if raw is None:

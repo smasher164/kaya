@@ -359,9 +359,13 @@ catalog begin from that window construct, never from app-global state
 or API.
 
 **The sugar tier speaks each language's current idiom** (audited
-2026-08-24, all eight, maintainer-ratified): a For's template trace is
+2026-08-24, all eight, maintainer-ratified; the ninth joined 2026-09-01
+on the same rule): a For's template trace is
 a LOOP where the language loops — Rust's `for row in rows(tx)`,
-Python's `for item in coll.columns(...)`, Go's range-over-func
+Python's `for item in coll.columns(...)`, JS's `for (const row of
+coll)` (the iterator protocol, so a `break` reaches the tracer through
+`return()` and the transaction exit refuses the half-authored
+blueprint by name), Go's range-over-func
 (`for row := range rows.All()`, go >= 1.23), Java's enhanced-for over
 a one-shot Iterable (which also freed locals from effectively-final
 capture) — and a CLOSURE where the platform's own DSL is one (Swift's
@@ -666,7 +670,18 @@ rules so far:
   applyAttr's total match makes a prop without its interpreter arm a
   compile failure — the type-level twin of the capi completeness
   tripwire). Dynamic setters (`set_grow`,
-  `SetSpacing`, ...) remain the uniform second path in all eight.
+  `SetSpacing`, ...) remain the uniform second path in all nine.
+  **JavaScript** (the ninth binding, 2026-09-01; docs/js-plan.md §4)
+  takes OPTIONS OBJECTS with the body last — `column({ spacing: 12 },
+  () => { ... })`, `button("Add", { onClick })` — the dominant idiom of
+  its ecosystem, over a transaction that is AMBIENT exactly as Python's
+  is: one constructor set serves both zones and the zone decides the
+  handle. Its one structural difference is threading, ruled and
+  recorded in docs/deferred.md's ninth-binding entry: the app's JS runs
+  in a `worker_thread` that IS the kaya-app thread while the process
+  main thread is surrendered to the platform loop at import, and a
+  native pump hands occurrences over one at a time so a wedged handler
+  stalls the app thread the way every other binding's does.
   The spelling varies by idiom; the observable semantics never do.
 - A canonical method vocabulary for derived signals: `eq`, `ne`, `lt`,
   `fmt`, and so on, method-shaped in every language (`count.eq(0)`,

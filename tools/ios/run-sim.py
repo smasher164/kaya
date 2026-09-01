@@ -62,12 +62,25 @@ def run(argv, **kw):
 def out_of(argv, timeout_s=None, env=None, stdin_text=None):
     """Captured stdout of a command (stderr dropped, as the shell's
     2>/dev/null captures were), decoded permissively — guest-origin
-    text is not clean UTF-8 (docs/traps.md, "NOT UTF-8")."""
+    text is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
+
+    INTO A FILE, NEVER A PIPE: `simctl spawn` hands the child's stdout
+    to the simulator's launchd, which keeps the write end after simctl
+    itself has exited, and a pipe read to EOF then waits on a launchd
+    that answers nothing — the iOS lane hung 30 minutes on
+    `launchctl list` that way, 0 legs (2026-09-01, docs/traps.md). A
+    file has no other end to wait for, and every spawn here is
+    bounded by `timeout` besides."""
     argv = (["timeout", str(timeout_s), *argv] if timeout_s else list(argv))
-    got = subprocess.run(argv, stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, input=stdin_text,
-                         env=env, check=False, **TEXT)
-    return got.stdout
+    with tempfile.NamedTemporaryFile(prefix="kaya-out-", delete=False) as tf:
+        out_path = pathlib.Path(tf.name)
+    try:
+        with open(out_path, "w", encoding="utf-8") as out:
+            subprocess.run(argv, stdout=out, stderr=subprocess.DEVNULL,
+                           input=stdin_text, env=env, check=False, **TEXT)
+        return out_path.read_text(encoding="utf-8", errors="replace")
+    finally:
+        out_path.unlink(missing_ok=True)
 
 
 def die(msg):
@@ -714,6 +727,15 @@ def clip_seed(udid, kind, b64, legs_dir):
                  f"{udid}"
 
 
+# THE HOLDER IS NOT KILLED FOR REAL, AND THAT IS MEASURED, NOT
+# FORGOTTEN: `holder.kill()` reaches `timeout` alone and leaves xcrun,
+# simctl and the writer inside the simulator alive — 192 of them on the
+# host after two days (2026-09-01). Killing the whole process group
+# instead wedged the simulator's pasteboard daemon mid-serve (it fetches
+# item data from the setter) and SpringBoard denied every launch after
+# (docs/traps.md). The retirement belongs in tools/ios/clipctl itself —
+# exit when the change count moves or after a bounded hold — which is
+# docs/deferred.md's open item for this leak.
 def clip_kill_holder(udid):
     with _holders_lock:
         holder = _seed_holders.pop(udid, None)

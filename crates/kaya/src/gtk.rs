@@ -9205,8 +9205,28 @@ fn foreign_clip_write(mime: Option<&str>, bytes: Vec<u8>) {
         }
         c
     };
+    // ALL THREE DESCRIPTORS SET EXPLICITLY, never inherited: a host
+    // runtime may mark its own standard descriptors close-on-exec — node
+    // does — and a child that inherits one starts with it CLOSED, which
+    // wl-copy refuses by design and xclip answers by hanging (measured
+    // on the js legs 2026-09-01, docs/traps.md). stderr goes to a FILE
+    // so the refusal below carries the writer's own words: a pipe would
+    // be inherited by the serving child both tools fork, and reading it
+    // to EOF waits on a daemon that never exits.
+    let err_path = std::env::temp_dir().join(format!(
+        "kaya-clip-seed-{}-{}.err",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let err_file = std::fs::File::create(&err_path)
+        .expect("kaya: clipboard_seed cannot open a file for the writer's stderr");
     let mut child = command
         .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(err_file))
         .spawn()
         .unwrap_or_else(|e| {
             panic!(
@@ -9221,9 +9241,11 @@ fn foreign_clip_write(mime: Option<&str>, bytes: Vec<u8>) {
         .write_all(&bytes)
         .expect("kaya: the foreign clipboard writer closed its stdin early");
     let status = child.wait().expect("kaya: the foreign clipboard writer vanished");
+    let said = std::fs::read_to_string(&err_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&err_path);
     assert!(
         status.success(),
-        "kaya: the foreign clipboard writer exited {status}"
+        "kaya: the foreign clipboard writer exited {status}; it said: {said:?}"
     );
 }
 

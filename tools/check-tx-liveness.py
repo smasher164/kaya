@@ -90,11 +90,19 @@ if swift_raw != 2:
 # --- the ambient bindings: the thread, checked at the build ----------
 
 python_text = gate.read("bindings/python/kaya/__init__.py")
+js_text = gate.read("bindings/js/kaya/index.ts")
 ocaml_text = gate.read("bindings/ocaml/kaya_app.ml")
 haskell_text = gate.read("bindings/haskell/KayaApp.hs")
 
 if "def _require_app_thread" not in python_text:
     note("python: _require_app_thread is gone")
+# THE DEFINITION IS NOT THE CALL: the definition plus the two scope
+# entries (the scene scope and the live window form).
+if "function requireAppThread()" not in js_text:
+    note("js: requireAppThread is gone")
+if js_text.count("requireAppThread()") < 3:
+    note("js: requireAppThread is defined but never called — runScope "
+         "and the live window form must check the thread")
 if "let require_app_thread" not in ocaml_text:
     note("ocaml: require_app_thread is gone")
 # THE DEFINITION IS NOT THE CALL: a bare name matches both, so count.
@@ -113,7 +121,8 @@ for file, want in [(GO, "App.Post"), (JAVA, "App.post"), (CS, "App.Post"),
                    (SWIFT, "app.post"), ("bindings/ocaml/kaya_app.ml",
                                          "Kaya_app.post"),
                    ("bindings/haskell/KayaApp.hs", "post"),
-                   ("bindings/python/kaya/__init__.py", "app.post")]:
+                   ("bindings/python/kaya/__init__.py", "app.post"),
+                   ("bindings/js/kaya/index.ts", "app.post")]:
     text = gate.read(file)
     if "transaction" not in text:
         note(f"{file}: no transaction guard message at all")
@@ -292,5 +301,5 @@ selftest("N4", SWIFT, r'"app\.post, which runs', '"something, which runs',
 if fail != 0:
     print("check-tx-liveness: FAILURES ABOVE", file=sys.stderr)
     sys.exit(1)
-print(f"check-tx-liveness: OK (9 tiers: 5 handle, 3 ambient, 1 floor with "
+print(f"check-tx-liveness: OK (10 tiers: 5 handle, 4 ambient, 1 floor with "
       f"no transaction; {payload})")

@@ -878,6 +878,11 @@ def leg_argv(scene, lang):
         return [str(RUST_GUESTS / stem)]
     if lang == "python":
         return ["python3", f"guests/python/{stem}.py"]
+    if lang == "js":
+        # node runs the .ts directly (type stripping; docs/js-plan.md
+        # §1); the binding finds libkaya by walking up from its own
+        # directory and the interpreter through KAYA_SWIFTUI_LIB.
+        return ["node", f"guests/js/{stem}.ts"]
     if lang == "go":
         return ["target/go-guests/kaya-go"]
     if lang == "csharp":

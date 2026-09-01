@@ -65,6 +65,11 @@ GATES = [
     ("kaya-app-checks", ["python3", "bindings/python/kaya_app_checks.py"], False,
      "sub-second and pure python; hashing an input set would cost more than "
      "the run it would skip"),
+    # The JS surface's twin, in a worker (the import surrenders the main
+    # thread otherwise; docs/js-plan.md §5).
+    ("js-app-checks", ["node", "bindings/js/kaya_app_checks.ts"], False,
+     "sub-second; hashing an input set would cost more than the run it "
+     "would skip"),
     ("check-targets", ["tools/check-targets.sh"], True, ""),
     ("check-shell", ["tools/check-shell.sh"], True, ""),
     # check-shell's opposite number: the gate bodies are python now
@@ -225,6 +230,7 @@ GATES = [
     ("check-detekt", ["tools/check-detekt.sh"], True, ""),
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),
     ("java-typecheck", ["tools/java-typecheck.sh"], True, ""),
+    ("js-typecheck", ["tools/js-typecheck.sh"], True, ""),
 ]
 
 # Gate scripts on disk that are deliberately NOT in the sweep. The

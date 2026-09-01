@@ -67,6 +67,33 @@ def brace_block(src, header_re, open_ch="{", close_ch="}"):
     return None
 
 
+def ts_body(src, header_re):
+    """One TypeScript member's brace-matched BODY, found by a header regex
+    that MUST END AT THE BODY'S OWN `{`.
+
+    `brace_block` cannot serve here and the difference is not cosmetic: a
+    TS parameter default is itself an object literal, so `rows(opts:
+    RowsOptions = {})` and `setColumns(…, opts: { sort?: Sort } = {})` hand
+    the first-brace reader `{}` — a body with NOTHING IN IT, which then
+    satisfies every `in` test by being empty and reports a surface it
+    never read. Measured while this file's js arm was written, on both
+    members at once.
+    """
+    m = re.search(header_re, src, re.M)
+    if not m or src[m.end() - 1] != "{":
+        return None
+    i = m.end() - 1
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[i:j + 1]
+    return None
+
+
 def python_class_block(src, name):
     """One top-level Python class, through the next top-level class."""
     start = re.search(
@@ -200,11 +227,13 @@ def zone_haskell(_):
     return {m.lower() for m in re.findall(r"^([a-z][A-Za-z0-9]*) ::[^\n]*-> Tpl Node", src, re.M)}
 
 
-# Python is EXEMPT from this census, on the record: its transaction is
-# ambient, so ONE module-level surface serves both zones (`_tpl_depth`
-# flips the allocator between Widget and Node) and there is no second
-# surface for a kind to be missing from. C is exempt with the rest of C:
-# the generated kaya_tx_create_widget IS its surface (invariant 5).
+# Python and JS are EXEMPT from this census, on the record: both
+# transactions are ambient, so ONE module-level surface serves both zones
+# (Python's `_tpl_depth` flips the allocator between Widget and Node; JS's
+# `allocWidgetOrNode` reads `_tplDepth` into one Widget's `isNode`) and
+# there is no second surface for a kind to be missing from. C is exempt
+# with the rest of C: the generated kaya_tx_create_widget IS its surface
+# (invariant 5).
 ZONES = [
     # (language, reader, zone description for the message, minimum
     #  constructors the reader must find before its verdict is believed)
@@ -269,6 +298,14 @@ PROP_MEMBERS = {
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
         "inset": "TplInset",
     },
+    # JS spells five of the seven as chainable methods on the base handle
+    # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
+    # two halves are read apart.
+    "js": {
+        "grow": "grow", "a11y_id": "a11yId", "a11y_label": "a11yLabel",
+        "a11y_hint": "a11yHint", "accepts": "accepts", "role": "role",
+        "inset": "inset",
+    },
 }
 
 
@@ -314,6 +351,40 @@ def members_haskell(_):
     return set(re.findall(r"^\s*(Tpl[A-Za-z0-9]*)\s*::", src, re.M))
 
 
+def members_js(_):
+    """What a TEMPLATE NODE can be TOLD in the binding whose ONE handle
+    serves both zones.
+
+    TWO STRUCTURES, python's shape one language over
+    (tools/checks/py-node-props.py). The a11y trio, `accepts` and `role`
+    are chainable methods on `class Handle`, the base a live widget and a
+    template node share — read out of THAT block and never `Widget`'s,
+    because `Widget.grow()`, `.align()`, `.axis()`, `.spacing()` and
+    `.inset()` refuse a node by name (a blueprint is declared once and
+    never mutated) and a census satisfied by them would report a zone it
+    never read.
+    So `grow` and `inset` are counted from the other structure, the
+    CONSTRUCTOR OPTION that IS the template spelling — and only while its
+    writer is ZONE-BLIND: one that asked `isNode` or `_tplDepth` could
+    answer for the live zone alone, which is the cut every other link
+    here would survive.
+    """
+    src = read("bindings/js/kaya/index.ts")
+    base = brace_block(src, r"^export class Handle \{")
+    layout = brace_block(
+        src, r"^function setLayout\(handle: Handle, opts: ContainerOptions\): void \{")
+    grow = brace_block(
+        src, r"^function setGrow\(handle: Handle, opts: GrowOption\): void \{")
+    if None in (base, layout, grow):
+        return None
+    names = set(re.findall(r"^  ([a-zA-Z][A-Za-z0-9]*)\(", base, re.M))
+    for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
+                                  ("inset", layout, "wire.tx_set_inset(")):
+        if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
+            names.add(prop)
+    return names
+
+
 # (language, reader, where, minimum members before the verdict is believed)
 PROP_ZONES = [
     ("rust", members_rust, "impl Tpl (crates/kaya/src/app.rs)", 10),
@@ -323,6 +394,9 @@ PROP_ZONES = [
     ("swift", members_swift, "final class KayaTpl (bindings/swift/KayaApp.swift)", 10),
     ("ocaml", members_ocaml, "module Tpl (bindings/ocaml/kaya_app.ml)", 10),
     ("haskell", members_haskell, "data TplAttr (bindings/haskell/KayaApp.hs)", 3),
+    ("js", members_js,
+     "class Handle plus the zone-blind option writers "
+     "(bindings/js/kaya/index.ts)", 8),
 ]
 
 
@@ -342,10 +416,21 @@ TABLE_POINTS = {
     "swift": ("columns", "on_sort", "keyed re-declaration"),
     "ocaml": ("columns", "on_sort", "keyed re-declaration"),
     # The two nested-RECORD points are RECORD_POINTS now, censused for
-    # all eight below rather than for Haskell alone (docs/deferred.md,
+    # all nine below rather than for Haskell alone (docs/deferred.md,
     # closed 2026-08-25). The sentence they fail with is unchanged.
     "haskell": ("columns", "on_sort", "keyed re-declaration"),
     "python": (
+        "columns",
+        "on_sort",
+        "keyed re-declaration",
+        "ordinary For grow",
+        "ordinary For align",
+        "ordinary For a11y id",
+    ),
+    # The ambient twin carries python's six for python's reason: one
+    # `rows(opts)` configures the ordinary For, so those three points are
+    # its to hold too.
+    "js": (
         "columns",
         "on_sort",
         "keyed re-declaration",
@@ -840,7 +925,7 @@ def table_haskell(_):
         got.add("keyed re-declaration")
 
     # THE ROW'S OWN FIELDS moved to record_haskell (RECORD_ZONES), where
-    # the other seven bindings are read for the same two points.
+    # the other eight bindings are read for the same two points.
     return got
 
 
@@ -985,7 +1070,92 @@ def table_java(_):
     return got
 
 
-# --- THE ROW'S OWN FIELDS: the nested RECORD collection, all eight -----
+def table_js(_):
+    src = read("bindings/js/kaya/index.ts")
+    collection = brace_block(
+        src, r"^export class Collection<E, R> extends BoundCollection<E, R> \{")
+    bound = brace_block(src, r"^export class BoundCollection<E, R> \{")
+    for_trace = brace_block(src, r"^class ForTrace implements Iterator<unknown> \{")
+    trace = brace_block(src, r"^class ColumnsTrace implements Iterable<unknown> \{")
+    if None in (collection, bound, for_trace, trace):
+        return None
+
+    got = set()
+    # The declaration hands the titles AND the options to the trace that
+    # closes the For; the bar itself is written from there, after
+    # template_end, with an empty path — every stamped copy's bar.
+    columns = re.search(
+        r"^  columns\(titles: readonly string\[\][^\n]*\bColumnsOptions\b.*?"
+        r"return new ColumnsTrace\(",
+        collection,
+        re.M | re.S,
+    )
+    header = re.search(
+        r"wire\.tx_set_column_headers\(\s*handle\.id,.*?"
+        r"this\._titles\.length,\s*0,\s*this\._titles",
+        trace,
+        re.S,
+    )
+    if columns and header:
+        got.add("columns")
+
+    # THE HANDLER RIDES THE DECLARATION, python's spelling: an option on
+    # `columns`, registered against the For the trace just closed.
+    registration = re.search(
+        r"_register\(handle,\s*wire\.OCC_SORT_REQUESTED,\s*this\._opts\.onSort\)",
+        trace,
+        re.S,
+    )
+    if columns and registration:
+        got.add("on_sort")
+
+    rows = ts_body(collection,
+                   r"^  rows\(opts: RowsOptions = \{\}\): Iterable<R> \{")
+    declared = re.search(r"^export type RowsOptions = \{([^}]*)\}", src, re.M)
+    if rows and declared:
+        row_points = (
+            (
+                "ordinary For grow", "grow", "_grow",
+                r"records\(\)\.push\(wire\.tx_set_grow\(handle\.id,\s*Number\(this\._grow\)\)\)",
+            ),
+            (
+                "ordinary For align", "align", "_align",
+                r"records\(\)\.push\(wire\.tx_set_align\(handle\.id,\s*"
+                r"alignValue\(this\._align\)\)\)",
+            ),
+            (
+                # THROUGH THE HANDLE SETTER, not a const emitter: the a11y
+                # id may come from the ROW, and only `propSource` reaches
+                # the element arm (python's clause says the same).
+                "ordinary For a11y id", "a11yId", "_a11yId",
+                r"handle\.a11yId\(this\._a11yId\)",
+            ),
+        )
+        for point, arg, field, emitter in row_points:
+            handed_off = (f"{arg}?:" in declared.group(1)
+                          and f"trace.{field} = opts.{arg}" in rows)
+            emitted = re.search(rf"if \(this\.{field} !== null\).*?{emitter}",
+                                for_trace, re.S)
+            if handed_off and emitted:
+                got.add(point)
+
+    # One copy's bar: the For's remembered handle, the keys OUTERMOST
+    # FIRST ahead of the titles, and path_len counting the keys.
+    setter = ts_body(
+        bound,
+        r"^  setColumns\(titles: readonly string\[\], opts: \{ sort\?: Sort \}"
+        r" = \{\}\): void \{")
+    if (
+        setter
+        and "this._owner._forHandle" in setter
+        and "this._path.length" in setter
+        and "[...keyPath(this._path), ...titles]" in setter
+    ):
+        got.add("keyed re-declaration")
+    return got
+
+
+# --- THE ROW'S OWN FIELDS: the nested RECORD collection, all nine -----
 #
 # A table nested in a row template is FOR rows that carry named fields,
 # and two halves make that spellable. Either one missing leaves the rows
@@ -1197,6 +1367,35 @@ def record_python(_):
     return got
 
 
+def record_js(_):
+    src = read("bindings/js/kaya/index.ts")
+    collection = brace_block(
+        src, r"^export class Collection<E, R> extends BoundCollection<E, R> \{")
+    ctor = brace_block(
+        src,
+        r"^export function collection\(type\?: RecordType \| readonly RecordType\[\]\)")
+    if None in (collection, ctor):
+        return None
+
+    got = set()
+    # AMBIENT, python's shape: one module-level constructor serves both
+    # zones, and the open-For edge is what makes the template one a NESTED
+    # collection rather than a second live table.
+    if ('new Collection<unknown, unknown>(app()._next("collection"), types)' in ctor
+            and "enclosing._children.push(handle)" in ctor):
+        got.add("nested record collection")
+
+    # The OWNER rides along, which is where the variants live: a
+    # BoundCollection built from anything else would encode the copy's
+    # entries against no schema. THE KEY PATH THREADED THROUGH, not just a
+    # handle handed back.
+    at = ts_body(collection,
+                 r"^  at\(\.\.\.path: Key\[\]\): BoundCollection<E, R> \{")
+    if at and "new BoundCollection(this, path)" in at:
+        got.add("record instance addressing")
+    return got
+
+
 def record_haskell(_):
     src = read("bindings/haskell/KayaApp.hs")
     declare = haskell_scope(src, r"^class Monad m => Declare m where")
@@ -1261,6 +1460,9 @@ RECORD_ZONES = [
     ("python", record_python,
      "the module-level `collection(record_type)` and Collection.at "
      "(bindings/python/kaya/__init__.py)"),
+    ("js", record_js,
+     "the module-level `collection(type)` and Collection.at "
+     "(bindings/js/kaya/index.ts)"),
     ("haskell", record_haskell,
      "Declare's `collectionOf` + instance CollectionHandle "
      "(RecordCollection a) (bindings/haskell/KayaApp.hs)"),
@@ -1285,6 +1487,12 @@ TABLE_ZONES = [
         "python",
         table_python,
         "Collection/_ColumnsTrace/_BoundCollection (bindings/python/kaya/__init__.py)",
+    ),
+    (
+        "js",
+        table_js,
+        "Collection/ColumnsTrace/ForTrace/BoundCollection "
+        "(bindings/js/kaya/index.ts)",
     ),
     (
         "java",
@@ -1486,6 +1694,33 @@ def sources_python(_):
     return got
 
 
+def sources_js(_):
+    """ONE surface, both zones, so the "zone" is the constructor itself —
+    python's clause one language over, in two hops rather than one: JS
+    routes every text bind through `bindText`, so the option is read off
+    the constructor and the arms out of the binder it hands to."""
+    src = read("bindings/js/kaya/index.ts")
+    impl = brace_block(
+        src,
+        r"^export function button\(a: string \| ButtonOptions, b\?: ButtonOptions\)"
+        r": Widget \{")
+    binder = brace_block(
+        src, r"^function bindText\(what: string, handle: Handle, bind: unknown\): void \{")
+    opts = re.search(r"^export type ButtonOptions = [^\n]*$", src, re.M)
+    if None in (impl, binder) or opts is None:
+        return None
+    # A `bind?:` the constructor never hands to the binder is the
+    # silent-nothing arm; both halves or neither.
+    if "bind?:" not in opts.group(0) or 'bindText("button", handle, opts.bind)' not in impl:
+        return set()
+    got = set()
+    if "wire.tx_bind_text(" in binder:
+        got.add("signal")
+    if "wire.tx_bind_text_element(" in binder:
+        got.add("field")
+    return got
+
+
 # (language, reader, where the point is spelled, how it is spelled)
 SOURCE_ZONES = [
     ("rust", sources_rust, "impl Tpl (crates/kaya/src/app.rs)",
@@ -1504,6 +1739,8 @@ SOURCE_ZONES = [
      "instances of the constructor's own source class"),
     ("python", sources_python, "def button (bindings/python/kaya/__init__.py)",
      "`bind=` taking a Signal or an element field"),
+    ("js", sources_js, "export function button (bindings/js/kaya/index.ts)",
+     "`{bind}` taking a Signal or one of the row's fields"),
 ]
 
 
@@ -1904,7 +2141,7 @@ def main():
             )
             status = 1
 
-    # THE ROW'S OWN FIELDS. Read for all eight out of the blocks that own
+    # THE ROW'S OWN FIELDS. Read for all nine out of the blocks that own
     # them; the sentence is the table census's on purpose, since a nested
     # record collection is what a table inside a row template is for.
     for lang, reader, where in RECORD_ZONES:
@@ -1966,8 +2203,8 @@ def main():
                 "stamped copy's caption is then one string for every row, and "
                 "\"Delete <that row's title>\" is spellable in that language "
                 f"only at the zone's floor, or not at all. The spelling here is "
-                f"{spelling}; the other seven bindings each have their own, and "
-                "all eight take BOTH a signal and an element field. A "
+                f"{spelling}; the other eight bindings each have their own, and "
+                "all nine take BOTH a signal and an element field. A "
                 "CONSTRUCTOR THAT EXISTS IS NOT ONE THAT TAKES THE ROW: this "
                 "clause is the half the kind census above cannot ask."
             )

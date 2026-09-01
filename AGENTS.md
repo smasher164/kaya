@@ -70,8 +70,8 @@ in docs/deferred.md.
 
 ## The invariants (violating these is never a style choice)
 
-1. **Uniform binding semantics.** kaya has 8 guest-language bindings
-   (Rust, Python, Go, C#, Java, Swift, OCaml, Haskell) plus a C floor.
+1. **Uniform binding semantics.** kaya has 9 guest-language bindings
+   (Rust, Python, Go, C#, Java, Swift, OCaml, Haskell, JS) plus a C floor.
    Any binding-level behavior — transaction rollback, abort handling,
    read guards, command surfaces — has ONE observable semantics in all
    of them. The language's idiom decides the *spelling* (exceptions vs
@@ -284,8 +284,8 @@ in docs/deferred.md.
    missed in gtk.rs alone used to survive every fast gate and die in the
    matrix),
    `tools/check-sugar-surface.sh` (every widget kind has a constructor
-   in all 8 bindings IN BOTH CONSTRUCTION ZONES, AND every window prop
-   has a sugar spelling in all 8 — the generic floor spells a prop
+   in all 9 bindings IN BOTH CONSTRUCTION ZONES, AND every window prop
+   has a sugar spelling in all 9 — the generic floor spells a prop
    without the sugar noticing, which is how Python shipped unable to
    declare `list_detail` at all.
    THE SECOND ZONE JOINED 2026-08-10 and is the half that had never been
@@ -320,15 +320,15 @@ in docs/deferred.md.
    of its own) are named in the file's exemption list, on the record
    rather than merely absent.
    AND THE CAPABILITY SURFACE SINCE 2026-08-19, in three clauses: the
-   `capabilities` QUERY in all eight, one NAMED BOOLEAN per bit
-   (`aux_windows` and its casings) in all eight, and the bit NUMBER
+   `capabilities` QUERY in all nine, one NAMED BOOLEAN per bit
+   (`aux_windows` and its casings) in all nine, and the bit NUMBER
    against the core's own — five bindings have no header to read
    `KAYA_CAP_AUX_WINDOWS` out of and write the number themselves, which
    is the file-modes trap one surface over, and the three that DO read
    the core's constant (Rust, Go's cgo, Swift's bridging header) are
    checked for still naming it rather than quietly becoming copiers.
    AND THE TABLE SURFACE SINCE 2026-08-21, `columns` and `on_sort` in
-   all eight: a table is not a KIND but a For with a header, so neither
+   all nine: a table is not a KIND but a For with a header, so neither
    the constructor sweep nor the window-prop sweep can see it while the
    wire records reach every binding through the generator whether or
    not a guest can spell either. The handler rides the declaration
@@ -949,7 +949,15 @@ in docs/deferred.md.
    KAYA_SELFTEST is not an unknown scene name, it is the default arm.
    A parser rather than a grep, because every file the rule protects
    documents the rule),
-   `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
+   `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`,
+   `tools/js-typecheck.sh` (strict tsc over the JS binding and every
+   JS guest — the compiler the guests never otherwise meet, since node
+   strips their types and checks nothing; it also writes the workspace
+   link the guests import through, and prints the census it compiled),
+   `node bindings/js/kaya_app_checks.ts` (the JS surface's negatives,
+   the python checks' twin, run in a worker because importing the
+   binding on the main thread surrenders it to kaya_run;
+   docs/js-plan.md §5).
    One gate sits outside the sweep because it needs docker — gates.sh
    carries it in EXCLUDED, with that reason, so it is excluded on the
    record rather than merely absent:
