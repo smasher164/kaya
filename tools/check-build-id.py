@@ -93,7 +93,7 @@ with scratch_dir("check-build-id-") as tmp:
                 return True
         return False
 
-    for lane_rel in ["tools/validate-mac.sh", "tools/linux/run-suites.sh",
+    for lane_rel in ["tools/validate-mac.py", "tools/linux/run-suites.sh",
                      "tools/ios/run-sim.py", "tools/android/run-emulator.py",
                      "tools/deploy-win.py", "tools/swiftui/build-dylib.sh"]:
         if not lane_verifies((ROOT / lane_rel).read_text(encoding="utf-8")):
@@ -138,6 +138,25 @@ with scratch_dir("check-build-id-") as tmp:
         if "kaya-build-id:" not in text:
             fail(f"{site} does not bake a build id into the interpreter "
                  f"it compiles")
+    # The mac lane VERIFIES the interpreter without compiling it (the
+    # matrix-handshake skip path builds via build-dylib.sh and must
+    # still ask the dylib for this tree's id) — verify only, no bake.
+    # This clause had no owner while the runner was shell: the lane's
+    # second-artifact verify was asserted by nobody (found by stage
+    # 4's enumeration).
+    mac_lane_text = (ROOT / "tools/validate-mac.py").read_text(
+        encoding="utf-8")
+    if not verifies_swiftui(mac_lane_text):
+        fail("tools/validate-mac.py runs the SwiftUI interpreter but "
+             "never verifies it on the gates-skip path (--component "
+             "swiftui)")
+    unverified_mac = g.doctor(
+        "2b's swiftui verify deleted from the mac lane", mac_lane_text,
+        r'"--component", "swiftui",', '"--frobnicate", "swiftui",',
+        want=1)
+    if verifies_swiftui(unverified_mac):
+        fail("self-test failed: a mac lane with no swiftui verify "
+             "passed the clause")
 
     # 2b-android. The Compose interpreter, same contract: the lane must
     # WRITE the marker before gradle and ASK the apk afterwards. The

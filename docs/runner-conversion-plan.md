@@ -92,7 +92,14 @@ tables but is NOT this tranche.
    sources it, and the python runner bridges to it.
 3. **validate-mac**, **validate-linux**, **validate-all** — the mac
    runner also carries the scene×language sweep tables check-steps
-   reads.
+   reads. validate-mac LANDED 2026-09-01, the night after stages 2-3:
+   rider EQUAL (the full 349-leg event stream with drains and panel
+   modes, plus the script bytes for all 48 scenes), gates 50/50, lane
+   green twice, matrix ALL PASS 1,390
+   (docs/measurements/validate-mac-conversion-2026-09-01.md). The
+   mac flightrec half crossed into MacRecorder and its selftest
+   drives the real capture; swift-toolchain.sh stays shell by §6
+   (ten consumers) behind a bridge.
 4. **gates.sh** last: its census/EXCLUDED table is decision logic and
    moves to data; the loop is a launcher and converts with it.
 

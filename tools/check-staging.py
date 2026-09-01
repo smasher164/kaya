@@ -34,6 +34,15 @@ def load_win_lane(path):
     return mod
 
 
+def load_mac_lane(path):
+    """The mac lane's tables, the same discipline."""
+    spec = importlib.util.spec_from_file_location("kaya_mac_lane_shadow",
+                                                 path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def check(root):
     root = pathlib.Path(root)
     findings = []
@@ -49,25 +58,37 @@ def check(root):
         body = re.sub(r"\$\{[A-Z_]+:-([^}]*)\}", r"\1", m.group(1))
         return set(body.split())
 
-    # --- validate-mac: $RUST_GUESTS refs vs SCENES + DEPTH_SCENES ----
-    mac = (root / "tools" / "validate-mac.sh").read_text(encoding="utf-8")
-    scenes = words(mac, "SCENES")
-    depth = words(mac, "DEPTH_SCENES")
-    if scenes is None or depth is None:
-        fail("tools/validate-mac.sh no longer declares SCENES/DEPTH_SCENES "
-             "where this census reads them — the staging derivation is "
-             "unreadable")
-    else:
-        staged = scenes | depth
-        for m in re.finditer(r'"\$RUST_GUESTS"/([A-Za-z0-9_-]+)', mac):
-            name = m.group(1)
-            if name not in staged:
-                fail(f"tools/validate-mac.sh runs \"$RUST_GUESTS\"/{name} "
-                     f"but {name} is in neither SCENES nor DEPTH_SCENES, so "
-                     f"the staging loop never copies it and the leg dies at "
-                     f"run time with 'No such file' — add {name} to "
-                     f"DEPTH_SCENES (or SCENES if every language has the "
-                     f"guest)")
+    # --- validate-mac: rust legs vs SCENES + DEPTH_SCENES ------------
+    # The mac tables are DATA since the runner conversion
+    # (tools/lib/lanes/mac.py): the staging loop copies SCENES ∪
+    # DEPTH_SCENES out of target/debug/examples, and every rust leg's
+    # guest stem must be in that union or the leg dies at run time
+    # with 'No such file'. The census imports what the runner imports.
+    mac_lane = load_mac_lane(root / "tools/lib/lanes/mac.py")
+    mac_staged = set(mac_lane.SCENES) | set(mac_lane.DEPTH_SCENES)
+    mac_rust = {(name, mac_lane.guest_stem(scene))
+                for name, scene, mac_l in mac_lane.legs()
+                if mac_l == "rust"}
+    if not mac_rust:
+        fail("tools/lib/lanes/mac.py queues no rust legs at all — this "
+             "census read nothing and would agree with anything")
+    for name, stem in sorted(mac_rust):
+        if stem not in mac_staged:
+            fail(f"tools/lib/lanes/mac.py queues {name} running "
+                 f"$RUST_GUESTS/{stem} but {stem} is in neither SCENES "
+                 f"nor DEPTH_SCENES, so the staging loop never copies "
+                 f"it and the leg dies at run time with 'No such file' "
+                 f"— add {stem} to DEPTH_SCENES (or SCENES if every "
+                 f"language has the guest)")
+    # ...and every python leg's guest file exists (the runner derives
+    # the path from the module, so the module is the thing to hold).
+    for name, scene, mac_l in mac_lane.legs():
+        if mac_l != "python":
+            continue
+        stem = mac_lane.guest_stem(scene)
+        if not (root / "guests" / "python" / f"{stem}.py").is_file():
+            fail(f"tools/lib/lanes/mac.py queues {name} running "
+                 f"guests/python/{stem}.py, which does not exist")
 
     # --- deploy-win: the lane module's roster vs its build lists -----
     # The windows tables are DATA since the runner conversion
@@ -124,7 +145,6 @@ def check(root):
     # --- every runner: a wired scene has its .steps, a python leg its
     # file
     runners = [
-        "tools/validate-mac.sh",
         "tools/deploy-win.py",
         "tools/linux/run-suites.sh",
     ]
@@ -212,8 +232,8 @@ def check(root):
 
 # --- self-tests: each perturbation applied to a COPY, count printed --
 
-SHADOW_RELS = ["tools/validate-mac.sh", "tools/deploy-win.py",
-               "tools/lib/lanes/win.py",
+SHADOW_RELS = ["tools/deploy-win.py",
+               "tools/lib/lanes/win.py", "tools/lib/lanes/mac.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
                "tools/scenes", "tools/guest", "guests/python"]
 
@@ -251,13 +271,9 @@ def negative(n, label, rel, pattern, repl, fragment, refusal_label):
 
 
 negative(
-    "N1", "wired an unstaged mac rust leg", "tools/validate-mac.sh",
-    r'run windowed-rust-swiftui env KAYA_SELFTEST=windowed '
-    r'"\$RUST_GUESTS"/windowed',
-    'run windowed-rust-swiftui env KAYA_SELFTEST=windowed '
-    '"$RUST_GUESTS"/windowed\n'
-    'run ghost-rust-swiftui env KAYA_SELFTEST=windowed '
-    '"$RUST_GUESTS"/ghost',
+    "N1", "wired an unstaged mac rust leg", "tools/lib/lanes/mac.py",
+    r'    \("windowed", \("rust",\)\),',
+    '    ("windowed", ("rust",)),\n    ("ghost", ("rust",)),',
     "ghost is in neither SCENES nor DEPTH_SCENES",
     "N1 (a mac leg whose binary the staging loop never copies)")
 
@@ -276,9 +292,9 @@ negative(
     "N2b (a launcher naming an exe the deploy never builds)")
 
 negative(
-    "N3", "pointed a leg at a missing guest", "tools/validate-mac.sh",
-    r"KAYA_SELFTEST=portfolio python3 guests/python/portfolio\.py",
-    "KAYA_SELFTEST=portfolio python3 guests/python/ghostledger.py",
+    "N3", "pointed a leg at a missing guest", "tools/lib/lanes/mac.py",
+    r'    \("portfolio", \("python",\)\),',
+    '    ("ghostledger", ("python",)),',
     "guests/python/ghostledger.py, which does not",
     "N3 (a python leg whose guest file is gone)")
 

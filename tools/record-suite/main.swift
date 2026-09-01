@@ -12,7 +12,7 @@
 // <pidfile> (runner-appended, polled live) are composited. Guests tile
 // themselves into slots (KAYA_WIN_SLOT) so crops never overlap.
 //
-// Protocol on stdout, consumed by tools/validate-mac.sh:
+// Protocol on stdout, consumed by tools/validate-mac.py:
 //   RECORDING_START <epoch_ms>    wall time of video t=0 (the anchor)
 //   SCALE <n>                     display points -> video pixels
 //   TRACKING <pid>                the pid's window has joined the filter

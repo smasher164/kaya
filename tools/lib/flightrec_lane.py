@@ -17,10 +17,13 @@ measured 27ms and three ssh round trips per leg took the windows lane
 spool, flushed once at lane end.
 """
 
+import hashlib
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
+import threading
 import time
 
 SECTION_CAP = int(os.environ.get("KAYA_FLIGHTREC_SECTION_CAP", "2097152"))
@@ -161,7 +164,10 @@ class LaneRecorder:
     def section(self, bundle, name, argv):
         """One captured command as a bundle section — the shell half's
         flightrec_section, argv-only. An error is marked, never raised
-        (the recorder may never cost a lane its legs)."""
+        (the recorder may never cost a lane its legs). A capture tool
+        this host does not have leaves a .skip NAMING it, never a
+        silently absent section (invariant 3 — flightrec-selftest N2
+        watches this fire)."""
         if bundle is None or not bundle.is_dir():
             return
         dest = bundle / f"{name}.txt"
@@ -170,6 +176,13 @@ class LaneRecorder:
                 rc = subprocess.run(argv, stdout=f,
                                     stderr=subprocess.STDOUT,
                                     check=False).returncode
+        except FileNotFoundError:
+            dest.unlink(missing_ok=True)
+            (bundle / f"{name}.skip").write_text(
+                f"flightrec: {argv[0]} is not on this host — section "
+                f"{name} could not be captured\n", encoding="utf-8")
+            self.mark(bundle, name, "skip", 0)
+            return
         except OSError:
             rc = 1
         size = dest.stat().st_size if dest.is_file() else 0
@@ -415,3 +428,309 @@ class AndroidRecorder(LaneRecorder):
                 self.section(bundle, "devices", ["adb", "devices", "-l"])
                 self.bundle_report(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
+
+
+class MacRecorder(LaneRecorder):
+    """The mac half, crossed from tools/lib/flightrec.sh's mac-only
+    functions with the runner conversion: a per-leg SAMPLER thread
+    (cheap lines every 2s, ONE expensive `sample` plus a window shot
+    taken while the guest is STILL ALIVE, just before the runner's
+    120s kill lands), and the at-fail capture — sampler history,
+    sample, leg log, WindowServer load, the guest's OWN window by id
+    (never a full-screen grab and never a title match: both
+    photographed the wrong thing once; docs/traps.md), and the
+    bounded unified log."""
+
+    def __init__(self, root):
+        super().__init__("mac", root)
+        self._winlist = None
+        self._winlist_tried = False
+
+    # ---- process genealogy: the guest is `timeout`'s descendant ----
+    @classmethod
+    def _descendants(cls, pid):
+        out = []
+        got = subprocess.run(["pgrep", "-P", str(pid)],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True,
+                             encoding="utf-8", errors="replace",
+                             check=False)
+        for kid in got.stdout.split():
+            out.append(kid)
+            out.extend(cls._descendants(kid))
+        return out
+
+    @staticmethod
+    def _comm(pid):
+        got = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True,
+                             encoding="utf-8", errors="replace",
+                             check=False)
+        return pathlib.Path(got.stdout.strip()).name
+
+    def guest_pid(self, root_pid):
+        """ANCHORED ON `timeout`, not on a blocklist: both leg paths
+        run the guest as `timeout 120 <guest>`, so the guest is
+        timeout's descendant and nothing else is (a blocklist once
+        profiled TEE for two seconds; the wrong-process shot exposed
+        it). The ROOT ITSELF is the usual anchor here — the runner
+        hands the sampler the `timeout` Popen directly, where the
+        shell handed it a leg subshell with timeout underneath; the
+        first live bundle had guest_pid=none for the leg's whole life
+        because this walked only descendants
+        (docs/measurements/validate-mac-conversion-2026-09-01.md)."""
+        best = ""
+        anchors = [str(root_pid)] if self._comm(root_pid) == "timeout" \
+            else []
+        for pid in self._descendants(root_pid):
+            if self._comm(pid) == "timeout":
+                anchors.append(pid)
+        for anchor in anchors:
+            for kid in self._descendants(anchor):
+                if self._comm(kid) not in ("env", "sh", "bash", ""):
+                    best = kid
+        return best
+
+    # ---- the window list binary, content-hashed like the shell's ----
+    def winlist_bin(self):
+        if self._winlist_tried:
+            return self._winlist
+        self._winlist_tried = True
+        src = self.root / "tools/mac/flightrec-winlist.swift"
+        if not src.is_file():
+            return None
+        digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
+        binp = self.root / f"target/tools/flightrec-winlist-{digest}"
+        if binp.is_file():
+            self._winlist = str(binp)
+            return self._winlist
+        (self.root / "target/tools").mkdir(parents=True, exist_ok=True)
+        got = subprocess.run(
+            ["bash", "-c",
+             'source "$1/tools/lib/swift-toolchain.sh" && '
+             'kaya_swiftc -O -o "$2" "$3"',
+             "_", str(self.root), str(binp), str(src)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False)
+        if got.returncode == 0 and binp.is_file():
+            self._winlist = str(binp)
+        return self._winlist
+
+    def shot_pid(self, pid, dest, at=None):
+        """ONE window, the GUEST'S OWN, addressed by pid -> window id.
+        No pid or no window means no shot and a sentence saying why —
+        never a full-screen grab."""
+        if not shutil.which("screencapture"):
+            return False
+        winlist = self.winlist_bin()
+        if not winlist:
+            return False
+        got = subprocess.run([winlist, str(pid)],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True,
+                             encoding="utf-8", errors="replace",
+                             check=False)
+        win = ""
+        for line in got.stdout.splitlines():
+            if "layer=0 " in line:
+                for tok in line.split():
+                    if tok.startswith("win="):
+                        win = tok[4:]
+                break
+        if not win or win == "-1":
+            return False
+        subprocess.run(["screencapture", "-x", "-o", f"-l{win}",
+                        str(dest)], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=False)
+        dest = pathlib.Path(dest)
+        if not dest.is_file() or not dest.stat().st_size:
+            return False
+        if at is not None:
+            pathlib.Path(str(dest) + ".when").write_text(
+                f"taken at t={at}s, window {win} of pid {pid}\n",
+                encoding="utf-8")
+        return True
+
+    # ---- the per-leg sampler, a thread over the guest's Popen ----
+    def sampler_start(self, scratch, proc):
+        """Cheap lines every 2s while the leg's `timeout` process
+        lives; ONE `sample` + live shot at KAYA_FLIGHTREC_SAMPLE_AT
+        (default 100s), while the guest can still answer. Returns a
+        handle for sampler_stop — EVERY CALLER MUST STOP IT."""
+        if not self.ok:
+            return None
+        scratch = pathlib.Path(scratch)
+        scratch.mkdir(parents=True, exist_ok=True)
+        stop = threading.Event()
+
+        def loop():
+            at, sampled, gpid, gcomm = 0, False, "", ""
+            hang_at = int(os.environ.get("KAYA_FLIGHTREC_SAMPLE_AT",
+                                         "100"))
+            while at < 130 and proc.poll() is None \
+                    and not stop.is_set():
+                if not gpid or self._comm(gpid) == "":
+                    gpid = self.guest_pid(proc.pid)
+                    gcomm = ""
+                ws = ""
+                got = subprocess.run(["ps", "-Ao", "pcpu=,comm="],
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL,
+                                     text=True, encoding="utf-8",
+                                     errors="replace", check=False)
+                for line in got.stdout.splitlines():
+                    if "WindowServer" in line:
+                        ws = " ".join(line.split())
+                        break
+                if gpid and not gcomm:
+                    gcomm = self._comm(gpid)
+                with open(scratch / "sampler.txt", "a",
+                          encoding="utf-8") as f:
+                    f.write(f"t={at}s guest_pid={gpid or 'none'} "
+                            f"guest={gcomm or 'none'} "
+                            f"windowserver=[{ws}]\n")
+                if gpid and at >= hang_at and not sampled:
+                    sampled = True
+                    # THE SHOT COMES FIRST (measured): it is
+                    # instantaneous where `sample` blocks for its two
+                    # seconds, and the window is what vanishes.
+                    self.shot_pid(gpid, scratch / "shot-live.png", at)
+                    got = subprocess.run(
+                        ["sample", str(gpid), "2"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, text=True,
+                        encoding="utf-8", errors="replace",
+                        check=False)
+                    with open(scratch / "sample.txt", "a",
+                              encoding="utf-8") as f:
+                        f.write(f"== sample {gpid} 2, taken at "
+                                f"t={at}s while the guest was STILL "
+                                f"ALIVE\n== (the runner's timeout "
+                                f"kill lands at 120s and would take "
+                                f"it with it)\n")
+                        f.write(got.stdout)
+                stop.wait(2)
+                at += 2
+            with open(scratch / "sampler.txt", "a",
+                      encoding="utf-8") as f:
+                f.write(f"sampler: stopped at t={at}s (sample taken: "
+                        f"{1 if sampled else 0})\n")
+
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+        return (t, stop)
+
+    @staticmethod
+    def sampler_stop(handle):
+        if handle is None:
+            return
+        t, stop = handle
+        stop.set()
+        t.join(timeout=10)
+
+    def _text_section(self, bundle, name, text):
+        dest = bundle / f"{name}.txt"
+        dest.write_text(text, encoding="utf-8")
+        self.mark(bundle, name, "ok", dest.stat().st_size)
+
+    def _shot(self, bundle, scratch):
+        """The fail-time attempt first; the sampler's live shot is
+        what answers when the guest is already gone (an assertion
+        failure exits at once)."""
+        pid = ""
+        sampler = scratch / "sampler.txt"
+        if sampler.is_file():
+            for line in sampler.read_text(encoding="utf-8",
+                                          errors="replace").splitlines():
+                for tok in line.split():
+                    if tok.startswith("guest_pid=") \
+                            and tok[10:].isdigit():
+                        pid = tok[10:]
+        if pid and self.shot_pid(pid, bundle / "shot.png"):
+            self.mark(bundle, "shot", "ok",
+                      (bundle / "shot.png").stat().st_size)
+            return
+        (bundle / "shot.png").unlink(missing_ok=True)
+        live = scratch / "shot-live.png"
+        if live.is_file() and live.stat().st_size:
+            shutil.copy2(live, bundle / "shot.png")
+            when = scratch / "shot-live.png.when"
+            if when.is_file():
+                shutil.copy2(when, bundle / "shot.when")
+            self.mark(bundle, "shot", "ok",
+                      (bundle / "shot.png").stat().st_size)
+            return
+        if not pid:
+            (bundle / "shot.skip").write_text(
+                "flightrec: the sampler never resolved a guest pid "
+                "for this leg, so no window is attributed to the "
+                "guest and none was photographed. The window list "
+                "beside this file is the whole desktop.\n",
+                encoding="utf-8")
+        else:
+            (bundle / "shot.skip").write_text(
+                f"flightrec: guest pid {pid} owned no on-screen "
+                f"window at failure and the sampler took none while "
+                f"it lived — the leg failed faster than the "
+                f"sampler's first shot. The window list beside this "
+                f"file is what was there.\n", encoding="utf-8")
+        self.mark(bundle, "shot", "skip", 0)
+
+    def _capture(self, bundle, log, scratch):
+        scratch = pathlib.Path(scratch)
+        self.adopt(bundle, "sampler", scratch / "sampler.txt")
+        self.adopt(bundle, "sample", scratch / "sample.txt")
+        if log and pathlib.Path(log).is_file():
+            self.adopt(bundle, "leg-log", log)
+        else:
+            (bundle / "leg-log.skip").write_text(
+                "flightrec: this leg streamed to the terminal "
+                "(KAYA_JOBS=1), so there is no log file to keep\n",
+                encoding="utf-8")
+            self.mark(bundle, "leg-log", "skip", 0)
+        got = subprocess.run(["ps", "-Ao", "pid=,pcpu=,pmem=,comm="],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True,
+                             encoding="utf-8", errors="replace",
+                             check=False)
+        wanted = [line for line in got.stdout.splitlines()
+                  if "WindowServer" in line or "loginwindow" in line]
+        self._text_section(bundle, "windowserver",
+                           "\n".join(wanted) + "\n")
+        winlist = self.winlist_bin()
+        if winlist:
+            self.section(bundle, "windows", [winlist])
+            self._shot(bundle, scratch)
+        else:
+            (bundle / "windows.skip").write_text(
+                "flightrec: no swiftc, or "
+                "tools/mac/flightrec-winlist.swift would not build — "
+                "no window list and therefore no window shot\n",
+                encoding="utf-8")
+            self.mark(bundle, "windows", "skip", 0)
+            self.mark(bundle, "shot", "skip", 0)
+        self.section(bundle, "unified-log", [
+            "log", "show", "--last", "2m", "--style", "compact",
+            "--predicate",
+            'process CONTAINS "kaya" OR senderImagePath CONTAINS '
+            '"kaya" OR eventMessage CONTAINS "kaya"'])
+        self.bundle_report(bundle)
+
+    def mac_leg(self, leg, verdict, secs, log, scratch, out=None):
+        """The one per-leg entry point every leg path calls, so the
+        serial and pooled paths cannot record different things. The
+        journal takes every leg; the capture is collected on a
+        failure alone, and the scratch dies either way."""
+        if not self.ok:
+            return
+        bundle, fail = None, ""
+        if verdict != "PASS":
+            bundle = self.bundle(leg)
+            fail = self.fail_sentence(log) if log else ""
+            if bundle is not None:
+                self._capture(bundle, log, scratch)
+                if out is not None:
+                    self.bundle_report(bundle, out=out)
+        self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
+        shutil.rmtree(scratch, ignore_errors=True)

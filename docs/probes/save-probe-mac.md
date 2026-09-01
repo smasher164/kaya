@@ -68,7 +68,7 @@ Two corrections to the brief, both MEASURED:
   leg or guest asks for a non-read mode.
 - No sandbox is in play. The mac guests are bundle-less command-line
   binaries run from a terminal under `.accessory` policy
-  (`tools/validate-mac.sh:907-921`), so App Sandbox — which is opt-in via
+  (`tools/validate-mac.py:99-108` stages them), so App Sandbox — which is opt-in via
   the `com.apple.security.app-sandbox` entitlement (DOCUMENTED:
   https://developer.apple.com/documentation/security/app-sandbox) — is off,
   and the powerbox grant that would otherwise decide writability never

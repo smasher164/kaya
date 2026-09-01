@@ -181,7 +181,7 @@ STAGES = {
         "ASSET_SRC"),
 }
 NOTHING_NEEDED = {
-    "tools/validate-mac.sh":
+    "tools/validate-mac.py":
         "the lane runs from the repo root, so the core's repo-relative "
         "default resolves with no environment at all",
     "tools/linux/run-suites.sh":

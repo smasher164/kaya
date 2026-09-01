@@ -193,7 +193,7 @@ def ios_pool_problem(runner, probe):
 # The five platform runners, by the two things a lane owes a reader who
 # was not watching: the ANSWER, and the EVIDENCE.
 LANE_RUNNERS = {
-    "tools/validate-mac.sh": ("validate-mac", "mac"),
+    "tools/validate-mac.py": ("validate-mac", "mac"),
     "tools/ios/run-sim.py": ("run-sim", "ios"),
     "tools/linux/run-suites.sh": ("run-suites", "linux"),
     # Python since the runner conversion; the .sh beside each is the
@@ -206,7 +206,7 @@ LANE_RUNNERS = {
 # than the sourced shell library: the lane's recorder CLASS declares its
 # lane name once, in its constructor, and every journaled leg rides it.
 PY_RECORDERS = {"windows": "WinRecorder", "ios": "IosRecorder",
-                "android": "AndroidRecorder"}
+                "android": "AndroidRecorder", "mac": "MacRecorder"}
 
 
 def lane_contract_problems(texts, lib, pylib):
@@ -300,7 +300,7 @@ GATES = listing["gates"]
 EXCLUDED = listing["excluded"]
 
 claude_text = (root / "CLAUDE.md").read_text(encoding="utf-8")
-mac_text = (root / "tools" / "validate-mac.sh").read_text(encoding="utf-8")
+mac_text = (root / "tools" / "validate-mac.py").read_text(encoding="utf-8")
 lane_texts = {rel: (root / rel).read_text(encoding="utf-8")
               for rel in LANE_RUNNERS}
 flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
@@ -387,14 +387,17 @@ else:
                  f"comparison did not report it")
 
 # N3 — a gate invoked DIRECTLY by validate-mac must be reported. The
-# perturbation plants one into validate-mac.sh's real text.
-planted, n = re.subn(r"(?m)^\s*tools/gates\.sh\b",
-                     "tools/check-mirror.sh || exit 1\ntools/gates.sh", mac_text)
+# perturbation plants one into validate-mac.py's real text (the python
+# spelling: an argv naming the gate's path).
+planted, n = re.subn(
+    r'(?m)^(\s*)if run\(\[str\(ROOT / "tools/gates\.sh"\)\]\)',
+    '\\1run([str(ROOT / "tools/check-mirror.sh")])\n'
+    '\\1if run([str(ROOT / "tools/gates.sh")])', mac_text)
 print(f"check-gates: self-test N3 planted a direct gate call in "
-      f"validate-mac.sh, {n} substitution(s)")
+      f"validate-mac.py, {n} substitution(s)")
 if n < 1:
-    fail("self-test N3 applied NO substitution — validate-mac.sh does not "
-         "invoke tools/gates.sh at the start of a line, so the delegation "
+    fail("self-test N3 applied NO substitution — validate-mac.py does not "
+         "invoke tools/gates.sh where this clause looks, so the delegation "
          "clause below is measuring nothing")
 elif "tools/check-mirror.sh" not in direct_invocations(planted):
     fail("self-test N3: a planted direct gate call was not seen — the "
@@ -580,15 +583,16 @@ for script, why in sorted(EXCLUDED.items()):
 
 direct = direct_invocations(mac_text)
 if direct:
-    fail("tools/validate-mac.sh invokes gates itself: "
+    fail("tools/validate-mac.py invokes gates itself: "
          + " ".join(sorted(direct))
          + " — the lane must DELEGATE to tools/gates.sh, or the sweep has two "
            "lists again and the count in one of them means nothing")
-# Leading whitespace allowed: the matrix-handshake branch (ratified
-# 2026-08-20) keeps the delegation inside a conditional, and the
-# clause's real quarry is DIRECT gate invocations, held above.
-if not re.search(r"(?m)^\s*tools/gates\.sh\b", mac_text):
-    fail("tools/validate-mac.sh does not call tools/gates.sh — the lane runs "
+# The delegation sits inside the matrix-handshake conditional
+# (ratified 2026-08-20); the clause's real quarry is DIRECT gate
+# invocations, held above. Python since the runner conversion, so the
+# spelling is the argv path.
+if not re.search(r'ROOT / "tools/gates\.sh"', mac_text):
+    fail("tools/validate-mac.py does not call tools/gates.sh — the lane runs "
          "no gate sweep at all")
 
 problem = matrix_parallel_problem(matrix_text)

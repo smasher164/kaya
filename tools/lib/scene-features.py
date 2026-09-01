@@ -38,7 +38,7 @@ import sys
 # the Swift declaration carries (one file serves mac AND iOS, so the
 # declaration there names its platform and nothing else does).
 RUNNERS = [
-    ("tools/validate-mac.sh", "swift/KayaSwiftUI.swift", "macos"),
+    ("tools/lib/lanes/mac.py", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
     # The windows, ios and android rosters are DATA since the runner
     # conversion: a tools/lib/lanes/ row is IMPORTED (lane_scenes

@@ -59,7 +59,9 @@ FILES = [MAC, ENTRY, CANVAS, GTK, WINUI, COMPOSE]
 # lane's own name for the leg. A runner missing from this table is a lane
 # whose dark arm nobody asserts.
 LEGS = [
-    ("tools/validate-mac.sh", "run canvasdark-rust-swiftui", "mac"),
+    # The mac roster is DATA (tools/lib/lanes/mac.py) since the runner
+    # conversion; the dark leg's spelling there is its quoted name.
+    ("tools/lib/lanes/mac.py", '"canvasdark-rust-swiftui"', "mac"),
     ("tools/linux/run-suites.sh", "canvasdark-rust", "linux"),
     # The ios roster is DATA (tools/lib/lanes/ios.py) since the runner
     # conversion; the dark leg's spelling there is its quoted name.
@@ -412,7 +414,8 @@ g.negative(
 g.negative(
     "N9 the mac dark leg unwired",
     lambda: census(without(
-        "tools/validate-mac.sh", r"run canvasdark-rust-swiftui", "run canvas-rust-swiftui", "N9")),
+        "tools/lib/lanes/mac.py", r'"canvasdark-rust-swiftui"',
+        '"canvas-rust-swiftui"', "N9")),
     want="the mac lane has no dark canvas leg",
 )
 g.negative(

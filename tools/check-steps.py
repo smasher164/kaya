@@ -30,6 +30,7 @@ import tempfile
 # runner imports.
 from lanes import android as android_lane
 from lanes import ios as ios_lane
+from lanes import mac as mac_lane
 from lanes import win as win_lane
 
 # Line-buffered stdout: the probes and helper scripts write to the same
@@ -1734,17 +1735,23 @@ def wired():
             failed = 1
 
     runner_texts = {
-        "tools/validate-mac.sh": read_rel("tools/validate-mac.sh"),
         "tools/linux/run-suites.sh":
             read_rel("tools/linux/run-suites.sh"),
-        # The windows, ios and android rosters are read from the lane
-        # MODULES, not text; the keys match scene-features.py's RUNNERS
-        # rows so the depth-stub exemptions line up.
+        # The windows, ios, android and mac rosters are read from the
+        # lane MODULES, not text; the keys match scene-features.py's
+        # RUNNERS rows so the depth-stub exemptions line up.
         "tools/lib/lanes/win.py": "",
         "tools/lib/lanes/ios.py": "",
         "tools/lib/lanes/android.py": "",
+        "tools/lib/lanes/mac.py": "",
     }
     win_scenes = {win_lane.scene_lang(leg)[0] for leg in win_lane.legs()}
+    mac_wired = mac_lane.wired_scenes()
+    if not mac_wired:
+        print("check-steps: wired() read NO scenes out of the mac lane "
+              "module's queue — it moved, and this clause is blind",
+              file=sys.stderr)
+        return 1
     for p in STEPS:
         scene = p.stem
         for runner, text in runner_texts.items():
@@ -1773,11 +1780,14 @@ def wired():
                           f"the win lane module ({runner})",
                           file=sys.stderr)
                     failed = 1
+            elif runner == "tools/lib/lanes/mac.py":
+                if scene not in mac_wired:
+                    print(f'check-steps: scene "{scene}" has no leg in '
+                          f"the mac lane module ({runner})",
+                          file=sys.stderr)
+                    failed = 1
             else:
-                if runner == "tools/validate-mac.sh":
-                    sig = f"run {scene}-"
-                else:
-                    sig = f'run "$proto" {scene}-'
+                sig = f'run "$proto" {scene}-'
                 if scene == "milestone2":
                     sig = scene
                 if sig not in text:
@@ -2042,8 +2052,7 @@ def feature_selftest(scene, stub, extra=""):
                     d / "crates/kaya/src/scene.rs")
         shutil.copy(ROOT / "tools/lib/hand-rolled-stubs.py",
                     d / "tools/lib/hand-rolled-stubs.py")
-        for empty in ("tools/validate-mac.sh",
-                      "tools/linux/run-suites.sh",
+        for empty in ("tools/linux/run-suites.sh",
                       "crates/kaya/src/gtk.rs",
                       "crates/kaya/src/winui/mod.rs",
                       "swift/KayaSwiftUI.swift"):
@@ -2052,7 +2061,8 @@ def feature_selftest(scene, stub, extra=""):
         # fixture's "runner that runs nothing" is a module whose
         # scenes are real enough to pass the floor and match nothing.
         for lane_stub in ("tools/lib/lanes/win.py",
-                          "tools/lib/lanes/ios.py"):
+                          "tools/lib/lanes/ios.py",
+                          "tools/lib/lanes/mac.py"):
             (d / lane_stub).write_text(
                 "def wired_scenes():\n"
                 "    return {f'zzfixture{i}' for i in range(12)}\n",
@@ -2156,11 +2166,11 @@ def sweep_guests():
     ]
     def desktop_scene_lists():
         """(runner, SCENES-or-None) for the three desktop lanes — the
-        windows list is the lane module's, imported rather than
-        regexed, so it cannot drift from what the runner stages."""
-        out = []
-        for runner in ("tools/validate-mac.sh",
-                       "tools/linux/run-suites.sh"):
+        mac and windows lists are the lane modules', imported rather
+        than regexed, so they cannot drift from what the runners
+        stage."""
+        out = [("tools/lib/lanes/mac.py", list(mac_lane.SCENES))]
+        for runner in ("tools/linux/run-suites.sh",):
             m = re.search(r'^SCENES="([^"]+)"', read_rel(runner), re.M)
             out.append((runner, m.group(1).split() if m else None))
         out.append(("tools/lib/lanes/win.py", list(win_lane.SCENES)))
@@ -2201,14 +2211,21 @@ def sweep_guests():
     # GATE: wired() above demands only that a scene has SOME leg, so
     # one language covers for all of them.
     #
-    # mac only, deliberately: this runner names every leg
-    # `<scene>-<lang>-swiftui`, so the expectation is exact. The other
+    # mac only, deliberately: this lane names every leg
+    # `<scene>-<lang>-swiftui`, so the expectation is exact — and it
+    # is the lane MODULE's leg list now, with a floor, closing the
+    # bare `if m:` vacuity the stage-1 record flagged. The other
     # runners have their own naming and their own backend-stub
     # carve-outs.
-    mac = read_rel("tools/validate-mac.sh")
-    m = re.search(r'^SCENES="([^"]+)"', mac, re.M)
+    mac_leg_names = {name for name, _s, _l in mac_lane.legs()}
+    if len(mac_leg_names) < 100:
+        bad.append(f"tools/lib/lanes/mac.py: the mac queue lists "
+                   f"{len(mac_leg_names)} legs — a roster that small "
+                   f"is a moved table, and this sweep would agree "
+                   f"with anything")
+        return bad
     stubbed = read_rel("swift/KayaSwiftUI.swift")
-    for scene in (m.group(1).split() if m else []):
+    for scene in mac_lane.SCENES:
         if f'epthStub("{scene}", on: "macos")' in stubbed:
             continue
         for lang, pat in LANGS + [("rust", "guests/rust/{s}.rs")]:
@@ -2217,13 +2234,11 @@ def sweep_guests():
                 continue
             # milestone2's legs drop the scene prefix — they ARE the
             # unprefixed originals, the same exception wired() carries.
-            leg = (f"run {lang}-swiftui" if scene == "milestone2"
-                   else f"run {scene}-{lang}-swiftui")
-            if leg not in mac:
+            if mac_lane.leg_name(scene, lang) not in mac_leg_names:
                 bad.append(
-                    f'tools/validate-mac.sh: scene "{scene}" has a '
-                    f'{lang} guest but no leg runs it (wanted '
-                    f'"{leg}")')
+                    f'tools/lib/lanes/mac.py: scene "{scene}" has a '
+                    f"{lang} guest but no leg runs it (wanted "
+                    f'"{mac_lane.leg_name(scene, lang)}")')
     return bad
 
 
@@ -2245,7 +2260,7 @@ if out:
 # three share — the thing that cannot be present while the leg is
 # dead.
 def sweep_c_floor():
-    RUNNERS = ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
+    RUNNERS = ("tools/linux/run-suites.sh",
                "tools/deploy-win.py", "tools/ios/run-sim.py",
                "tools/android/run-emulator.py")
     makefile = read_rel("guests/c/Makefile")
@@ -2258,6 +2273,23 @@ def sweep_c_floor():
 
     bad = []
     runs = {}   # scene -> the runners that execute its C binary
+    # The mac lane's C legs are the lane MODULE's, imported: the stem
+    # of every `c` leg in the queue. A queue with no C legs at all is
+    # a moved table, not a shrunk floor.
+    mac_c = sorted({mac_lane.guest_stem(scene)
+                    for _n, scene, lang in mac_lane.legs()
+                    if lang == "c"})
+    if not mac_c:
+        bad.append("tools/lib/lanes/mac.py: the mac queue carries no "
+                   "C legs at all — this census read nothing and "
+                   "would agree with anything")
+    for name in mac_c:
+        if name not in built:
+            bad.append(f"tools/lib/lanes/mac.py: runs c-guests/{name}, "
+                       f"which guests/c/Makefile never builds (SCENES "
+                       f'has no "{name}")')
+            continue
+        runs.setdefault(name, []).append("tools/lib/lanes/mac.py")
     for runner in RUNNERS:
         text = read_rel(runner)
         for name in re.findall(r"c-guests/([A-Za-z0-9_]+)", text):
@@ -2280,15 +2312,19 @@ def sweep_c_floor():
         if scene not in runs:
             bad.append(f"guests/c/{scene}.c is built by "
                        f"guests/c/Makefile but no lane runs it (wanted "
-                       f"a leg naming c-guests/{scene} in one of: "
-                       + ", ".join(RUNNERS) + ")")
+                       f"a leg naming c-guests/{scene} in the mac lane "
+                       f"module or one of: " + ", ".join(RUNNERS) + ")")
 
-    # 2. A RUNNER THAT NAMES THE C SCENES IT BUILDS RUNS THEM. mac
-    #    compiles exactly one C guest — `make -C guests/c SCENES=undo`
-    #    — so that line is the mac lane's own declaration of what its
-    #    C floor is, and a build with no leg is a binary compiled for
-    #    nothing. Runners that build the whole floor (linux) declare
+    # 2. A RUNNER THAT NAMES THE C SCENES IT BUILDS RUNS THEM: a build
+    #    with no leg is a binary compiled for nothing. The mac lane's
+    #    build list is the module's C_SCENES (what build_c passes to
+    #    make); runners that build the whole floor (linux) declare
     #    nothing here and are covered by clause 1.
+    for scene in mac_lane.C_SCENES:
+        if scene not in mac_c:
+            bad.append(f'tools/lib/lanes/mac.py: builds the C '
+                       f'"{scene}" guest (C_SCENES) but queues no leg '
+                       f"for it — wire the leg, or stop building it")
     for runner in RUNNERS:
         text = read_rel(runner)
         for at in (mm.end() for mm in
@@ -2497,7 +2533,6 @@ if not family_serial("run layout-java env X\nrun clipboard-rust env "
     selftest_fail("undrained-before clipboard leg passed")
 
 for runner, leg, barrier in (
-    ("tools/validate-mac.sh", MAC_LEG, "drain"),
     ("tools/linux/run-suites.sh", MAC_LEG, "drain"),
 ):
     out = family_serial(read_rel(runner), leg, barrier, "clipboard",
@@ -2508,6 +2543,45 @@ for runner, leg, barrier in (
               f"system clipboard per session):", file=sys.stderr)
         print("\n".join(out), file=sys.stderr)
         status = 1
+
+
+# The mac lane's serial families, in the module's own vocabulary since
+# the runner conversion: a block of its own per leg, read from the
+# same ORDER the runner walks (win_clipboard_serial's shape).
+def mac_family_serial(order_blocks, family, path):
+    bad = []
+    seen = 0
+    prefix = f"{family}-"
+    for block in order_blocks:
+        for leg in block:
+            if not leg.startswith(prefix):
+                continue
+            seen += 1
+            if list(block) != [leg]:
+                bad.append(f'{path}: leg "{leg}" shares a block with '
+                           f"{len(block) - 1} other leg(s)")
+    if seen == 0:
+        bad.append(f"{path}: no {family} leg found (the scene must "
+                   f"stay wired)")
+    return bad
+
+
+# The guard guards itself, on the mac spelling and the REASON.
+if not mac_family_serial(
+        [["clipboard-rust-swiftui", "clipboard-python-swiftui"]],
+        "clipboard", "-"):
+    selftest_fail("pooled mac clipboard legs passed")
+if not mac_family_serial([["nav-rust-swiftui"]], "clipboard", "-"):
+    selftest_fail("a mac roster with no clipboard leg passed")
+
+out = mac_family_serial(mac_lane.blocks(), "clipboard",
+                        "tools/lib/lanes/mac.py")
+if out:
+    print("check-steps: the mac lane's clipboard legs must run in "
+          "blocks of their own (docs/clipboard-plan.md §0d — one "
+          "system clipboard per session):", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
 
 
 # The win lane's clipboard rule, in the module's own vocabulary: a
@@ -2562,26 +2636,25 @@ if out:
 #               under $TMPDIR/kaya-save-<pid>. A barrier there could
 #               not fail for the reason it exists (CLAUDE.md
 #               invariant 4).
-MAC_SAVE_LEG = r"run save-[a-z]"
-
-# The guard guards itself: two save legs sharing the pool must fail...
-if not family_serial("drain\nrun save-rust-swiftui env X\n"
-                     "run save-python-swiftui env X\ndrain\n",
-                     MAC_SAVE_LEG, "drain", "save", "-"):
+# The guard guards itself: two save legs sharing a block must fail...
+if not mac_family_serial(
+        [["save-rust-swiftui", "save-python-swiftui"]], "save", "-"):
     selftest_fail("pooled save legs passed")
-# ...and a save leg entering a pool that still holds another scene's
-# leg, which is the same trample from the other side: the sibling's
-# panel is what wrote the preference this leg is about to read.
-if not family_serial("run layout-java env X\n"
-                     "run save-rust-swiftui env X\ndrain\n",
-                     MAC_SAVE_LEG, "drain", "save", "-"):
+# ...a save leg sharing a block with another scene's leg, which is the
+# same trample from the other side: the sibling's panel is what wrote
+# the preference this leg is about to read...
+if not mac_family_serial(
+        [["layout-java-swiftui", "save-rust-swiftui"]], "save", "-"):
     selftest_fail("undrained-before save leg passed")
+# ...and a roster with no save leg at all must fail.
+if not mac_family_serial([["nav-rust-swiftui"]], "save", "-"):
+    selftest_fail("a mac roster with no save leg passed")
 
-out = family_serial(read_rel("tools/validate-mac.sh"), MAC_SAVE_LEG,
-                    "drain", "save", "tools/validate-mac.sh")
+out = mac_family_serial(mac_lane.blocks(), "save",
+                        "tools/lib/lanes/mac.py")
 if out:
-    print("check-steps: tools/validate-mac.sh save legs must run ALONE "
-          "between drains (docs/save-plan.md, measured 2026-08-10 — "
+    print("check-steps: the mac lane's save legs must run in blocks "
+          "of their own (docs/save-plan.md, measured 2026-08-10 — "
           "macOS shares a save panel's last directory as a user "
           "preference across every process, so a pooled leg is shown "
           "a sibling's):", file=sys.stderr)
@@ -3409,7 +3482,9 @@ if out:
 def go_desktop_scenes(table_text, table, runners):
     """`runners` is a list of (label, kind, payload): kind "runner"
     carries the runner's text, kind "cmd-dir" a list of (name, text)
-    launcher files — the two spellings the three lanes use."""
+    launcher files, kind "selected" a precomputed set of
+    KAYA_SELFTEST values (a lane module's go legs) — the three
+    spellings the three lanes use."""
     armed = set(re.findall(r'^\t"([a-z0-9]+)":', table_text, re.M))
     bad = []
     if not armed:
@@ -3442,6 +3517,8 @@ def go_desktop_scenes(table_text, table, runners):
                                f"no KAYA_SELFTEST, so it runs whatever "
                                f"the default is")
                 selected.update(names)
+        elif kind == "selected":
+            selected = set(payload)
         else:
             src = payload.replace("\\\n", " ")
             selected = set(re.findall(
@@ -3498,11 +3575,23 @@ if go_desktop_scenes(
         [("-", "runner", "run entry-go env KAYA_SELFTEST=entry "
           "target/go-guests/kaya-go\n")]):
     selftest_fail("a leg naming an armed scene was refused")
+# ...and the module spelling — the mac queue is a lanes module now,
+# and its go selection is a derived set rather than a text pattern.
+if not go_desktop_scenes(SAMPLE_TABLE, "-",
+                         [("-", "selected", {"ghost"})]):
+    selftest_fail("a module go leg naming a scene the table lacks "
+                  "passed")
+if not go_desktop_scenes(SAMPLE_TABLE, "-",
+                         [("-", "selected", set())]):
+    selftest_fail("an EMPTY module go selection passed — the clause "
+                  "compared nothing and said OK")
 
+mac_go_selected = {"1" if scene == "milestone2" else scene
+                   for _n, scene, lang in mac_lane.legs()
+                   if lang == "go"}
 out = go_desktop_scenes(
     read_rel("guests/go/cmd/scenes.go"), "guests/go/cmd/scenes.go",
-    [("tools/validate-mac.sh", "runner",
-      read_rel("tools/validate-mac.sh")),
+    [("tools/lib/lanes/mac.py", "selected", mac_go_selected),
      ("tools/linux/run-suites.sh", "runner",
       read_rel("tools/linux/run-suites.sh")),
      ("tools/guest", "cmd-dir",

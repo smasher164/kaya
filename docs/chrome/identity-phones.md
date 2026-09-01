@@ -94,7 +94,7 @@ the lane script rather than by Xcode:
 ### macOS, for contrast [REPO]
 
 macOS guests run as **bare executables with no bundle at all** —
-`tools/validate-mac.sh:74-108` stages the Rust guests out of
+`tools/validate-mac.py:99-108` stages the Rust guests out of
 `target/debug/examples` and runs them directly, and its comment
 describes LaunchServices treating the *containing directory* as the
 bundle. So mac has no `Info.plist` and therefore no

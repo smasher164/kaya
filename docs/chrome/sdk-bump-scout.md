@@ -199,7 +199,7 @@ family reads the main executable, not the loaded image). So today:
 - every other leg's host process is stamped SDK 14.4 / 11.3 → **compatibility generation**
 
 **The mac lane is ALREADY running both design generations, and has been.**
-`tools/validate-mac.sh:614-616` says so in `build_swift`'s comment — "the fleet's
+`tools/validate-mac.py:699-704` says so in `build_swift`'s docstring — "the fleet's
 modern-stamp legs" — and `docs/deferred.md:967-969` says so explicitly ("the
 swift mac guests compile against the system toolchain and exercise the modern
 generation — both covered on purpose"). But no gate asserts it.
@@ -343,7 +343,7 @@ exists to show styling:
 
 1. **Baseline first, before touching the flake.** The `typeface` guest is the
    in-flight styling depth slice and is rust-only today
-   (`validate-mac.sh:1130`, `DEPTH_SCENES="typeface"`), so it is the natural
+   (`tools/lib/lanes/mac.py:35`, typeface in DEPTH_SCENES), so it is the natural
    subject; `styling` is the graduated sibling that exists in all eight
    languages. Copy the current `target/rust-guests/typeface` aside (a copy, not
    git) and record its stamp — measured today: `minos 14.0 sdk 14.4`.
@@ -405,8 +405,8 @@ modern generation today):
 | **`editor`** | **`expect_inset row#0 8`** + `expect_order` | **NO — Go only** | **NO** |
 
 `editor` is kaya's forcing artifact and runs on the mac lane as a **single Go
-leg** (`validate-mac.sh:1067`, `run editor-go-swiftui … target/go-guests/kaya-go`);
-`validate-mac.sh:1053` notes it is deliberately in neither `SCENES` nor
+leg** (`tools/lib/lanes/mac.py:131`, the editor group's one go entry);
+its HAND_QUEUED comment notes it is deliberately in neither `SCENES` nor
 `DEPTH_SCENES`. Go is a kaya-built leg, so the bump moves it 14.4 → 26.5, and
 `expect_inset row#0 8` — the tree's only **non-zero** geometry assertion — runs
 under the modern generation **for the first time anywhere**.

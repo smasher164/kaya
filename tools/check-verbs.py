@@ -178,7 +178,7 @@ def ink_tolerance(harness_src=None, swift_src=None, kotlin_src=None):
 # as a VALUE rather than as prose.
 #
 # NO LANE CAN FAIL THIS. Every runner greps the verdict for
-# `KAYA_SELFTEST: OK` and never diffs its text (validate-mac.sh:523,
+# `KAYA_SELFTEST: OK` and never diffs its text (validate-mac.py:622,
 # run-emulator.sh, run-sim.sh, run-suites.sh), so the spellings can
 # disagree forever with every leg green — which is exactly how they
 # did.

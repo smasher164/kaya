@@ -385,8 +385,8 @@ same value one line over, and a harness whose PASS text quotes and
 whose FAIL text does not is the same defect.
 
 NO LANE COULD HAVE CAUGHT THIS. Every runner only greps the verdict for
-`KAYA_SELFTEST: OK` and never diffs its text (validate-mac.sh:523,
-run-emulator.sh, run-sim.sh, run-suites.sh), so the byte-compared-verdict
+`KAYA_SELFTEST: OK` and never diffs its text (validate-mac.py:622,
+run-emulator.py, run-sim.py, run-suites.sh), so the byte-compared-verdict
 rule is doctrine that only a gate can hold. tools/check-verbs.sh got the
 clause: a census reading each emitter out of its OWN ARM in all three
 harnesses, flattening every interpolation to `<v>` so three languages
@@ -3708,8 +3708,34 @@ matrix ALL PASS 1,390 legs in 616s with android at 226s — the first
 matrix's five lanes all passed and its one red was check-doc-refs
 refusing the new measurement doc's own pgrep quotation, the recording
 sweep catching the record it rides in. Record:
-docs/measurements/run-emulator-conversion-2026-08-31.md. Stage 4
-(validate-mac, validate-linux, validate-all) then gates.sh remain.
+docs/measurements/run-emulator-conversion-2026-08-31.md.
+
+STAGE 4's FIRST ITEM (validate-mac) LANDED 2026-09-01, the night
+after: the 349-leg queue — scene groups in their own language order,
+drains as entries, the three panel-mode rotations, the serial
+families — is tools/lib/lanes/mac.py, the body is
+tools/validate-mac.py, and the mac flight-recorder half (the per-leg
+sampler, the window-scoped shot, the at-fail capture) crossed into
+flightrec_lane.py's MacRecorder with 254 lines of mac-only shell
+leaving flightrec.sh. tools/flightrec-selftest.py — the tenth parser,
+which used to cut run() out of the shell body and execute it — drives
+the real MacRecorder now, with the driver's one paraphrase pinned
+against the runner's own _leg_worker by ast. The enumeration's
+eight-item silent-vacuity list is closed (the check-stubs and
+scene-features mac rows ride roster floors, sweep_guests' bare
+`if m:` exactness clause imports the module, sweep_c_floor reads
+C_SCENES as data, and check-build-id finally asserts the mac lane's
+swiftui verify — a clause that had NO owner for as long as the skip
+path existed). The first live bundle both evidenced lane run 1's one
+red (save-c under a 53.8% WindowServer, the pre-existing contention
+class) and caught a real conversion defect — guest_pid=none for the
+whole leg, the sampler's timeout anchor walking only descendants
+when the python runner hands it the timeout process itself — fixed
+with a living-guest selftest clause and its watched negative.
+Validated: rider ALL EQUAL (event stream + script bytes), gates
+50/50, lane 349/349 twice, matrix ALL PASS 1,390 legs in 657s.
+Record: docs/measurements/validate-mac-conversion-2026-09-01.md.
+Remaining: validate-linux, validate-all, then gates.sh last.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 
@@ -5183,8 +5209,8 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   it was already done when this sentence was committed: `cbf6476`
   (2026-08-17) moved `toolbar` out of DEPTH_SCENES into SCENES in the
   same edit that added it to the other lanes. Verified 2026-08-19:
-  tools/validate-mac.sh:37 carries `toolbar` in SCENES and :48 reads
-  `DEPTH_SCENES="typeface"`.
+  tools/lib/lanes/mac.py:23 carries `toolbar` in SCENES and :35 reads
+  the depth list.
 
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 
