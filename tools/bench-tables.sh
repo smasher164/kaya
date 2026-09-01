@@ -92,7 +92,7 @@ esac
 
 # The converted runners run as python bodies (the .sh beside each is an
 # exec shim), so pgrep must look for the .py names.
-MATRIX_RUNNERS="validate-all.sh validate-mac.py validate-linux.sh deploy-win.py run-sim.py run-emulator.py"
+MATRIX_RUNNERS="validate-all.py validate-mac.py validate-linux.py deploy-win.py run-sim.py run-emulator.py"
 
 if [ -n "${KAYA_MATRIX_GATES_TOKEN:-}" ]; then
     echo "$0: refusing — this shell carries KAYA_MATRIX_GATES_TOKEN, which" >&2

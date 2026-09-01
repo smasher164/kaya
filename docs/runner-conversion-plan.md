@@ -99,7 +99,14 @@ tables but is NOT this tranche.
    (docs/measurements/validate-mac-conversion-2026-09-01.md). The
    mac flightrec half crossed into MacRecorder and its selftest
    drives the real capture; swift-toolchain.sh stays shell by §6
-   (ten consumers) behind a bridge.
+   (ten consumers) behind a bridge. validate-linux and validate-all
+   LANDED the same night: the docker wrapper carries no tables
+   (run-suites.sh is an in-container payload, §6), the matrix
+   driver's launch block and BUDGETS moved with every measured
+   ceiling comment intact, check-gates' six matrix negatives
+   re-spelled to the python pins, matrix ALL PASS 1,390
+   (docs/measurements/validate-all-conversion-2026-09-01.md). The
+   lane tier is fully python; gates.sh remains, last by design.
 4. **gates.sh** last: its census/EXCLUDED table is decision logic and
    moves to data; the loop is a launcher and converts with it.
 

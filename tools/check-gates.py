@@ -116,17 +116,19 @@ def census(on_disk, listed, excluded):
     return sorted(set(on_disk) - set(listed) - set(excluded))
 
 
+# The matrix driver is python since the runner conversion; these are
+# its exact launch spellings (the linux launch spans two lines — its
+# env rider — and is matched as a prefix).
 PLATFORM_LAUNCHES = [
-    "run_lane mac tools/validate-mac.sh",
-    ('run_lane linux env KAYA_JOBS="${KAYA_LINUX_JOBS:-}" '
-     'tools/validate-linux.sh'),
-    'run_lane windows tools/deploy-win.sh "$HOST" all',
-    "run_lane ios tools/ios/run-sim.sh",
-    "run_lane android tools/android/run-emulator.sh",
+    'run_lane("mac", ["tools/validate-mac.sh"])',
+    'run_lane("linux", ["tools/validate-linux.sh"],',
+    'run_lane("windows", ["tools/deploy-win.sh", HOST, "all"])',
+    'run_lane("ios", ["tools/ios/run-sim.sh"])',
+    'run_lane("android", ["tools/android/run-emulator.sh"])',
 ]
-GATE_LAUNCH = "run_lane gates nice -n 10 tools/gates.sh"
-ANDROID_PID = 'android_lane_pid="${lane_pids[${#lane_pids[@]} - 1]}"'
-ANDROID_WAIT = 'wait "$android_lane_pid" 2>/dev/null || true'
+GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.sh"])'
+ANDROID_PID = "android_lane_proc = lane_procs[-1]"
+ANDROID_WAIT = "android_lane_proc.wait()"
 # The runners are python since the runner conversion; the probe stays
 # shell, so the two spellings of each one default diverge in language
 # and these clauses hold them BOTH.
@@ -138,33 +140,47 @@ IOS_PROBE_POOL = 'IOS_POOL="${KAYA_IOS_SIMS:-3}"'
 
 def matrix_parallel_problem(text):
     parallel = re.search(
-        r'(?ms)^if \[ "\$MODE" = parallel \]; then\n(.*?)^else$', text)
+        r'(?ms)^if MODE == "parallel":\n(.*?)^else:$', text)
     if parallel is None:
-        return "tools/validate-all.sh's parallel matrix block is missing"
-    lines = [line.strip() for line in code_lines(parallel.group(1)) if line.strip()]
-    launches = [line for line in lines if line.startswith("run_lane ")]
-    if launches != PLATFORM_LAUNCHES + [GATE_LAUNCH]:
-        return ("tools/validate-all.sh must queue all five platform lanes and the "
-                "one niced gate sweep exactly once")
-    start = lines.index(PLATFORM_LAUNCHES[0])
-    if lines[start:start + len(PLATFORM_LAUNCHES)] != PLATFORM_LAUNCHES:
-        return ("tools/validate-all.sh must queue all five platform lanes together "
-                "without an admission barrier between them")
-    tail = lines[start + len(PLATFORM_LAUNCHES):
-                 start + len(PLATFORM_LAUNCHES) + 3]
+        return "tools/validate-all.py's parallel matrix block is missing"
+    lines = [line.strip() for line in code_lines(parallel.group(1))
+             if line.strip()]
+    launches = [line for line in lines if line.startswith("run_lane(")]
+    if len(launches) != 6 or launches[5] != GATE_LAUNCH or any(
+            not launches[i].startswith(PLATFORM_LAUNCHES[i])
+            for i in range(5)):
+        return ("tools/validate-all.py must queue all five platform lanes and "
+                "the one niced gate sweep exactly once")
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith(PLATFORM_LAUNCHES[0]))
+    # The five platform launches must be CONSECUTIVE statements — the
+    # linux launch's env rider spans two extra lines, and nothing else
+    # may sit between them (an admission barrier would).
+    at = start
+    for want in PLATFORM_LAUNCHES:
+        if not lines[at].startswith(want):
+            return ("tools/validate-all.py must queue all five platform lanes "
+                    "together without an admission barrier between them")
+        at += 1
+        while at < len(lines) and not lines[at].startswith("run_lane(") \
+                and lines[at].startswith(('"', "'", "env=")):
+            at += 1
+    tail = lines[at:at + 3]
     if tail != [ANDROID_PID, ANDROID_WAIT, GATE_LAUNCH]:
-        return ("tools/validate-all.sh must record Android's exact lane pid, wait "
-                "for it, then start the one gate sweep at niceness 10")
-    run_lane = re.search(r'(?ms)^run_lane\(\) \{\n(.*?)^\}', text)
-    if run_lane is None or not all(part in run_lane.group(1) for part in (
-        ") &", "lane_pids+=($!)", 'lane_names+=("$name")')):
-        return ("tools/validate-all.sh's run_lane no longer backgrounds and records "
-                "every concurrent matrix unit")
-    fingerprint = 'KAYA_MATRIX_GATES_TOKEN="$(tools/gates.sh --fingerprint)" || exit 1'
+        return ("tools/validate-all.py must record Android's exact lane "
+                "process, wait for it, then start the one gate sweep at "
+                "niceness 10")
+    run_lane = re.search(r"(?ms)^def run_lane\(.*?(?=^[A-Za-z_#])", text)
+    if run_lane is None or not all(part in run_lane.group(0) for part in (
+        "subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf)",
+        "lane_procs.append(proc)", "lane_names.append(name)")):
+        return ("tools/validate-all.py's run_lane no longer backgrounds and "
+                "records every concurrent matrix unit")
     gate_lines = [line for line in lines if "tools/gates.sh" in line]
+    fingerprint = 'got = subprocess.run(["tools/gates.sh", "--fingerprint"],'
     if gate_lines != [fingerprint, GATE_LAUNCH]:
-        return ("tools/validate-all.sh must invoke gates only for the same-tree "
-                "fingerprint and the one delayed niced sweep")
+        return ("tools/validate-all.py must invoke gates only for the "
+                "same-tree fingerprint and the one delayed niced sweep")
     return None
 
 
@@ -307,7 +323,7 @@ flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
     encoding="utf-8")
 flightrec_pylib_text = (root / "tools" / "lib" / "flightrec_lane.py"
                         ).read_text(encoding="utf-8")
-matrix_text = (root / "tools" / "validate-all.sh").read_text(encoding="utf-8")
+matrix_text = (root / "tools" / "validate-all.py").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.py").read_text(
     encoding="utf-8")
 ios_text = (root / "tools" / "ios" / "run-sim.py").read_text(encoding="utf-8")
@@ -411,7 +427,8 @@ if not census(on_disk + ["tools/check-invented-by-selftest.sh"],
 
 # N5 — every one of the five platform lanes must be queued.
 doctored, n = re.subn(
-    r'(?m)^\s*run_lane ios tools/ios/run-sim\.sh\n', "", matrix_text, count=1)
+    r'(?m)^    run_lane\("ios", \["tools/ios/run-sim\.sh"\]\)\n', "",
+    matrix_text, count=1)
 print("check-gates: self-test N5 removed one concurrent platform launch, "
       f"{n} substitution(s)")
 if n != 1:
@@ -422,8 +439,8 @@ elif matrix_parallel_problem(doctored) is None:
 
 # N6 — no barrier may split the five platform launches.
 doctored, n = re.subn(
-    r'(?m)^(\s*run_lane mac tools/validate-mac\.sh)$',
-    r'\1\n    wait "${lane_pids[0]}"', matrix_text, count=1)
+    r'(?m)^(    run_lane\("mac", \["tools/validate-mac\.sh"\]\))$',
+    "\\1\n    lane_procs[-1].wait()", matrix_text, count=1)
 print("check-gates: self-test N6 inserted a barrier after the mac launch, "
       f"{n} substitution(s)")
 if n != 1:
@@ -433,7 +450,10 @@ elif matrix_parallel_problem(doctored) is None:
     fail("self-test N6: staged platform admission passed as concurrent")
 
 # N7 — run_lane must keep every queued unit in the background.
-doctored, n = re.subn(r'(?m)^    \) &$', "    )", matrix_text, count=1)
+doctored, n = re.subn(
+    r"subprocess\.Popen\(argv, env=lane_env, stdout=lf, stderr=lf\)",
+    "subprocess.run(argv, env=lane_env, stdout=lf, stderr=lf)",
+    matrix_text, count=1)
 print("check-gates: self-test N7 foregrounded run_lane, "
       f"{n} substitution(s)")
 if n != 1:
@@ -481,9 +501,10 @@ else:
         fail("self-test N9 failed for another reason: " + problem)
 
 # N10 — the delayed sweep must wait for the Android child this invocation
-# recorded, not for an ambient process or a guessed array slot.
+# recorded, not for an ambient process or a guessed slot.
 doctored, n = re.subn(
-    re.escape(ANDROID_PID), 'android_lane_pid="$!"', matrix_text, count=1)
+    re.escape(ANDROID_PID), "android_lane_proc = lane_procs[0]",
+    matrix_text, count=1)
 print("check-gates: self-test N10 replaced Android pid provenance, "
       f"{n} substitution(s)")
 if n != 1:
@@ -495,8 +516,7 @@ elif matrix_parallel_problem(doctored) is None:
 # N11 — starting the sweep immediately reintroduces the contention this
 # schedule exists to bound.
 doctored, n = re.subn(
-    r'(?m)^\s*wait "\$android_lane_pid" 2>/dev/null \|\| true\n',
-    "", matrix_text, count=1)
+    r"(?m)^    android_lane_proc\.wait\(\)\n", "", matrix_text, count=1)
 print("check-gates: self-test N11 removed the Android wait, "
       f"{n} substitution(s)")
 if n != 1:
@@ -507,8 +527,8 @@ elif matrix_parallel_problem(doctored) is None:
 
 # N12 — the sweep's lower priority is part of the measured schedule.
 doctored, n = re.subn(
-    r'(?m)^(\s*run_lane gates )nice -n 10 (tools/gates\.sh)$',
-    r'\1\2', matrix_text, count=1)
+    re.escape('["nice", "-n", "10", "tools/gates.sh"]'),
+    '["tools/gates.sh"]', matrix_text, count=1)
 print("check-gates: self-test N12 removed gate niceness, "
       f"{n} substitution(s)")
 if n != 1:

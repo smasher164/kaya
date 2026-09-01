@@ -3735,7 +3735,26 @@ with a living-guest selftest clause and its watched negative.
 Validated: rider ALL EQUAL (event stream + script bytes), gates
 50/50, lane 349/349 twice, matrix ALL PASS 1,390 legs in 657s.
 Record: docs/measurements/validate-mac-conversion-2026-09-01.md.
-Remaining: validate-linux, validate-all, then gates.sh last.
+
+STAGE 4b (validate-linux + validate-all) LANDED THE SAME NIGHT,
+finishing the lane tier: the docker wrapper is python with NO lanes
+module (run-suites.sh is an in-container payload by §6 and
+check-steps' linux arms keep reading its text), and the matrix driver
+is python with its launch block as the data check-gates pins — the
+five concurrent launches, Android's process provenance and wait, the
+niced delayed sweep, and gates.sh reachable only through the
+fingerprint and the one launch, all six matrix negatives re-spelled
+and re-proven. The BUDGETS table moved with every ceiling's measured
+raise/lower history intact, and per-lane durations are stamped by
+waiter threads at actual exit (a queue-order collection would bill an
+early finisher for its siblings' wall time). The first driver matrix
+ran on a host at load 53 — the seventh matrix in four hours — and
+two pre-existing flake classes fired on untouched lanes (the windows
+caption-centre probe's honest 10/11 under-run, android's portfolio
+title read); the load-gated rerun was ALL PASS 1,390 in 631s with
+every lane comfortably under ceiling. Record:
+docs/measurements/validate-all-conversion-2026-09-01.md. The LANE
+TIER IS FULLY PYTHON; gates.sh remains, last by the plan's ordering.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 
