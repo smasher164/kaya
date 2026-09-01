@@ -601,7 +601,20 @@ impl<'a> Reader<'a> {
         let payload = self.take(len);
         let value = match ty {
             VALUE_BOOL => Value::Bool(payload[0] != 0),
-            VALUE_I64 => Value::I64(i64::from_le_bytes(payload.try_into().unwrap())),
+            VALUE_I64 => {
+                let v = i64::from_le_bytes(payload.try_into().unwrap());
+                // The safe-integer contract's one wall (spec.rs's
+                // MAX_SAFE_INTEGER): keys route through here too, so
+                // an i64 identity past 2^53 is refused with its fix.
+                assert!(
+                    v.unsigned_abs() <= crate::spec::MAX_SAFE_INTEGER as u64,
+                    "kaya: integer value {v} is outside ±(2^53 − 1) — kaya \
+                     integers are counts and quantities (spec.rs's \
+                     safe-integer contract); identity belongs in a string \
+                     or an opaque tag, which round-trip any width"
+                );
+                Value::I64(v)
+            }
             VALUE_F64 => Value::F64(f64::from_le_bytes(payload.try_into().unwrap())),
             VALUE_STR => Value::Str(
                 std::str::from_utf8(payload)
@@ -3365,6 +3378,64 @@ mod tests {
         }
     }
 
+    /// The safe-integer contract's boundary, both sides (spec.rs's
+    /// MAX_SAFE_INTEGER; ruled 2026-08-31 for the ninth binding and
+    /// enforced for all nine): ±(2^53 − 1) round-trips exactly, and
+    /// one past it is refused at the decode chokepoint with the
+    /// sentence that names the fix. The negative is watched — with
+    /// the guard deleted this test FAILS (no panic), which is the
+    /// difference between a wall and a comment.
+    #[test]
+    fn safe_integer_boundary_round_trips() {
+        for v in [
+            crate::spec::MAX_SAFE_INTEGER,
+            -crate::spec::MAX_SAFE_INTEGER,
+            0,
+            1,
+            -1,
+        ] {
+            let mut w = Writer::new();
+            w.tx_op(&TxOp::WriteSignal {
+                id: SignalId(1),
+                value: Value::I64(v),
+            });
+            let decoded = decode_transaction(&w.into_bytes());
+            assert_eq!(decoded.len(), 1);
+            assert_eq!(
+                format!("{:?}", decoded[0]),
+                format!(
+                    "{:?}",
+                    TxOp::WriteSignal {
+                        id: SignalId(1),
+                        value: Value::I64(v),
+                    }
+                )
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "outside ±(2^53 − 1)")]
+    fn an_integer_past_the_safe_range_is_refused() {
+        let mut w = Writer::new();
+        w.tx_op(&TxOp::WriteSignal {
+            id: SignalId(1),
+            value: Value::I64(crate::spec::MAX_SAFE_INTEGER + 1),
+        });
+        decode_transaction(&w.into_bytes());
+    }
+
+    #[test]
+    #[should_panic(expected = "outside ±(2^53 − 1)")]
+    fn a_negative_integer_past_the_safe_range_is_refused() {
+        let mut w = Writer::new();
+        w.tx_op(&TxOp::WriteSignal {
+            id: SignalId(1),
+            value: Value::I64(-(crate::spec::MAX_SAFE_INTEGER + 1)),
+        });
+        decode_transaction(&w.into_bytes());
+    }
+
     /// Blobs ride every value position — a signal's initial, a write,
     /// a record field — as batch-local handles; the bytes live in the
     /// writer's table and the decoder resolves them back. Content
@@ -4006,7 +4077,10 @@ mod tests {
     fn values_round_trip() {
         for v in [
             Value::Bool(true),
-            Value::I64(i64::MIN),
+            // i64::MIN is refused since the safe-integer contract
+            // (spec.rs's MAX_SAFE_INTEGER); the boundary tests hold
+            // the integer extremes.
+            Value::I64(-crate::spec::MAX_SAFE_INTEGER),
             Value::F64(2.5),
             Value::Str("héllo".into()),
         ] {

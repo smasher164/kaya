@@ -3804,6 +3804,26 @@ the instrument in place decides whether this is a Weston sizing race
 or a fold-derivation defect.
 KEY: portfolio wayland fold, column#9 folded, surface width premise
 
+## WATCH — the android portfolio leg reads the pre-navigation title
+
+Two sightings, same sentence both times: `title "portfolio", wanted
+"Transactions"` — 2026-08-31 under the seventh matrix of a saturated
+stretch (15-minute load 53.8, docs/measurements/
+validate-all-conversion-2026-09-01.md) and 2026-09-01 ~12:00 under
+an otherwise-clean load-gated matrix, ~30s into the leg. The leg
+passed every run between and beside them, including a matrix one
+hour before the second sighting on the same tree. The
+flakes-are-premises shape: the assertion runs after the navigation
+to the Transactions screen, so the suspect premise is that the
+window title OBSERVATION had caught up with the navigation by the
+expect's read — the title it reports is the old screen's, a
+consistent verdict over an unpinned propagation. NEXT SIGHTING: do
+not rerun — instrument the premise at its chokepoint (log, beside
+the title observation in KayaCompose's expect_title arm, WHICH
+screen the model believes is current at the moment the title is
+read) and keep the flight-recorder bundle.
+KEY: android portfolio title, wanted Transactions, title propagation
+
 ## MAYBE: read Windows accessibility client-side, like the other platforms
 
 Raised 2026-07-31, NOT decided. Recorded so a green lane does not read
@@ -9192,17 +9212,20 @@ RULED 2026-08-31 (maintainer, design-only session — no code today):
   dance in the entry module. An ASYNC handler's transaction dies at
   its first await (an async function returns there), and the liveness
   refusal says so — the check-tx-liveness rule, JS spelling.
-- JSX/TSX: DESIGNED FOR, SHIPPED LATER. kaya's model is SolidJS's
-  model (components run once to build the tree, no virtual DOM,
-  signals update in place; Solid's For/Show are kaya's For/when), so
-  a run-once JSX factory (`jsxImportSource: "kaya-gui"`) compiles 1:1
-  onto the function sugar. Day one is the function sugar, shaped so
-  that factory needs nothing changed; React's re-render model is
-  ruled out as fighting the retained core.
+- JSX/TSX: DROPPED (maintainer, 2026-09-01, at build kickoff —
+  amending the design day's "designed for, shipped later"). His
+  reasoning on the record: React Native took JSX because it WAS React
+  extended to native, and that inheritance does not apply here — the
+  sugar should be the most ergonomic plain JS it can be, not a
+  woven-in XML variant on platforms that have no markup at all. The
+  amendment costs nothing structurally: the only constraint
+  JSX-readiness ever imposed (components run once, no virtual DOM,
+  signals update in place) is kaya's own model and stands on its own.
+  React's re-render model stays ruled out as fighting the retained
+  core.
 - Transaction style: AMBIENT (module-level constructors against the
-  implicit current transaction, nested arrow bodies) is the
-  recommendation consistent with the worker and JSX rulings; confirmed
-  at build kickoff.
+  implicit current transaction, nested arrow bodies) — CONFIRMED by
+  the maintainer at build kickoff, 2026-09-01.
 
 THE INTEGER CONTRACT — RULED 2026-08-31 (maintainer, same evening):
 SAFE-INTEGER. Kaya integers are COUNTS AND QUANTITIES, exact to
@@ -9227,8 +9250,25 @@ of the ninth-binding milestone: the spec doc sentence, the root guard
 at the value-decode chokepoint (refusal names the fix: identity as
 strings/tags), a watched negative, and the eight existing bindings
 audited for any path that could emit past 2^53 (none expected).
-Ambient tx style stands as the recommendation, to be confirmed at
-build kickoff.
+STEP ONE BUILT 2026-09-01, on exactly that shape: spec.rs's
+MAX_SAFE_INTEGER carries the contract sentence (a const, outside the
+spec hash, so nothing regenerates), and wire.rs's Reader::value
+refuses a VALUE_I64 past the bound at the one decode chokepoint —
+keys route through the same arm, so an oversized i64 identity is
+refused too, with the fix (strings/tags) named in the sentence. A
+boundary round-trip at ±(2^53−1) plus two should_panic negatives,
+both watched FAILING with the guard deleted from the body (restored
+under shasum). The audit read 940 files under guests/ and bindings/
+for any literal past 2^53: the only two hits are bindings/go
+COMMENTS documenting the signed-index trap, so no binding or guest
+emits one. values_round_trip's I64 extreme moved from i64::MIN to
+the contract's own −MAX_SAFE_INTEGER — the one in-tree consequence,
+and the contract catching it is the guard working. The const is
+pub(crate), found the hard way: a bare pub had cbindgen exporting
+`((1 << 53) - 1)` into kaya.h, where the 1 is a 32-bit int and the
+shift is UB — gen-header's staleness wall refused the sweep's build
+before any gate ran, exactly the on-the-path refusal invariant 3
+asks for.
 
 
 ## DESIGN — THE LINUX OUT-OF-BOX LOOK: EMBEDDED DEFAULT TYPEFACE + GTK CHROME (2026-08-31)

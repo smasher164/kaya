@@ -7,6 +7,20 @@
 //! RECORDS over the existing types, not new types — that is what keeps
 //! eight bindings mechanical.
 
+/// THE SAFE-INTEGER CONTRACT (ruled 2026-08-31, the ninth binding's
+/// gate): a kaya integer is a COUNT or a QUANTITY, exact to
+/// ±(2^53 − 1) in every binding, and the wire refuses one beyond that
+/// at the value-decode chokepoint (wire.rs). Identity — database ids,
+/// timestamps, anything that must survive past 2^53 — rides as a
+/// string or an opaque tag, which already round-trip any width.
+/// The bound is IEEE-754's exact-integer range, so all nine bindings
+/// share one integer semantics with no BigInt asymmetry.
+/// pub(crate): a bare `pub` exports it into kaya.h, where cbindgen's
+/// transliteration `((1 << 53) - 1)` shifts a 32-bit int — UB — and
+/// the unprefixed name lands in every C guest. The wall is the core's
+/// decode; no binding carries this number.
+pub(crate) const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
+
 /// A record field: its name (for generated helper signatures and docs)
 /// and its wire type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
