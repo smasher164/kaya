@@ -87,7 +87,7 @@ Only #1 has ever been called an asset. #2 and #3 have every property of one.
 
 | lane | mechanism | verified? |
 |---|---|---|
-| Android | `adb push` + `chmod 644` + **size check** (`adb shell stat -c %s` vs `wc -c`), then `am start --es KAYA_FONT_FILE` (tools/android/run-emulator.sh:317-376) | yes, size |
+| Android | `adb push` + `chmod 644` + **size check** (`adb shell stat -c %s` vs `wc -c`), then `am start --es KAYA_FONT_FILE` (tools/android/run-emulator.py:712-729, the hash-verified successor) | yes, size |
 | Windows | `scp` every run, deliberately OUTSIDE the deploy stamp, into a repo-mirror path (tools/deploy-win.py:466-486) | no |
 | Linux | nothing — repo bind-mounted at `/work` | n/a |
 | macOS | nothing — runs from the repo root | n/a |

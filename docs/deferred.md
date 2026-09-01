@@ -3680,8 +3680,36 @@ through a wired_scenes() floor, closing two silently-vacuous-on-a-shim
 readers; check-steps' 26 clipboard/picker negatives re-spelled to the
 python body and the module. Validated: gates 50/50, ios lane green
 twice (113/113), matrix ALL PASS 1,390 legs in 631s. Record:
-docs/measurements/run-sim-conversion-2026-08-31.md. run-emulator is
-stage 3.
+docs/measurements/run-sim-conversion-2026-08-31.md.
+
+STAGE 3 (run-emulator) LANDED THE SAME NIGHT: the 123 legs and their
+exceptions (the tablet leg, the remount pairs, the KAYA_ASSET_DIR and
+dark-appearance riders, the per-scene cuts and the identity drop) are
+tools/lib/lanes/android.py; the body is tools/android/run-emulator.py
+on the prelude with the shim pinned and AndroidRecorder in
+flightrec_lane.py; the emulator-state library stays SHELL by the
+plan's §6 (probe-env.sh still sources it) and the runner bridges to
+it, one copy. The rider compared EQUAL on every axis including each
+leg's CALL KIND, and a second rider closed the class stage 2 caught
+one instance of: the old shell scene_script/cut/drop functions,
+materialized from git and executed, produced byte-identical
+KAYA_SELFTEST_SCRIPT payloads to the new script_for() for all 39
+scenes. tools/lib/android-leg-order.py — the deepest parser, ~19
+clause families over shell text — was rewritten whole against the
+python body and the module, 38 watched negatives with counts printed,
+two of which caught its own first draft. Stage 3's finds beyond the
+runner: bench-tables.sh's MATRIX_RUNNERS still pgrep'd the stage-1/2
+.sh basenames the shims no longer answer to (path literals are a
+second reader class beside parsers), and check-build-id's 2b-android
+pair of bare substrings had no negative — it reads the python body
+line-wise now with both halves watched red. Validated: gates 50/50,
+android lane green twice (123/123 both, journal carrying every leg),
+matrix ALL PASS 1,390 legs in 616s with android at 226s — the first
+matrix's five lanes all passed and its one red was check-doc-refs
+refusing the new measurement doc's own pgrep quotation, the recording
+sweep catching the record it rides in. Record:
+docs/measurements/run-emulator-conversion-2026-08-31.md. Stage 4
+(validate-mac, validate-linux, validate-all) then gates.sh remain.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 

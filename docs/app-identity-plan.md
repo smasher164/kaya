@@ -102,7 +102,7 @@ draft could find no runtime call that takes picture bytes. But kaya
 already builds both packages:
 
 - the Android lane builds an installable APK with gradle
-  (`tools/android/run-emulator.sh:1180`), and
+  (`tools/android/run-emulator.py:1756`), and
 - the iOS lane assembles a real `.app` bundle with a real `Info.plist`
   (`tools/ios/run-sim.py:219`, the `make_bundle` function, filling in
   `tools/ios/Info.plist.in`).
@@ -216,7 +216,7 @@ repo root that every guest knows, and a `KAYA_FONT_FILE` environment
 variable that overrides it for a runner whose guest cannot see the repo
 (`guests/python/typeface.py:55` is one of the eight). Three staging
 lines carry that file to the three places that are not the repo: pushed
-to each Android device (`tools/android/run-emulator.sh:354`), copied to
+to each Android device (`tools/android/run-emulator.py:712`), copied to
 the Windows machine at the mirrored path
 (`tools/deploy-win.py:484`), and left at its default inside the Linux
 container because the container mounts the repo
@@ -710,7 +710,7 @@ it.
   ground that no phone has a runtime call taking picture bytes. That is
   true and it is the wrong conclusion, because the phones are the two
   platforms whose packaging the repo ALREADY builds: gradle makes an
-  installable APK (tools/android/run-emulator.sh:1180) and the iOS lane
+  installable APK (tools/android/run-emulator.py:1756) and the iOS lane
   assembles a real bundle (tools/ios/run-sim.py:219). Both become
   readers of the declared identity now, which is what puts a real
   launcher icon on both phones. The rest of this bullet is the reasoning
@@ -1055,7 +1055,7 @@ unchanged.
 6. The phones' packaging readers, per ruling 3, which are the first two
    build-time consumers of the asset: the APK gains an icon resource
    plus `android:icon` and `android:label`
-   (tools/android/run-emulator.sh:1180 builds it), and the iOS bundle
+   (tools/android/run-emulator.py:1756 builds it), and the iOS bundle
    gains the icon plus `CFBundleDisplayName` and the icon keys
    (tools/ios/run-sim.py:219 assembles it, from
    tools/ios/Info.plist.in). Android's runtime Recents route stays

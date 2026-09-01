@@ -90,7 +90,9 @@ esac
 # LANES_DIR is an mktemp that dies with it), so the two causes are read
 # two different ways and answered in two different sentences.
 
-MATRIX_RUNNERS="validate-all.sh validate-mac.sh validate-linux.sh deploy-win.sh run-sim.sh run-emulator.sh"
+# The converted runners run as python bodies (the .sh beside each is an
+# exec shim), so pgrep must look for the .py names.
+MATRIX_RUNNERS="validate-all.sh validate-mac.sh validate-linux.sh deploy-win.py run-sim.py run-emulator.py"
 
 if [ -n "${KAYA_MATRIX_GATES_TOKEN:-}" ]; then
     echo "$0: refusing — this shell carries KAYA_MATRIX_GATES_TOKEN, which" >&2

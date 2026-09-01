@@ -94,7 +94,7 @@ with scratch_dir("check-build-id-") as tmp:
         return False
 
     for lane_rel in ["tools/validate-mac.sh", "tools/linux/run-suites.sh",
-                     "tools/ios/run-sim.py", "tools/android/run-emulator.sh",
+                     "tools/ios/run-sim.py", "tools/android/run-emulator.py",
                      "tools/deploy-win.py", "tools/swiftui/build-dylib.sh"]:
         if not lane_verifies((ROOT / lane_rel).read_text(encoding="utf-8")):
             fail(f"{lane_rel} builds the core but never verifies what it "
@@ -140,15 +140,43 @@ with scratch_dir("check-build-id-") as tmp:
                  f"it compiles")
 
     # 2b-android. The Compose interpreter, same contract: the lane must
-    # WRITE the marker before gradle and ASK the apk afterwards.
-    emulator = (ROOT / "tools/android/run-emulator.sh").read_text(
+    # WRITE the marker before gradle and ASK the apk afterwards. The
+    # runner is python since the runner conversion; the verify is read
+    # line-wise like clause 2, and both halves are watched red below —
+    # this pair had no negative while it read the shell body, and the
+    # crossing is exactly when a bare-substring clause goes quiet.
+    def verifies_compose(text):
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("#"):
+                continue
+            if "--component" in s and "compose" in s:
+                return True
+        return False
+
+    emulator = (ROOT / "tools/android/run-emulator.py").read_text(
         encoding="utf-8")
     if "kaya_write_compose_marker" not in emulator:
-        fail("run-emulator.sh does not bake a build id into the Compose "
+        fail("run-emulator.py does not bake a build id into the Compose "
              "interpreter")
-    if "component compose" not in emulator:
-        fail("run-emulator.sh never verifies the apk it installs "
+    if not verifies_compose(emulator):
+        fail("run-emulator.py never verifies the apk it installs "
              "(--component compose)")
+    unmarked = g.doctor("2b-android's marker writes deleted", emulator,
+                        r"kaya_write_compose_marker", "kaya_write_nothing",
+                        want=5)
+    if "kaya_write_compose_marker" in unmarked:
+        fail("self-test failed: the marker-write removal left a call "
+             "behind")
+    uncomposed = g.doctor("2b-android's compose verify deleted", emulator,
+                          r'"--component", "compose"',
+                          '"--frobnicate", "compose"', want=1)
+    if not verifies_compose(emulator):
+        fail("self-test failed: the runner's real compose verify is "
+             "invisible to the clause")
+    if verifies_compose(uncomposed):
+        fail("self-test failed: a runner with no compose verify passed "
+             "the clause")
 
     # 2c. The built interpreter itself, when one is present.
     dylib = ROOT / "target/swiftui/libkaya_swiftui.dylib"

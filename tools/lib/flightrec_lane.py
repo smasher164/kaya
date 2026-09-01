@@ -390,3 +390,28 @@ class IosRecorder(LaneRecorder):
                               "booted"])
                 self.bundle_report(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
+
+
+class AndroidRecorder(LaneRecorder):
+    """The android half: the failure-path bundle is the leg's own log
+    plus the adb device roster — an android leg that failed because its
+    emulator went offline reads exactly like one that failed an
+    assertion, and only the roster tells them apart."""
+
+    def __init__(self, root):
+        super().__init__("android", root)
+
+    def android_leg(self, leg, verdict, secs, log, out=None):
+        """The one per-leg entry point: the journal takes every leg,
+        pass or fail; the bundle is collected on a failure alone."""
+        if not self.ok:
+            return
+        bundle, fail = None, ""
+        if verdict != "PASS":
+            bundle = self.bundle(leg)
+            fail = self.fail_sentence(log)
+            if bundle is not None:
+                self.adopt(bundle, "leg-log", log)
+                self.section(bundle, "devices", ["adb", "devices", "-l"])
+                self.bundle_report(bundle, out=out)
+        self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")

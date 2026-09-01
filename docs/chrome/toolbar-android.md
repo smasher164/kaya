@@ -26,7 +26,7 @@ All **[MEASURED]** from the tree and this machine's gradle cache.
 | material-icons core/extended | **1.7.8** (frozen; last release) | `android/kaya/build.gradle.kts:96-97 (gone)` |
 | activity-compose | **1.9.3** | `android/kaya/build.gradle.kts:52` |
 | AGP / Kotlin | **8.7.3 / 2.0.21** | `android/build.gradle.kts` |
-| emulator system image | **`system-images;android-35;google_apis;arm64-v8a`** (Android 15) | `tools/android/run-emulator.sh:70` |
+| emulator system image | **`system-images;android-35;google_apis;arm64-v8a`** (Android 15) | `tools/android/run-emulator.py:114` |
 | manifest theme | `@android:style/Theme.Material[.Light][.NoActionBar]`, day/night pair — **platform theme, not AppCompat, not a Material Components theme** | `android/kaya/src/main/res/values/themes.xml`, `values-night/themes.xml` |
 
 The three validation apps differ: the Rust guest app uses
@@ -322,7 +322,7 @@ what kaya draws today.
 
 `targetSdk = 35` **[MEASURED: android/milestone2/build.gradle.kts:15]**
 running on `system-images;android-35` **[MEASURED:
-tools/android/run-emulator.sh:70]** is precisely the enforcement
+tools/android/run-emulator.py:114]** is precisely the enforcement
 combination: *"Apps are edge-to-edge by default on devices running
 Android 15 if the app is targeting Android 15 (API level 35)"*, the
 status bar is transparent, *"the top offset is disabled so content

@@ -28,6 +28,7 @@ import tempfile
 # since the runner conversion (docs/runner-conversion-plan.md §2); the
 # clauses that used to regex tools/deploy-win.sh's text import what the
 # runner imports.
+from lanes import android as android_lane
 from lanes import ios as ios_lane
 from lanes import win as win_lane
 
@@ -1648,10 +1649,10 @@ for p in STEPS:
 #
 # Every scene must be WIRED into every platform runner, not merely
 # registered: a scene can exist, parse and be registered yet run
-# nowhere. EVERY runner is held to a STRUCTURAL signature — mac, linux
-# and windows to their leg spellings, android to its `run_apk <scene>-`
-# blocks, iOS to membership in the IOS_*_SCENES lists its legs are
-# generated from. NEVER the bare name: the name-level check this
+# nowhere. EVERY runner is held to a STRUCTURAL signature — mac and
+# linux to their leg spellings, windows, iOS and android to membership
+# in the lane modules their legs are generated from. NEVER the bare
+# name: the name-level check this
 # replaced was satisfied by a COMMENT (the only `background` in
 # run-sim.sh sat in a sentence about shell jobs) and by unrelated CODE
 # (`window` inside resize_window), so four pairs claimed wiring that
@@ -1675,19 +1676,6 @@ for p in STEPS:
 # `undo` that held only the `undo` legs off a runner would leave no
 # tree able to satisfy both gates. tools/lib/scene-features.py derives
 # the pairs and is the SAME predicate the cross-check uses.
-def runner_list_scenes(rel, alternation):
-    """The scene-halves of every word in the VAR="..." assignments
-    matching `alternation` (`listdetail:split` yields `listdetail`)."""
-    out = []
-    pat = re.compile(r'^\s*(?:' + alternation + r')="([^"]*)"')
-    for line in read_rel(rel).splitlines():
-        m = pat.match(line)
-        if m:
-            out.extend(entry.split(":")[0]
-                       for entry in m.group(1).split())
-    return out
-
-
 def wired():
     r = subprocess.run(
         ["python3", "tools/lib/scene-features.py", "--mode", "exempt"],
@@ -1706,18 +1694,22 @@ def wired():
     ios_wired = sorted(ios_lane.wired_scenes())
     ios_declared = sorted(set(ios_lane.DESKTOP_ONLY_SCENES)
                           | set(ios_lane.UNWIRED_SCENES))
-    android_declared = runner_list_scenes(
-        "tools/android/run-emulator.sh",
-        "ANDROID_DESKTOP_ONLY_SCENES|ANDROID_UNWIRED_SCENES")
+    android_wired = sorted(android_lane.wired_scenes())
+    android_declared = sorted(set(android_lane.DESKTOP_ONLY_SCENES)
+                              | set(android_lane.UNWIRED_SCENES))
     # A reader that reads nothing agrees with everything.
     if not ios_wired:
         print("check-steps: wired() read NO scenes out of the ios lane "
               "module's suite lists — they moved, and this clause "
               "is blind", file=sys.stderr)
         return 1
+    if not android_wired:
+        print("check-steps: wired() read NO scenes out of the android "
+              "lane module's suite lists — they moved, and this "
+              "clause is blind", file=sys.stderr)
+        return 1
 
     roster = {p.stem for p in STEPS}
-    android_text = read_rel("tools/android/run-emulator.sh")
     failed = 0
     for decl in ios_declared:
         if decl not in roster:
@@ -1731,13 +1723,13 @@ def wired():
             failed = 1
     for decl in android_declared:
         if decl not in roster:
-            print(f'check-steps: run-emulator.sh declares "{decl}" '
-                  f"off, but no such scene exists", file=sys.stderr)
+            print(f'check-steps: the android lane module declares '
+                  f'"{decl}" off, but no such scene exists',
+                  file=sys.stderr)
             failed = 1
-        if re.search(r"run_apk\s+" + re.escape(decl) + "-",
-                     android_text):
-            print(f'check-steps: run-emulator.sh declares "{decl}" off '
-                  f"AND carries a run_apk leg for it — one of the two "
+        if decl in android_wired:
+            print(f'check-steps: the android lane module declares '
+                  f'"{decl}" off AND a suite lists it — one of the two '
                   f"is stale", file=sys.stderr)
             failed = 1
 
@@ -1745,12 +1737,12 @@ def wired():
         "tools/validate-mac.sh": read_rel("tools/validate-mac.sh"),
         "tools/linux/run-suites.sh":
             read_rel("tools/linux/run-suites.sh"),
-        # The windows and ios rosters are read from the lane MODULES,
-        # not text; the keys match scene-features.py's RUNNERS rows so
-        # the depth-stub exemptions line up.
+        # The windows, ios and android rosters are read from the lane
+        # MODULES, not text; the keys match scene-features.py's RUNNERS
+        # rows so the depth-stub exemptions line up.
         "tools/lib/lanes/win.py": "",
         "tools/lib/lanes/ios.py": "",
-        "tools/android/run-emulator.sh": android_text,
+        "tools/lib/lanes/android.py": "",
     }
     win_scenes = {win_lane.scene_lang(leg)[0] for leg in win_lane.legs()}
     for p in STEPS:
@@ -1765,19 +1757,15 @@ def wired():
                           f"the ios lane module and is not declared "
                           f"off ({runner})", file=sys.stderr)
                     failed = 1
-            elif runner == "tools/android/run-emulator.sh":
-                # milestone2's legs drop the scene prefix (they ARE the
-                # unprefixed originals); its check stays coarse.
-                if scene == "milestone2":
-                    ok = scene in text
-                else:
-                    ok = (re.search(r"run_apk\s+" + re.escape(scene)
-                                    + "-", text) is not None
-                          or scene in android_declared)
+            elif runner == "tools/lib/lanes/android.py":
+                # milestone2 needs no special case here: the bare suite
+                # legs map to it through the module's own scene_of.
+                ok = (scene in android_wired
+                      or scene in android_declared)
                 if not ok:
-                    print(f'check-steps: scene "{scene}" has no '
-                          f"run_apk leg in {runner} and is not "
-                          f"declared off", file=sys.stderr)
+                    print(f'check-steps: scene "{scene}" has no leg in '
+                          f"the android lane module and is not "
+                          f"declared off ({runner})", file=sys.stderr)
                     failed = 1
             elif runner == "tools/lib/lanes/win.py":
                 if scene not in win_scenes:
@@ -2041,11 +2029,11 @@ if subprocess.run(["python3", "tools/lib/scene-features.py", "--mode",
 # root borrows tools/scenes, scene.rs and hand-rolled-stubs.py from
 # this tree and synthesizes only the runner and backend files, so the
 # derivation under test is the derivation that ships.
-def feature_selftest(legs, stub, extra=""):
+def feature_selftest(scene, stub, extra=""):
     with tempfile.TemporaryDirectory() as td:
         d = pathlib.Path(td)
         for sub in ("tools/lib/lanes", "tools/linux", "tools/ios",
-                    "tools/android", "crates/kaya/src", "swift",
+                    "crates/kaya/src", "swift",
                     "crates/kaya/src/winui",
                     "android/kaya/src/main/kotlin/dev/kaya"):
             (d / sub).mkdir(parents=True, exist_ok=True)
@@ -2072,8 +2060,13 @@ def feature_selftest(legs, stub, extra=""):
         if extra:
             (d / "tools/scenes/zzprobe.steps").write_text(
                 f'expect label#0 "x"\n{extra}\n', encoding="utf-8")
-        (d / "tools/android/run-emulator.sh").write_text(
-            legs + "\n", encoding="utf-8")
+        # The android roster is a lanes module too: the fixture wires
+        # exactly one real scene, padded past the import floor.
+        (d / "tools/lib/lanes/android.py").write_text(
+            "def wired_scenes():\n"
+            f"    return {{{scene!r}}} | "
+            "{f'zzfixture{i}' for i in range(11)}\n",
+            encoding="utf-8")
         (d / "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
          ).write_text(stub + "\n", encoding="utf-8")
         r = subprocess.run(
@@ -2089,8 +2082,7 @@ def feature_selftest(legs, stub, extra=""):
 #    is not the problem, and the whole defect was that nobody was
 #    looking at todos.
 rc, selftest_out = feature_selftest(
-    "run_apk todos-compose apk act todos",
-    'internal fun x(): Nothing = depthStub("undo")')
+    "todos", 'internal fun x(): Nothing = depthStub("undo")')
 if rc == 0 or not re.search(
         r'runs "todos" legs[\s\S]*stubs "undo"[\s\S]*todos\.steps:',
         selftest_out):
@@ -2102,13 +2094,12 @@ if rc == 0 or not re.search(
 #    interim state of a depth slice is inexpressible and this clause is
 #    a wall across the only road out of it.
 rc, _ = feature_selftest(
-    "run_apk menus-compose apk act menus",
-    'internal fun x(): Nothing = depthStub("undo")')
+    "menus", 'internal fun x(): Nothing = depthStub("undo")')
 if rc != 0:
     selftest_fail("a stub with no legs wired was refused")
 # 3. ...and with no stub at all, the same legs must PASS — otherwise 1
 #    is failing for some reason that has nothing to do with the stub.
-rc, _ = feature_selftest("run_apk todos-compose apk act todos", "")
+rc, _ = feature_selftest("todos", "")
 if rc != 0:
     selftest_fail("todos legs on an unstubbed backend were refused")
 # 4/5. THE CLIPBOARD ROWS FIRING CROSS-SCENE, which nothing in the tree
@@ -2120,7 +2111,7 @@ if rc != 0:
 for probe in ('expect_clipboard text "x"', 'menu_activate '
               '"Edit>Paste"'):
     rc, selftest_out = feature_selftest(
-        "run_apk zzprobe-compose apk act zzprobe",
+        "zzprobe",
         'internal fun x(): Nothing = depthStub("clipboard")', probe)
     if rc == 0 or not re.search(
             r'runs "zzprobe" legs[\s\S]*stubs "clipboard"',
@@ -2256,7 +2247,7 @@ if out:
 def sweep_c_floor():
     RUNNERS = ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
                "tools/deploy-win.py", "tools/ios/run-sim.py",
-               "tools/android/run-emulator.sh")
+               "tools/android/run-emulator.py")
     makefile = read_rel("guests/c/Makefile")
     m = re.search(r"^SCENES\s*:?=\s*(.+)$", makefile, re.M)
     if not m:
@@ -2606,50 +2597,55 @@ if out:
 # A drain bracket on top would exclude nothing, and a gate satisfiable
 # without exercising the real thing is a bug in the gate (invariant
 # 4). So this checks the two things that CAN go wrong: a clipboard leg
-# that stops riding run_apk (the tablet is the live temptation — one
-# device, no lock), and a run_apk that stops claiming a device.
-def clipboard_device(text, path):
+# that stops riding the slot-locked pool (the tablet is the live
+# temptation — one device, no lock), and a worker that stops claiming
+# a device. The roster is the lane MODULE's since the runner
+# conversion; the pool mechanics are read out of the python body,
+# exactly the ios clause's shape below.
+def clipboard_device(text, path, mod):
     bad = []
-    seen = 0
-    for n, line in enumerate(text.splitlines(), 1):
-        m = re.match(r"([A-Za-z_][A-Za-z_0-9]*)\s+"
-                     r"(clipboard-[a-z0-9]+)\b", line.strip())
-        if m is None:
-            continue
-        seen += 1
-        if m.group(1) != "run_apk":
-            bad.append(f"{path}:{n}: {m.group(2)} rides {m.group(1)}, "
-                       f"not run_apk — only run_apk claims an emulator "
-                       f"for the whole leg, and two clipboard legs on "
-                       f"one device share that device clipboard")
-    if seen == 0:
+    clip_legs = [leg for leg in mod.legs()
+                 if mod.scene_of(leg) == "clipboard"]
+    if not clip_legs:
         bad.append(f"{path}: no clipboard leg found (the scene must "
                    f"stay wired)")
-
-    start = text.find("run_apk() {")
-    end = text.find("run_apk_tablet() {")
-    if start < 0 or end < start:
-        bad.append(f"{path}: run_apk()/run_apk_tablet() are not where "
-                   f"this gate looks — the runner shape moved and the "
-                   f"check went vacuous")
-    else:
-        body = text[start:end]
-        for claim in ('mkdir "$LEGS_DIR/.dev-', 'rmdir "$LEGS_DIR/.dev-'):
-            if claim in body:
-                continue
-            bad.append(f"{path}: run_apk no longer does `{claim}...`, "
-                       f"so a leg no longer holds its emulator alone — "
-                       f"on this lane that lock IS the clipboard "
-                       f"exclusion (docs/clipboard-plan.md §0d, §7 "
-                       f"finding 4)")
+    for leg in clip_legs:
+        if mod.FLAGS.get(leg, {}).get("tablet"):
+            bad.append(f"{path}: {leg} rides the tablet — the one "
+                       f"device with no slot lock, so two clipboard "
+                       f"legs on it would share that device clipboard; "
+                       f"only a pool leg claims an emulator for the "
+                       f"whole leg")
+    worker = py_function_body(text, "_leg_worker", path, bad)
+    claim = py_function_body(text, "_claim_device", path, bad)
+    if worker and ("_claim_device()" not in worker
+                   or "_release_device(slot)" not in worker):
+        bad.append(f"{path}: _leg_worker no longer claims and releases "
+                   f"a device slot, so a leg no longer holds its "
+                   f"emulator alone — on this lane that lock IS the "
+                   f"clipboard exclusion (docs/clipboard-plan.md §0d, "
+                   f"§7 finding 4)")
+    if claim and "_dev_slots.pop" not in claim:
+        bad.append(f"{path}: _claim_device no longer takes a slot from "
+                   f"the device pool, so a leg no longer holds its "
+                   f"emulator alone — on this lane that lock IS the "
+                   f"clipboard exclusion (docs/clipboard-plan.md §0d, "
+                   f"§7 finding 4)")
     return bad
 
 
-# The guard guards itself in the ANDROID spelling, and on the REASON
-# rather than the exit code: a negative test whose failure comes from
-# somewhere else proves nothing about the clause it covers.
-def android_device_selftest(sample, want, label):
-    out = clipboard_device(sample, "-")
+ANDROID_RUNNER_TEXT = read_rel("tools/android/run-emulator.py")
+ANDROID_LANE_TEXT = read_rel("tools/lib/lanes/android.py")
+
+
+# The guard guards itself in the ANDROID spelling, on the REAL runner
+# and lane module, and on the REASON rather than the exit code: a
+# negative test whose failure comes from somewhere else proves nothing
+# about the clause it covers. Counts printed; an unchanged copy is a
+# failed test. The executions sit with the iOS negatives below, after
+# load_lane_copy is defined.
+def android_device_selftest(sample, want, label, mod):
+    out = clipboard_device(sample, "-", mod)
     if not out:
         selftest_fail(f"{label} passed")
     if not any(want in b for b in out):
@@ -2657,37 +2653,12 @@ def android_device_selftest(sample, want, label):
                       + "\n".join(out))
 
 
-ANDROID_POOL = ('run_apk() {\nif mkdir "$LEGS_DIR/.dev-$i"; then\nfi\n'
-                'rmdir "$LEGS_DIR/.dev-$slot"\n}\n'
-                'run_apk_tablet() {\n')
-# A clipboard leg on the lockless tablet must fail...
-android_device_selftest(
-    "run_apk_tablet clipboard-compose apk act clipboard\n"
-    + ANDROID_POOL, "not run_apk", "a clipboard leg on the tablet")
-# ...a run_apk that stopped claiming a device must fail...
-android_device_selftest(
-    "run_apk clipboard-compose apk act clipboard\nrun_apk() {\n"
-    'serial="${SERIALS[$i]}"\n}\nrun_apk_tablet() {\n',
-    "holds its emulator alone", "an unlocked run_apk")
-# ...an unwired scene must fail...
-android_device_selftest(ANDROID_POOL, "no clipboard leg found",
-                        "a runner with no clipboard leg")
-# ...and the well-formed shape must PASS, or the three above are
-# failing for a reason that has nothing to do with what they claim to
-# test.
-if clipboard_device("run_apk clipboard-compose apk act clipboard\n"
-                    + ANDROID_POOL, "-"):
-    selftest_fail("a well-formed android clipboard leg was refused")
-
-out = clipboard_device(read_rel("tools/android/run-emulator.sh"),
-                       "tools/android/run-emulator.sh")
-if out:
-    print("check-steps: an android clipboard leg must own its emulator "
-          "for the whole leg (docs/clipboard-plan.md §0d, §7 finding 4 "
-          "— one clipboard per emulator session, and the slot lock is "
-          "this lane's drain):", file=sys.stderr)
-    print("\n".join(out), file=sys.stderr)
-    status = 1
+def android_applied(hits, label, want=1):
+    print(f"check-steps: android self-test {label} applied {hits} "
+          f"substitution(s)")
+    if hits != want:
+        selftest_fail(f"{label} applied {hits} times, want {want} — "
+                      f"an unchanged copy cannot prove the rule fires")
 
 
 # THE iOS LANE IS THE ANDROID SHAPE, FOR THE ANDROID REASON: two
@@ -3275,6 +3246,49 @@ if out:
     print("\n".join(out), file=sys.stderr)
     status = 1
 
+# The android clipboard clause's negatives, same discipline. A
+# clipboard leg moved onto the lockless tablet must fail...
+doc, hits = sub_count(r"(?m)^FLAGS = \{\n",
+                      'FLAGS = {\n    "clipboard-compose": '
+                      '{"tablet": True},\n', ANDROID_LANE_TEXT)
+android_applied(hits, "the tablet-flag perturbation")
+android_device_selftest(ANDROID_RUNNER_TEXT, "rides the tablet",
+                        "a clipboard leg on the tablet",
+                        load_lane_copy(doc))
+# ...a claim that stopped taking a slot from the pool must fail...
+doc, hits = sub_count(r"_dev_slots\.pop\(0\)", "0",
+                      ANDROID_RUNNER_TEXT)
+android_applied(hits, "the slot-lock perturbation")
+android_device_selftest(doc, "no longer takes a slot",
+                        "an unlocked device claim", android_lane)
+# ...a worker that stopped releasing its slot must fail...
+doc, hits = sub_count(r"(?m)^ {16}_release_device\(slot\)$",
+                      "                pass", ANDROID_RUNNER_TEXT)
+android_applied(hits, "the claim/release perturbation")
+android_device_selftest(doc, "no longer claims and releases",
+                        "a worker without the slot bracket",
+                        android_lane)
+# ...an unwired scene must fail, which takes EVERY suite's clipboard
+# leg away — 3 today, STATED so a fourth suite lands loudly.
+doc, hits = sub_count(r'"clipboard-(?:compose|jvm|go)", ?', "",
+                      ANDROID_LANE_TEXT)
+android_applied(hits, "the clipboard roster removal", 3)
+android_device_selftest(ANDROID_RUNNER_TEXT, "no clipboard leg found",
+                        "a lane with no clipboard leg",
+                        load_lane_copy(doc))
+
+# The accept direction is the real check itself: a rule that refused
+# everything would fail here rather than pass quietly.
+out = clipboard_device(ANDROID_RUNNER_TEXT,
+                       "tools/android/run-emulator.py", android_lane)
+if out:
+    print("check-steps: an android clipboard leg must own its emulator "
+          "for the whole leg (docs/clipboard-plan.md §0d, §7 finding 4 "
+          "— one clipboard per emulator session, and the slot lock is "
+          "this lane's drain):", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+
 
 # EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK
 # hosts every scene, so the leg selects one through `--es
@@ -3287,55 +3301,56 @@ if out:
 # THREE APKs, EACH WITH ITS OWN SELECTOR, so the pair is an argument
 # rather than a constant.
 #
-# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE: if the activity
-# regex stops matching the runner, `selected` is empty, `missing` is
-# empty, and the clause PASSES having compared nothing.
-def android_scenes(runner_text, runner, guest_text, guest, activity,
-                   arm, exempt=()):
-    exempt = set(exempt)
-    selected = set(re.findall(activity + r" ([a-z0-9]+)", runner_text))
+# THE FLOOR IS THE ANTI-VACUITY CLAUSE: the selection comes from the
+# lane module's suite roster now, and a moved table answers few or no
+# scenes — a census that reads nothing agrees with everything.
+def android_selected(mod, suite):
+    """The KAYA_SELFTEST value each of a suite's legs passes — the
+    bare suite legs pass "1" (the unprefixed milestone2 arm)."""
+    return {"1" if leg in mod.SUITES else mod.scene_of(leg)
+            for leg in mod.suite_legs(suite)}
+
+
+def android_scenes(selected, source, guest_text, guest, arm,
+                   exempt=()):
+    if len(selected) < 5:
+        return [f"{source} selects {len(selected)} scene(s) for this "
+                f"suite — a roster that small is the module table "
+                f"moved, and this clause compared nothing"]
     armed = set(re.findall(arm, guest_text, re.M))
-    if not selected:
-        return [f"{runner} launches no scene through {activity} — the "
-                f"activity pattern matched nothing, so this clause "
-                f"compared nothing"]
-    missing = sorted(selected - armed - exempt)
-    return [f"{runner} selects scene {name!r}, which {guest} has no "
+    missing = sorted(set(selected) - armed - set(exempt))
+    return [f"{source} selects scene {name!r}, which {guest} has no "
             f"arm for" for name in missing]
 
 
 # The guard guards itself in every direction: an unarmed selector must
-# fail, an activity pattern matching nothing must fail, and each ARM
-# SHAPE gets its own negative — a `match` arm and a map key are
-# different text.
+# fail, an emptied selection must fail, and each ARM SHAPE gets its
+# own negative — a `match` arm and a map key are different text.
 if not android_scenes(
-        "dev.kaya.milestone2/.MainActivity ghostscene\n", "-",
-        'Ok("entry") => entry::app(ctx),\n', "-",
-        r"dev\.kaya\.milestone2/\.MainActivity",
-        r'Ok\("([a-z0-9]+)"\)'):
+        {"entry", "ghostscene", "zzf1", "zzf2", "zzf3"}, "-",
+        'Ok("entry") => entry::app(ctx),\n'
+        'Ok("zzf1") | Ok("zzf2") | Ok("zzf3") => entry::app(ctx),\n',
+        "-", r'Ok\("([a-z0-9]+)"\)'):
     selftest_fail("an unarmed android selector passed")
 if not android_scenes(
-        "dev.kaya.milestone2/.MainActivity ghostscene\n", "-",
-        'Ok("entry") => entry::app(ctx),\n', "-",
-        r"dev\.kaya\.nosuchmodule/\.MainActivity",
+        set(), "-", 'Ok("entry") => entry::app(ctx),\n', "-",
         r'Ok\("([a-z0-9]+)"\)'):
-    selftest_fail("an activity pattern matching NOTHING passed — the "
-                  "clause compared nothing and said OK")
+    selftest_fail("an EMPTY selection passed — the clause compared "
+                  "nothing and said OK")
 if not android_scenes(
-        "dev.kaya.milestone2go/.MainActivity ghostscene\n", "-",
+        {"entry", "ghostscene", "zzf1", "zzf2", "zzf3"}, "-",
         'var scenes = map[string]func() *kaya.App{\n'
-        '\t"entry": entry.App,\n}\n', "-",
-        r"dev\.kaya\.milestone2go/\.MainActivity",
+        '\t"entry": entry.App,\n\t"zzf1": entry.App,\n'
+        '\t"zzf2": entry.App,\n\t"zzf3": entry.App,\n}\n', "-",
         r'^\t"([a-z0-9]+)":'):
     selftest_fail("an unarmed GO scene table passed — the map-key "
                   "pattern is not reading the table")
 
-emulator_text = read_rel("tools/android/run-emulator.sh")
 out = android_scenes(
-    emulator_text, "tools/android/run-emulator.sh",
+    android_selected(android_lane, "compose"),
+    "tools/lib/lanes/android.py",
     read_rel("guests/rust/milestone2_android.rs"),
-    "guests/rust/milestone2_android.rs",
-    r"dev\.kaya\.milestone2/\.MainActivity", r'Ok\("([a-z0-9]+)"\)')
+    "guests/rust/milestone2_android.rs", r'Ok\("([a-z0-9]+)"\)')
 if out:
     print("check-steps: an android leg selects a scene the APK's guest "
           "cannot run:", file=sys.stderr)
@@ -3346,13 +3361,12 @@ if out:
 # unarmed name does not die — it SILENTLY RUNS MILESTONE2. "1" is
 # exempt because it IS that default arm, reached deliberately.
 out = android_scenes(
-    emulator_text, "tools/android/run-emulator.sh",
+    android_selected(android_lane, "jvm"),
+    "tools/lib/lanes/android.py",
     read_rel("android/milestone2kt/src/main/kotlin/dev/kaya/"
              "milestone2kt/MainActivity.kt"),
     "android/milestone2kt/src/main/kotlin/dev/kaya/milestone2kt/"
-    "MainActivity.kt",
-    r"dev\.kaya\.milestone2kt/\.MainActivity", r'"([a-z0-9]+)" ->',
-    exempt=("1",))
+    "MainActivity.kt", r'"([a-z0-9]+)" ->', exempt=("1",))
 if out:
     print("check-steps: an android JVM leg selects a scene "
           "MainActivity.kt has no arm for — it would run milestone2 "
@@ -3365,9 +3379,10 @@ if out:
 # TABLE SERVES THE DESKTOPS since the guests collapsed into one
 # binary, and the clause below reads it from the other three runners.
 out = android_scenes(
-    emulator_text, "tools/android/run-emulator.sh",
+    android_selected(android_lane, "go"),
+    "tools/lib/lanes/android.py",
     read_rel("guests/go/cmd/scenes.go"), "guests/go/cmd/scenes.go",
-    r"dev\.kaya\.milestone2go/\.MainActivity", r'^\t"([a-z0-9]+)":')
+    r'^\t"([a-z0-9]+)":')
 if out:
     print("check-steps: an android Go leg selects a scene the Go "
           "guest does not carry (guests/go/cmd/scenes.go's table):",

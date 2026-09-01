@@ -127,11 +127,11 @@ PLATFORM_LAUNCHES = [
 GATE_LAUNCH = "run_lane gates nice -n 10 tools/gates.sh"
 ANDROID_PID = 'android_lane_pid="${lane_pids[${#lane_pids[@]} - 1]}"'
 ANDROID_WAIT = 'wait "$android_lane_pid" 2>/dev/null || true'
-ANDROID_RUNNER_POOL = 'POOL="${KAYA_ANDROID_EMUS:-4}"'
+# The runners are python since the runner conversion; the probe stays
+# shell, so the two spellings of each one default diverge in language
+# and these clauses hold them BOTH.
+ANDROID_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_ANDROID_EMUS", "4"))'
 ANDROID_PROBE_POOL = 'ANDROID_POOL="${KAYA_ANDROID_EMUS:-4}"'
-# The runner is python since the runner conversion; the probe stays
-# shell, so the two spellings of the one three-simulator default
-# diverge in language and this clause holds them BOTH.
 IOS_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_IOS_SIMS", "3"))'
 IOS_PROBE_POOL = 'IOS_POOL="${KAYA_IOS_SIMS:-3}"'
 
@@ -170,7 +170,7 @@ def matrix_parallel_problem(text):
 
 def android_pool_problem(runner, probe):
     if runner.count(ANDROID_RUNNER_POOL) != 1:
-        return ("tools/android/run-emulator.sh must default to the guarded "
+        return ("tools/android/run-emulator.py must default to the guarded "
                 "four-phone Android pool")
     if probe.count(ANDROID_PROBE_POOL) != 1:
         return ("tools/probe-env.sh must probe the same guarded four-phone "
@@ -196,16 +196,17 @@ LANE_RUNNERS = {
     "tools/validate-mac.sh": ("validate-mac", "mac"),
     "tools/ios/run-sim.py": ("run-sim", "ios"),
     "tools/linux/run-suites.sh": ("run-suites", "linux"),
-    "tools/android/run-emulator.sh": ("run-emulator", "android"),
-    # Python since the runner conversion; the .sh beside it is the
+    # Python since the runner conversion; the .sh beside each is the
     # pinned shim (check-python rule 9), so the contract reads the body.
+    "tools/android/run-emulator.py": ("run-emulator", "android"),
     "tools/deploy-win.py": ("deploy-win", "windows"),
 }
 
 # A converted runner records through tools/lib/flightrec_lane.py rather
 # than the sourced shell library: the lane's recorder CLASS declares its
 # lane name once, in its constructor, and every journaled leg rides it.
-PY_RECORDERS = {"windows": "WinRecorder", "ios": "IosRecorder"}
+PY_RECORDERS = {"windows": "WinRecorder", "ios": "IosRecorder",
+                "android": "AndroidRecorder"}
 
 
 def lane_contract_problems(texts, lib, pylib):
@@ -307,7 +308,7 @@ flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
 flightrec_pylib_text = (root / "tools" / "lib" / "flightrec_lane.py"
                         ).read_text(encoding="utf-8")
 matrix_text = (root / "tools" / "validate-all.sh").read_text(encoding="utf-8")
-android_text = (root / "tools" / "android" / "run-emulator.sh").read_text(
+android_text = (root / "tools" / "android" / "run-emulator.py").read_text(
     encoding="utf-8")
 ios_text = (root / "tools" / "ios" / "run-sim.py").read_text(encoding="utf-8")
 probe_text = (root / "tools" / "probe-env.sh").read_text(encoding="utf-8")
@@ -441,7 +442,7 @@ elif matrix_parallel_problem(doctored) is None:
 # N8 — restoring the measured-red three-phone pool must be reported.
 doctored, n = re.subn(
     re.escape(ANDROID_RUNNER_POOL),
-    'POOL="${KAYA_ANDROID_EMUS:-3}"',
+    'POOL = int(os.environ.get("KAYA_ANDROID_EMUS", "3"))',
     android_text,
     count=1,
 )

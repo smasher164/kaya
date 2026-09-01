@@ -40,13 +40,13 @@ import sys
 RUNNERS = [
     ("tools/validate-mac.sh", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    # The windows and ios rosters are DATA since the runner conversion:
-    # a tools/lib/lanes/ row is IMPORTED (lane_scenes below), never
-    # regexed — a regex over a module whose lists hold bare scene names
-    # would agree with everything.
+    # The windows, ios and android rosters are DATA since the runner
+    # conversion: a tools/lib/lanes/ row is IMPORTED (lane_scenes
+    # below), never regexed — a regex over a module whose lists hold
+    # bare scene names would agree with everything.
     ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
     ("tools/lib/lanes/ios.py", "swift/KayaSwiftUI.swift", "ios"),
-    ("tools/android/run-emulator.sh",
+    ("tools/lib/lanes/android.py",
      "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt", ""),
 ]
 

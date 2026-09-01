@@ -367,8 +367,8 @@ and the thing to look for when a breadth leg is half done.
 
 **The reshaped todos scene needs the undo feature, and the Compose
 backend refuses it.** The Android lane runs the todos scene on Compose
-(`todos-compose`, tools/android/run-emulator.sh:620, and `todos-jvm`,
-:812) with this same shared script.
+(`todos-compose`, tools/lib/lanes/android.py:44, and `todos-jvm`,
+:61) with this same shared script.
 
 - `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:4167-4222` —
   five `depthStub("undo")` bodies: `kayaUndoRoute`, `kayaRedoRoute`,

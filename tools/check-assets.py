@@ -42,7 +42,7 @@ dev_shell_or_die()
 #      PREFIX        read back through AssetManager. Three files spell
 #                    that prefix and this holds them equal. THE BYTES
 #                    are checked where they are packaged, by
-#                    `apk_assets_verify` in run-emulator.sh.
+#                    `apk_assets_verify` in run-emulator.py.
 #   C8-C11           The market family: the artifacts are DERIVED and
 #                    regenerated into scratch for comparison, the
 #                    ledger nets to the guest's BOOK, the history ends
@@ -165,7 +165,9 @@ STAGES = {
         "the VM has no repo; the deploy copies the root into the "
         "mirror path every run, outside the deploy stamp",
         "KAYA_ASSET_DIR"),
-    "tools/android/run-emulator.sh": (
+    # Python since the runner conversion; the staging behaviour lives
+    # in the BODY, so this reads the .py.
+    "tools/android/run-emulator.py": (
         "a device has no repo; the root is pushed to /data/local/tmp "
         "and named in each leg's intent",
         "KAYA_ASSET_DIR"),
@@ -192,8 +194,8 @@ APK_PREFIX_SITES = {
         re.compile(r"""const\s+val\s+ROOT\s*=\s*"([^"]+)\""""),
     "android/build.gradle.kts":
         re.compile(r"""val\s+kayaAssetPrefix\s*=\s*"([^"]+)\""""),
-    "tools/android/run-emulator.sh":
-        re.compile(r"""^APK_ASSET_PREFIX=([A-Za-z0-9._-]+)""",
+    "tools/android/run-emulator.py":
+        re.compile(r"""^APK_ASSET_PREFIX = "([A-Za-z0-9._-]+)"$""",
                    re.MULTILINE),
 }
 
@@ -980,7 +982,7 @@ refused(s, "below the floor of",
 
 # N7 — C5: a stager verifies by size rather than by hash.
 s = fresh("n7")
-doctor_shadow("N7's hash removal", s, "tools/android/run-emulator.sh",
+doctor_shadow("N7's hash removal", s, "tools/android/run-emulator.py",
               r"(?i)sha256sum|shasum|sha256", "wc -c")
 refused(s, "never hashes what arrived",
         "N7 (a size check standing in for a hash)")

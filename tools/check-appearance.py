@@ -64,7 +64,9 @@ LEGS = [
     # The ios roster is DATA (tools/lib/lanes/ios.py) since the runner
     # conversion; the dark leg's spelling there is its quoted name.
     ("tools/lib/lanes/ios.py", '"canvasdark-swift"', "ios"),
-    ("tools/android/run-emulator.sh", "run_apk canvasdark-compose", "android"),
+    # The android roster is DATA (tools/lib/lanes/android.py) since the
+    # runner conversion; the dark leg's spelling there is its quoted name.
+    ("tools/lib/lanes/android.py", '"canvasdark-compose"', "android"),
     # The windows roster is DATA (tools/lib/lanes/win.py) since the
     # runner conversion; the leg's spelling there is its quoted name.
     ("tools/lib/lanes/win.py", '"canvasdark_rust"', "windows"),

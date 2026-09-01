@@ -83,6 +83,13 @@ tables but is NOT this tranche.
    (tools/swift-typecheck.sh reads the swift roster — the shell gates
    parse runners too), two green lanes, matrix ALL PASS 1,390
    (docs/measurements/run-sim-conversion-2026-08-31.md).
+   run-emulator LANDED the same night: rider EQUAL (123 legs WITH
+   their pool/tablet/remount call kinds), a second rider held every
+   scene's script payload byte-equal across the crossing, gates
+   50/50, two green lanes, matrix ALL PASS 1,390
+   (docs/measurements/run-emulator-conversion-2026-08-31.md). The
+   emulator-state library stays shell by §6 — probe-env.sh still
+   sources it, and the python runner bridges to it.
 3. **validate-mac**, **validate-linux**, **validate-all** — the mac
    runner also carries the scene×language sweep tables check-steps
    reads.

@@ -415,7 +415,7 @@ the bytes get to the machine at all. All rows [REPO].
 | **macOS** | repo-relative default, no copy | nothing needed, runs from the repo root | `Contents/Resources/` in a `.app` | later; no bundle in the tree |
 | **Linux** | repo-relative default | nothing needed, the repo is bind-mounted at `/work` (tools/linux/run-suites.sh:736 states the reasoning) | `$datadir/kaya/<app>/` beside the `.desktop` file | later |
 | **Windows** | n/a | `scp` every run into a repo-mirror path, deliberately outside the deploy stamp so an asset edit cannot be swallowed by a stamp skip (tools/deploy-win.py:484) | beside the exe, or inside an MSIX | staging today, packaging later |
-| **Android** | n/a | `adb push` to `/data/local/tmp` with a size check, then named into the app through an intent extra (tools/android/run-emulator.sh:356) | APK resources or `assets/`, read through `AssetManager` | staging today, packaging later |
+| **Android** | n/a | `adb push` to `/data/local/tmp` with a size check, then named into the app through an intent extra (tools/android/run-emulator.py:712) | APK resources or `assets/`, read through `AssetManager` | staging today, packaging later |
 | **iOS** | n/a | **nothing. No file-push route for assets exists.** | inside the `.app`, copied at bundle assembly | **neither** |
 
 **The iOS row is the finding.** [MEASURED] `grep -c typeface` over the
@@ -443,8 +443,9 @@ lanes that have a filesystem. Both already exist; neither needs inventing.
 
 ## A5. What the harness and the lanes need
 
-1. **Stage the root, not the file.** `font_prepare()` in
-   tools/android/run-emulator.sh:356 becomes an asset-root push. Its
+1. **Stage the root, not the file.** `font_prepare()` (now
+   `assets_prepare`, tools/android/run-emulator.py:712) becomes an
+   asset-root push. Its
    size verification (`adb shell stat -c %s` compared against `wc -c`)
    is the model, and it should become a **hash** comparison rather than a
    size one when it generalizes, because a same-length corruption is
