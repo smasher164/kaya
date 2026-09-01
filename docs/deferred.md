@@ -3609,6 +3609,23 @@ deploy-win.sh first. This moves the 2026-08-27 ruling's
 runners-stay-shell boundary, which was recorded present-tense for
 exactly this revisit. Out of scope as before: in-container and
 in-toolchain payloads, and the .cmd stubs (the HOLD).
+
+TRANCHES 1 AND 2 LANDED THE SAME EVENING (511a3da, 36d7213): the
+three generators and keyed/build-id are python, every mode
+byte-compared against the old body on the same tree, and each
+tranche paid immediately — gen-bindings' bare `cargo run` was the
+one cargo invocation outside both cargo rules' alternation (it
+carries --locked now and `run` joined the rules), and
+tools/lib/keyed-inputs.py turned out to be parsing build-id.sh's
+text and scanning tools/<gate>.sh SHIMS — its input-coverage census
+had gone progressively vacuous across the whole conversion, and it
+imports the module and scans the .py bodies now. Tranche 3 is
+MEASURED and needs its plan first: 10,076 lines across six runners,
+with EIGHT gates text-parsing deploy-win alone (appearance,
+app-identity, assets, build-id, gates, staging, stubs, steps) — the
+leg-table schema those eight would import instead is the design
+decision, docs/runner-conversion-plan.md is its home, and each
+runner port is validated by its own lane plus the matrix.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 
