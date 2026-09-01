@@ -3568,9 +3568,12 @@ makes it easy to get wrong — which is itself an argument for leaving).
 See also the portsh work for the cases where one script must run on both
 sides.
 
-PROGRESS 2026-08-31: the GATE tier is fully converted — every gate body
-under tools/ is python against the imported prelude (48 bodies in
-check-python's census; each old body was run beside its replacement on
+PROGRESS 2026-08-31: the GATE tier is converted — every census and
+self-test gate body under tools/ is python against the imported
+prelude (48 bodies in check-python's census; the ONE gate still in
+shell is tools/swift-typecheck.sh, deliberately: its body is swiftc
+invocation loops, the in-toolchain launcher shape, not decision
+logic; each old body was run beside its replacement on
 the same tree with stdout, stderr and exit compared, and every watched
 negative re-proven red on the converted body; the two largest,
 tools/check-steps.py and tools/check-sugar-surface.py, closed the set
