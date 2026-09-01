@@ -30,21 +30,28 @@ IMPLICIT = ("tools/", "flake.nix", "flake.lock")
 PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9_]+")
 
 
-def _table(name: str) -> dict[str, list[str]]:
-    text = (ROOT / "tools" / "build-id.sh").read_text()
-    marker = name + " = {"
-    body = text[text.index(marker) : text.index("\n}", text.index(marker))]
-    ns: dict = {}
-    exec(name + " = {" + body[len(marker) :] + "\n}", ns)  # noqa: S102
-    return ns[name]
+def _build_id():
+    """tools/build-id.py, imported: the tables are DATA there since the
+    2026-08-31 conversion. The text-parse this replaces read
+    build-id.sh, which is a two-line shim now — it crashed the moment
+    the shim landed, which is exactly when a quiet fallback would have
+    gone vacuous instead."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "build_id", ROOT / "tools" / "build-id.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def gates() -> dict[str, list[str]]:
     """The GATES table with each gate's ARTIFACT_GATES paths folded in
     as declared inputs — an artifact in the key is a declared read,
-    read from build-id.sh rather than duplicated."""
-    table = _table("GATES")
-    for gate, artifacts in _table("ARTIFACT_GATES").items():
+    read from build-id.py rather than duplicated."""
+    mod = _build_id()
+    table = {gate: list(inputs) for gate, inputs in mod.GATES.items()}
+    for gate, artifacts in mod.ARTIFACT_GATES.items():
         if gate in table:
             table[gate] = table[gate] + artifacts
     return table
@@ -56,7 +63,7 @@ def code_only(source: pathlib.Path) -> str:
     A docstring is prose in a string literal, and `ast` is what tells one
     apart from a path a call actually uses.
     """
-    text = source.read_text()
+    text = source.read_text(encoding="utf-8")
     if source.suffix == ".py":
         import ast
 
@@ -124,7 +131,14 @@ def main() -> int:
     status = 0
     checked = 0
     for gate, declared in table.items():
-        script = ROOT / "tools" / f"{gate}.sh"
+        # The BODY, not the shim: a converted gate's .sh is two exec
+        # lines, and scanning those instead of the .py made this whole
+        # census read nothing as the conversion advanced — found
+        # 2026-08-31 when the build-id conversion crashed the table
+        # parse above and this loop got re-read alongside it.
+        script = ROOT / "tools" / f"{gate}.py"
+        if not script.exists():
+            script = ROOT / "tools" / f"{gate}.sh"
         if not script.exists():
             continue
         checked += 1
