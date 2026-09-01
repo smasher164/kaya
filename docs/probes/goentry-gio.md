@@ -514,11 +514,11 @@ Cost: ~20 lines in `bindings/go`. `AndroidMain` already exists
 failure mode. Does not hide the split; shrinks it to its irreducible
 statement.
 
-**M2 — generate the tails.** `tools/gen-guests.sh:31` already runs
+**M2 — generate the tails.** `tools/gen-guests.py:86` already runs
 `go generate ./guests/go/...` against `cmd/kaya-gen`, and `--check`
 regenerates in place and fails on any diff. Adding an emitter is one
 generator arm plus one glob in the `GENERATED=(...)` list
-(`gen-guests.sh:79`). **But
+(`gen-guests.py:33`). **But
 generated files are checked in by design**, so the author still *sees*
 `main_android.go` — it merely becomes a file they must not hand-edit,
 sitting in the directory they edit daily. That is a new footgun class

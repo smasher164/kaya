@@ -106,10 +106,14 @@ if unpinned:
 # Every cargo invocation carries --locked (CLAUDE.md). The flag is
 # per-invocation, so a new callsite starts out unguarded.
 # cargo, an optional wrapper (ndk/xwin) with its own flags, then the
-# subcommand that can resolve dependencies.
+# subcommand that can resolve dependencies. `run` joined 2026-08-31:
+# it resolves exactly as `build` does, and gen-bindings' bare
+# `cargo run` sat outside this alternation for the gate's whole life.
+# check-python's SH_CARGO is this pattern's copy for embedded shell —
+# the two move together.
 CARGO = re.compile(r"(?:^|[^-\w])cargo\s+"
                    r"(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?"
-                   r"(?:build|check|test)(?!\S)")
+                   r"(?:build|check|test|run)(?!\S)")
 unlocked = []
 for f in sorted((ROOT / "tools").rglob("*")):
     if f.suffix not in (".sh", ".cmd") or not f.is_file():
@@ -120,14 +124,16 @@ for f in sorted((ROOT / "tools").rglob("*")):
             continue
         if CARGO.search(line):
             unlocked.append(f"{rel}:{n}:{line.strip()[:110]}")
-# Self-test: the scan must see an unlocked invocation.
+# Self-test: the scan must see an unlocked invocation, in both the
+# build and run spellings, and not a locked one.
 planted = ["cargo build --lib",
+           "KAYA_REGENERATING=1 cargo run --quiet -- root",
            "cargo ndk -t arm64-v8a build --locked --lib"]
 seen = sum(1 for ln in planted
            if CARGO.search(ln) and "--locked" not in ln)
-if seen != 1:
+if seen != 2:
     print(f"check-shell: self-test failed (--locked scan matched {seen} "
-          f"of 1 planted defects)", file=sys.stderr)
+          f"of 2 planted defects)", file=sys.stderr)
     status = 1
 if unlocked:
     print("check-shell: cargo invocation without --locked (it may rewrite "

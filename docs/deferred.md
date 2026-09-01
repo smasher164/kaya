@@ -3595,6 +3595,23 @@ had no floor — all four fixed the same day with watched proofs. What
 remains of this entry: the tools/guest/*.cmd generation problem and the
 runner boundary (the windows half is the 2026-08-31 HOLD entry below).
 
+RULED 2026-08-31 (Akhil, evening, after the matrix record): NEW
+SCRIPTS ARE PYTHON FIRST — on the kaya_gate prelude — so nothing new
+joins this entry, and the NEXT TRANCHES convert in order: (1) the
+three generators (gen-header, gen-bindings, gen-guests — decision
+logic already in the gate sweep), (2) keyed.sh and build-id.sh as
+typed python modules with thin CLI faces, their GATES/input-set
+tables becoming importable data, (3) the runners, reframed as
+leg-tables-become-shared-data — check-steps, check-staging and
+check-gates regex-parse runner shell text today, so each runner port
+re-teaches its census gates to import the same tables;
+deploy-win.sh first. This moves the 2026-08-27 ruling's
+runners-stay-shell boundary, which was recorded present-tense for
+exactly this revisit. Out of scope as before: in-container and
+in-toolchain payloads, and the .cmd stubs (the HOLD).
+KEY: python-first, tranche, generators, keyed, build-id, runner
+conversion, leg tables
+
 ## MAYBE: read Windows accessibility client-side, like the other platforms
 
 Raised 2026-07-31, NOT decided. Recorded so a green lane does not read

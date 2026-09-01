@@ -17,6 +17,12 @@ in docs/deferred.md.
 - For ad-hoc text processing use python3, never sed/awk (BSD/GNU
   divergence causes recurring breakage; this is repo policy with no
   "trivial enough" exception).
+- New tools/ scripts are written in PYTHON FIRST, on the kaya_gate
+  prelude (ruled 2026-08-31, after the gate tier's conversion measured
+  its wins) — shell remains only for the launcher shapes: in-container
+  and in-toolchain payloads, the guest-side .cmd schtasks stubs, and
+  thin wrappers whose consumers are still shell, each such choice
+  stated where it stands. Nothing new joins a porting backlog.
 - Never pipe a build through `tail`/`head` in a verify loop — the
   pipeline's exit status becomes tail's, and a failed build silently
   runs the test against a stale artifact. Check the build's exit first.

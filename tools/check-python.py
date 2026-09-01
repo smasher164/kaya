@@ -155,12 +155,15 @@ BINARY = {"read_bytes", "write_bytes"}
 # fixture lesson).
 SH_CARGO = re.compile(r"(?:^|[^-\w])cargo\s+"
                       r"(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?"
-                      r"(?:build|check|test)(?!\S)")
+                      r"(?:build|check|test|run)(?!\S)")
 SH_TOOLCMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
                         r"(sed|awk)\b")
 SH_FFMPEG = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
                        r"ffmpeg\b")
-RESOLVING = {"build", "check", "test"}
+# `run` resolves dependencies exactly as `build` does — it joined both
+# cargo rules 2026-08-31, when gen-bindings' bare `cargo run` turned
+# out to be the one invocation outside the alternation.
+RESOLVING = {"build", "check", "test", "run"}
 COMPILING = {"-d", "-proc:only"}
 BANNED_TOOLS = {"sed", "awk"}
 
@@ -369,17 +372,26 @@ def census(files):
 
 
 def shim_findings():
-    """9. A converted gate's `.sh` holds NOTHING BUT THE EXEC."""
-    bad = []
+    """9. A converted body's `.sh` holds NOTHING BUT THE EXEC.
+
+    check-* bodies MUST have one (the docs cite those .sh names and
+    check-doc-refs holds every citation to a real file); any other
+    converted body — the generators since 2026-08-31 — is pinned the
+    moment a same-stem .sh exists beside it, and a python-first script
+    with no citations owes no shim at all. Returns (findings, pinned
+    count) so the verdict states what was actually held."""
+    bad, pinned = [], 0
     for path in sorted(files):
-        if not path.startswith("tools/check-") or path.endswith("kaya_gate.py"):
+        if path.endswith("kaya_gate.py"):
             continue
         stem = pathlib.Path(path).stem
         sh = ROOT / "tools" / f"{stem}.sh"
         if not sh.is_file():
-            bad.append(f"tools/{stem}.sh does not exist — a converted gate "
-                       f"keeps its .sh name because the docs cite it and "
-                       f"check-doc-refs holds every citation to a real file.")
+            if path.startswith("tools/check-"):
+                bad.append(f"tools/{stem}.sh does not exist — a converted "
+                           f"gate keeps its .sh name because the docs cite "
+                           f"it and check-doc-refs holds every citation to "
+                           f"a real file.")
             continue
         got = sh.read_text(encoding="utf-8")
         want = SHIM.format(stem=stem)
@@ -389,7 +401,9 @@ def shim_findings():
                 f"but the exec — a stub with logic in it is a second place "
                 f"for the preamble to drift back to.\n"
                 f"    want: {want!r}\n    got:  {got!r}")
-    return bad
+        else:
+            pinned += 1
+    return bad, pinned
 
 
 files = converted()
@@ -520,7 +534,8 @@ gate.counted("converted gate bodies", files, floor=7)
 
 for line in census(files):
     gate.finding(line)
-for line in shim_findings():
+shim_bad, shims_pinned = shim_findings()
+for line in shim_bad:
     gate.finding(line)
 
 # Every exemption must name a file that still exists, or it has rotted
@@ -560,5 +575,5 @@ else:
           "the real shell pipeline, both dev-shell sentences, the perturbation "
           "count, the census floor, scratch cleanup after an exception)")
 
-gate.verdict(f"{len(files)} converted bodies, {len(files) - 1} shims pinned, "
+gate.verdict(f"{len(files)} converted bodies, {shims_pinned} shims pinned, "
              f"11 rules + ruff")
