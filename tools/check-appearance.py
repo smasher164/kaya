@@ -63,7 +63,9 @@ LEGS = [
     ("tools/linux/run-suites.sh", "canvasdark-rust", "linux"),
     ("tools/ios/run-sim.sh", "${guest}dark-swift", "ios"),
     ("tools/android/run-emulator.sh", "run_apk canvasdark-compose", "android"),
-    ("tools/deploy-win.sh", "run_suite canvasdark_rust", "windows"),
+    # The windows roster is DATA (tools/lib/lanes/win.py) since the
+    # runner conversion; the leg's spelling there is its quoted name.
+    ("tools/lib/lanes/win.py", '"canvasdark_rust"', "windows"),
 ]
 
 # THE PATTERNS ARE CALL-SHAPED AND READ COMMENT-STRIPPED TEXT, both
@@ -412,7 +414,7 @@ g.negative(
 g.negative(
     "N10 the windows dark leg unwired",
     lambda: census(without(
-        "tools/deploy-win.sh", r"run_suite canvasdark_rust", "run_suite canvas_rust", "N10")),
+        "tools/lib/lanes/win.py", r'"canvasdark_rust"', '"canvas_rust"', "N10")),
     want="the windows lane has no dark canvas leg",
 )
 g.negative(

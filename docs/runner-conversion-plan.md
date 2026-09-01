@@ -73,6 +73,10 @@ tables but is NOT this tranche.
    families extracted from the old body and the new module must be
    identical — the one byte-comparable artifact a nondeterministic
    lane offers), then repeated green windows lanes, then the matrix.
+   LANDED 2026-08-31 exactly on this shape — rider EQUAL both sides
+   of the crossing, gates 50/50, two green lanes, matrix ALL PASS
+   1,390 legs (docs/measurements/deploy-win-conversion-2026-08-31.md
+   and the ledger's retire-the-shell entry hold the record).
 2. **run-sim**, then **run-emulator** — same shape, mobile-lane
    validation.
 3. **validate-mac**, **validate-linux**, **validate-all** — the mac

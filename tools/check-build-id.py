@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -78,15 +78,42 @@ with scratch_dir("check-build-id-") as tmp:
         fail("self-test failed: a missing artifact verified clean")
 
     # 2. Coverage. The list is explicit: a runner that silently stopped
-    # verifying looks exactly like one that never needed to.
-    for lane in ["tools/validate-mac.sh", "tools/linux/run-suites.sh",
-                 "tools/ios/run-sim.sh", "tools/android/run-emulator.sh",
-                 "tools/deploy-win.sh", "tools/swiftui/build-dylib.sh"]:
-        text = (ROOT / lane).read_text(encoding="utf-8")
-        if ('build-id.sh" --verify' not in text
-                and "build-id.sh --verify" not in text):
-            fail(f"{lane} builds the core but never verifies what it runs "
-                 f"(build-id.sh --verify)")
+    # verifying looks exactly like one that never needed to. The windows
+    # runner is python since the runner conversion, and its argv spelling
+    # (["…/build-id.sh", "--verify", …]) matched NEITHER of the two shell
+    # substrings this clause used to hold — so the call is read as a
+    # non-comment LINE naming build-id and --verify together, which both
+    # languages spell.
+    def lane_verifies(text):
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("#"):
+                continue
+            if "build-id" in s and "--verify" in s:
+                return True
+        return False
+
+    for lane_rel in ["tools/validate-mac.sh", "tools/linux/run-suites.sh",
+                     "tools/ios/run-sim.sh", "tools/android/run-emulator.sh",
+                     "tools/deploy-win.py", "tools/swiftui/build-dylib.sh"]:
+        if not lane_verifies((ROOT / lane_rel).read_text(encoding="utf-8")):
+            fail(f"{lane_rel} builds the core but never verifies what it "
+                 f"runs (build-id.sh --verify)")
+
+    # The clause's own negative, watched because this parse already
+    # drifted once (the argv spelling above): the windows runner with
+    # its one verify flag doctored away must fail the clause, and the
+    # perturbation count is printed by the prelude.
+    g = Gate("check-build-id")
+    win_text = (ROOT / "tools/deploy-win.py").read_text(encoding="utf-8")
+    unverified = g.doctor("2's verify call deleted from the windows runner",
+                          win_text, r'"--verify"', '"--frobnicate"', want=1)
+    if not lane_verifies(win_text):
+        fail("self-test failed: the windows runner's real verify call is "
+             "invisible to the coverage clause")
+    if lane_verifies(unverified):
+        fail("self-test failed: a runner with no verify call passed the "
+             "coverage clause")
 
     # 2b. The SwiftUI interpreter is a SECOND artifact with its own id;
     # both places that compile one must bake it in and check it. swiftc

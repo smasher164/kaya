@@ -163,7 +163,7 @@ in docs/deferred.md.
    than failing. GTK and WinUI builds need it too — mac/iOS do not,
    since the SwiftUI interpreter carries its own harness.
    IT RUNS WHERE YOU TYPE IT, which is why the windows lane now runs the
-   core's unit tests ON THE GUEST as well (tools/deploy-win.sh's
+   core's unit tests ON THE GUEST as well (tools/deploy-win.py's
    unit-tests phase, filtered to `capi::picked_tests`): the Windows half
    of the core — the HANDLE arms of protocol.rs's
    raw_handle/file_from_raw — is code no unix run compiles, and the one

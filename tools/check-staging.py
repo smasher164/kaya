@@ -15,10 +15,23 @@ dev_shell_or_die()
 # absent from the SCENES/DEPTH_SCENES derivation that populates
 # $RUST_GUESTS). Every finding names the leg AND the list to extend.
 
+import importlib.util
 import re
 import shutil
 
 gate = Gate("check-staging")
+
+
+def load_win_lane(path):
+    """The windows lane's tables, imported from a PATH — python's own
+    reader, so this census and the runner cannot disagree about what the
+    module says. Loaded per call under a throwaway name (never through
+    sys.modules) so the shadow negatives can perturb a copy and see
+    their perturbation."""
+    spec = importlib.util.spec_from_file_location("kaya_lane_shadow", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def check(root):
@@ -56,64 +69,63 @@ def check(root):
                      f"DEPTH_SCENES (or SCENES if every language has the "
                      f"guest)")
 
-    # --- deploy-win: run_suite scenes vs its build lists -------------
-    win = (root / "tools" / "deploy-win.sh").read_text(encoding="utf-8")
-    wscenes = words(win, "SCENES")
-    wdepth = words(win, "DEPTH_SCENES")
-    wgo = words(win, "GO_ONLY_SCENES")
-    wpy = words(win, "PY_ONLY_SCENES")
-    if None in (wscenes, wdepth, wgo, wpy):
-        fail("tools/deploy-win.sh no longer declares its four scene lists "
-             "where this census reads them")
-    else:
-        # A suite's ARTIFACT is what its checked-in launcher names, not
-        # the suite's own word: listdetail runs split.exe (two scenes,
-        # one guest), so the launcher is the only honest derivation
-        # source.
-        exes = wscenes | wdepth | wgo
-        pys = wscenes | wpy
-        for m in re.finditer(r"^\s*run_suite ([a-z0-9]+_[a-z0-9]+)\b", win,
+    # --- deploy-win: the lane module's roster vs its build lists -----
+    # The windows tables are DATA since the runner conversion
+    # (tools/lib/lanes/win.py); this census imports what the runner
+    # imports, so the roster read cannot go vacuous the way a regex
+    # over retired shell text would. The DEFAULT depth list is read on
+    # purpose: the census must not follow KAYA_WIN_DEPTH_SCENES.
+    win_lane = load_win_lane(root / "tools/lib/lanes/win.py")
+    exes = (set(win_lane.SCENES) | set(win_lane.DEPTH_SCENES)
+            | set(win_lane.GO_ONLY_SCENES))
+    pys = set(win_lane.SCENES) | set(win_lane.PY_ONLY_SCENES)
+    # A suite's ARTIFACT is what its checked-in launcher names, not the
+    # suite's own word: listdetail runs split.exe (two scenes, one
+    # guest), so the launcher is the only honest derivation source.
+    # The module roster covers the milestone2 bare legs too, which the
+    # old `<scene>_<lang>` regex never could.
+    for suite in [leg for block in win_lane.ORDER for leg in block]:
+        launcher = root / "tools" / "guest" / win_lane.launcher(suite)
+        if not launcher.is_file():
+            fail(f"tools/lib/lanes/win.py wires leg {suite} but "
+                 f"tools/guest/{win_lane.launcher(suite)} does not exist — "
+                 f"the scheduled task would start nothing and the leg "
+                 f"waits out its whole deadline")
+            continue
+        body = launcher.read_text(encoding="utf-8", errors="replace")
+        for e in re.finditer(r"(?:^|[\s\\])([a-z0-9_]+)\.exe\b", body,
                              re.M):
-            suite = m.group(1)
-            launcher = root / "tools" / "guest" / f"run_{suite}.cmd"
-            if not launcher.is_file():
-                fail(f"tools/deploy-win.sh runs run_suite {suite} but "
-                     f"tools/guest/run_{suite}.cmd does not exist — the "
-                     f"scheduled task would start nothing and the leg "
-                     f"waits out its whole deadline")
+            base = e.group(1)
+            # Runtimes are not guest artifacts: what python.exe RUNS
+            # is the .py clause's business, and dotnet/java ship
+            # their own guest trees whole.
+            if base in ("python", "pythonw", "java", "dotnet", "cmd",
+                        "wscript", "cscript", "schtasks", "taskkill"):
                 continue
-            body = launcher.read_text(encoding="utf-8", errors="replace")
-            for e in re.finditer(r"(?:^|[\s\\])([a-z0-9_]+)\.exe\b", body,
-                                 re.M):
-                base = e.group(1)
-                # Runtimes are not guest artifacts: what python.exe RUNS
-                # is the .py clause's business, and dotnet/java ship
-                # their own guest trees whole.
-                if base in ("python", "pythonw", "java", "dotnet", "cmd",
-                            "wscript", "cscript", "schtasks", "taskkill"):
-                    continue
-                scene = base[:-3] if base.endswith("_go") else base
-                if scene not in exes:
-                    fail(f"tools/guest/run_{suite}.cmd runs {base}.exe but "
-                         f"{scene} is in none of deploy-win's SCENES / "
-                         f"DEPTH_SCENES / GO_ONLY_SCENES, so the deploy "
-                         f"never builds or ships it — add {scene} to the "
-                         f"matching list")
-            for p in re.finditer(r"C:\\kaya\\([a-z0-9_]+)\.py\b", body):
-                name = p.group(1)
-                if name not in pys or not (
-                    root / "guests" / "python" / f"{name}.py"
-                ).is_file():
-                    fail(f"tools/guest/run_{suite}.cmd runs {name}.py but "
-                         f"{name} is not a shipped python guest (SCENES / "
-                         f"PY_ONLY_SCENES with guests/python/{name}.py) — "
-                         f"the deploy never stages it")
+            scene = base[:-3] if base.endswith("_go") else base
+            if scene not in exes:
+                fail(f"tools/guest/{win_lane.launcher(suite)} runs "
+                     f"{base}.exe but {scene} is in none of the win lane "
+                     f"module's SCENES / DEPTH_SCENES / GO_ONLY_SCENES, "
+                     f"so the deploy never builds or ships it — add "
+                     f"{scene} to the matching list in "
+                     f"tools/lib/lanes/win.py")
+        for p in re.finditer(r"C:\\kaya\\([a-z0-9_]+)\.py\b", body):
+            name = p.group(1)
+            if name not in pys or not (
+                root / "guests" / "python" / f"{name}.py"
+            ).is_file():
+                fail(f"tools/guest/{win_lane.launcher(suite)} runs "
+                     f"{name}.py but {name} is not a shipped python guest "
+                     f"(SCENES / PY_ONLY_SCENES with "
+                     f"guests/python/{name}.py) — the deploy never stages "
+                     f"it")
 
     # --- every runner: a wired scene has its .steps, a python leg its
     # file
     runners = [
         "tools/validate-mac.sh",
-        "tools/deploy-win.sh",
+        "tools/deploy-win.py",
         "tools/linux/run-suites.sh",
     ]
     for rel in runners:
@@ -159,16 +171,14 @@ def check(root):
                  f"the device is turned, so exactly one orientation is "
                  f"declared")
 
-    # --- every guest .ps1 is in BOTH windows lists -------------------
+    # --- every guest .ps1 is in the windows deploy list --------------
     # The .cmd and .vbs families ride GLOBS, so a new one ships itself;
-    # a .ps1 is named individually in deploy_stamp AND in
-    # DEPLOY_ARTIFACTS, and deploy-win.sh's own comment says which half
-    # is worse — missing from the STAMP, the stamp does not move, the
-    # whole deploy block is skipped, and the lane runs against a file
-    # that is not there. That comment was the only thing holding the
-    # rule: shot-window.ps1 shipped with its .cmd riding the glob beside
-    # it and the .ps1 in NEITHER list, so the launcher was staged and
-    # the script it runs was not.
+    # a .ps1 is named individually. The shell body kept TWO hand-written
+    # copies of the list (deploy_stamp and DEPLOY_ARTIFACTS) and
+    # shot-window.ps1 once shipped with the .ps1 in NEITHER; the python
+    # runner has ONE deploy_artifacts() list feeding both the manifest
+    # ship and the stamp, so the drift between the halves is gone by
+    # construction and this census holds the one list to the directory.
     def block(text, opener, closer):
         start = text.find(opener)
         if start < 0:
@@ -176,37 +186,34 @@ def check(root):
         end = text.find(closer, start + len(opener))
         return text[start:end] if end > 0 else None
 
-    stamp_block = block(win, 'shasum -a 256 "$0"', "\n    }")
-    artifacts_block = block(win, "DEPLOY_ARTIFACTS=(", "\n    )")
+    win = (root / "tools" / "deploy-win.py").read_text(encoding="utf-8")
+    deploy_block = block(win, "def deploy_artifacts():", "\ndef ")
     guest_dir = root / "tools" / "guest"
     ps1s = (sorted(p.name for p in guest_dir.glob("*.ps1"))
             if guest_dir.is_dir() else [])
-    if stamp_block is None or artifacts_block is None:
-        fail("tools/deploy-win.sh no longer spells deploy_stamp's shasum "
-             "list or DEPLOY_ARTIFACTS where this census reads them — "
-             "re-point the clause")
+    if deploy_block is None:
+        fail("tools/deploy-win.py no longer spells deploy_artifacts() "
+             "where this census reads it — re-point the clause")
     elif not ps1s:
         fail("tools/guest holds no .ps1 at all — a census that reads "
              "nothing agrees with everything")
-    else:
-        for where, body in (("deploy_stamp", stamp_block),
-                            ("DEPLOY_ARTIFACTS", artifacts_block)):
-            if "tools/guest/*.ps1" in body:
-                continue  # a glob covers the whole family
-            for name in ps1s:
-                if f"tools/guest/{name}" not in body:
-                    fail(f"tools/guest/{name} is staged to the Windows "
-                         f"guest by neither glob nor name in {where} — a "
-                         f".ps1 is named individually in BOTH deploy_stamp "
-                         f"and DEPLOY_ARTIFACTS, and missing it from the "
-                         f"stamp means the deploy block never runs at all")
+    elif 'glob("*.ps1")' not in deploy_block:
+        for name in ps1s:
+            if f"tools/guest/{name}" not in deploy_block:
+                fail(f"tools/guest/{name} is staged to the Windows guest "
+                     f"by neither glob nor name in deploy_artifacts() — "
+                     f"that one list feeds BOTH the artifact ship and the "
+                     f"deploy stamp, so missing it means the file never "
+                     f"rides the wire AND an edit to it never busts the "
+                     f"stamp")
 
     return findings
 
 
 # --- self-tests: each perturbation applied to a COPY, count printed --
 
-SHADOW_RELS = ["tools/validate-mac.sh", "tools/deploy-win.sh",
+SHADOW_RELS = ["tools/validate-mac.sh", "tools/deploy-win.py",
+               "tools/lib/lanes/win.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
                "tools/scenes", "tools/guest", "guests/python"]
 
@@ -255,9 +262,9 @@ negative(
     "N1 (a mac leg whose binary the staging loop never copies)")
 
 negative(
-    "N2", "wired a suite with no launcher", "tools/deploy-win.sh",
-    r"^        run_suite windowed_rust$",
-    "        run_suite windowed_rust\n        run_suite ghost_python",
+    "N2", "wired a suite with no launcher", "tools/lib/lanes/win.py",
+    r'^     "windowed_rust",$',
+    '     "windowed_rust",\n     "ghost_python",',
     "run_ghost_python.cmd does not exist",
     "N2 (a windows suite whose scheduled task would start nothing)")
 
@@ -291,22 +298,29 @@ negative(
     "declares no <UISupportedInterfaceOrientations>",
     "N5 (an iOS bundle that inherits the device's orientation)")
 
-# The two halves separately, because they fail differently: dropped from
-# DEPLOY_ARTIFACTS the file simply never ships, dropped from the STAMP
-# the whole deploy block is skipped and the lane runs against what the
-# VM happened to hold.
+# Both directions of the one-list census: a name dropped from the list,
+# and a file appearing on disk that the list does not know.
 negative(
-    "N6", "dropped a guest .ps1 from the stamp", "tools/deploy-win.sh",
-    r'^ {12}"\$ROOT/tools/guest/shot-window\.ps1" \\\n', "",
-    "neither glob nor name in deploy_stamp",
-    "N6 (a guest .ps1 the deploy stamp cannot see, so the ship is "
-    "skipped)")
+    "N6", "dropped a guest .ps1 from the deploy list",
+    "tools/deploy-win.py",
+    r'^ {15}ROOT / "tools/guest/shot-window\.ps1",\n', "",
+    "neither glob nor name in deploy_artifacts",
+    "N6 (a guest .ps1 that never rides the wire and never busts the "
+    "stamp)")
 
-negative(
-    "N7", "dropped a guest .ps1 from the artifacts", "tools/deploy-win.sh",
-    r'^ {8}"\$ROOT/tools/guest/shot-window\.ps1"\n', "",
-    "neither glob nor name in DEPLOY_ARTIFACTS",
-    "N7 (a guest .ps1 that never rides the wire)")
+# N7 plants a NEW .ps1 on the shadow's disk with no list entry — the
+# census direction that catches the next shot-window.ps1 the day it is
+# written.
+_s7 = shadow("n7")
+(_s7 / "tools/guest/ghosthelper.ps1").write_text(
+    "Write-Output ghost\n", encoding="utf-8")
+_f7 = check(_s7)
+if not any("tools/guest/ghosthelper.ps1 is staged" in f for f in _f7):
+    print("check-staging: SELF-TEST FAIL (N7: a .ps1 on disk that "
+          "deploy_artifacts() never names passed)", file=sys.stderr)
+    sys.exit(1)
+print("check-staging: self-test — N7 (a guest .ps1 the deploy list does "
+      "not know) refused")
 
 findings = check(ROOT)
 if findings:

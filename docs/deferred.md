@@ -3626,6 +3626,40 @@ app-identity, assets, build-id, gates, staging, stubs, steps) — the
 leg-table schema those eight would import instead is the design
 decision, docs/runner-conversion-plan.md is its home, and each
 runner port is validated by its own lane plus the matrix.
+
+TRANCHE 3 STAGE 1 LANDED 2026-08-31, the evening after the plan:
+deploy-win is python. The leg tables are tools/lib/lanes/win.py —
+SCENES, the depth default under its KAYA_WIN_DEPTH_SCENES override,
+GO_ONLY/PY_ONLY, and ORDER as blocks-between-drains with each
+barrier's measured reason as the block's comment — the body is
+tools/deploy-win.py on the prelude with the .sh a pinned shim, and
+the flight recorder's windows half crossed into
+tools/lib/flightrec_lane.py with it. The roster rider compared EQUAL
+on every axis (41/3/1/2 scene lists, 201 legs in order, 32 blocks)
+before the crossing and again afterward against the git-materialized
+shell body. All eight parsing gates were re-taught in the same slice
+— steps/staging/appearance/stubs and scene-features import or read
+the module, assets/build-id/gates read the python body — each with
+its negatives re-proven red on the import path (the deleted-nav
+family watched reddening check-steps live), and the tranche paid the
+usual immediate dividends: check-build-id's --verify coverage clause
+got its first watched negative, check-steps' serial clause grew the
+undo arm the shell body's comment had recorded as missing, the
+launchers census now covers the milestone2 bare five, and
+check-staging's two hand-written .ps1 lists collapsed into the one
+deploy_artifacts() list with both census directions watched. The one
+runtime defect the first lane found is a trap now (docs/traps.md,
+"NOT UTF-8"): the guest's output files carry cmd.exe codepage bytes
+and a strict text=True decode killed the leg WAITER — every
+guest-origin capture says errors="replace". Validated: gates 50/50,
+windows lane green twice standalone (suites 138s/134s, the second
+through the deploy-unchanged stamp path), matrix ALL PASS 1,390 legs
+in 639s (a first matrix ran all legs green with linux 5s over its
+530s ceiling — the container's mtime-busted core rebuild plus sweep
+contention, not the lane; the rerun's linux was 404s). Enumeration
+and re-teach record:
+docs/measurements/deploy-win-conversion-2026-08-31.md. run-sim is
+stage 2.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 

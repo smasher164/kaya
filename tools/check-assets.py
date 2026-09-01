@@ -159,7 +159,9 @@ def code_only(text, ext):
 # what it staged). The token differs per lane because the mechanism
 # does: iOS needs no variable at all.
 STAGES = {
-    "tools/deploy-win.sh": (
+    # The windows runner is python since the runner conversion; the
+    # staging behaviour lives in the BODY, so this reads the .py.
+    "tools/deploy-win.py": (
         "the VM has no repo; the deploy copies the root into the "
         "mirror path every run, outside the deploy stamp",
         "KAYA_ASSET_DIR"),
@@ -935,7 +937,7 @@ refused(s, "names an asset path for itself", "N3 (a second resolver)")
 
 # N4 — C4: a stager copies a FILE under the root rather than the root.
 s = fresh("n4")
-doctor_shadow("N4's per-file staging", s, "tools/deploy-win.sh",
+doctor_shadow("N4's per-file staging", s, "tools/deploy-win.py",
               r"run_ssh",
               "scp guests/assets/fonts/sora-wght.ttf ignored\n"
               "run_ssh")

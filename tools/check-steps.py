@@ -24,6 +24,12 @@ import shutil
 import subprocess
 import tempfile
 
+# The windows lane's tables — roster, order, drain structure — are DATA
+# since the runner conversion (docs/runner-conversion-plan.md §2); the
+# clauses that used to regex tools/deploy-win.sh's text import what the
+# runner imports.
+from lanes import win as win_lane
+
 # Line-buffered stdout: the probes and helper scripts write to the same
 # fd, and block-buffered prints would land AFTER output they preceded.
 sys.stdout.reconfigure(line_buffering=True)
@@ -1738,10 +1744,14 @@ def wired():
         "tools/validate-mac.sh": read_rel("tools/validate-mac.sh"),
         "tools/linux/run-suites.sh":
             read_rel("tools/linux/run-suites.sh"),
-        "tools/deploy-win.sh": read_rel("tools/deploy-win.sh"),
+        # The windows roster is read from the lane MODULE, not text;
+        # the key matches scene-features.py's RUNNERS row so the
+        # depth-stub exemptions line up.
+        "tools/lib/lanes/win.py": "",
         "tools/ios/run-sim.sh": ios_text,
         "tools/android/run-emulator.sh": android_text,
     }
+    win_scenes = {win_lane.scene_lang(leg)[0] for leg in win_lane.legs()}
     for p in STEPS:
         scene = p.stem
         for runner, text in runner_texts.items():
@@ -1776,13 +1786,17 @@ def wired():
                           f"run_apk leg in {runner} and is not "
                           f"declared off", file=sys.stderr)
                     failed = 1
+            elif runner == "tools/lib/lanes/win.py":
+                if scene not in win_scenes:
+                    print(f'check-steps: scene "{scene}" has no leg in '
+                          f"the win lane module ({runner})",
+                          file=sys.stderr)
+                    failed = 1
             else:
                 if runner == "tools/validate-mac.sh":
                     sig = f"run {scene}-"
-                elif runner == "tools/linux/run-suites.sh":
-                    sig = f'run "$proto" {scene}-'
                 else:
-                    sig = f"run_suite {scene}_"
+                    sig = f'run "$proto" {scene}-'
                 if scene == "milestone2":
                     sig = scene
                 if sig not in text:
@@ -2037,7 +2051,7 @@ if subprocess.run(["python3", "tools/lib/scene-features.py", "--mode",
 def feature_selftest(legs, stub, extra=""):
     with tempfile.TemporaryDirectory() as td:
         d = pathlib.Path(td)
-        for sub in ("tools/lib", "tools/linux", "tools/ios",
+        for sub in ("tools/lib/lanes", "tools/linux", "tools/ios",
                     "tools/android", "crates/kaya/src", "swift",
                     "crates/kaya/src/winui",
                     "android/kaya/src/main/kotlin/dev/kaya"):
@@ -2049,7 +2063,7 @@ def feature_selftest(legs, stub, extra=""):
                     d / "tools/lib/hand-rolled-stubs.py")
         for empty in ("tools/validate-mac.sh",
                       "tools/linux/run-suites.sh",
-                      "tools/deploy-win.sh", "tools/ios/run-sim.sh",
+                      "tools/lib/lanes/win.py", "tools/ios/run-sim.sh",
                       "crates/kaya/src/gtk.rs",
                       "crates/kaya/src/winui/mod.rs",
                       "swift/KayaSwiftUI.swift"):
@@ -2148,15 +2162,24 @@ def sweep_guests():
          "guests/java-desktop/dev/kaya/milestone2kt/Main.java"),
         ("csharp", "guests/csharp/Program.cs"),
     ]
+    def desktop_scene_lists():
+        """(runner, SCENES-or-None) for the three desktop lanes — the
+        windows list is the lane module's, imported rather than
+        regexed, so it cannot drift from what the runner stages."""
+        out = []
+        for runner in ("tools/validate-mac.sh",
+                       "tools/linux/run-suites.sh"):
+            m = re.search(r'^SCENES="([^"]+)"', read_rel(runner), re.M)
+            out.append((runner, m.group(1).split() if m else None))
+        out.append(("tools/lib/lanes/win.py", list(win_lane.SCENES)))
+        return out
+
     bad = []
-    for runner in ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
-                   "tools/deploy-win.sh"):
-        text = read_rel(runner)
-        m = re.search(r'^SCENES="([^"]+)"', text, re.M)
-        if not m:
+    for runner, listed in desktop_scene_lists():
+        if listed is None:
             bad.append(f"{runner}: no SCENES variable")
             continue
-        for scene in m.group(1).split():
+        for scene in listed:
             for lang, pat in LANGS:
                 rel = pat.format(s=scene, S=scene.capitalize())
                 if not (ROOT / rel).exists():
@@ -2165,11 +2188,9 @@ def sweep_guests():
                         f"has no {lang} guest ({rel}) — a rust-only "
                         f"scene belongs in DEPTH_SCENES")
     scenes = set()
-    for runner in ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
-                   "tools/deploy-win.sh"):
-        m = re.search(r'^SCENES="([^"]+)"', read_rel(runner), re.M)
-        if m:
-            scenes.update(m.group(1).split())
+    for _runner, listed in desktop_scene_lists():
+        if listed:
+            scenes.update(listed)
     for lang, selector in SELECTORS:
         text = read_rel(selector)
         for scene in sorted(scenes):
@@ -2233,7 +2254,7 @@ if out:
 # dead.
 def sweep_c_floor():
     RUNNERS = ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
-               "tools/deploy-win.sh", "tools/ios/run-sim.sh",
+               "tools/deploy-win.py", "tools/ios/run-sim.sh",
                "tools/android/run-emulator.sh")
     makefile = read_rel("guests/c/Makefile")
     m = re.search(r"^SCENES\s*:?=\s*(.+)$", makefile, re.M)
@@ -2307,23 +2328,17 @@ if sweep_c_floor():
 
 
 # EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win schedules
-# C:\kaya\run_<scene>_<lang>.cmd on the VM and those .cmd files are
-# CHECKED IN under tools/guest. A leg whose launcher does not exist
-# does not fail: schtasks starts nothing, no output appears, and the
-# runner waits out its full 300s timeout before calling it a hang.
+# C:\kaya\run_<leg>.cmd on the VM and those .cmd files are CHECKED IN
+# under tools/guest. A leg whose launcher does not exist does not
+# fail: schtasks starts nothing, no output appears, and the runner
+# waits out its full 300s timeout before calling it a hang.
 # NO LEG RUNS TWICE. deploy-win submits by name, and a name submitted
 # twice runs the scene twice against the same output file — the second
 # verdict silently replaces the first, and a duplicate looks exactly
-# like a leg.
-def duplicate_legs(text, path):
-    legs = []
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            continue
-        m = re.match(r"run_suite\s+([a-z0-9_]+)\s*$", s)
-        if m:
-            legs.append(m.group(1))
+# like a leg. Both clauses read the lane module's roster — the same
+# list the runner iterates — so the prose-vs-call trap the old text
+# roster carried is gone with the text.
+def duplicate_legs(legs, path):
     counts = {}
     for n in legs:
         counts[n] = counts.get(n, 0) + 1
@@ -2332,61 +2347,32 @@ def duplicate_legs(text, path):
 
 
 # The guard guards itself, both directions.
-if not duplicate_legs("run_suite nav_rust\ndrain_suites\n"
-                      "run_suite nav_rust\n", "-"):
+if not duplicate_legs(["nav_rust", "nav_rust"], "-"):
     selftest_fail("duplicate leg passed")
-if duplicate_legs("run_suite nav_rust\nrun_suite nav_python\n", "-"):
+if duplicate_legs(["nav_rust", "nav_python"], "-"):
     selftest_fail("distinct legs rejected")
 
-deploy_text = read_rel("tools/deploy-win.sh")
-out = duplicate_legs(deploy_text, "tools/deploy-win.sh")
+out = duplicate_legs(win_lane.legs(), "tools/lib/lanes/win.py")
 if out:
-    print("check-steps: deploy-win.sh submits the same leg more than "
-          "once — the second run overwrites the first's output file "
-          "and buys nothing:", file=sys.stderr)
+    print("check-steps: the win lane module submits the same leg more "
+          "than once — the second run overwrites the first's output "
+          "file and buys nothing:", file=sys.stderr)
     print("\n".join(out), file=sys.stderr)
     status = 1
 
 
-# The legs a runner SUBMITS, which is not the same as the legs its
-# text MENTIONS: every file these rules protect DOCUMENTS the rule, so
-# the words appear in prose and a grep over the whole file reads a
-# usage comment as a call. Comments are skipped here, as in
-# duplicate_legs.
-def suite_legs(text):
-    out = []
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            continue
-        m = re.match(r"run_suite\s+([a-z0-9_]+)\s*$", s)
-        if m:
-            out.append(m.group(1))
-    return sorted(set(out))
-
-
-# The guard guards itself, both directions: a leg named only in prose
-# is not a leg, and a leg on a real line is.
-if suite_legs("# the all case run_suite calls\n"):
-    selftest_fail("a run_suite named in a COMMENT was read as a leg")
-if suite_legs("run_suite zzprobe_rust\n") != ["zzprobe_rust"]:
-    selftest_fail("a real run_suite line was not read as a leg")
-
-
 def launchers():
     failed = 0
-    for leg in suite_legs(deploy_text):
-        # The milestone2 legs are the unprefixed originals
-        # (run_rust.cmd, run_python.cmd, ...).
-        if leg in ("rust", "python", "go", "csharp", "java"):
-            continue
-        scene, _, lang = leg.rpartition("_")
+    for leg in win_lane.legs():
+        # The module roster covers the milestone2 bare legs too
+        # (run_rust.cmd and kin), which the old text roster's
+        # <scene>_<lang> shape never could.
         if not (ROOT / "tools" / "guest"
-                / f"run_{scene}_{lang}.cmd").is_file():
-            print(f'check-steps: deploy-win runs leg "{leg}" but '
-                  f"tools/guest/run_{scene}_{lang}.cmd does not exist "
-                  f"— that leg would wait out its whole timeout in "
-                  f"silence", file=sys.stderr)
+                / win_lane.launcher(leg)).is_file():
+            print(f'check-steps: the win lane wires leg "{leg}" but '
+                  f"tools/guest/{win_lane.launcher(leg)} does not "
+                  f"exist — that leg would wait out its whole timeout "
+                  f"in silence", file=sys.stderr)
             failed = 1
     return failed
 
@@ -2407,54 +2393,48 @@ if launchers():
 #                the DESKTOP for a visible `#32770` and takes the
 #                first, so a picker up beside it eats the typing.
 #
-# So deploy-win must run each of these ALONE, between drains. Pinned
-# structurally: every such `run_suite` call must have `drain_suites`
-# as its nearest significant neighbor on BOTH sides, so a
-# parallelizing refactor cannot silently re-pool them.
-def menu_serial(text, path):
-    lines = [line.strip() for line in text.splitlines()]
-
-    def significant(seq):
-        return [line for line in seq
-                if line and not line.startswith("#")]
-
+# So deploy-win must run each of these ALONE, between drains. The lane
+# module's ORDER is a list of BLOCKS with the pool draining between
+# them, so "alone between drains" IS "in a block of its own" — read
+# structurally, and a parallelizing refactor cannot re-pool a leg
+# without moving it into a wider block this refuses. `undo_` joined
+# the family here with the conversion: the old shell body's undo block
+# carried a comment saying the text pattern must grow an undo arm or a
+# refactor could re-pool it with nothing to say so, and the pattern
+# never did.
+def menu_serial(order, path):
     bad = []
     seen = 0
-    for n, line in enumerate(lines):
-        if not re.match(r"run_suite\s+(menus|filedialog|save)_", line):
-            continue
-        seen += 1
-        before = significant(lines[:n])
-        after = significant(lines[n + 1:])
-        if not before or before[-1] != "drain_suites" or not after \
-                or after[0] != "drain_suites":
-            bad.append(f"{path}:{n + 1}: {line} lacks the "
-                       f"drain/run/drain barrier")
+    for block in order:
+        for leg in block:
+            if not re.match(r"(menus|filedialog|save|undo)_", leg):
+                continue
+            seen += 1
+            if list(block) != [leg]:
+                bad.append(f'{path}: leg "{leg}" shares a block with '
+                           f"{len(block) - 1} other leg(s) and lacks "
+                           f"the drain/run/drain barrier")
     if seen == 0:
-        bad.append(f"{path}: no run_suite menus_*/filedialog_*/save_* "
-                   f"leg found (all three scenes must stay wired)")
+        bad.append(f"{path}: no menus_*/filedialog_*/save_*/undo_* "
+                   f"leg found (all four scenes must stay wired)")
     return bad
 
 
-# The guard guards itself: a pooled menu leg must fail.
-if not menu_serial("run_suite layout_java\nrun_suite menus_rust\n"
-                   "drain_suites\n", "-"):
+# The guard guards itself: a pooled leg of each family must fail.
+if not menu_serial([["layout_java", "menus_rust"]], "-"):
     selftest_fail("pooled menus leg passed")
-# ...and the filedialog family, the second one this rule now covers.
-if not menu_serial("run_suite layout_java\n"
-                   "run_suite filedialog_python\ndrain_suites\n", "-"):
+if not menu_serial([["layout_java", "filedialog_python"]], "-"):
     selftest_fail("pooled filedialog leg passed")
-# ...and the save family, the third — the one this gate was missing on
-# the day validate-mac already imposed the rule by hand.
-if not menu_serial("run_suite layout_java\nrun_suite save_rust\n"
-                   "drain_suites\n", "-"):
+if not menu_serial([["layout_java", "save_rust"]], "-"):
     selftest_fail("pooled save leg passed")
+if not menu_serial([["layout_java", "undo_rust"]], "-"):
+    selftest_fail("pooled undo leg passed")
 
-out = menu_serial(deploy_text, "tools/deploy-win.sh")
+out = menu_serial(win_lane.ORDER, "tools/lib/lanes/win.py")
 if out:
-    print("check-steps: deploy-win.sh menus/filedialog/save legs must "
-          "run serially between drain_suites calls (docs/traps.md — "
-          "each needs the desktop to itself):", file=sys.stderr)
+    print("check-steps: the win lane's menus/filedialog/save/undo legs "
+          "must run in blocks of their own (docs/traps.md — each needs "
+          "the desktop to itself):", file=sys.stderr)
     print("\n".join(out), file=sys.stderr)
     status = 1
 
@@ -2508,9 +2488,9 @@ def family_serial(text, leg_pattern, barrier, family, path):
 
 
 # Each runner spells its pool differently, so the rule is checked in
-# each runner's own vocabulary.
+# each runner's own vocabulary; the win lane's vocabulary is the
+# module's block structure, one clause down.
 MAC_LEG = r"run .*clipboard-[a-z]"
-WIN_LEG = r"run_suite clipboard_[a-z]"
 
 # The guard guards itself: two clipboard legs sharing the pool must
 # fail...
@@ -2523,18 +2503,10 @@ if not family_serial("drain\nrun clipboard-rust-swiftui env X\n"
 if not family_serial("run layout-java env X\nrun clipboard-rust env "
                      "X\ndrain\n", MAC_LEG, "drain", "clipboard", "-"):
     selftest_fail("undrained-before clipboard leg passed")
-# ...and the deploy-win spelling (run_suite vs run, underscore vs
-# dash, drain_suites vs drain): a barrier that exists in one runner's
-# vocabulary silently exempts every other runner.
-if not family_serial("run_suite clipboard_rust\n"
-                     "run_suite clipboard_python\ndrain_suites\n",
-                     WIN_LEG, "drain_suites", "clipboard", "-"):
-    selftest_fail("pooled deploy-win clipboard legs passed")
 
 for runner, leg, barrier in (
     ("tools/validate-mac.sh", MAC_LEG, "drain"),
     ("tools/linux/run-suites.sh", MAC_LEG, "drain"),
-    ("tools/deploy-win.sh", WIN_LEG, "drain_suites"),
 ):
     out = family_serial(read_rel(runner), leg, barrier, "clipboard",
                         runner)
@@ -2544,6 +2516,40 @@ for runner, leg, barrier in (
               f"system clipboard per session):", file=sys.stderr)
         print("\n".join(out), file=sys.stderr)
         status = 1
+
+
+# The win lane's clipboard rule, in the module's own vocabulary: a
+# block of its own per leg. The same structural read as menu_serial,
+# with §0d's reason rather than the desktop's.
+def win_clipboard_serial(order, path):
+    bad = []
+    seen = 0
+    for block in order:
+        for leg in block:
+            if not leg.startswith("clipboard_"):
+                continue
+            seen += 1
+            if list(block) != [leg]:
+                bad.append(f'{path}: leg "{leg}" shares a block with '
+                           f"{len(block) - 1} other leg(s)")
+    if seen == 0:
+        bad.append(f"{path}: no clipboard leg found (the scene must "
+                   f"stay wired)")
+    return bad
+
+
+if not win_clipboard_serial([["clipboard_rust", "clipboard_python"]], "-"):
+    selftest_fail("pooled win clipboard legs passed")
+if not win_clipboard_serial([["nav_rust"]], "-"):
+    selftest_fail("a win roster with no clipboard leg passed")
+
+out = win_clipboard_serial(win_lane.ORDER, "tools/lib/lanes/win.py")
+if out:
+    print("check-steps: the win lane's clipboard legs must run in "
+          "blocks of their own (docs/clipboard-plan.md §0d — one "
+          "system clipboard per session):", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
 
 # THE SAVE LEGS ARE MUTUALLY EXCLUSIVE ON THE MAC LANE, and the shared
 # thing is the PANEL rather than the scene: macOS remembers a save

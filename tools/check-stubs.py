@@ -23,7 +23,9 @@ LANGS = "rust|python|go|csharp|java|swift|ocaml|haskell|compose|jvm|swiftui"
 
 PAIRS = [
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    ("tools/deploy-win.sh", "crates/kaya/src/winui/mod.rs", ""),
+    # The windows roster is DATA since the runner conversion: the legs
+    # are quoted names in the lane module, which the same regex reads.
+    ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
     ("tools/validate-mac.sh", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/ios/run-sim.sh", "swift/KayaSwiftUI.swift", "ios"),
     ("tools/android/run-emulator.sh",

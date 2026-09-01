@@ -194,11 +194,18 @@ LANE_RUNNERS = {
     "tools/ios/run-sim.sh": ("run-sim", "ios"),
     "tools/linux/run-suites.sh": ("run-suites", "linux"),
     "tools/android/run-emulator.sh": ("run-emulator", "android"),
-    "tools/deploy-win.sh": ("deploy-win", "windows"),
+    # Python since the runner conversion; the .sh beside it is the
+    # pinned shim (check-python rule 9), so the contract reads the body.
+    "tools/deploy-win.py": ("deploy-win", "windows"),
 }
 
+# A converted runner records through tools/lib/flightrec_lane.py rather
+# than the sourced shell library: the lane's recorder CLASS declares its
+# lane name once, in its constructor, and every journaled leg rides it.
+PY_RECORDERS = {"windows": "WinRecorder"}
 
-def lane_contract_problems(texts, lib):
+
+def lane_contract_problems(texts, lib, pylib):
     """A lane must END WITH THE ANSWER and KEEP ITS EVIDENCE.
 
     Both were measured missing. Three runners ended with a bare
@@ -212,22 +219,53 @@ def lane_contract_problems(texts, lib):
     problems = []
     for rel, (name, lane) in LANE_RUNNERS.items():
         text = texts[rel]
-        for want in (f'echo "{name}: ALL PASS"',
-                     f'echo "{name}: FAILURES ABOVE"'):
+        is_py = rel.endswith(".py")
+        verdicts = ((f'print("{name}: ALL PASS")',
+                     f'print("{name}: FAILURES ABOVE")') if is_py else
+                    (f'echo "{name}: ALL PASS"',
+                     f'echo "{name}: FAILURES ABOVE"'))
+        for want in verdicts:
             if want not in text:
                 problems.append(
                     f"{rel} never prints {want} — a lane that ends without "
                     f"its verdict cannot be told from one that was cut off, "
                     f"and a truncated log then reads as a pass")
+        if is_py:
+            # The recorder opens with the lane's own class, and that
+            # class binds the lane name in its constructor — so a
+            # journaled leg cannot ride another lane's name.
+            cls = PY_RECORDERS.get(lane)
+            if cls is None or f"flightrec_lane.{cls}(" not in text:
+                problems.append(
+                    f"{rel} does not construct flightrec_lane.{cls} — a leg "
+                    f"that fails once and passes on the rerun would leave "
+                    f"nothing behind, which is what the flight recorder "
+                    f"exists to stop")
+                continue
+            block = re.search(
+                rf"^class {cls}\(LaneRecorder\):(.*?)(?=^class |\Z)",
+                pylib, re.S | re.M)
+            journals = (block is not None
+                        and f'super().__init__("{lane}"' in block.group(1)
+                        and re.search(r"\.\w+_leg\(", text))
+            if not journals:
+                problems.append(
+                    f"{rel} opens a flight-recorder run but journals no leg "
+                    f"under lane `{lane}` — {cls} in "
+                    f"tools/lib/flightrec_lane.py does not bind that lane, "
+                    f"or the runner never calls its per-leg entry, and an "
+                    f"empty journal is the same silence with more moving "
+                    f"parts")
+            continue
         if f"flightrec_start {lane}" not in text:
             problems.append(
                 f"{rel} does not call `flightrec_start {lane}` — a leg that "
                 f"fails once and passes on the rerun would leave nothing "
                 f"behind, which is what tools/lib/flightrec.sh exists to stop")
         # DIRECTLY, or through a lane wrapper in the library that
-        # journals under this lane's name — deploy-win calls
-        # flightrec_win_leg and validate-mac flightrec_mac_leg, and both
-        # of those reach flightrec_leg inside tools/lib/flightrec.sh.
+        # journals under this lane's name — validate-mac calls
+        # flightrec_mac_leg, which reaches flightrec_leg inside
+        # tools/lib/flightrec.sh.
         journals = f"flightrec_leg {lane} " in text
         if not journals:
             for wrapper in re.findall(r"\bflightrec_\w*_leg\b", text):
@@ -263,6 +301,8 @@ lane_texts = {rel: (root / rel).read_text(encoding="utf-8")
               for rel in LANE_RUNNERS}
 flightrec_lib_text = (root / "tools" / "lib" / "flightrec.sh").read_text(
     encoding="utf-8")
+flightrec_pylib_text = (root / "tools" / "lib" / "flightrec_lane.py"
+                        ).read_text(encoding="utf-8")
 matrix_text = (root / "tools" / "validate-all.sh").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.sh").read_text(
     encoding="utf-8")
@@ -556,7 +596,8 @@ if problem is not None:
 problem = ios_pool_problem(ios_text, probe_text)
 if problem is not None:
     fail(problem)
-for problem in lane_contract_problems(lane_texts, flightrec_lib_text):
+for problem in lane_contract_problems(lane_texts, flightrec_lib_text,
+                                      flightrec_pylib_text):
     fail(problem)
 
 # N15 — a lane that stops printing its verdict must be reported. The
@@ -572,7 +613,8 @@ if n != 1:
          "contract clause is not reading the real runner")
 else:
     hurt = dict(lane_texts, **{"tools/ios/run-sim.sh": doctored})
-    problems = lane_contract_problems(hurt, flightrec_lib_text)
+    problems = lane_contract_problems(hurt, flightrec_lib_text,
+                                      flightrec_pylib_text)
     if not problems:
         fail("self-test N15: a lane that never prints its verdict passed")
     elif not any("ALL PASS" in x for x in problems):
@@ -591,33 +633,36 @@ if n != 1:
          "lane contract clause is not reading the real runner")
 else:
     hurt = dict(lane_texts, **{"tools/linux/run-suites.sh": doctored})
-    problems = lane_contract_problems(hurt, flightrec_lib_text)
+    problems = lane_contract_problems(hurt, flightrec_lib_text,
+                                      flightrec_pylib_text)
     if not problems:
         fail("self-test N16: a lane that records nothing passed")
     elif not any("flightrec_start" in x for x in problems):
         fail("self-test N16 failed for another reason: " + "; ".join(problems))
 
 # N17 — THE WRAPPER PATH ITSELF. deploy-win journals through
-# flightrec_win_leg rather than calling flightrec_leg, so the clause has
-# to read the wrapper's body out of the library; a pattern that never
-# matches would call that lane uncovered — or, if every lane journaled
-# directly, would pass while reading nothing. This doctors the LIBRARY,
-# which is the only half N15/N16 never touch. (It has already earned its
-# keep: the first draft of the clause carried a literal backspace where
-# `\b` belonged.)
+# WinRecorder.win_leg rather than spelling a journal line itself, so the
+# clause has to read the recorder class out of
+# tools/lib/flightrec_lane.py; a pattern that never matches would call
+# that lane uncovered — or, if every lane journaled directly, would pass
+# while reading nothing. This doctors the LIBRARY, which is the only
+# half N15/N16 never touch. (The shell-era version of this negative
+# earned its keep: the first draft of the clause carried a literal
+# backspace where `\b` belonged.)
 doctored, n = re.subn(
-    r"^    flightrec_leg windows ", "    flightrec_leg ghostlane ",
-    flightrec_lib_text, count=1, flags=re.M)
-print("check-gates: self-test N17 renamed the windows wrapper's lane, "
+    r'super\(\).__init__\("windows"', 'super().__init__("ghostlane"',
+    flightrec_pylib_text, count=1)
+print("check-gates: self-test N17 renamed the windows recorder's lane, "
       f"{n} substitution(s)")
 if n != 1:
-    fail("self-test N17 did not rename exactly one wrapper journal — the "
-         "lane contract clause is not reading tools/lib/flightrec.sh")
+    fail("self-test N17 did not rename exactly one recorder lane — the "
+         "lane contract clause is not reading tools/lib/flightrec_lane.py")
 else:
-    problems = lane_contract_problems(lane_texts, doctored)
+    problems = lane_contract_problems(lane_texts, flightrec_lib_text,
+                                      doctored)
     if not problems:
-        fail("self-test N17: a lane whose only journal is a wrapper that "
-             "records another lane passed")
+        fail("self-test N17: a lane whose only journal is a recorder bound "
+             "to another lane passed")
     elif not any("deploy-win" in x and "journals no leg" in x
                  for x in problems):
         fail("self-test N17 failed for another reason: " + "; ".join(problems))

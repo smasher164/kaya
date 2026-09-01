@@ -40,7 +40,10 @@ import sys
 RUNNERS = [
     ("tools/validate-mac.sh", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    ("tools/deploy-win.sh", "crates/kaya/src/winui/mod.rs", ""),
+    # The windows roster is DATA since the runner conversion; the legs
+    # are quoted names in the lane module, which runs_scene's regex
+    # reads exactly as it reads a shell leg.
+    ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
     ("tools/ios/run-sim.sh", "swift/KayaSwiftUI.swift", "ios"),
     ("tools/android/run-emulator.sh",
      "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt", ""),

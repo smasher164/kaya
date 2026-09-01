@@ -88,7 +88,7 @@ Only #1 has ever been called an asset. #2 and #3 have every property of one.
 | lane | mechanism | verified? |
 |---|---|---|
 | Android | `adb push` + `chmod 644` + **size check** (`adb shell stat -c %s` vs `wc -c`), then `am start --es KAYA_FONT_FILE` (tools/android/run-emulator.sh:317-376) | yes, size |
-| Windows | `scp` every run, deliberately OUTSIDE the deploy stamp, into a repo-mirror path (tools/deploy-win.sh:526-556) | no |
+| Windows | `scp` every run, deliberately OUTSIDE the deploy stamp, into a repo-mirror path (tools/deploy-win.py:466-486) | no |
 | Linux | nothing — repo bind-mounted at `/work` | n/a |
 | macOS | nothing — runs from the repo root | n/a |
 | **iOS** | **no file-push route for assets exists.** The only host→guest binary channel is a base64-over-container-file bridge in tools/ios/run-sim.sh, which is the clipboard/dialog protocol, not an asset installer | — |

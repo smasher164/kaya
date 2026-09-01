@@ -6422,3 +6422,23 @@ override for Wayland. `tools/linux/font-preflight.py`, reached by every
 Linux lane before its first leg, reads the real `Gtk.Settings` once per
 protocol and resolves that description through Pango. The second read is
 what catches an installed setting whose absent face silently falls back.
+
+## The Windows guest's output files are NOT UTF-8, and a strict python decode kills the leg's WAITER, not the leg (measured 2026-08-31)
+
+The first python windows lane (the runner conversion's tranche 3) died
+mid-suites with `UnicodeDecodeError: 'utf-8' codec can't decode byte
+0x83` — thrown not by the guest but by the HOST-side thread capturing
+the guest's `out_<leg>.txt` through `subprocess.run(text=True)`, whose
+default is a STRICT decode. cmd.exe writes its half of a leg's output
+in the console codepage, so a guest transcript is utf-8 harness lines
+interleaved with codepage bytes, and one such byte kills the waiter
+thread while the leg itself runs on — the shell body never saw this
+because `$(...)` never decodes at all. The rule that follows: every
+capture of GUEST-ORIGIN text in a python runner says
+`encoding="utf-8", errors="replace"` (tools/deploy-win.py and
+tools/lib/flightrec_lane.py carry it on every `text=True` site), and
+the same applies to run-sim/run-emulator when their tranches convert —
+simctl and adb output has the same not-your-encoding character. This
+is the javac `-encoding` trap (check-python rule 3) arriving through
+the OTHER direction: rule 3 covers files this repo opens; a subprocess
+capture is decoded by the same locale machinery and no gate reads it.

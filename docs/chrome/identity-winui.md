@@ -286,7 +286,7 @@ after a call to MddBootstrapInitialize().**"*
 `define_interface!`-style shim exactly like the `IWindowNative` one already at
 `crates/kaya/src/winui/mod.rs:11050-11062`. kaya already runs the bootstrapper
 (it ships `Microsoft.WindowsAppRuntime.Bootstrap.dll`,
-[REPO] `tools/deploy-win.sh:236`), so the ordering precondition is already met.
+[REPO] `tools/deploy-win.py:145`), so the ordering precondition is already met.
 The sibling `Windowing_GetWindowIdFromWindow` is available through the same
 shim, which is how you get a `WindowId`/`AppWindow` from an HWND if you ever need
 the non-XAML route.
@@ -379,7 +379,7 @@ embedded icon resource (id 32512) with `LoadIcon`, converts with
 
 [INFER] **This is the strongest argument for the runtime-blob design on this
 platform.** kaya's Windows guests do not run one executable: [REPO]
-`tools/deploy-win.sh:699-704` kills `<scene>.exe` (Rust), `<scene>_go.exe` (Go),
+`tools/deploy-win.py:674-684` kills `<scene>.exe` (Rust), `<scene>_go.exe` (Go),
 `python.exe`, `dotnet.exe`, `kaya-guests.exe`, `java.exe`. The fallback chain
 above ends at *the host process's* icon — so with no runtime call the Python
 guest wears the Python icon, the Java guest the JVM's, and the Rust guest

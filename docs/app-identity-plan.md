@@ -218,7 +218,7 @@ variable that overrides it for a runner whose guest cannot see the repo
 lines carry that file to the three places that are not the repo: pushed
 to each Android device (`tools/android/run-emulator.sh:354`), copied to
 the Windows machine at the mirrored path
-(`tools/deploy-win.sh:544`), and left at its default inside the Linux
+(`tools/deploy-win.py:484`), and left at its default inside the Linux
 container because the container mounts the repo
 (`tools/linux/run-suites.sh:736`). The identity icon takes exactly this
 shape, with its own `KAYA_*` variable and the same three staging lines.
