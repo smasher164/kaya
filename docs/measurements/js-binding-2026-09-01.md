@@ -158,15 +158,20 @@ FAIL on one leg (682 green), iOS 0 legs because the LocalStorage
 export probe would not install on any of the three simulators after
 the forced shutdowns.
 
-THE MAC CAUSE IS THIS SESSION'S HOST. `AXIsProcessTrusted()` read
-FALSE from the session's own shell afterwards, and its process chain
-is `claude --bg-pty-host` — Claude Code's background pty daemon, not
-the terminal that holds the Accessibility grant (docs/traps.md, the
-26.6.2 entry: TCC attributes lane guests to the app hosting the lane
-shells). The standalone mac lane had passed every dialog leg earlier
-in the same session, so the attribution changed during it; the
-measurement is the false reading, and the fix is the grant on the
-daemon host or running the matrix from the terminal.
+THE MAC CAUSE WAS THE ACCESSIBILITY TRUST, MEASURED BOTH WAYS.
+`AXIsProcessTrusted()` read FALSE from the session's own shell at
+15:40, with the process chain walked to its root: zsh ← the claude
+session ← `claude --bg-pty-host` ← `claude daemon run` ← the
+interactive claude ← zsh ← login ← Terminal.app. At 15:58, after the
+maintainer opened the Accessibility pane and found every entry
+enabled, the same shell read TRUE and a filedialog leg passed; nothing
+in the chain or the tree had moved. What flipped it is NOT
+established — the pane visit refreshing TCC's cache is the candidate,
+the daemon host being attributed separately from Terminal was the
+hypothesis the true reading argues against. The measured rule that
+survives: read the trust from the lane's shell before a matrix
+(tools/probe-env.sh's panel-trust line), because a false reading
+fails every dialog leg identically and reads like a lane defect.
 
 THE LINUX SIGHTING: table-js-wayland read ONE row of three for 15s
 at the first `expect_rows` and then every sorted read after the header
@@ -180,3 +185,21 @@ Three lanes exceeded their ceilings in that window (mac 621 against
 linux ceilings move in this commit for the roster's growth (42 and 80
 legs), with the standalone deltas as the reason; windows carries no js
 leg, its 667 was the same load-75 window, and its ceiling stays.
+
+## The third matrix (trust restored)
+
+mac PASS, 391 legs in 376s — every JS leg green under the matrix for
+the first time, and under the raised ceiling with room. windows PASS
+(201 legs). linux 682 of 683: table-js-wayland again, the same one-row
+first read for 15s then every sorted read right — the second sighting
+of that shape in two matrices, js's leg only, python's beside it green
+both times, and the two guests are the same shape (one window body,
+inserts inside it), so the difference is TIMING: node's start under
+load lands the first transaction later against the compositor's
+configure, which is the wayland surface-size premise the fold WATCH
+names; it carries the sibling now. android 122 of 123: the portfolio
+title WATCH, its third sighting today. iOS 0 legs: one simulator
+(8F0680C5) kept an unhealthy LocalStorage export through the runner's
+reseed, and device preparation is all-or-nothing, so the lane refused
+every leg — a simulator-state fault, not the tree's; the same lane was
+113 green standalone forty minutes earlier.

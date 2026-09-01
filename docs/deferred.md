@@ -3813,7 +3813,11 @@ the same evening (the JS linux rerun) and a SIBLING under the second
 matrix: table-js-wayland read one row of three for 15s at first read,
 then every read after a header click was right — the same
 surface-size premise on a table, so the instrument belongs at the
-surface's first size report, not in the fold alone.
+surface's first size report, not in the fold alone. The table sibling
+recurred on the next matrix (two of two), js's leg only, with the
+python guest of the same shape green beside it both times: the timing
+of a slower-starting guest against the compositor's configure is the
+premise to pin.
 KEY: portfolio wayland fold, column#9 folded, surface width premise
 
 ## The iOS clipboard seed holder never retires, and killing it for real wedges the pasteboard (2026-09-01)
@@ -3853,6 +3857,12 @@ not rerun — instrument the premise at its chokepoint (log, beside
 the title observation in KayaCompose's expect_title arm, WHICH
 screen the model believes is current at the moment the title is
 read) and keep the flight-recorder bundle.
+THIRD AND FOURTH SIGHTINGS 2026-09-01 (the second and third matrices
+of the JS binding day, 15:26 and 16:04), `title "portfolio", wanted
+"Transactions"` both times, the first also reading `label@count
+"15003 of 15003"` — the pre-navigation screen again. The instruction
+stands: instrument which screen the model believes is current at the
+title read.
 KEY: android portfolio title, wanted Transactions, title propagation
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
