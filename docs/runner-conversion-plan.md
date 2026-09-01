@@ -109,6 +109,22 @@ tables but is NOT this tranche.
    lane tier is fully python; gates.sh remains, last by design.
 4. **gates.sh** last: its census/EXCLUDED table is decision logic and
    moves to data; the loop is a launcher and converts with it.
+   LANDED 2026-09-01, closing the tranche: the shell wrapper's
+   python heredoc became tools/gates.py — GATES/EXCLUDED/BUILD as
+   importable module data under a variable-status main() (tranche
+   two's build-id shape) — with ZERO consumer re-teach, because the
+   consumers already read data (--list JSON, --fingerprint, the shim
+   path). Riders on the same tree against the git-materialized old
+   body: --fingerprint identical, --list and --selftest output
+   byte-identical (docs/measurements/gates-conversion-2026-09-01.md).
+   The tranche's closing census: 59 pinned shims, 40 real shell
+   bodies remaining and every one in a §6 class — the in-container
+   payload (run-suites.sh, 1,375 lines) and its leg wrappers, the
+   in-toolchain probe/build launchers, the three shared libraries
+   with shell consumers (swift-toolchain, flightrec's generic half,
+   android-emulator-state), and the stated survivors
+   (swift-typecheck, probe-env, the bench instruments,
+   fetch-winappsdk).
 
 Fix-forward per lane; a runner port is landed only on its own lane
 green plus a full matrix, like any feature.

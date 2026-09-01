@@ -119,14 +119,18 @@ demands `guest_pid=<digits>` in the sampler history — /usr/bin/false
 exits before the first tick and proved nothing about resolution —
 with N0b watching the descendants-only shape stay refused.
 
-## One transient, recorded
+## One transient, recorded — CAUSE FOUND the next morning
 
 The first post-conversion gate sweep hung at check-sugar-surface
 (gate 14/50): the log went silent for 23 minutes after that gate's
 haskell self-tests and the monitor killed it. Standalone
 reproduction immediately after: clean at normal speed; the rerun
-sweep with a stall sampler armed: 50/50 with no stall. One compiler
-invocation stuck in that window, unreproduced twice since.
+sweep with a stall sampler armed: 50/50 with no stall. RESOLVED: the
+laptop lid was closed and the machine slept — the same silence
+recurred at check-keyed during the gates.sh conversion's sweep, and
+the maintainer's morning message supplied the cause
+(docs/measurements/gates-conversion-2026-09-01.md). Not a code
+finding.
 
 ## Record
 

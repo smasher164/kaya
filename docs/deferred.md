@@ -3754,9 +3754,55 @@ caption-centre probe's honest 10/11 under-run, android's portfolio
 title read); the load-gated rerun was ALL PASS 1,390 in 631s with
 every lane comfortably under ceiling. Record:
 docs/measurements/validate-all-conversion-2026-09-01.md. The LANE
-TIER IS FULLY PYTHON; gates.sh remains, last by the plan's ordering.
+TIER IS FULLY PYTHON.
+
+GATES.SH LANDED 2026-09-01 THE NEXT MORNING, CLOSING THE THIRD
+TRANCHE (this entry stays open on its .cmd half, below): the
+wrapper's python heredoc became tools/gates.py with
+GATES/EXCLUDED/BUILD as importable data under a main guard (tranche
+two's build-id shape), zero consumer re-teach because the consumers
+already read data (--list JSON, --fingerprint, the shim), and the
+riders held on the same tree against the git-materialized old body
+(--fingerprint identical, --list and --selftest byte-identical;
+docs/measurements/gates-conversion-2026-09-01.md). The two sweep
+"hangs" during its validation were the LAPTOP LID: the machine slept
+mid-sweep twice, both gates clean on standalone reproduction — a
+silent monitored run with a clean repro and no leftover processes
+means suspect sleep before suspecting the gate. THE CONVERSION'S
+CLOSING CENSUS: 59 pinned shims; 40 real shell bodies remain and
+every one is in a declared class — the in-container payload
+(tools/linux/run-suites.sh, 1,375 lines, the largest surviving body)
+and its leg wrappers, the in-toolchain probe/build launchers, the
+three shared libraries with shell consumers (swift-toolchain.sh,
+flightrec.sh's generic half, android-emulator-state.sh), and the
+stated survivors (swift-typecheck.sh, probe-env.sh, the bench
+instruments, fetch-winappsdk.sh). What remains of THIS entry is its
+other half: the tools/guest/*.cmd generation problem (the 188-file
+HOLD below) — the shell-script retirement it asked for is done to
+the ruling's boundary.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
+
+## WATCH — portfolio-python-wayland's fold flickers folded
+
+Two sightings in eight hours, same sentence both times:
+`column#9 fold reads "folded", wanted it not folded` — 2026-09-01
+~00:55 (standalone lane run, docs/measurements/
+validate-all-conversion-2026-09-01.md) and ~08:20 (under the
+tranche-closing matrix). The leg passed every run between and beside
+them, so this is an intermittent with a CONSISTENT verdict — the
+flakes-are-premises shape: the fold is DERIVED from the wayland
+surface's width, so the suspect premise is the width the compositor
+had delivered at the moment the assertion read the fold state, and
+nothing pins or logs that width today. The scene runs entirely
+inside tools/linux/run-suites.sh (in-container, untouched by the
+runner conversion that was in flight both times). NEXT SIGHTING: do
+not rerun — instrument the premise at its chokepoint (log the
+surface width the fold derivation actually used, beside the fold
+verdict) and keep the flight-recorder bundle. Third sighting with
+the instrument in place decides whether this is a Weston sizing race
+or a fold-derivation defect.
+KEY: portfolio wayland fold, column#9 folded, surface width premise
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
 
