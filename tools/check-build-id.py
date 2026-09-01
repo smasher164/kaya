@@ -94,7 +94,7 @@ with scratch_dir("check-build-id-") as tmp:
         return False
 
     for lane_rel in ["tools/validate-mac.sh", "tools/linux/run-suites.sh",
-                     "tools/ios/run-sim.sh", "tools/android/run-emulator.sh",
+                     "tools/ios/run-sim.py", "tools/android/run-emulator.sh",
                      "tools/deploy-win.py", "tools/swiftui/build-dylib.sh"]:
         if not lane_verifies((ROOT / lane_rel).read_text(encoding="utf-8")):
             fail(f"{lane_rel} builds the core but never verifies what it "
@@ -118,10 +118,21 @@ with scratch_dir("check-build-id-") as tmp:
     # 2b. The SwiftUI interpreter is a SECOND artifact with its own id;
     # both places that compile one must bake it in and check it. swiftc
     # failing leaves the previous dylib where a cargo failure leaves the
-    # previous libkaya.
-    for site in ["tools/swiftui/build-dylib.sh", "tools/ios/run-sim.sh"]:
+    # previous libkaya. Line-wise like clause 2: the shell spells
+    # `--component swiftui` and the python runner spells the argv pair
+    # on one line, and both name the two tokens together.
+    def verifies_swiftui(text):
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("#"):
+                continue
+            if "--component" in s and "swiftui" in s:
+                return True
+        return False
+
+    for site in ["tools/swiftui/build-dylib.sh", "tools/ios/run-sim.py"]:
         text = (ROOT / site).read_text(encoding="utf-8")
-        if "component swiftui" not in text:
+        if not verifies_swiftui(text):
             fail(f"{site} compiles the SwiftUI interpreter but never "
                  f"verifies it (--component swiftui)")
         if "kaya-build-id:" not in text:

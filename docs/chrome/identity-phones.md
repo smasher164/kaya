@@ -624,7 +624,7 @@ has no `android:icon` and no launcher resource at all, and iOS's
 generated `Info.plist` has no `CFBundleIconName`, no `CFBundleIcons`, and
 not even `CFBundleDisplayName`. If kaya is to have a declared identity at
 all, the work is in `tools/ios/Info.plist.in` + an `actool` step in
-`tools/ios/run-sim.sh:93` (`make_bundle`), and in the android module
+`tools/ios/run-sim.py:219` (`make_bundle`), and in the android module
 manifests + a generated resource — and the guard belongs where invariant
 3 wants it: `tools/check-steps.sh:2274 (gone)` already refuses on a missing
 `Info.plist.in` key, so the same clause extends to the identity keys for
@@ -687,7 +687,7 @@ this session:
 ```
 
 22 days and 1 day of elapsed time against a session minutes old. These
-are the lane's persistent pools — `tools/ios/run-sim.sh:108-121`
+are the lane's persistent pools — `tools/ios/run-sim.py:261-268`
 documents the iOS pool as deliberately staying booted across runs, and
 the `-avd kaya … -read-only` emulators are the android lane's. **I did
 not start them and I am deliberately NOT stopping them**, since killing

@@ -23,14 +23,31 @@ LANGS = "rust|python|go|csharp|java|swift|ocaml|haskell|compose|jvm|swiftui"
 
 PAIRS = [
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    # The windows roster is DATA since the runner conversion: the legs
-    # are quoted names in the lane module, which the same regex reads.
+    # The windows and ios rosters are DATA since the runner conversion:
+    # a tools/lib/lanes/ row is IMPORTED with a roster floor — a regex
+    # over a module whose lists hold bare scene names would agree with
+    # everything.
     ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
     ("tools/validate-mac.sh", "swift/KayaSwiftUI.swift", "macos"),
-    ("tools/ios/run-sim.sh", "swift/KayaSwiftUI.swift", "ios"),
+    ("tools/lib/lanes/ios.py", "swift/KayaSwiftUI.swift", "ios"),
     ("tools/android/run-emulator.sh",
      "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt", ""),
 ]
+
+
+def lane_scenes(runner):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "kaya_lane_stubs", ROOT / runner)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    wired = set(mod.wired_scenes())
+    if len(wired) < 10:
+        print(f"check-stubs: {runner} answered {len(wired)} wired scenes "
+              f"— a roster that small is a moved table, and this census "
+              f"would agree with anything", file=sys.stderr)
+        sys.exit(1)
+    return wired
 
 
 def stubbed(scene, backend_text, platform):
@@ -43,13 +60,19 @@ def stubbed(scene, backend_text, platform):
 
 
 def check(scenes, runner_name, runner_text, backend_name, backend_text,
-          platform):
+          platform, wired_set=None):
     """Findings for one runner/backend pair — the census the negative
-    below runs in-process, so it cannot drift from the real one."""
+    below runs in-process, so it cannot drift from the real one. A lane
+    module's roster arrives as `wired_set` (imported); shell runners
+    keep the leg-spelling regex over their text."""
     out = []
     for scene in scenes:
         stub = f'depth_stub("{scene}")'
-        wired = re.search(rf"\b{re.escape(scene)}[-_](?:{LANGS})", runner_text)
+        if wired_set is not None:
+            wired = scene in wired_set
+        else:
+            wired = re.search(rf"\b{re.escape(scene)}[-_](?:{LANGS})",
+                              runner_text)
         if wired and stubbed(scene, backend_text, platform):
             out.append(f"check-stubs: {runner_name} wires '{scene}' legs but "
                        f"{backend_name} still stubs it ({stub})")
@@ -59,9 +82,12 @@ def check(scenes, runner_name, runner_text, backend_name, backend_text,
 status = 0
 scenes = sorted(p.stem for p in (ROOT / "tools/scenes").glob("*.steps"))
 for runner, backend, platform in PAIRS:
+    wired_set = (lane_scenes(runner)
+                 if runner.startswith("tools/lib/lanes/") else None)
     findings = check(
         scenes, runner, (ROOT / runner).read_text(encoding="utf-8"),
-        backend, (ROOT / backend).read_text(encoding="utf-8"), platform)
+        backend, (ROOT / backend).read_text(encoding="utf-8"), platform,
+        wired_set=wired_set)
     for line in findings:
         print(line, file=sys.stderr)
     if findings:

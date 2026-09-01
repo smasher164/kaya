@@ -16,7 +16,7 @@ recommendation.
 There is one iOS backend and it is the SwiftUI interpreter, compiled to a
 dylib and embedded in the app bundle. `crates/kaya/src/lib.rs:135-150 (gone)` — for
 `macos`/`ios`, `kaya::run` spawns the app thread and then calls
-`swiftui_host::run()`, which never returns. `tools/ios/run-sim.sh:1276-1279`
+`swiftui_host::run()`, which never returns. `tools/ios/run-sim.py:1600-1604`
 says it directly: "The one iOS backend is the SwiftUI interpreter: every
 bundle embeds its dylib, **whatever language the guest is written in**." `[D]`
 
@@ -24,8 +24,8 @@ bundle embeds its dylib, **whatever language the guest is written in**." `[D]`
 
 | Flavor | Guest artifact | How kaya is linked | Backend |
 |---|---|---|---|
-| Rust (`rust-swiftui`) | full Mach-O executable from `cargo build --target aarch64-apple-ios-sim --example <scene>` (`tools/ios/run-sim.sh:1381`) | kaya is an **rlib inside the executable** (Rust static link) | `libkaya_swiftui.dylib` copied into bundle root (`:1384`) |
-| Swift | full Mach-O executable from `xcrun -sdk iphonesimulator swiftc … -L target/… -lkaya` (`tools/ios/run-sim.sh:1337-1346`) | kaya is **`libkaya.a`, the staticlib crate-type** (`crates/kaya/Cargo.toml:9-12`) | same dylib, same place (`:1366`) |
+| Rust (`rust-swiftui`) | full Mach-O executable from `cargo build --target aarch64-apple-ios-sim --example <scene>` (`tools/ios/run-sim.py:1886-1889`) | kaya is an **rlib inside the executable** (Rust static link) | `libkaya_swiftui.dylib` copied into bundle root (`:1384`) |
+| Swift | full Mach-O executable from `xcrun -sdk iphonesimulator swiftc … -L target/… -lkaya` (`tools/ios/run-sim.py:1686-1704`) | kaya is **`libkaya.a`, the staticlib crate-type** (`crates/kaya/Cargo.toml:9-12`) | same dylib, same place (`:1366`) |
 
 The crate declares `crate-type = ["rlib", "cdylib", "staticlib"]` with the
 comment "staticlib is for iOS, where app bundles prefer static linking and the
@@ -58,7 +58,7 @@ Swift validation leg links libkaya.a directly" (`crates/kaya/Cargo.toml:10-12`).
 
 ### 1.3 Bundle layout
 
-`make_bundle` (`tools/ios/run-sim.sh:90-103`) builds the whole `.app` by hand —
+`make_bundle` (`tools/ios/run-sim.py:219-258`) builds the whole `.app` by hand —
 no Xcode project anywhere in the lane:
 
 ```
@@ -102,7 +102,7 @@ because it is only ever `dlopen`ed by explicit path. `[M]`
 
 The lane sets the path explicitly per launch:
 `SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib"`
-(`tools/ios/run-sim.sh:1094`), where `$container` is
+(`tools/ios/run-sim.py:1333`), where `$container` is
 `xcrun simctl get_app_container <udid> <bundle_id> app` (`:1021`).
 
 ### 1.5 Entry point and threads
@@ -125,7 +125,7 @@ logic runs on a second thread it (or the binding) starts. `[D]`
 
 ### 1.6 What the runner installs and launches
 
-`run_swiftui_on` (`tools/ios/run-sim.sh:982-1119`):
+`run_swiftui_on` (`tools/ios/run-sim.py:1280-1400`):
 
 1. `xcrun simctl install "$udid" "$app"` (`:1019`)
 2. resolve the app container (`:1021`)

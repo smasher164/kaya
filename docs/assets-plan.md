@@ -421,13 +421,13 @@ the bytes get to the machine at all. All rows [REPO].
 **The iOS row is the finding.** [MEASURED] `grep -c typeface` over the
 five lane scripts: validate-mac 5, the linux suite runner 19, deploy-win
 15, the android emulator runner 21, **ios/run-sim 0**. The scene lists at
-tools/ios/run-sim.sh:1525 do not contain `typeface`. The one asset kaya
+tools/lib/lanes/ios.py:26 do not contain `typeface`. The one asset kaya
 ships has never reached iOS, and the lane's only host-to-guest binary
 channel is a base64-over-container-file bridge that is the clipboard and
 dialog protocol, not an asset installer.
 
 The recommended fix is the one that is also the packaging reader:
-**tools/ios/run-sim.sh:137 (`make_bundle`) copies the asset root into the
+**tools/ios/run-sim.py:219 (`make_bundle`) copies the asset root into the
 bundle's Resources.** That is what a shipped iOS app does anyway, so iOS
 becomes the first lane whose asset delivery is the real mechanism rather
 than a test convenience, and the typeface scene becomes runnable there.

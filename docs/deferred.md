@@ -3658,8 +3658,30 @@ in 639s (a first matrix ran all legs green with linux 5s over its
 530s ceiling — the container's mtime-busted core rebuild plus sweep
 contention, not the lane; the rerun's linux was 404s). Enumeration
 and re-teach record:
-docs/measurements/deploy-win-conversion-2026-08-31.md. run-sim is
-stage 2.
+docs/measurements/deploy-win-conversion-2026-08-31.md.
+
+STAGE 2 (run-sim) LANDED THE SAME EVENING, the same shape: tables in
+tools/lib/lanes/ios.py (four suite rosters, the declared-off lists,
+PAD_EXTRAS and the per-leg cut/drop/keep/extra MODS), body
+tools/ios/run-sim.py with the shim pinned, IosRecorder in
+flightrec_lane.py, rider EQUAL on every axis (113 legs in queue
+order). Stage 2's own findings: a NINTH parser the enumeration missed
+— tools/swift-typecheck.sh reads IOS_MIN and the swift roster out of
+the runner, and its floor REFUSED A VERDICT loudly on the first sweep,
+the correct failure mode; it imports the lane module now, and the
+stages 3-4 lesson is to sweep the SHELL gates for runner reads too.
+And expect_app_icon caught a real conversion slip on the first lane
+run — the rust identity bundle lost its make_bundle identity argument
+in translation and the leg went red naming exactly that (112/113,
+then 113/113 twice after the one-line fix). check-python's population
+extended to tools/**/*.py with a second byte-pinned header for
+depth-2 runners; scene-features and check-stubs import lanes/ rows
+through a wired_scenes() floor, closing two silently-vacuous-on-a-shim
+readers; check-steps' 26 clipboard/picker negatives re-spelled to the
+python body and the module. Validated: gates 50/50, ios lane green
+twice (113/113), matrix ALL PASS 1,390 legs in 631s. Record:
+docs/measurements/run-sim-conversion-2026-08-31.md. run-emulator is
+stage 3.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 

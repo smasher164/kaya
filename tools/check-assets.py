@@ -169,12 +169,14 @@ STAGES = {
         "a device has no repo; the root is pushed to /data/local/tmp "
         "and named in each leg's intent",
         "KAYA_ASSET_DIR"),
-    "tools/ios/run-sim.sh": (
+    # Python since the runner conversion; the token is the python
+    # constant the bundle copy reads.
+    "tools/ios/run-sim.py": (
         "an app in the simulator has no repo and its cwd is /; the "
         "root goes into the bundle, which is both this lane's staging "
         "and what a shipped iOS app actually does — so the core finds "
         "it through Bundle.main and no variable is involved",
-        "$ASSET_SRC"),
+        "ASSET_SRC"),
 }
 NOTHING_NEEDED = {
     "tools/validate-mac.sh":
@@ -373,9 +375,11 @@ def check(root):
                        f"the compile-time repo path it does not have")
         # A COPY of one file under the root, never a mere mention of
         # one: the deploy hashes the resource index by path, which is a
-        # READ.
+        # READ. The python spellings joined with the runner
+        # conversion — a converted lane copying one file would match
+        # none of the shell verbs and the ban would go vacuous.
         COPY = ("scp ", "adb push", "cp ", "copyTo", "install ",
-                "rsync")
+                "rsync", "copy2", "copytree", "copyfile")
         for line in text.splitlines():
             if not re.search(r"guests/assets/(fonts|icons|win)/"
                              r"[A-Za-z0-9*]", line):
@@ -944,6 +948,17 @@ doctor_shadow("N4's per-file staging", s, "tools/deploy-win.py",
 refused(s, "stages a FILE under the asset root",
         "N4 (per-file staging)")
 
+# N4b — the same defect in the ios lane's PYTHON spelling: a
+# shutil.copy2 of one file under the root must trip the ban the shell
+# verbs used to carry alone.
+s = fresh("n4b")
+doctor_shadow("N4b's per-file python staging", s, "tools/ios/run-sim.py",
+              r'    shutil\.copytree\(ASSET_SRC, app / "assets"\)',
+              '    shutil.copy2("guests/assets/fonts/sora-wght.ttf", app)\n'
+              '    shutil.copytree(ASSET_SRC, app / "assets")')
+refused(s, "stages a FILE under the asset root",
+        "N4b (per-file staging, python spelling)")
+
 # N5 — C4: a lane that needs nothing stops saying so.
 s = fresh("n5")
 doctor_shadow("N5's redacted reason", s, "tools/linux/run-suites.sh",
@@ -1180,7 +1195,7 @@ doctor_shadow("N29's renamed CHART_DAYS", s,
 refused(s, "no longer spells CHART_DAYS",
         "N29 (a chart census with no window)")
 
-g.negatives_ran(29)
+g.negatives_ran(30)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",

@@ -80,8 +80,10 @@ kind. Consequence for restarts is in A.6.
 
 ### A.4 What the existing lane already proves (read mode)
 
-The `filedialog` scene runs on the iOS lane: `tools/ios/run-sim.sh:1555-1559`
-builds `--example filedialog` and queues `filedialog-swiftui`. The scene
+The `filedialog` scene runs on the iOS lane: the rust suite loop
+(`tools/ios/run-sim.py:1886-1889`) builds the module's examples —
+`filedialog` among them (`tools/lib/lanes/ios.py:63`) — and queues
+`filedialog-swiftui`. The scene
 (`tools/scenes/filedialog.steps:66-67`) asserts the guest read the real bytes
 back out of the descriptor ("1 picked bytes"), and its header says the scene
 uniquely proves the capability SURVIVES CROSSING A THREAD.

@@ -95,7 +95,7 @@ Only #1 has ever been called an asset. #2 and #3 have every property of one.
 
 [MEASURED] `grep -c typeface`: validate-mac 5, linux/run-suites 19,
 deploy-win 15, android/run-emulator (gone) 21, **ios/run-sim 0**. The iOS scene
-lists (tools/ios/run-sim.sh:1340, :1456) do not contain `typeface`. The
+lists (tools/lib/lanes/ios.py:26, :40) do not contain `typeface`. The
 one asset the tree ships never reaches iOS.
 
 ## 6. The four per-platform icon tables — NOT assets

@@ -138,38 +138,41 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
     # AND THE GUESTS FOR iOS: the macOS loop at the top compiles ONE side
     # of every `#if os(...)` a guest carries.
     #
-    # THE FILE SET AND THE FLAGS ARE THE LANE'S, read out of
-    # tools/ios/run-sim.sh rather than restated here:
-    #   - IOS_SWIFT_SCENES is which guests the lane ships to a phone
-    #     (entries `scene` or `scene:guest`, the SOURCE after the colon).
-    #     The rest are desktop-only by design.
-    #   - IOS_MIN (16.0) is NOT the 17.0 the interpreter passes use. The
-    #     older target is STRICTER for availability diagnostics, so a
-    #     hardcoded 17.0 would make this gate looser than the lane.
+    # THE FILE SET AND THE FLAGS ARE THE LANE'S, never restated here:
+    #   - the swift roster is the lane MODULE's SWIFT_ENTRIES (entries
+    #     `scene` or `scene:guest`, the SOURCE after the colon) since
+    #     the runner conversion — IMPORTED, the same table the runner
+    #     iterates. The rest are desktop-only by design.
+    #   - IOS_MIN (16.0) is the runner's, and NOT the 17.0 the
+    #     interpreter passes use: the older target is STRICTER for
+    #     availability diagnostics, so a hardcoded 17.0 would make this
+    #     gate looser than the lane.
     # No -warnings-as-errors: the lane's guest builds do not use it, and
     # a gate stricter than the lane fails builds that would have shipped.
     #
     # The reader refuses rather than returning nothing — an empty parse
     # would agree with everything.
-    if ! ios_lane_spec="$(python3 - tools/ios/run-sim.sh <<'PY'
+    if ! ios_lane_spec="$(python3 - tools/ios/run-sim.py <<'PY'
 import pathlib
 import re
 import sys
 
-src = pathlib.Path(sys.argv[1]).read_text()
-target = re.search(r'^IOS_MIN="([0-9][0-9.]*)"', src, re.M)
-scenes = re.search(r'^\s*IOS_SWIFT_SCENES="([^"]*)"', src, re.M)
-if not target or not scenes:
-    sys.exit("cannot read IOS_MIN/IOS_SWIFT_SCENES out of tools/ios/run-sim.sh; "
-             "the iOS lane's guest build moved and this gate no longer knows "
-             "which guests reach a phone")
+sys.path.insert(0, "tools/lib")
+from lanes import ios as lane
+
+src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+target = re.search(r'^IOS_MIN = "([0-9][0-9.]*)"$', src, re.M)
+if not target:
+    sys.exit("cannot read IOS_MIN out of tools/ios/run-sim.py; the iOS "
+             "lane's floor moved and this gate no longer knows which "
+             "target the guests build against")
 sources = []
-for entry in scenes.group(1).split():
+for entry in lane.SWIFT_ENTRIES:
     name = entry.split(":")[-1]
     if name not in sources:
         sources.append(name)
 if not sources:
-    sys.exit("IOS_SWIFT_SCENES named no guests")
+    sys.exit("the lane module's SWIFT_ENTRIES named no guests")
 print(target.group(1))
 print(" ".join(sources))
 PY
@@ -182,11 +185,11 @@ PY
     ios_srcs=()
     for name in "${ios_names[@]}"; do
         [ -f "guests/swift/$name.swift" ] ||
-            refuse "tools/ios/run-sim.sh ships guest '$name' to iOS and guests/swift/$name.swift does not exist"
+            refuse "the ios lane module ships guest '$name' to iOS and guests/swift/$name.swift does not exist"
         ios_srcs+=("guests/swift/$name.swift")
     done
     [ "${#ios_srcs[@]}" -ge 10 ] ||
-        refuse "the iOS guest pass was handed ${#ios_srcs[@]} guests by tools/ios/run-sim.sh; a pass over that is not a check"
+        refuse "the iOS guest pass was handed ${#ios_srcs[@]} guests by the ios lane module; a pass over that is not a check"
     # Pooled: each compile re-reads the four binding files, so serially
     # this pass costs ~35s of a ~35s gate and parallel ~3s (measured
     # 2026-08-18).
@@ -224,7 +227,7 @@ PY
     [ "$ios_status" = 0 ] || exit 1
     [ "$ios_guests" = "${#ios_srcs[@]}" ] ||
         refuse "the iOS guest pass compiled $ios_guests of ${#ios_srcs[@]} guests"
-    PASSES+=("guests/swift: $ios_guests of ${#GUESTS[@]} files (tools/ios/run-sim.sh's IOS_SWIFT_SCENES; the rest are desktop-only), iphonesimulator SDK, arm64-apple-ios$ios_min-simulator")
+    PASSES+=("guests/swift: $ios_guests of ${#GUESTS[@]} files (the ios lane module's SWIFT_ENTRIES; the rest are desktop-only), iphonesimulator SDK, arm64-apple-ios$ios_min-simulator")
 else
     echo "swift-typecheck: note — no iphonesimulator SDK; the iOS half went unchecked" >&2
     PASSES+=("SKIPPED: everything iOS — the interpreter, tools/ios/clipctl and the lane's guests (no iphonesimulator SDK)")

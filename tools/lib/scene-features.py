@@ -40,14 +40,32 @@ import sys
 RUNNERS = [
     ("tools/validate-mac.sh", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    # The windows roster is DATA since the runner conversion; the legs
-    # are quoted names in the lane module, which runs_scene's regex
-    # reads exactly as it reads a shell leg.
+    # The windows and ios rosters are DATA since the runner conversion:
+    # a tools/lib/lanes/ row is IMPORTED (lane_scenes below), never
+    # regexed — a regex over a module whose lists hold bare scene names
+    # would agree with everything.
     ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
-    ("tools/ios/run-sim.sh", "swift/KayaSwiftUI.swift", "ios"),
+    ("tools/lib/lanes/ios.py", "swift/KayaSwiftUI.swift", "ios"),
     ("tools/android/run-emulator.sh",
      "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt", ""),
 ]
+
+
+def lane_scenes(path):
+    """A lanes/ module's wired scenes, imported with python's own
+    reader. The floor is the vacuity wall: a shimmed or emptied module
+    must refuse, not agree (the keyed-inputs lesson one tranche over)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("kaya_lane_sf", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    wired = set(mod.wired_scenes())
+    if len(wired) < 10:
+        raise SystemExit(
+            f"scene-features: {path} answered {len(wired)} wired scenes "
+            f"— a roster that small is a moved table, and this census "
+            f"would agree with anything")
+    return wired
 
 # A menu item's LEAF LABEL, lowercased, against the closed role
 # vocabulary, and then the role against the feature that implements it.
@@ -314,9 +332,18 @@ def main() -> int:
             bad.append(f"{runner}: missing — the cross-check cannot read a "
                        f"runner that is not there")
             continue
-        text = path.read_text()
+        if runner.startswith("tools/lib/lanes/"):
+            wired = lane_scenes(path)
+
+            def has_legs(scene, wired=wired):
+                return scene in wired
+        else:
+            text = path.read_text()
+
+            def has_legs(scene, text=text):
+                return runs_scene(text, scene)
         for scene, feats in scenes.items():
-            if not runs_scene(text, scene):
+            if not has_legs(scene):
                 continue
             for feat, (n, line) in sorted(feats.items()):
                 if not stubbed(root, backend, feat, platform):

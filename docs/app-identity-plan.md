@@ -104,7 +104,7 @@ already builds both packages:
 - the Android lane builds an installable APK with gradle
   (`tools/android/run-emulator.sh:1180`), and
 - the iOS lane assembles a real `.app` bundle with a real `Info.plist`
-  (`tools/ios/run-sim.sh:137`, the `make_bundle` function, filling in
+  (`tools/ios/run-sim.py:219`, the `make_bundle` function, filling in
   `tools/ios/Info.plist.in`).
 
 So those two steps become **the first two readers of the declared
@@ -711,7 +711,7 @@ it.
   true and it is the wrong conclusion, because the phones are the two
   platforms whose packaging the repo ALREADY builds: gradle makes an
   installable APK (tools/android/run-emulator.sh:1180) and the iOS lane
-  assembles a real bundle (tools/ios/run-sim.sh:137). Both become
+  assembles a real bundle (tools/ios/run-sim.py:219). Both become
   readers of the declared identity now, which is what puts a real
   launcher icon on both phones. The rest of this bullet is the reasoning
   for the half that stays refused, the Android-only Recents card, and it
@@ -1057,7 +1057,7 @@ unchanged.
    plus `android:icon` and `android:label`
    (tools/android/run-emulator.sh:1180 builds it), and the iOS bundle
    gains the icon plus `CFBundleDisplayName` and the icon keys
-   (tools/ios/run-sim.sh:137 assembles it, from
+   (tools/ios/run-sim.py:219 assembles it, from
    tools/ios/Info.plist.in). Android's runtime Recents route stays
    refused (I6).
 7. Gates: one `check_styling_point` row, one `VERB_FEATURE` row in

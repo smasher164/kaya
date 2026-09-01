@@ -384,7 +384,7 @@ backend refuses it.** The Android lane runs the todos scene on Compose
 - The other four backends are clear. `depth_stub(` has NO callers in
   any Rust backend and `kayaDepthStub(` none in Swift; GTK and WinUI
   both carry `undo` in their lane's SCENES; the iOS lane queues
-  `undo-swiftui` explicitly (tools/ios/run-sim.sh:1502). Compose is the
+  `undo-swiftui` explicitly (tools/lib/lanes/ios.py:66). Compose is the
   only hole, and mac is proven green above.
 
 **Why no gate caught it, which is the part worth fixing.**

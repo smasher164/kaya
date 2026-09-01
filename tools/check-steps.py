@@ -28,6 +28,7 @@ import tempfile
 # since the runner conversion (docs/runner-conversion-plan.md §2); the
 # clauses that used to regex tools/deploy-win.sh's text import what the
 # runner imports.
+from lanes import ios as ios_lane
 from lanes import win as win_lane
 
 # Line-buffered stdout: the probes and helper scripts write to the same
@@ -1698,34 +1699,34 @@ def wired():
     exempt = {tuple(line.split("\t"))
               for line in r.stdout.splitlines() if line.strip()}
 
-    ios_wired = runner_list_scenes(
-        "tools/ios/run-sim.sh",
-        "IOS_SWIFT_SCENES|IOS_GO_SCENES|IOS_PYTHON_SCENES")
-    ios_declared = runner_list_scenes(
-        "tools/ios/run-sim.sh",
-        "IOS_DESKTOP_ONLY_SCENES|IOS_UNWIRED_SCENES")
+    # The iOS roster is the lane MODULE's since the runner conversion:
+    # every suite's scenes plus the declared-off lists come from the
+    # import, and the hand-queued regex died with the shell text (the
+    # rust suite is a module-driven loop now too).
+    ios_wired = sorted(ios_lane.wired_scenes())
+    ios_declared = sorted(set(ios_lane.DESKTOP_ONLY_SCENES)
+                          | set(ios_lane.UNWIRED_SCENES))
     android_declared = runner_list_scenes(
         "tools/android/run-emulator.sh",
         "ANDROID_DESKTOP_ONLY_SCENES|ANDROID_UNWIRED_SCENES")
     # A reader that reads nothing agrees with everything.
     if not ios_wired:
-        print("check-steps: wired() read NO scenes out of run-sim.sh's "
-              "IOS_*_SCENES assignments — they moved, and this clause "
+        print("check-steps: wired() read NO scenes out of the ios lane "
+              "module's suite lists — they moved, and this clause "
               "is blind", file=sys.stderr)
         return 1
 
     roster = {p.stem for p in STEPS}
-    ios_text = read_rel("tools/ios/run-sim.sh")
     android_text = read_rel("tools/android/run-emulator.sh")
     failed = 0
     for decl in ios_declared:
         if decl not in roster:
-            print(f'check-steps: run-sim.sh declares "{decl}" off, but '
-                  f"no such scene exists", file=sys.stderr)
+            print(f'check-steps: the ios lane module declares "{decl}" '
+                  f"off, but no such scene exists", file=sys.stderr)
             failed = 1
         if decl in ios_wired:
-            print(f'check-steps: run-sim.sh declares "{decl}" off AND '
-                  f"lists it in IOS_*_SCENES — one of the two is "
+            print(f'check-steps: the ios lane module declares "{decl}" '
+                  f"off AND a suite lists it — one of the two is "
                   f"stale", file=sys.stderr)
             failed = 1
     for decl in android_declared:
@@ -1744,11 +1745,11 @@ def wired():
         "tools/validate-mac.sh": read_rel("tools/validate-mac.sh"),
         "tools/linux/run-suites.sh":
             read_rel("tools/linux/run-suites.sh"),
-        # The windows roster is read from the lane MODULE, not text;
-        # the key matches scene-features.py's RUNNERS row so the
-        # depth-stub exemptions line up.
+        # The windows and ios rosters are read from the lane MODULES,
+        # not text; the keys match scene-features.py's RUNNERS rows so
+        # the depth-stub exemptions line up.
         "tools/lib/lanes/win.py": "",
-        "tools/ios/run-sim.sh": ios_text,
+        "tools/lib/lanes/ios.py": "",
         "tools/android/run-emulator.sh": android_text,
     }
     win_scenes = {win_lane.scene_lang(leg)[0] for leg in win_lane.legs()}
@@ -1757,20 +1758,12 @@ def wired():
         for runner, text in runner_texts.items():
             if (runner, scene) in exempt:
                 continue
-            if runner == "tools/ios/run-sim.sh":
-                # Two wiring forms: the list-driven suites, and the
-                # HAND-QUEUED legs below them (the rust-swiftui suite
-                # and the editor) — a `queue_leg run_swiftui_on
-                # <scene>-...` line is as structural as a list entry.
-                ok = (scene in ios_wired
-                      or re.search(r'run_swiftui_on\s+"?'
-                                   + re.escape(scene) + "-", text)
-                      or scene in ios_declared)
+            if runner == "tools/lib/lanes/ios.py":
+                ok = scene in ios_wired or scene in ios_declared
                 if not ok:
-                    print(f'check-steps: scene "{scene}" has no live '
-                          f"legs in {runner} (not in IOS_*_SCENES, not "
-                          f"hand-queued, not declared off)",
-                          file=sys.stderr)
+                    print(f'check-steps: scene "{scene}" has no leg in '
+                          f"the ios lane module and is not declared "
+                          f"off ({runner})", file=sys.stderr)
                     failed = 1
             elif runner == "tools/android/run-emulator.sh":
                 # milestone2's legs drop the scene prefix (they ARE the
@@ -2063,11 +2056,19 @@ def feature_selftest(legs, stub, extra=""):
                     d / "tools/lib/hand-rolled-stubs.py")
         for empty in ("tools/validate-mac.sh",
                       "tools/linux/run-suites.sh",
-                      "tools/lib/lanes/win.py", "tools/ios/run-sim.sh",
                       "crates/kaya/src/gtk.rs",
                       "crates/kaya/src/winui/mod.rs",
                       "swift/KayaSwiftUI.swift"):
             (d / empty).write_text("", encoding="utf-8")
+        # The lane modules are IMPORTED with a roster floor, so the
+        # fixture's "runner that runs nothing" is a module whose
+        # scenes are real enough to pass the floor and match nothing.
+        for lane_stub in ("tools/lib/lanes/win.py",
+                          "tools/lib/lanes/ios.py"):
+            (d / lane_stub).write_text(
+                "def wired_scenes():\n"
+                "    return {f'zzfixture{i}' for i in range(12)}\n",
+                encoding="utf-8")
         if extra:
             (d / "tools/scenes/zzprobe.steps").write_text(
                 f'expect label#0 "x"\n{extra}\n', encoding="utf-8")
@@ -2254,7 +2255,7 @@ if out:
 # dead.
 def sweep_c_floor():
     RUNNERS = ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
-               "tools/deploy-win.py", "tools/ios/run-sim.sh",
+               "tools/deploy-win.py", "tools/ios/run-sim.py",
                "tools/android/run-emulator.sh")
     makefile = read_rel("guests/c/Makefile")
     m = re.search(r"^SCENES\s*:?=\s*(.+)$", makefile, re.M)
@@ -2694,156 +2695,117 @@ if out:
 # untouched (docs/clipboard-plan.md §8 finding 5). A session is a
 # DEVICE, and the slot queue_leg claims IS this lane's exclusion.
 #
-# A clipboard leg must ride queue_leg AND run_swiftui_on: the first
-# claims the simulator, the second starts the host-side watcher that
-# answers clipboard_seed and expect_clipboard — the guest cannot spawn
-# a child process here. It must not ride kaya-sim-pad, ONE lockless
-# device. And queue_leg must still claim a device, or the first clause
-# is a rule about a word.
-#
-# The swift flavor never spells its own leg name — it is queued in a
-# loop over IOS_SWIFT_SCENES — so that list is read as a leg too.
-def clipboard_ios(text, path):
+# A clipboard leg must claim a simulator and ride run_swiftui_on: the
+# claim holds the device, run_swiftui_on starts the host-side watcher
+# that answers clipboard_seed and expect_clipboard — the guest cannot
+# spawn a child process here. It must not ride kaya-sim-pad, ONE
+# lockless device. The runner is python since the conversion
+# (tools/ios/run-sim.py) and its rosters are the lane module's
+# (tools/lib/lanes/ios.py), so membership is IMPORTED and the pool
+# mechanics are read out of the python body.
+def clipboard_ios(text, path, mod):
     bad = []
 
-    # A leg call usually wraps, so continuations are joined first,
-    # each keeping the line it started on.
-    joined = []
-    first = None
-    buf = ""
-    for n, raw in enumerate(text.splitlines(), 1):
-        s = raw.strip()
-        if first is None:
-            first = n
-        if s.endswith("\\"):
-            buf = (buf + " " + s[:-1]).strip()
-            continue
-        joined.append((first, (buf + " " + s).strip()))
-        first, buf = None, ""
-
-    seen = 0
-    for n, line in joined:
-        words = line.split()
-        if not words or words[0] not in ("queue_leg", "queue_pad_leg",
-                                         "run_swiftui_on"):
-            continue
-        if not any(w == "clipboard" or w.startswith("clipboard-")
-                   for w in words[1:]):
-            continue
-        seen += 1
-        verb = words[0]
-        fn = words[1] if len(words) > 1 else ""
-        if verb == "queue_pad_leg":
-            bad.append(f"{path}:{n}: a clipboard leg on the iPad — "
-                       f"kaya-sim-pad is a single LOCKLESS device "
-                       f"(queue_pad_leg claims no slot), so legs on it "
-                       f"would share one pasteboard; the phone pool "
-                       f"slot lock IS this lane clipboard exclusion "
-                       f"(docs/clipboard-plan.md §8 finding 5)")
-        elif verb != "queue_leg":
-            bad.append(f"{path}:{n}: a clipboard leg runs outside "
-                       f"queue_leg, the only thing that claims a "
-                       f"simulator for a whole leg")
-        elif fn != "run_swiftui_on":
-            bad.append(f"{path}:{n}: the clipboard leg rides "
-                       f"{fn or verb}, not run_swiftui_on — the "
-                       f"host-side seed/read bridge is started there "
-                       f"and nowhere else, and iOS cannot answer "
-                       f"either verb in the guest process")
-
-    # The guest-language suites are legs too, spelled as a list rather
-    # than as calls. EVERY such list is read, never one by name: a
-    # gate that knew only the first IOS_<LANG>_SCENES would go
-    # half-vacuous the moment a second suite landed.
-    lists = list(re.finditer('IOS_([A-Z0-9]+)_SCENES="([^"]*)"', text))
-    if not lists:
-        bad.append(f"{path}: no IOS_<LANG>_SCENES list is where this "
-                   f"gate looks — the runner shape moved and the "
-                   f"guest-suite half of the check went vacuous")
-    for scenes in lists:
-        lang = scenes.group(1)
-        if not any(entry.split(":")[0] == "clipboard"
-                   for entry in scenes.group(2).split()):
-            continue
-        seen += 1
-        block = text[scenes.end():]
-        # The block ends at the phase-closing `timing` call, which
-        # both the drained and the interleaved shapes carry (the drain
-        # itself moved inside a conditional when the phases learned to
-        # interleave, 2026-08-20).
-        stop = re.search(r"\n +timing ", block)
-        if stop:
-            block = block[:stop.start()]
-        if "queue_pad_leg" in block:
-            bad.append(f"{path}: clipboard is in IOS_{lang}_SCENES and "
-                       f"that block queues with queue_pad_leg — the "
-                       f"pad is one lockless device")
-        if "queue_leg " not in block:
-            bad.append(f"{path}: clipboard is in IOS_{lang}_SCENES but "
-                       f"that block no longer queues through "
-                       f"queue_leg, so the {lang.lower()} leg claims "
-                       f"no device")
-
-    if seen == 0:
+    # Which suites carry the clipboard scene — the module's lists, the
+    # same tables the runner derives its legs from.
+    suites_with = []
+    for label, scenes in (
+            ("swift", [e.split(":")[0] for e in mod.SWIFT_ENTRIES]),
+            ("go", mod.GO_SCENES),
+            ("python", mod.PYTHON_SCENES),
+            ("rust-swiftui", mod.RUST_SCENES)):
+        if "clipboard" in scenes:
+            suites_with.append(label)
+    if not suites_with:
         bad.append(f"{path}: no clipboard leg found (the scene must "
                    f"stay wired)")
 
-    # AND THE BOARD MUST BELONG TO THE DEVICE BEFORE ANY LEG RUNS.
+    # NOT ON THE PAD: kaya-sim-pad is a single LOCKLESS device, so legs
+    # on it would share one pasteboard; the phone pool slot lock IS
+    # this lane's clipboard exclusion (§8 finding 5).
+    if "clipboard" in mod.PAD_EXTRAS:
+        bad.append(f"{path}: a clipboard leg on the iPad — kaya-sim-pad "
+                   f"is a single LOCKLESS device, so legs on it would "
+                   f"share one pasteboard; the phone pool slot lock IS "
+                   f"this lane's clipboard exclusion "
+                   f"(docs/clipboard-plan.md §8 finding 5)")
+
+    # ...and the ONLY route to the pad is the PAD_EXTRAS membership
+    # test, so the module clause above is the whole story: exactly one
+    # pad=True queue site, guarded by that membership.
+    pad_sites = [n for n, line in enumerate(text.splitlines(), 1)
+                 if "pad=True)" in line]
+    if len(pad_sites) != 1:
+        bad.append(f"{path}: {len(pad_sites)} pad=True queue sites — "
+                   f"one guarded site is the rule, and zero means the "
+                   f"pad legs are gone")
+    else:
+        lines = text.splitlines()
+        window = "\n".join(lines[max(0, pad_sites[0] - 10):pad_sites[0]])
+        if "if scene in lane.PAD_EXTRAS:" not in window:
+            bad.append(f"{path}:{pad_sites[0]}: the pad queue is not "
+                       f"guarded by PAD_EXTRAS membership — any scene "
+                       f"could ride the lockless pad")
+
+    # THE SLOT LOCK: a leg holds its simulator alone for its whole
+    # duration — the claim comes from the device pool and is released
+    # after the leg, and the worker runs the leg through
+    # run_swiftui_on, the only place the host-side bridge starts.
+    worker = py_function_body(text, "_leg_worker", path, bad)
+    claim = py_function_body(text, "_claim_device", path, bad)
+    if worker:
+        flat = " ".join(worker.split())
+        if ("_claim_device()" not in worker
+                or "_release_device(slot)" not in worker):
+            bad.append(f"{path}: _leg_worker no longer claims and "
+                       f"releases a device slot, so a leg no longer "
+                       f"holds its simulator alone — on this lane that "
+                       f"lock IS the clipboard exclusion "
+                       f"(docs/clipboard-plan.md §8 finding 5)")
+        if "run_swiftui_on(udid, slot, *args, log=log, **kwargs)" \
+                not in flat:
+            bad.append(f"{path}: _leg_worker no longer runs the leg "
+                       f"through run_swiftui_on — the host-side "
+                       f"seed/read bridge is started there and nowhere "
+                       f"else, and iOS cannot answer either verb in "
+                       f"the guest process")
+    if claim and "_dev_slots.pop" not in claim:
+        bad.append(f"{path}: _claim_device no longer takes a slot from "
+                   f"the device pool, so a leg no longer holds its "
+                   f"simulator alone — on this lane that lock IS the "
+                   f"clipboard exclusion "
+                   f"(docs/clipboard-plan.md §8 finding 5)")
+
+    # AND THE BOARD MUST BELONG TO THE DEVICE BEFORE ANY LEG RUNS:
     # Simulator.app relays the macOS pasteboard into and out of every
-    # booted simulator while Edit > Automatically Sync Pasteboard is
-    # on, which is the default, so the slot lock excludes other LEGS
-    # and nothing else (docs/clipboard-plan.md §8 finding 7). The
-    # runner MEASURES the isolation and refuses. Matched with an
-    # argument after the name: a bare name would match the definition
-    # too.
-    relay_call = None
-    first_leg = None
-    for n, raw in enumerate(text.splitlines(), 1):
-        s = raw.strip()
-        if s.startswith("#"):
-            continue
-        if relay_call is None and re.match(r"clip_relay_check\s+\S", s):
-            relay_call = n
-        if first_leg is None and re.match(r"queue_(pad_)?leg\s+\S", s):
-            first_leg = n
-    if relay_call is None:
+    # booted simulator while Automatically Sync Pasteboard is on, which
+    # is the default (§8 finding 7). The runner MEASURES the isolation
+    # inside prep_join, and queue_leg joins the preparation before it
+    # queues anything.
+    join_body = py_function_body(text, "prep_join", path, bad)
+    if join_body and "clip_relay_check(UDIDS[0], PAD_UDID)" \
+            not in join_body:
         bad.append(f"{path}: nothing measures the clipboard isolation "
                    f"— the pasteboard of a booted simulator belongs to "
                    f"Simulator.app too whenever it is running, and the "
                    f"legs then share one board with the mac lane "
                    f"(docs/clipboard-plan.md §8 finding 7). Call "
-                   f"clip_relay_check before the legs")
-    elif first_leg is not None and relay_call > first_leg:
-        bad.append(f"{path}:{relay_call}: the clipboard isolation is "
-                   f"measured AFTER the first leg is queued (line "
-                   f"{first_leg}) — a lane that dies at leg 40 teaches "
-                   f"nothing a lane that dies in five seconds does "
-                   f"not")
+                   f"clip_relay_check in prep_join")
+    queue_body = py_function_body(text, "queue_leg", path, bad)
+    if queue_body:
+        at_join = queue_body.find("prep_join()")
+        at_thread = queue_body.find("threading.Thread")
+        if at_join < 0 or (at_thread >= 0 and at_join > at_thread):
+            bad.append(f"{path}: queue_leg queues a leg without joining "
+                       f"the device preparation first — the isolation "
+                       f"is then measured AFTER the first leg, and a "
+                       f"lane that dies at leg 40 teaches nothing a "
+                       f"lane that dies in five seconds does not")
 
-    start = text.find("queue_leg() {")
-    end = text.find("queue_pad_leg() {")
-    if start < 0 or end < start:
-        bad.append(f"{path}: queue_leg()/queue_pad_leg() are not where "
-                   f"this gate looks — the runner shape moved and the "
-                   f"check went vacuous")
-    else:
-        body = text[start:end]
-        for claim in ('mkdir "$LEGS_DIR/.dev-', 'rmdir "$LEGS_DIR/.dev-'):
-            if claim in body:
-                continue
-            bad.append(f"{path}: queue_leg no longer does "
-                       f"`{claim}...`, so a leg no longer holds its "
-                       f"simulator alone — on this lane that lock IS "
-                       f"the clipboard exclusion "
-                       f"(docs/clipboard-plan.md §8 finding 5)")
-
-    # NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH: transiting
-    # the macOS pasteboard delivers asynchronously, so the guest read
-    # races the window, and under validate-all it would race the
-    # clipboard legs of the mac lane. The ratified shape is a spawned
-    # on-device write (tools/ios/clipctl), so the pasteboard tools may
-    # appear here only in comments explaining exactly this
-    # (docs/clipboard-plan.md §8 finding 6).
+    # NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH: the
+    # ratified shape is a spawned on-device write (tools/ios/clipctl),
+    # so the pasteboard tools may appear here only in comments
+    # explaining exactly this (§8 finding 6).
     for n, raw in enumerate(text.splitlines(), 1):
         s = raw.strip()
         if s.startswith("#"):
@@ -2859,71 +2821,55 @@ def clipboard_ios(text, path):
     return bad
 
 
+def py_function_body(text, name, path, bad):
+    """One python function's body, # comments stripped — the shell
+    body reader's successor. An absent function is a finding, never a
+    silent skip."""
+    match = re.search(
+        rf"(?ms)^def {re.escape(name)}\(.*?(?=^def |^class |^[A-Za-z_]"
+        rf"[A-Za-z0-9_]* = |\Z)", text)
+    if match is None:
+        bad.append(f"{path}: no {name}() is where the iOS admission "
+                   f"check looks")
+        return ""
+    return "\n".join(line for line in match.group(0).splitlines()
+                     if not line.lstrip().startswith("#"))
+
+
 # THE PICKER STACK MUST CLEAN, AIM AND EXPORT before any leg runs. A
 # live FileProvider pid does not prove its LocalStorage index can
 # materialize an export (docs/traps.md), so this checks the per-phone
-# admission wall and the tiny app that supplies its result.
+# admission wall and the tiny app that supplies its result — the
+# python spellings of the same walls the shell body carried.
 def picker_ios(text, path, probe_text, probe_path):
     bad = []
 
-    def shell_function(name):
-        match = re.search(
-            rf"(?ms)^{re.escape(name)}\(\) \{{.*?"
-            rf"(?=^[A-Za-z_][A-Za-z0-9_]*\(\) \{{|\Z)", text)
-        if match is None:
-            bad.append(f"{path}: no {name}() is where the iOS picker "
-                       f"admission check looks")
-            return ""
-        return "\n".join(
-            line for line in match.group(0).splitlines()
-            if not line.lstrip().startswith("#"))
+    def fn(name):
+        return py_function_body(text, name, path, bad)
 
-    prepare = shell_function("picker_prepare")
-    cleanup = shell_function("picker_cleanup")
-    installed = shell_function("kaya_installed_apps")
-    reseed = shell_function("picker_reseed")
-    export = shell_function("picker_export_probe")
-    prep_join = shell_function("prep_join")
+    prepare = fn("picker_prepare")
+    cleanup = fn("picker_cleanup")
+    installed = fn("kaya_installed_apps")
+    reseed = fn("picker_reseed")
+    export = fn("picker_export_probe")
+    prep_join = fn("prep_join")
 
-    pool_blocks = [
-        block for block in re.findall(
-            r"(?ms)^for udid in \"\$\{UDIDS\[@\]\}\"; do\n(.*?)^done$",
-            text)
-        if "picker_prepare" in block
-    ]
-    if len(pool_blocks) != 1 \
-            or pool_blocks[0].count('picker_prepare "$udid"') != 1 \
-            or "picker-$udid.rc" not in pool_blocks[0]:
+    # LocalStorage admission runs once per phone pool device, with a
+    # per-device verdict the join reads.
+    if ("for _udid in UDIDS:" not in text
+            or "_prep_results[u] = picker_prepare(u)" not in text):
         bad.append(f"{path}: LocalStorage admission is not prepared "
                    f"once per phone pool UDID with a per-device "
                    f"verdict")
 
-    prepare_calls = []
-    first_leg = None
-    for n, raw in enumerate(text.splitlines(), 1):
-        s = raw.strip()
-        if s.startswith("#"):
-            continue
-        if re.match(r"picker_prepare\s+\S", s):
-            prepare_calls.append(n)
-        if first_leg is None and re.match(r"queue_(pad_)?leg\s+\S", s):
-            first_leg = n
-    if not prepare_calls:
-        bad.append(f"{path}: nothing admits the LocalStorage export "
-                   f"path before the legs")
-    elif first_leg is not None and min(prepare_calls) > first_leg:
-        bad.append(f"{path}:{min(prepare_calls)}: LocalStorage is "
-                   f"admitted AFTER the first leg is queued (line "
-                   f"{first_leg})")
-
-    probe_calls = [m.start() for m in re.finditer(
-        r'(?m)^\s*picker_export_probe "\$udid"', prepare)]
-    warm_calls = [m.start() for m in re.finditer(
-        r'(?m)^\s*picker_warm "\$udid"', prepare)]
-    reseed_calls = [m.start() for m in re.finditer(
-        r'(?m)^\s*picker_reseed "\$udid"', prepare)]
-    cleanup_calls = [m.start() for m in re.finditer(
-        r'(?m)^\s*picker_cleanup "\$udid" \|\| return 1$', prepare)]
+    # Exactly two warmed export attempts around one measured-failure
+    # reseed, cleanup first, no open-ended retry.
+    order = []
+    for token in ("picker_cleanup(udid)", "picker_warm(udid)",
+                  "picker_export_probe(udid)", "picker_reseed(udid)"):
+        order.append([m.start() for m in
+                      re.finditer(re.escape(token), prepare)])
+    cleanup_calls, warm_calls, probe_calls, reseed_calls = order
     if len(cleanup_calls) != 1 or not warm_calls \
             or cleanup_calls[0] > warm_calls[0]:
         bad.append(f"{path}: picker_prepare does not clean every "
@@ -2933,85 +2879,73 @@ def picker_ios(text, path, probe_text, probe_path):
             or len(reseed_calls) != 1 \
             or not (warm_calls[0] < probe_calls[0] < reseed_calls[0]
                     < warm_calls[1] < probe_calls[1]) \
-            or re.search(r"(?m)^\s*(for|while|until)\b", prepare) \
-            or 'if [ "$rc" -ne 75 ]; then' not in prepare:
+            or re.search(r"(?m)^\s*(for|while)\b", prepare) \
+            or "if rc != 75:" not in prepare:
         bad.append(f"{path}: picker_prepare must spell exactly two "
                    f"warmed export attempts around one "
                    f"measured-failure reseed, with no open-ended "
                    f"retry")
 
+    # The prior-run app census is scoped exactly to the dev.kaya.
+    # prefix, and its emitter is live.
+    flat_installed = " ".join(installed.split())
     installed_parts = [
-        'xcrun simctl listapps "$udid"',
-        "plutil -convert json -o - -- -",
-        "apps = json.load(sys.stdin)",
-        "if not isinstance(apps, dict) or not apps:",
-        "prefix = sys.argv[1]",
-        "for bundle in sorted(apps):",
-        "bundle.startswith(prefix)",
-        "print(bundle)",
+        '"simctl", "listapps"',
+        '"plutil", "-convert", "json"',
+        "json.loads",
+        "isinstance(apps, dict)",
+        "startswith(KAYA_BUNDLE_PREFIX)",
     ]
-    cleanup_parts = [
-        'listed=$(kaya_installed_apps "$udid") || return 1',
-        'for bundle in "${bundles[@]}"; do',
-        "dev.kaya.*) ;;",
-        'xcrun simctl uninstall "$udid" "$bundle"',
-        'remaining=$(kaya_installed_apps "$udid") || return 1',
-        'if [ -n "$remaining" ]; then',
-    ]
-    if re.search(r"(?m)^KAYA_BUNDLE_PREFIX=dev\.kaya\.$", text) is None \
-            or not all(part in installed for part in installed_parts):
+    if re.search(r'(?m)^KAYA_BUNDLE_PREFIX = "dev\.kaya\."$', text) \
+            is None \
+            or not all(part in flat_installed
+                       for part in installed_parts):
         bad.append(f"{path}: prior-run app census is not scoped "
                    f"exactly to the dev.kaya. bundle prefix")
-    cleanup_positions = [cleanup.find(part) for part in cleanup_parts]
-    cleanup_lines = [line.strip() for line in cleanup.splitlines()
-                     if line.strip()]
-    uninstall_lines = [line for line in cleanup_lines
-                       if re.search(r"\bsimctl\s+uninstall\b", line)]
-    safe_uninstall = ('timeout 60 xcrun simctl uninstall "$udid" '
-                      '"$bundle" >/dev/null 2>&1 || {')
-    if any(at < 0 for at in cleanup_positions) \
-            or cleanup_positions != sorted(cleanup_positions) \
-            or cleanup.count('kaya_installed_apps "$udid"') != 2 \
-            or uninstall_lines != [safe_uninstall] \
-            or re.search(r"\bsimctl\s+(?:delete|erase|shutdown|boot|"
-                         r"bootstatus)\b", cleanup) \
-            or re.search(r"\b(?:rm|unlink|find)\b", cleanup):
+
+    # picker_cleanup: bounded per-device uninstalls, both censuses, the
+    # refusal on survivors — and NOTHING destructive.
+    flat_cleanup = " ".join(cleanup.split())
+    if (cleanup.count("kaya_installed_apps(udid)") != 2
+            or 'startswith("dev.kaya.")' not in cleanup
+            or '"timeout", "60", "xcrun", "simctl", "uninstall", udid, '
+               'bundle]' not in flat_cleanup
+            or "if remaining:" not in cleanup
+            or re.search(r'"(?:delete|erase|shutdown|boot|bootstatus)"',
+                         cleanup)
+            or re.search(r"\b(?:rmtree|unlink|remove)\b", cleanup)):
         bad.append(f"{path}: picker_cleanup does not use bounded "
                    f"simctl uninstalls and verify that no prior-run "
                    f"kaya app remains")
 
-    reseed_steps = [
-        'xcrun simctl shutdown "$udid"',
-        'xcrun simctl erase "$udid"',
-        'xcrun simctl boot "$udid"',
-        'xcrun simctl bootstatus "$udid" -b',
-    ]
-    positions = [reseed.find(step) for step in reseed_steps]
+    # picker_reseed: a bounded shutdown/erase/boot of exactly $udid.
+    flat_reseed = " ".join(reseed.split())
+    reseed_steps = ['"shutdown", udid', '"erase", udid', '"boot", udid',
+                    '"bootstatus", udid']
+    positions = [flat_reseed.find(step) for step in reseed_steps]
     if any(at < 0 for at in positions) \
             or positions != sorted(positions) \
-            or 'xcrun simctl erase "$udid" >/dev/null 2>&1 || return 1' \
-            not in reseed \
-            or 'xcrun simctl boot "$udid" >/dev/null 2>&1 || return 1' \
-            not in reseed \
-            or 'xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || '\
-            'return 1' not in reseed \
-            or re.search(r'simctl (shutdown|erase|boot) '
-                         r'(all|booted|"?\$\{UDIDS)', reseed):
+            or re.search(r'"(?:all|booted)"', reseed):
         bad.append(f"{path}: picker_reseed is not a bounded "
                    f"shutdown/erase/boot of exactly $udid")
 
+    # picker_export_probe drives and classifies the REAL export result
+    # before admitting a device.
+    flat_export = " ".join(export.split())
     export_parts = [
-        'simctl install "$udid" "$EXPORT_PROBE_APP"',
-        'savename "$probe_name"',
-        "savepress",
-        'if [ "$result" = ok ]; then',
-        'empty*|*"FP -1005"*|*"Index out of sync"*',
-        '|*"didPickDocumentURLs called with nil or 0 URLS"*)',
+        '"install", udid, EXPORT_PROBE_APP]',
+        '"savename", probe_name]',
+        '"savepress"]',
+        'if result == "ok": return 0',
+        '"FP -1005" in haystack',
+        '"Index out of sync" in haystack',
+        'or "didPickDocumentURLs called with nil or 0 URLS" in '
+        'haystack',
         "return 75",
     ]
-    if not all(part in export for part in export_parts) \
-            or export.find('savename "$probe_name"') \
-            > export.find("savepress"):
+    if not all(part in flat_export for part in export_parts) \
+            or flat_export.find('"savename", probe_name]') \
+            > flat_export.find('"savepress"]'):
         bad.append(f"{path}: picker_export_probe no longer drives and "
                    f"classifies the real export result before "
                    f"admitting a device")
@@ -3030,10 +2964,12 @@ def picker_ios(text, path, probe_text, probe_path):
                    f"nonempty callback and an exact byte readback, "
                    f"with cancellation kept red")
 
+    # prep_join measures clipboard isolation only after every device's
+    # recovery has finished and its verdict has been checked.
     join_steps = [
-        prep_join.find('wait "${PREP_PIDS[@]}"'),
-        prep_join.find('for udid in "${UDIDS[@]}"'),
-        prep_join.find('clip_relay_check "${UDIDS[0]}" "$PAD_UDID"'),
+        prep_join.find("t.join()"),
+        prep_join.find("_prep_results.get"),
+        prep_join.find("clip_relay_check(UDIDS[0], PAD_UDID)"),
     ]
     if any(at < 0 for at in join_steps) \
             or join_steps != sorted(join_steps):
@@ -3041,20 +2977,23 @@ def picker_ios(text, path, probe_text, probe_path):
                    f"before device recovery has finished and its "
                    f"verdicts have been checked")
 
-    record_wall = ('if [ -n "${KAYA_RECORD:-}" ]; then\n'
-                   "    prep_join || exit 1\n"
-                   "fi\n"
-                   "rec_suite_start")
+    # Recording cannot start before a possible erase/reboot recovery
+    # has been retired.
+    record_wall = ('if os.environ.get("KAYA_RECORD"):\n'
+                   "    prep_join()\n"
+                   "rec_suite_start()")
     if record_wall not in text:
         bad.append(f"{path}: recording can start before picker "
                    f"recovery retires its erase/reboot")
     return bad
 
-# THE GUARD GUARDS ITSELF, on the REAL runner rather than a fixture
+
+# THE GUARD GUARDS ITSELF, on the REAL runner and the REAL lane module
 # (docs/traps.md: the wayland seat guard passed VACUOUSLY TWICE). Each
 # perturbation prints its substitution count and the copy is refused
 # if it did not apply, and each refusal is checked for its REASON.
-RUN_SIM = read_rel("tools/ios/run-sim.sh")
+RUN_SIM = read_rel("tools/ios/run-sim.py")
+IOS_LANE_TEXT = read_rel("tools/lib/lanes/ios.py")
 EXPORT_PROBE = read_rel("tools/ios/exportprobe/main.swift")
 
 
@@ -3066,8 +3005,22 @@ def ios_applied(hits, label, want=1):
                       f"an unchanged copy cannot prove the rule fires")
 
 
-def ios_selftest(doctored, want, label):
-    out = clipboard_ios(doctored, "-")
+def load_lane_copy(module_text):
+    """A doctored lane module, imported from scratch under a throwaway
+    name — the negatives must perturb what the census actually reads."""
+    import importlib.util
+    with tempfile.TemporaryDirectory() as td:
+        p = pathlib.Path(td) / "doctored_lane.py"
+        p.write_text(module_text, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("kaya_ios_shadow",
+                                                      p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+def ios_selftest(doctored, want, label, mod=ios_lane):
+    out = clipboard_ios(doctored, "-", mod)
     if not out:
         selftest_fail(f"{label} passed")
     if not any(want in b for b in out):
@@ -3086,46 +3039,50 @@ def picker_selftest(runner_text, want, label,
 
 
 # A clipboard leg moved onto the lockless pad must fail...
-doc, hits = sub_count(r"queue_leg (run_swiftui_on clipboard-swiftui)",
-                      r"queue_pad_leg \1", RUN_SIM)
-ios_applied(hits, "the pad perturbation")
-ios_selftest(doc, "on the iPad", "a clipboard leg on the pad")
+doc, hits = sub_count(r"(?m)^PAD_EXTRAS = \{\n",
+                      'PAD_EXTRAS = {\n    "clipboard": "",\n',
+                      IOS_LANE_TEXT)
+ios_applied(hits, "the pad-membership perturbation")
+ios_selftest(RUN_SIM, "on the iPad", "a clipboard leg on the pad",
+             mod=load_lane_copy(doc))
 
-# ...a clipboard leg that claims no device slot at all must fail...
-doc, hits = sub_count(r"queue_leg (run_swiftui_on clipboard-swiftui)",
-                      r"\1", RUN_SIM)
-ios_applied(hits, "the unqueued-leg perturbation")
-ios_selftest(doc, "outside queue_leg",
-             "a clipboard leg outside queue_leg")
+# ...a pad queue no longer guarded by the module's membership must
+# fail...
+doc, hits = sub_count(r"if scene in lane\.PAD_EXTRAS:", "if True:",
+                      RUN_SIM)
+ios_applied(hits, "the unguarded-pad perturbation")
+ios_selftest(doc, "not guarded by PAD_EXTRAS",
+             "a pad queue any scene could ride")
 
-# ...a queue_leg that stopped claiming a device must fail...
-doc, hits = sub_count(r'mkdir "\$LEGS_DIR/\.dev-\$i"',
-                      'mkdir "$LEGS_DIR/live-$i"', RUN_SIM)
+# ...a worker that stopped claiming a device must fail...
+doc, hits = sub_count(r"_dev_slots\.pop\(0\)", "0", RUN_SIM)
 ios_applied(hits, "the slot-lock perturbation")
-ios_selftest(doc, "holds its simulator alone", "an unlocked queue_leg")
+ios_selftest(doc, "no longer takes a slot", "an unlocked device claim")
 
-# ...and an unwired scene must fail, which takes EVERY leg away. The
-# expected count is the number of IOS_<LANG>_SCENES lists — 2 today —
-# and it is STATED rather than derived, so a third guest suite lands
-# as a loud "applied 3 times, want 2".
+# ...a worker that stopped running the leg through run_swiftui_on must
+# fail...
 doc, hits = sub_count(
-    r"queue_leg run_swiftui_on clipboard-swiftui[\s\S]*?"
-    r"clipboard clipboard\n", "", RUN_SIM)
-ios_applied(hits, "the rust-leg removal")
-# The word is deleted FROM THE TWO LIST ASSIGNMENTS BY NAME, never
-# "the word before the closing quote": one more word appended to a
-# list turns a tail-anchored pattern into 0 substitutions.
-doc, hits = sub_count(r'(IOS_[A-Z]+_SCENES="[^"]*) clipboard', r"\1",
-                      doc)
-ios_applied(hits, "the guest-list removal", 2)
-ios_selftest(doc, "no clipboard leg found",
-             "a runner with no clipboard leg")
+    r"ok = run_swiftui_on\(udid, slot, \*args, log=log, \*\*kwargs\)",
+    "ok = True", RUN_SIM)
+ios_applied(hits, "the bridge-bypass perturbation")
+ios_selftest(doc, "no longer runs the leg through run_swiftui_on",
+             "a leg that bypasses the host-side bridge")
+
+# ...an unwired scene must fail, which takes EVERY suite's membership
+# away. The count is the number of suite lists carrying clipboard — 3
+# today — STATED rather than derived, so a fourth suite lands as a
+# loud "applied 4 times, want 3".
+doc, hits = sub_count(r' "clipboard",', "", IOS_LANE_TEXT)
+ios_applied(hits, "the guest-list removal", 3)
+ios_selftest(RUN_SIM, "no clipboard leg found",
+             "a lane with no clipboard leg", mod=load_lane_copy(doc))
 
 # ...and a live host-pasteboard line must fail: the seed once rode
-# pbcopy+pbsync and raced both its own delivery window and (under
-# validate-all) the mac lane's legs.
-doc, hits = sub_count(r"(?m)^    echo ok$",
-                      "    printf seed | pbcopy\n    echo ok", RUN_SIM)
+# host-side copy tools and raced both its own delivery window and
+# (under validate-all) the mac lane's legs.
+doc, hits = sub_count(r'(?m)^KAYA_BUNDLE_PREFIX = "dev\.kaya\."$',
+                      'KAYA_BUNDLE_PREFIX = "dev.kaya."\n'
+                      'got = out_of(["pbcopy"])', RUN_SIM)
 ios_applied(hits, "the host-pasteboard perturbation")
 ios_selftest(doc, "touches a pasteboard tool",
              "a live pbcopy in the runner")
@@ -3133,29 +3090,24 @@ ios_selftest(doc, "touches a pasteboard tool",
 # ...and a runner that never asks whether the board is the device's
 # own must fail: with Simulator.app running, it is Simulator.app's
 # too.
-doc, hits = sub_count(r"(?m)^ *clip_relay_check .*\n", "", RUN_SIM)
+doc, hits = sub_count(
+    r"(?m)^    if not clip_relay_check\(UDIDS\[0\], PAD_UDID\):\n"
+    r"        sys\.exit\(1\)\n", "", RUN_SIM)
 ios_applied(hits, "the relay-check removal")
 ios_selftest(doc, "nothing measures the clipboard isolation",
              "a runner that never measures the isolation")
 
-# ...and one that measures it only after the legs are queued must
-# fail.
-doc, hits = sub_count(r"(?m)^ *clip_relay_check (.*)\n", "", RUN_SIM)
-ios_applied(hits, "the late-check removal half")
+# ...and a queue that stops joining the preparation first would queue
+# legs before the isolation is measured.
 doc, hits = sub_count(
-    r"(?m)^        drain\n        timing swiftui-build\+legs",
-    'clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1\n'
-    "        drain\n        timing swiftui-build+legs", doc)
-ios_applied(hits, "the late-check insertion half")
-ios_selftest(doc, "measured AFTER the first leg",
-             "a runner that measures the isolation too late")
+    r"(?m)^    prep_join\(\)\n(?=    _leg_names\.append)", "", RUN_SIM)
+ios_applied(hits, "the queue-join removal")
+ios_selftest(doc, "without joining the device preparation",
+             "a queue that skips the preparation join")
 
 # ...and the picker half, with its own refusals.
-doc, hits = sub_count(
-    r'for udid in "\$\{UDIDS\[@\]\}"; do\n    \(\n        prep_rc=0\n'
-    r"        picker_prepare",
-    'for udid in "${UDIDS[0]}"; do\n    (\n        prep_rc=0\n'
-    "        picker_prepare", RUN_SIM)
+doc, hits = sub_count(r"for _udid in UDIDS:", "for _udid in UDIDS[:1]:",
+                      RUN_SIM)
 ios_applied(hits, "the one-device picker preparation")
 picker_selftest(doc, "not prepared once per phone pool UDID",
                 "a runner that admits only one pool device")
@@ -3163,50 +3115,44 @@ picker_selftest(doc, "not prepared once per phone pool UDID",
 # Prior-run app containers must leave before the probe judges
 # LocalStorage.
 doc, hits = sub_count(
-    r'(?m)^    picker_cleanup "\$udid" \|\| return 1\n', "", RUN_SIM)
+    r"(?m)^    if not picker_cleanup\(udid\):\n        return 1\n", "",
+    RUN_SIM)
 ios_applied(hits, "the prior-run app cleanup call")
 picker_selftest(doc, "does not clean every prior-run kaya app",
                 "a picker admission that leaves old app containers "
                 "installed")
 
-doc, hits = sub_count(r"(?m)^KAYA_BUNDLE_PREFIX=dev\.kaya\.$",
-                      "KAYA_BUNDLE_PREFIX=dev.", RUN_SIM)
+doc, hits = sub_count(r'(?m)^KAYA_BUNDLE_PREFIX = "dev\.kaya\."$',
+                      'KAYA_BUNDLE_PREFIX = "dev."', RUN_SIM)
 ios_applied(hits, "the exact kaya bundle cleanup scope")
 picker_selftest(doc, "not scoped exactly to the dev.kaya. bundle "
                      "prefix",
                 "a cleanup broad enough to uninstall unrelated apps")
 
-doc, hits = sub_count(r"(?m)^        print\(bundle\)$", "        pass",
-                      RUN_SIM)
+doc, hits = sub_count(
+    r"return \[b for b in sorted\(apps\) "
+    r"if b\.startswith\(KAYA_BUNDLE_PREFIX\)\]",
+    "return []", RUN_SIM)
 ios_applied(hits, "the prior-run app census emitter")
 picker_selftest(doc, "not scoped exactly to the dev.kaya. bundle "
                      "prefix",
                 "a census that silently emits no installed kaya apps")
 
-doc, hits = sub_count(r"(?m)^prefix = sys\.argv\[1\]$",
-                      'prefix = "dev.kaya.never."', RUN_SIM)
-ios_applied(hits, "the live prior-run app prefix")
-picker_selftest(doc, "not scoped exactly to the dev.kaya. bundle "
-                     "prefix",
-                "a census that filters against an impossible prefix")
-
-doc, hits = sub_count(r'if \[ -n "\$remaining" \]; then', "if false; "
-                      "then", RUN_SIM)
+doc, hits = sub_count(r"if remaining:", "if False:", RUN_SIM)
 ios_applied(hits, "the cleanup postcondition")
 picker_selftest(doc, "does not use bounded simctl uninstalls and "
                      "verify",
                 "a cleanup that never refuses a surviving kaya app")
 
 doc, hits = sub_count(
-    r"(?m)^(picker_cleanup\(\) \{ # udid\n)",
-    '\\1    timeout 60 xcrun simctl delete "$udid"\n', RUN_SIM)
+    r"(?m)^(def picker_cleanup\(udid\):\n)",
+    '\\1    run(["xcrun", "simctl", "delete", udid])\n', RUN_SIM)
 ios_applied(hits, "the destructive cleanup insertion")
 picker_selftest(doc, "does not use bounded simctl uninstalls and "
                      "verify",
                 "a cleanup that deletes a whole simulator")
 
-doc, hits = sub_count(r'xcrun simctl uninstall "\$udid" "\$bundle"',
-                      'xcrun simctl uninstall booted "$bundle"',
+doc, hits = sub_count(r'"uninstall", udid,', '"uninstall", "booted",',
                       RUN_SIM)
 ios_applied(hits, "the bounded per-device uninstall")
 picker_selftest(doc, "does not use bounded simctl uninstalls and "
@@ -3215,56 +3161,55 @@ picker_selftest(doc, "does not use bounded simctl uninstalls and "
 
 # Exactly two attempts: taking away the post-reseed proof must fail.
 doc, hits = sub_count(
-    r'(?m)^    rc=0\n    picker_export_probe "\$udid" \|\| rc=\$\?\n'
-    r'    if \[ "\$rc" -eq 0 \]; then\n        return 0\n    fi\n'
-    r'    if \[ "\$rc" -eq 75 \]; then',
-    '    rc=0\n    if [ "$rc" -eq 0 ]; then\n        return 0\n'
-    '    fi\n    if [ "$rc" -eq 75 ]; then', RUN_SIM)
+    r"(?m)^    rc = picker_export_probe\(udid\)\n"
+    r"(?=    if rc == 0:\n        return 0\n    if rc == 75:\n)", "",
+    RUN_SIM)
 ios_applied(hits, "the post-reseed export removal")
 picker_selftest(doc, "exactly two warmed export attempts",
                 "a picker preparation that trusts its reseed without "
                 "probing")
 
 # Recovery must stay on the one device that failed admission.
-doc, hits = sub_count(r'xcrun simctl erase "\$udid"',
-                      "xcrun simctl erase all", RUN_SIM)
+doc, hits = sub_count(r'"erase", udid', '"erase", "all"', RUN_SIM)
 ios_applied(hits, "the broad picker reseed")
 picker_selftest(doc, "exactly $udid",
                 "a picker recovery that erases every simulator")
 
 # The host must drive the name field before Save; picker disappearance
 # alone cannot prove the intended destination was materialized.
-doc, hits = sub_count(
-    r"(?m)^    drive=\$\(KAYA_SIMDRIVE_LOG=.*\n        .* savename "
-    r".*\n", "", RUN_SIM)
+doc, hits = sub_count(r'"savename", probe_name\],', '"savepress"],',
+                      RUN_SIM)
 ios_applied(hits, "the export-name drive removal")
 picker_selftest(doc, "no longer drives and classifies",
                 "an export probe that never verifies its destination "
                 "name")
 
 doc, hits = sub_count(
-    r'\|\*"didPickDocumentURLs called with nil or 0 URLS"\*', "",
-    RUN_SIM)
+    r'\s*or "didPickDocumentURLs called with nil or 0 URLS"\n'
+    r"\s*in haystack", "", RUN_SIM)
 ios_applied(hits, "the empty-materialization log removal")
 picker_selftest(doc, "no longer drives and classifies",
                 "an export probe that ignores UIKit's "
                 "empty-materialization log")
 
 # Recovery may race neither the clipboard measurement nor recording.
-doc, hits = sub_count(r"(?m)^    clip_relay_check .*\n", "", RUN_SIM)
+doc, hits = sub_count(
+    r"(?m)^    if not clip_relay_check\(UDIDS\[0\], PAD_UDID\):\n"
+    r"        sys\.exit\(1\)\n", "", RUN_SIM)
 ios_applied(hits, "the final-state relay removal half")
 doc, hits = sub_count(
-    r"(?m)^    PREP_JOINED=1\n",
-    '    PREP_JOINED=1\n    clip_relay_check "${UDIDS[0]}" '
-    '"$PAD_UDID" || return 1\n', doc)
+    r"(?m)^    _prep_joined = True\n",
+    "    _prep_joined = True\n"
+    "    if not clip_relay_check(UDIDS[0], PAD_UDID):\n"
+    "        sys.exit(1)\n", doc)
 ios_applied(hits, "the early relay insertion half")
 picker_selftest(doc, "before device recovery has finished",
                 "clipboard isolation measured before a possible "
                 "reseed")
 
 doc, hits = sub_count(
-    r"(?m)^    prep_join \|\| exit 1\n(?=fi\nrec_suite_start)", "",
-    RUN_SIM)
+    r'(?m)^if os\.environ\.get\("KAYA_RECORD"\):\n    prep_join\(\)\n'
+    r"(?=rec_suite_start\(\))", "", RUN_SIM)
 ios_applied(hits, "the recording join removal")
 picker_selftest(doc, "recording can start before picker recovery",
                 "a recorder started while recovery may erase its "
@@ -3295,24 +3240,23 @@ picker_selftest(RUN_SIM, "cancellation kept red",
                 "an admission app that calls cancellation healthy",
                 probe_text=doc)
 
-# A preparation call moved behind the first leg must still fail even
+# A preparation call moved out of the pool loop must still fail even
 # if it exists somewhere in the runner.
 doc, hits = sub_count(
-    r'(?m)^        picker_prepare "\$udid" \|\| prep_rc=\$\?\n', "",
+    r"(?m)^        _prep_results\[u\] = picker_prepare\(u\)\n", "",
     RUN_SIM)
 ios_applied(hits, "the late-prepare removal half")
 doc, hits = sub_count(
-    r"(?m)^        drain\n        timing swiftui-build\+legs",
-    'picker_prepare "${UDIDS[0]}" || exit 1\n        drain\n'
-    "        timing swiftui-build+legs", doc)
+    r"(?m)^rec_suite_start\(\)\n",
+    "rec_suite_start()\npicker_prepare(UDIDS[0])\n", doc)
 ios_applied(hits, "the late-prepare insertion half")
-picker_selftest(doc, "admitted AFTER the first leg",
+picker_selftest(doc, "not prepared once per phone pool UDID",
                 "a runner that admits LocalStorage too late")
 
 # The accept direction is the real check itself, immediately below: a
 # rule that refused everything would fail here rather than pass
 # quietly.
-out = clipboard_ios(RUN_SIM, "tools/ios/run-sim.sh")
+out = clipboard_ios(RUN_SIM, "tools/ios/run-sim.py", ios_lane)
 if out:
     print("check-steps: an iOS clipboard leg must own its simulator "
           "for the whole leg (docs/clipboard-plan.md §8 finding 5 — "
@@ -3321,7 +3265,7 @@ if out:
     print("\n".join(out), file=sys.stderr)
     status = 1
 
-out = picker_ios(RUN_SIM, "tools/ios/run-sim.sh", EXPORT_PROBE,
+out = picker_ios(RUN_SIM, "tools/ios/run-sim.py", EXPORT_PROBE,
                  "tools/ios/exportprobe/main.swift")
 if out:
     print("check-steps: the iOS lane must admit every phone's real "
@@ -3330,6 +3274,7 @@ if out:
           file=sys.stderr)
     print("\n".join(out), file=sys.stderr)
     status = 1
+
 
 # EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK
 # hosts every scene, so the leg selects one through `--es

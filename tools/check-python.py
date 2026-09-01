@@ -94,6 +94,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 '''
 
+# The one depth the tree actually has below tools/: a runner in
+# tools/<dir>/ reaches the same prelude one parent up. One variant per
+# depth, byte-identical at each — the runner conversion's stage 2 put
+# tools/ios/run-sim.py in this population.
+HEADER_SUB = HEADER.replace(".resolve().parent / ",
+                            ".resolve().parent.parent / ")
+
 SHIM = '''#!/usr/bin/env bash
 exec python3 "$(dirname "$0")/{stem}.py" "$@"
 '''
@@ -127,17 +134,20 @@ SUBN_EXEMPT = {
 
 
 def converted():
-    """Every tools/*.py carrying the header, plus the prelude.
+    """Every tools/**/*.py carrying a prelude header, plus the prelude.
 
     Membership is READ FROM THE FILE, never from a list here: a gate
     converted next month is held by this the moment it is written, with
-    nothing to remember to add.
+    nothing to remember to add. The walk is the prelude's pruned one —
+    tools/ holds 323k entries of build output against ~213 tracked
+    files — and the depth decides WHICH header a file must open with
+    (rule 7's per-depth clause in census()).
     """
     out = {}
-    for p in sorted((ROOT / "tools").glob("*.py")):
+    for p in sorted(gate.walk("*.py", under="tools")):
         text = p.read_text(encoding="utf-8")
-        if text.startswith(HEADER):
-            out[f"tools/{p.name}"] = text
+        if text.startswith(HEADER) or text.startswith(HEADER_SUB):
+            out[str(p.relative_to(ROOT))] = text
     lib = ROOT / "tools/lib/kaya_gate.py"
     out["tools/lib/kaya_gate.py"] = lib.read_text(encoding="utf-8")
     return out
@@ -255,12 +265,18 @@ def census(files):
                        f"the branch you are reading.")
             continue
 
-        # 7. THE HEADER, byte for byte. The prelude is the one file that
-        # does not carry it — it is what the header reaches.
-        if path != "tools/lib/kaya_gate.py" and not text.startswith(HEADER):
-            bad.append(f"{path}: does not open with the exact prelude header. "
-                       f"Six variants of the dev-shell preamble is what this "
-                       f"replaced; one variant is the whole point.")
+        # 7. THE HEADER, byte for byte, THE RIGHT ONE FOR THE DEPTH: a
+        # depth-2 runner reaching `parent / "lib"` imports nothing and
+        # dies at the wrong moment. The prelude is the one file that
+        # carries neither — it is what the headers reach.
+        if path != "tools/lib/kaya_gate.py":
+            depth = path.count("/")
+            want_header = HEADER if depth == 1 else HEADER_SUB
+            if not text.startswith(want_header):
+                bad.append(f"{path}: does not open with the exact prelude "
+                           f"header for its depth. Six variants of the "
+                           f"dev-shell preamble is what this replaced; one "
+                           f"variant per depth is the whole point.")
 
         for node in ast.walk(tree):
             # 11. COMMAND HYGIENE FOLLOWS THE COMMAND INTO PYTHON.
@@ -384,8 +400,9 @@ def shim_findings():
     for path in sorted(files):
         if path.endswith("kaya_gate.py"):
             continue
-        stem = pathlib.Path(path).stem
-        sh = ROOT / "tools" / f"{stem}.sh"
+        rel = pathlib.Path(path)
+        stem = rel.stem
+        sh = ROOT / rel.with_suffix(".sh")
         if not sh.is_file():
             if path.startswith("tools/check-"):
                 bad.append(f"tools/{stem}.sh does not exist — a converted "
@@ -397,9 +414,9 @@ def shim_findings():
         want = SHIM.format(stem=stem)
         if got != want:
             bad.append(
-                f"tools/{stem}.sh is not the bare shim. It may hold NOTHING "
-                f"but the exec — a stub with logic in it is a second place "
-                f"for the preamble to drift back to.\n"
+                f"{rel.with_suffix('.sh')} is not the bare shim. It may "
+                f"hold NOTHING but the exec — a stub with logic in it is a "
+                f"second place for the preamble to drift back to.\n"
                 f"    want: {want!r}\n    got:  {got!r}")
         else:
             pinned += 1

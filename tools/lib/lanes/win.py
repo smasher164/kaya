@@ -262,3 +262,8 @@ def alone(leg):
     """True when the leg runs in a block of its own — between drains."""
     return any(block == [leg] for block in ORDER)
 
+
+def wired_scenes():
+    """The scenes some leg runs — the gates' census surface."""
+    return {scene_lang(leg)[0] for leg in legs()}
+

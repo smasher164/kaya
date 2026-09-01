@@ -61,7 +61,9 @@ FILES = [MAC, ENTRY, CANVAS, GTK, WINUI, COMPOSE]
 LEGS = [
     ("tools/validate-mac.sh", "run canvasdark-rust-swiftui", "mac"),
     ("tools/linux/run-suites.sh", "canvasdark-rust", "linux"),
-    ("tools/ios/run-sim.sh", "${guest}dark-swift", "ios"),
+    # The ios roster is DATA (tools/lib/lanes/ios.py) since the runner
+    # conversion; the dark leg's spelling there is its quoted name.
+    ("tools/lib/lanes/ios.py", '"canvasdark-swift"', "ios"),
     ("tools/android/run-emulator.sh", "run_apk canvasdark-compose", "android"),
     # The windows roster is DATA (tools/lib/lanes/win.py) since the
     # runner conversion; the leg's spelling there is its quoted name.
@@ -418,13 +420,20 @@ g.negative(
     want="the windows lane has no dark canvas leg",
 )
 g.negative(
+    "N10b the ios dark leg unwired",
+    lambda: census(without(
+        "tools/lib/lanes/ios.py", r'"canvasdark-swift"', '"canvas-swift"',
+        "N10b")),
+    want="the ios lane has no dark canvas leg",
+)
+g.negative(
     "N11 the ink verb back on the ambient trait collection",
     lambda: census(without(
         MAC, r"window\.traitCollection\.userInterfaceStyle == \.dark",
         "UITraitCollection.current.userInterfaceStyle == .dark", "N11")),
     want="reads UITraitCollection.current",
 )
-g.negatives_ran(13)
+g.negatives_ran(14)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

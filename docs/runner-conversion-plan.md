@@ -78,7 +78,11 @@ tables but is NOT this tranche.
    1,390 legs (docs/measurements/deploy-win-conversion-2026-08-31.md
    and the ledger's retire-the-shell entry hold the record).
 2. **run-sim**, then **run-emulator** — same shape, mobile-lane
-   validation.
+   validation. run-sim LANDED 2026-08-31, the evening after stage 1:
+   rider EQUAL (113 legs), gates 50/50 after a NINTH parser surfaced
+   (tools/swift-typecheck.sh reads the swift roster — the shell gates
+   parse runners too), two green lanes, matrix ALL PASS 1,390
+   (docs/measurements/run-sim-conversion-2026-08-31.md).
 3. **validate-mac**, **validate-linux**, **validate-all** — the mac
    runner also carries the scene×language sweep tables check-steps
    reads.

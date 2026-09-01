@@ -129,7 +129,10 @@ ANDROID_PID = 'android_lane_pid="${lane_pids[${#lane_pids[@]} - 1]}"'
 ANDROID_WAIT = 'wait "$android_lane_pid" 2>/dev/null || true'
 ANDROID_RUNNER_POOL = 'POOL="${KAYA_ANDROID_EMUS:-4}"'
 ANDROID_PROBE_POOL = 'ANDROID_POOL="${KAYA_ANDROID_EMUS:-4}"'
-IOS_RUNNER_POOL = 'POOL="${KAYA_IOS_SIMS:-3}"'
+# The runner is python since the runner conversion; the probe stays
+# shell, so the two spellings of the one three-simulator default
+# diverge in language and this clause holds them BOTH.
+IOS_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_IOS_SIMS", "3"))'
 IOS_PROBE_POOL = 'IOS_POOL="${KAYA_IOS_SIMS:-3}"'
 
 
@@ -179,7 +182,7 @@ def android_pool_problem(runner, probe):
 # the exact drift the Android clause guards, unguarded one platform over.
 def ios_pool_problem(runner, probe):
     if runner.count(IOS_RUNNER_POOL) != 1:
-        return ("tools/ios/run-sim.sh must default to the three-simulator "
+        return ("tools/ios/run-sim.py must default to the three-simulator "
                 "iOS pool")
     if probe.count(IOS_PROBE_POOL) != 1:
         return ("tools/probe-env.sh must probe the same three-simulator "
@@ -191,7 +194,7 @@ def ios_pool_problem(runner, probe):
 # was not watching: the ANSWER, and the EVIDENCE.
 LANE_RUNNERS = {
     "tools/validate-mac.sh": ("validate-mac", "mac"),
-    "tools/ios/run-sim.sh": ("run-sim", "ios"),
+    "tools/ios/run-sim.py": ("run-sim", "ios"),
     "tools/linux/run-suites.sh": ("run-suites", "linux"),
     "tools/android/run-emulator.sh": ("run-emulator", "android"),
     # Python since the runner conversion; the .sh beside it is the
@@ -202,7 +205,7 @@ LANE_RUNNERS = {
 # A converted runner records through tools/lib/flightrec_lane.py rather
 # than the sourced shell library: the lane's recorder CLASS declares its
 # lane name once, in its constructor, and every journaled leg rides it.
-PY_RECORDERS = {"windows": "WinRecorder"}
+PY_RECORDERS = {"windows": "WinRecorder", "ios": "IosRecorder"}
 
 
 def lane_contract_problems(texts, lib, pylib):
@@ -306,7 +309,7 @@ flightrec_pylib_text = (root / "tools" / "lib" / "flightrec_lane.py"
 matrix_text = (root / "tools" / "validate-all.sh").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.sh").read_text(
     encoding="utf-8")
-ios_text = (root / "tools" / "ios" / "run-sim.sh").read_text(encoding="utf-8")
+ios_text = (root / "tools" / "ios" / "run-sim.py").read_text(encoding="utf-8")
 probe_text = (root / "tools" / "probe-env.sh").read_text(encoding="utf-8")
 block = rung2(claude_text)
 if block is None:
@@ -513,7 +516,7 @@ elif matrix_parallel_problem(doctored) is None:
 # N13 — narrowing the iOS runner's pool must be reported.
 doctored, n = re.subn(
     re.escape(IOS_RUNNER_POOL),
-    'POOL="${KAYA_IOS_SIMS:-2}"',
+    'POOL = int(os.environ.get("KAYA_IOS_SIMS", "2"))',
     ios_text,
     count=1,
 )
@@ -604,7 +607,7 @@ for problem in lane_contract_problems(lane_texts, flightrec_lib_text,
 # measured shape: three of five runners ended with a bare `exit "$status"`
 # and a truncated log read as a complete one.
 doctored, n = re.subn(
-    re.escape('echo "run-sim: ALL PASS"'), 'true', lane_texts["tools/ios/run-sim.sh"],
+    re.escape('print("run-sim: ALL PASS")'), 'pass', lane_texts["tools/ios/run-sim.py"],
     count=1)
 print("check-gates: self-test N15 silenced a lane's verdict, "
       f"{n} substitution(s)")
@@ -612,7 +615,7 @@ if n != 1:
     fail("self-test N15 did not remove exactly one verdict — the lane "
          "contract clause is not reading the real runner")
 else:
-    hurt = dict(lane_texts, **{"tools/ios/run-sim.sh": doctored})
+    hurt = dict(lane_texts, **{"tools/ios/run-sim.py": doctored})
     problems = lane_contract_problems(hurt, flightrec_lib_text,
                                       flightrec_pylib_text)
     if not problems:

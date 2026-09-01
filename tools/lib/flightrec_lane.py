@@ -158,6 +158,31 @@ class LaneRecorder:
         size = dest.stat().st_size
         self.mark(bundle, name, "ok" if size else "empty", size)
 
+    def section(self, bundle, name, argv):
+        """One captured command as a bundle section — the shell half's
+        flightrec_section, argv-only. An error is marked, never raised
+        (the recorder may never cost a lane its legs)."""
+        if bundle is None or not bundle.is_dir():
+            return
+        dest = bundle / f"{name}.txt"
+        try:
+            with open(dest, "w", encoding="utf-8") as f:
+                rc = subprocess.run(argv, stdout=f,
+                                    stderr=subprocess.STDOUT,
+                                    check=False).returncode
+        except OSError:
+            rc = 1
+        size = dest.stat().st_size if dest.is_file() else 0
+        if size > SECTION_CAP:
+            data = dest.read_bytes()[:SECTION_CAP]
+            dest.write_bytes(data + b"\n... truncated at %d bytes "
+                                    b"(flightrec section cap)\n"
+                             % SECTION_CAP)
+            size = SECTION_CAP
+        state = ("error" if rc != 0 else
+                 "empty" if size == 0 else "ok")
+        self.mark(bundle, name, state, size)
+
     def bundle_report(self, bundle, out=None):
         """The counts and the size, PRINTED: a bundle whose sections
         silently stopped being collected looks exactly like one that was
@@ -337,5 +362,31 @@ class WinRecorder(LaneRecorder):
                 self.foreground(bundle, t0)
                 self.pull(bundle, leg, "collect.txt", "desktop", "desktop.txt")
                 self.pull(bundle, leg, "shot.png", "shot", "shot.png")
+                self.bundle_report(bundle, out=out)
+        self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
+
+
+class IosRecorder(LaneRecorder):
+    """The iOS half: no VM transport — the failure-path bundle is the
+    leg's own log (the harness's step timeline) plus the booted-device
+    census, collected where drain() prints the verdict."""
+
+    def __init__(self, root):
+        super().__init__("ios", root)
+
+    def ios_leg(self, leg, verdict, secs, log, out=None):
+        """The one per-leg entry point: the journal takes every leg,
+        pass or fail; the bundle is collected on a failure alone."""
+        if not self.ok:
+            return
+        bundle, fail = None, ""
+        if verdict != "PASS":
+            bundle = self.bundle(leg)
+            fail = self.fail_sentence(log)
+            if bundle is not None:
+                self.adopt(bundle, "leg-log", log)
+                self.section(bundle, "devices",
+                             ["xcrun", "simctl", "list", "devices",
+                              "booted"])
                 self.bundle_report(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
