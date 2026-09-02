@@ -35,6 +35,63 @@ static WATCHED: AtomicBool = AtomicBool::new(false);
 /// The harness's declaration that it is watching the latch.
 pub(crate) fn watch() {
     WATCHED.store(true, Ordering::Release);
+    log_panics();
+}
+
+/// Whether the panic log's hook is installed — once per process, by
+/// whichever of `kaya_run` and `watch` comes first.
+static PANIC_LOG_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// THE PANIC LOG: a Rust panic's one sentence, appended to the file
+/// `KAYA_PANIC_LOG` names BEFORE the default hook prints it — for hosts
+/// whose stderr is not durable (an iOS app launched with no console
+/// loses it; docs/deferred.md, "AN iOS GUEST'S PANIC MESSAGE DIES WITH
+/// ITS PTY"). Unset or empty means no hook at all. A RELATIVE name
+/// resolves under `$HOME/Documents` when that directory exists — the
+/// iOS data container, the one place a runner can read back — and
+/// under the working directory otherwise.
+pub(crate) fn log_panics() {
+    let Some(named) = std::env::var_os("KAYA_PANIC_LOG").filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let path = std::path::PathBuf::from(named);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        match std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Documents")) {
+            Some(docs) if docs.is_dir() => docs.join(path),
+            _ => path,
+        }
+    };
+    log_panics_to(path);
+}
+
+/// The installable half, so a test can name its own file.
+pub(crate) fn log_panics_to(path: std::path::PathBuf) {
+    if PANIC_LOG_INSTALLED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let said = info
+            .payload()
+            .downcast_ref::<&'static str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "a panic with no message".to_owned());
+        let at = info
+            .location()
+            .map(|l| format!(" at {}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        // O_APPEND and one write, the verb trace's rule; nothing here
+        // may panic, so every failure is dropped on the floor.
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = f.write_all(format!("KAYA_PANIC: {said}{at}\n").as_bytes());
+            let _ = f.flush();
+        }
+        previous(info);
+    }));
 }
 
 /// Report a failure the process cannot continue past. The sentence
@@ -100,6 +157,28 @@ pub(crate) fn guard<R>(what: &str, f: impl FnOnce() -> R) -> Option<R> {
 
 #[cfg(test)]
 mod tests {
+    /// The panic log writes the sentence and the location BEFORE the
+    /// default hook runs, so a host whose stderr is gone still has the
+    /// guest's last words (the iOS pyhost sighting). Process-global by
+    /// nature: the hook chains to whatever was installed before it, so
+    /// the suite's other panics print exactly as they did.
+    #[test]
+    fn the_panic_log_keeps_the_sentence_and_the_location() {
+        let dir = std::env::temp_dir().join(format!("kaya-panic-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("panic.txt");
+        super::log_panics_to(path.clone());
+        let caught = std::panic::catch_unwind(|| panic!("the guest's last words"));
+        assert!(caught.is_err());
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("KAYA_PANIC: the guest's last words at crates/kaya/src/fault.rs:"),
+            "the panic log carries neither the sentence nor the location: {text:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The nounwind chokepoints, each read from the file it lives in by
     /// `include_str!` — so this test cannot read a stale copy, and the
     /// Windows-only body is censused on every platform's `cargo test`.

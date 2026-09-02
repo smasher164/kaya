@@ -1225,6 +1225,18 @@ def run_apk_on(serial, name, apk, component, script, extras,
                 **TEXT)
         print(f"full buffers kept at target/validate-failures/"
               f"android-{name}-buffers.log", file=log)
+        # AND THE INTERPRETER'S VERB TRACE, out of the app's private
+        # files dir through run-as (the debug APKs are debuggable), beside
+        # the leg's log for the flight recorder to adopt.
+        pulled = subprocess.run(
+            ["adb", "-s", serial, "exec-out", "run-as", package, "cat",
+             f"files/verb-trace-{name}.txt"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        if pulled.returncode == 0 and pulled.stdout:
+            dest = (LEGS_DIR / f"{name}.log").with_suffix(".vtrace")
+            dest.write_bytes(pulled.stdout)
+            print(f"verb trace kept beside the log ({len(pulled.stdout)} "
+                  f"bytes)", file=log)
         failed = True
     if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):
         failed = True
@@ -1894,6 +1906,11 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_ASSET_DIR", ASSET_ON_DEVICE]
         if flags.get("appearance"):
             extras += ["--es", "KAYA_APPEARANCE", flags["appearance"]]
+        # THE VERB TRACE, a RELATIVE name the interpreter resolves under
+        # the app's own files dir (the one place run-as can read back);
+        # written on a failure alone and pulled at fail time
+        # (crates/kaya/src/vtrace.rs).
+        extras += ["--es", "KAYA_VERB_TRACE", f"verb-trace-{leg}.txt"]
         queue_leg(leg, selftest,
                   (apk, component, selftest, extras, remount_expect),
                   tablet=bool(flags.get("tablet")))

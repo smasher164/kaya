@@ -49,6 +49,11 @@ app.window(() => {
       kaya.button("OK").a11yId("ok");
     });
     actions.a11yId("actions").a11yLabel("Actions");
+    // A spoken name that FOLLOWS A SIGNAL: the surface JS had from its
+    // first day, uniform across the nine since 2026-09-02.
+    const spoken = kaya.signal("Before");
+    kaya.label("Spoken").a11yId("spoken").a11yLabel(spoken);
+    kaya.button("Rename", { onClick: () => spoken.set("After") }).a11yId("rename");
   });
   form.a11yId("form").a11yLabel("Form");
 });

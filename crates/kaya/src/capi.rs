@@ -1069,6 +1069,8 @@ fn state() -> &'static CState {
 /// host decides how to terminate its own process.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_run() -> i32 {
+    // The panic log, for hosts whose stderr is not durable (fault.rs).
+    crate::fault::log_panics();
     // On Apple the SwiftUI interpreter runs its own presentation pump
     // over this same C API, so core_ends stays in place for it to take.
     #[cfg(any(target_os = "macos", target_os = "ios"))]

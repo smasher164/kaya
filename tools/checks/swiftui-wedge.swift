@@ -1,5 +1,13 @@
 import Foundation
 
+/// The watchdog's fire path dumps the interpreter's verb trace
+/// (KayaVTrace in swift/KayaSwiftUI.swift) before it leaves; the cut this
+/// probe compiles is the watchdog alone, so the ring is a no-op here —
+/// tools/check-verbs.sh holds the real one's shape and its call sites.
+enum KayaVTrace {
+    static func dump(_ reason: String) {}
+}
+
 /// THE RUNTIME NEGATIVE FOR THE STEP CEILING: a REAL wedged main thread,
 /// the interpreter's OWN watchdog source (tools/check-harness-ceiling.sh
 /// cuts it out of swift/KayaSwiftUI.swift and compiles it with this

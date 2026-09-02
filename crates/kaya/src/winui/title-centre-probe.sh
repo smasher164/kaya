@@ -104,6 +104,14 @@ ssh "$HOST" "taskkill /im toolbar.exe /f >nul 2>&1" >/dev/null 2>&1
 echo "== the measurement =="
 ssh "$HOST" "cmd /c type $R\\prove.txt" > "$WORK/prove.txt" 2>&1
 cat "$WORK/prove.txt"
+# THE PROBE'S OWN LAST WORDS, when the sweep ended without its "PROVE:
+# done": matrix 19 (2026-09-02) read ten AIM lines, no cut-off sentence
+# and no done line, with the guest leaving OK — a shape the settle cannot
+# explain, and prove.txt alone cannot say why the ps1 stopped.
+if ! grep -q "^PROVE: done" "$WORK/prove.txt"; then
+    echo "== the probe stopped before PROVE: done; its own output (psout.txt), last 20 lines =="
+    ssh "$HOST" "cmd /c type $R\\psout.txt" 2>/dev/null | tail -20
+fi
 echo "== the guest's own verdict for the same run =="
 ssh "$HOST" "cmd /c type $R\\out.txt" | grep -E "KAYA_SELFTEST|step-failed|panicked|EXIT="
 ssh "$HOST" "cmd /c rmdir /s /q $R" >/dev/null 2>&1

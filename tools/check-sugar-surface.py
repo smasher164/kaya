@@ -563,7 +563,8 @@ def check_role_sugar(snake, pascal, camel, findings=None):
               f"func {camel}\\(_ text: String\\) -> KayaNodeHandle",
               findings)
     want_role("ocaml-live", "bindings/ocaml/kaya_app.ml", snake,
-              f"^let {snake} \\?grow \\?a11y_id \\?a11y_label \\?text "
+              f"^let {snake} \\?grow \\?a11y_id \\?a11y_id_bind \\?a11y_label "
+              f"\\?a11y_label_bind \\?text "
               f"\\?bind \\(\\)", findings)
     want_role("ocaml-tpl", "bindings/ocaml/kaya_app.ml", snake,
               f"^  let {snake} \\?grow \\?a11y_id \\?a11y_id_bind",
@@ -3268,7 +3269,7 @@ check("swift", "bindings/swift/KayaApp.swift", "spacing",
 check("haskell", "bindings/haskell/KayaApp.hs", "spacing",
       r"Spacing :: Double -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "spacing",
-      r"let row \?grow \?a11y_id \?a11y_label \?spacing ")
+      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind \?spacing ")
 check("js", "bindings/js/kaya/index.ts", "spacing", r"^  spacing\(gap: number\)")
 
 # The align prop's layer-3 spelling, same rule again.
@@ -3286,7 +3287,7 @@ check("swift", "bindings/swift/KayaApp.swift", "align",
 check("haskell", "bindings/haskell/KayaApp.hs", "align",
       r"Align :: Align -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "align",
-      r"let row \?grow \?a11y_id \?a11y_label \?spacing \?align ")
+      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind \?spacing \?align ")
 check("js", "bindings/js/kaya/index.ts", "align", r"^  align\(mode: AlignValue")
 
 # THE UNIVERSAL ACCESSIBILITY PROPS, same rule as grow/spacing/align.
@@ -3308,7 +3309,7 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "a11y_id",
 check("swift", "bindings/swift/KayaApp.swift", "a11y_id",
       r"func setA11yId\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "a11y_id",
-      r"A11yId :: String -> Attr")
+      r"A11yId :: LiveStrSource s => s -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_id",
       r"let set_a11y_id \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_id", r"^  a11yId\(ident:")
@@ -3326,7 +3327,7 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "a11y_label",
 check("swift", "bindings/swift/KayaApp.swift", "a11y_label",
       r"func setA11yLabel\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "a11y_label",
-      r"A11yLabel :: String -> Attr")
+      r"A11yLabel :: LiveStrSource s => s -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_label",
       r"let set_a11y_label \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_label", r"^  a11yLabel\(label:")
@@ -3349,10 +3350,42 @@ check("java", "bindings/java/dev/kaya/KayaApp.java", "a11y_hint",
 check("swift", "bindings/swift/KayaApp.swift", "a11y_hint",
       r"func setA11yHint\(")
 check("haskell", "bindings/haskell/KayaApp.hs", "a11y_hint",
-      r"A11yHint :: String -> Attr")
+      r"A11yHint :: LiveStrSource s => s -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_hint",
       r"let set_a11y_hint \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_hint", r"^  a11yHint\(hint:")
+
+# THE LIVE TRIO TAKES A SIGNAL (2026-09-02; docs/deferred.md, the
+# live-zone a11y entry): a stamped copy's spoken name could follow a
+# signal in all nine while a LIVE widget's could in Python and JS alone,
+# an invariant-1 divergence held open until a sweep. RECEIVER-KEYED,
+# the template-grow lesson above: every pattern names the LIVE receiver
+# (Widget, `self` on the chain, KayaWidget), never a bare name a
+# template setter would satisfy. Python and JS read one surface for
+# both zones and are censused above; Haskell's attrs are held by the
+# `LiveStrSource` constraint the three clauses above pin.
+for prop, rust, go, cs, java, swift, hs, ml in (
+        ("a11y_id", "a11y_id", "BindA11yID", "SetA11yId", "setA11yId",
+         "setA11yId", "bindA11yId", "bind_a11y_id"),
+        ("a11y_label", "a11y_label", "BindA11yLabel", "SetA11yLabel",
+         "setA11yLabel", "setA11yLabel", "bindA11yLabel", "bind_a11y_label"),
+        ("a11y_hint", "a11y_hint", "BindA11yHint", "SetA11yHint",
+         "setA11yHint", "setA11yHint", "bindA11yHint", "bind_a11y_hint")):
+    check("rust", "crates/kaya/src/app.rs", f"live {prop} (sourced)",
+          rf"pub fn {rust}\(self, \w+: impl Into<LiveSource<StrKind>>\)")
+    check("go", "bindings/go/app.go", f"live {prop} (sourced)",
+          rf"func \(w Widget\) {go}\(s Signal\[string\]\)")
+    check("csharp", "bindings/csharp/KayaApp.cs", f"live {prop} (sourced)",
+          rf"public void {cs}\(Widget w, Signal s\)")
+    check("java", "bindings/java/dev/kaya/KayaApp.java",
+          f"live {prop} (sourced)",
+          rf"public void {java}\(Widget w, Signal<String> s\)")
+    check("swift", "bindings/swift/KayaApp.swift", f"live {prop} (sourced)",
+          rf"func {swift}\(_ w: KayaWidget, _ s: KayaSignal\)")
+    check("haskell", "bindings/haskell/KayaApp.hs", f"live {prop} (sourced)",
+          rf"^{hs} \(Widget w\) \(Signal s\) = emitB")
+    check("ocaml", "bindings/ocaml/kaya_app.ml", f"live {prop} (sourced)",
+          rf"^let {ml} \(Widget id\) \(Signal s\) =")
 
 # THE CLIPBOARD SURFACE (DESIGN.md, Clipboard). Four points, none of
 # them a widget kind or a window prop: the copy record, the

@@ -2273,6 +2273,37 @@ public final class KayaApp {
             return this;
         }
 
+        /** The signal-sourced chained forms (Tx.setA11yId and friends). */
+        public Widget a11yId(Signal<String> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: a11yId on a widget outside its build transaction"
+                    + " — use Tx.setA11yId inside a live transaction");
+            }
+            tx.setA11yId(this, s);
+            return this;
+        }
+
+        public Widget a11yLabel(Signal<String> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: a11yLabel on a widget outside its build transaction"
+                    + " — use Tx.setA11yLabel inside a live transaction");
+            }
+            tx.setA11yLabel(this, s);
+            return this;
+        }
+
+        public Widget a11yHint(Signal<String> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: a11yHint on a widget outside its build transaction"
+                    + " — use Tx.setA11yHint inside a live transaction");
+            }
+            tx.setA11yHint(this, s);
+            return this;
+        }
+
         /**
          * THIS CANVAS REFUSES COERCION: it draws at its viewbox and is
          * placed in whatever track layout gives it, never adapting to it
@@ -3537,6 +3568,25 @@ public final class KayaApp {
          */
         public void setA11yHint(Widget w, String hint) {
             emit(KayaWire.txSetA11yHint(w.id, hint));
+        }
+
+        /**
+         * The SIGNAL-SOURCED forms of the trio — the live zone's half of
+         * the template zone's Signal overloads, spelled as bindText is: a
+         * spoken name that follows app state. Since 2026-09-02, uniform
+         * across the nine bindings (docs/deferred.md, the live-zone a11y
+         * entry).
+         */
+        public void setA11yId(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindA11yId(w.id, s.id));
+        }
+
+        public void setA11yLabel(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindA11yLabel(w.id, s.id));
+        }
+
+        public void setA11yHint(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindA11yHint(w.id, s.id));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {

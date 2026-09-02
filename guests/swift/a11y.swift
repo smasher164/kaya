@@ -68,6 +68,15 @@ try app.build { tx in
         }
         tx.setA11yId(actions, "actions")
         tx.setA11yLabel(actions, "Actions")
+        // A spoken name that FOLLOWS A SIGNAL: the live trio's KayaSignal
+        // overloads, the template zone's shape live.
+        let spoken = tx.signal(.str("Before"))
+        let spokenLabel = tx.label("Spoken")
+        tx.setA11yId(spokenLabel, "spoken")
+        tx.setA11yLabel(spokenLabel, spoken)
+        tx.setA11yId(
+            tx.button("Rename", onClick: { inner in inner.write(spoken, .str("After")) }),
+            "rename")
     }
     // Safe here: the blob table already holds its own reference.
     mark.close()

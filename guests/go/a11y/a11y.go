@@ -43,6 +43,13 @@ func App() *kaya.App {
 				tx.Button("Cancel", nil).A11yID("cancel")
 				tx.Button("OK", nil).A11yID("ok")
 			}).A11yID("actions").A11yLabel("Actions")
+			// A spoken name that FOLLOWS A SIGNAL: the live trio's
+			// Bind forms, the template zone's shape in the live zone.
+			spoken := tx.Signal("Before")
+			tx.LabelText("Spoken").A11yID("spoken").BindA11yLabel(spoken)
+			tx.Button("Rename", func(tx *kaya.Tx) {
+				tx.Write(spoken, "After")
+			}).A11yID("rename")
 		}).A11yID("form").A11yLabel("Form"))
 	})
 

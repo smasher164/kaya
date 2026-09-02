@@ -429,7 +429,8 @@ run_one() {
                 done
                 sleep 0.05
             done
-            DISPLAY=":$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 "$@"
+            DISPLAY=":$kaya_display" KAYA_SELFTEST=1 GDK_BACKEND=x11 \
+                KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             local kaya_rc=$?
             if [ "$kaya_rc" -ne 0 ]; then
                 # A failed leg may leave windows behind; the next leg on
@@ -444,7 +445,7 @@ run_one() {
             ;;
         wayland)
             KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \
-                timeout 180 "$@"
+                KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
             ;;
     esac
 }
@@ -503,6 +504,9 @@ drain() {
                     cat "$LEGS_DIR/$name.log"
                 flightrec_section "$bundle" xvfb "" \
                     sh -c 'cat /tmp/xvfb-*.log 2>/dev/null'
+                # The Rust harness's verb trace, written on a failure
+                # alone (crates/kaya/src/vtrace.rs; run_one names it).
+                flightrec_adopt "$bundle" verb-trace "$LEGS_DIR/$name.vtrace"
                 flightrec_bundle_report "$bundle"
             fi
         fi

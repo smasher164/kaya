@@ -126,6 +126,10 @@ module KayaApp
     revealRange,
     setText,
     bindText,
+    bindA11yId,
+    bindA11yLabel,
+    bindA11yHint,
+    LiveStrSource (..),
     bindChecked,
     bindValue,
     bindSource,
@@ -2045,6 +2049,28 @@ setA11yLabel (Widget w) l = emitB (W.txSetA11yLabel w l)
 setA11yHint :: Widget -> String -> Build ()
 setA11yHint (Widget w) h = emitB (W.txSetA11yHint w h)
 
+-- | The SIGNAL-SOURCED forms of the trio — the live zone's half of the
+-- template zone's 'TplStrSource' instances, spelled as 'bindText' is: a
+-- spoken name that follows app state. Since 2026-09-02, uniform across
+-- the nine bindings (docs/deferred.md, the live-zone a11y entry).
+bindA11yId, bindA11yLabel, bindA11yHint :: Widget -> Signal -> Build ()
+bindA11yId (Widget w) (Signal s) = emitB (W.txBindA11yId w s)
+bindA11yLabel (Widget w) (Signal s) = emitB (W.txBindA11yLabel w s)
+bindA11yHint (Widget w) (Signal s) = emitB (W.txBindA11yHint w s)
+
+-- | What a LIVE widget's Str a11y prop can take: a constant or a signal —
+-- the attr picks the setter by the argument's type, as the template
+-- zone's 'TplStrSource' does with the row field arm left out.
+class LiveStrSource s where
+  liveStr :: (Widget -> String -> Build ()) -> (Widget -> Signal -> Build ())
+          -> Widget -> s -> Build ()
+
+instance LiveStrSource String where
+  liveStr setter _ w v = setter w v
+
+instance LiveStrSource Signal where
+  liveStr _ binder w s = binder w s
+
 data Attr (c :: WClass) where
   -- | This widget's flex weight — any widget class.
   Grow :: Double -> Attr c
@@ -2064,14 +2090,14 @@ data Attr (c :: WClass) where
   -- | This widget's accessibility identifier — any widget class, like
   -- 'Grow': the two accessibility props are universal, so the index
   -- must not narrow them.
-  A11yId :: String -> Attr c
+  A11yId :: LiveStrSource s => s -> Attr c
   -- | What an assistive client speaks for this widget — any widget
-  -- class, for the same reason.
-  A11yLabel :: String -> Attr c
+  -- class, for the same reason. A 'String' or a 'Signal'.
+  A11yLabel :: LiveStrSource s => s -> Attr c
   -- | What ACTIVATING this widget does. Leaf-class only, unlike the
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
-  A11yHint :: String -> Attr 'LeafW
+  A11yHint :: LiveStrSource s => s -> Attr 'LeafW
   -- | What this widget MEANS (docs/styling-plan.md D4) — semantic emphasis,
   -- never appearance.
   Role :: Role -> Attr 'LeafW
@@ -2085,9 +2111,9 @@ applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (StackWhen when) w = stackWhen w when
-applyAttr (A11yId i) w = setA11yId w i
-applyAttr (A11yLabel l) w = setA11yLabel w l
-applyAttr (A11yHint h) w = setA11yHint w h
+applyAttr (A11yId i) w = liveStr setA11yId bindA11yId w i
+applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
+applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
 applyAttr (Role r) w = setRole w r
 applyAttr (Accepts kinds) w = setAccepts w kinds
 

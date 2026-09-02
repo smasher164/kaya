@@ -128,8 +128,8 @@ def drive(lane_mod, journal_home, tmp, leg_name="alwaysfail",
 # Every section the mac capture is supposed to account for. A section
 # that stops being collected must be a RED here, not a quietly shorter
 # bundle — which is the whole failure class this file exists for.
-WANT_SECTIONS = "sampler sample leg-log windowserver windows shot " \
-                "unified-log"
+WANT_SECTIONS = "sampler sample verb-trace leg-log windowserver windows " \
+                "shot unified-log"
 
 
 def check_bundle(home):

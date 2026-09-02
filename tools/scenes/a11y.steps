@@ -65,3 +65,11 @@ expect_ax row#0 "group/Actions"
 # container claim, and the half that regressed once already.
 expect_ax button#2 "button/Cancel"
 expect_ax button#3 "button/OK"
+
+# A LIVE widget's spoken name follows a SIGNAL (2026-09-02): the seven
+# bindings whose live a11y setters took a constant alone take a source
+# now, as their template zones always did. Keyed targets, so the new
+# widgets move no ordinal above.
+expect_ax label@spoken "label/Before"
+click button@rename
+expect_ax label@spoken "label/After"

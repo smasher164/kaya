@@ -398,6 +398,14 @@ class IosRecorder(LaneRecorder):
             fail = self.fail_sentence(log)
             if bundle is not None:
                 self.adopt(bundle, "leg-log", log)
+                # Pulled out of the app's own container by the runner at
+                # fail time, beside the log: the interpreter's verb trace
+                # and the core's panic log (crates/kaya/src/vtrace.rs,
+                # fault.rs's KAYA_PANIC_LOG).
+                self.adopt(bundle, "verb-trace",
+                           pathlib.Path(log).with_suffix(".vtrace"))
+                self.adopt(bundle, "panic",
+                           pathlib.Path(log).with_suffix(".panic"))
                 self.section(bundle, "devices",
                              ["xcrun", "simctl", "list", "devices",
                               "booted"])
@@ -425,6 +433,10 @@ class AndroidRecorder(LaneRecorder):
             fail = self.fail_sentence(log)
             if bundle is not None:
                 self.adopt(bundle, "leg-log", log)
+                # Pulled out of the app's private files dir by the runner
+                # (run-as) at fail time, beside the log.
+                self.adopt(bundle, "verb-trace",
+                           pathlib.Path(log).with_suffix(".vtrace"))
                 self.section(bundle, "devices", ["adb", "devices", "-l"])
                 self.bundle_report(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
@@ -681,6 +693,7 @@ class MacRecorder(LaneRecorder):
         scratch = pathlib.Path(scratch)
         self.adopt(bundle, "sampler", scratch / "sampler.txt")
         self.adopt(bundle, "sample", scratch / "sample.txt")
+        self.adopt(bundle, "verb-trace", scratch / "verb-trace.txt")
         if log and pathlib.Path(log).is_file():
             self.adopt(bundle, "leg-log", log)
         else:

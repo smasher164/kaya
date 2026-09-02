@@ -9,13 +9,21 @@
 //! only while there is one row (tools/check-steps.sh).
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    // The keep-alive idiom: docs/deferred.md wants a `park` primitive.
-    let msgs = kaya::Messages::<()>::new();
-    ctx.apply(|tx| {
+    #[derive(Clone, Copy)]
+    enum Msg {
+        Rename,
+    }
+
+    let msgs = kaya::Messages::<Msg>::new();
+    let spoken = ctx.apply(|tx| {
         let status = tx.signal("Ready");
         let cell_name = tx.signal("Name");
         let cell_value = tx.signal("Ada");
         let feed_item = tx.signal("Item");
+        // A spoken name that FOLLOWS A SIGNAL: the live trio takes a
+        // source, as the template zone's always did.
+        let spoken_caption = tx.signal("Spoken");
+        let spoken = tx.signal("Before");
 
         let root = tx.column(|tx| {
             // Caption-bearing controls: identified, deliberately NOT
@@ -56,14 +64,24 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .a11y_id("actions")
             .a11y_label("Actions");
+            tx.label(spoken_caption).a11y_id("spoken").a11y_label(spoken);
+            let rename = tx.button("Rename").a11y_id("rename").id();
+            msgs.on_click(rename, Msg::Rename);
         })
         .a11y_id("form")
         .a11y_label("Form")
         .id();
         tx.mount(root);
+        spoken
     });
 
-    while msgs.next(&ctx).is_some() {}
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            Msg::Rename => ctx.apply(|tx| {
+                tx.write(spoken, "After");
+            }),
+        }
+    }
 }
 
 fn main() {

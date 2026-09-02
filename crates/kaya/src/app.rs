@@ -152,6 +152,40 @@ impl<K> From<Field<K>> for TplSource<K> {
     }
 }
 
+/// What a LIVE widget's Str prop can take: a constant or a signal — the
+/// template zone's [`TplSource`] without its element arm, since a row
+/// field means nothing outside a template and the root refuses one.
+/// The live a11y trio takes this since 2026-09-02, so a live widget's
+/// spoken name can follow app state in every binding as it always could
+/// in Python (docs/deferred.md, the live-zone a11y entry).
+pub struct LiveSource<K> {
+    inner: LiveInner,
+    _kind: PhantomData<K>,
+}
+
+enum LiveInner {
+    Const(Value),
+    Signal(SignalId),
+}
+
+impl From<&str> for LiveSource<StrKind> {
+    fn from(s: &str) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::Str(s.to_owned())), _kind: PhantomData }
+    }
+}
+
+impl From<String> for LiveSource<StrKind> {
+    fn from(s: String) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::Str(s)), _kind: PhantomData }
+    }
+}
+
+impl<K> From<SignalId> for LiveSource<K> {
+    fn from(s: SignalId) -> Self {
+        LiveSource { inner: LiveInner::Signal(s), _kind: PhantomData }
+    }
+}
+
 impl<K> Field<K> {
     pub const fn new(index: u32) -> Self {
         Field {
@@ -995,7 +1029,7 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
 
     /// This widget's accessibility identifier — the chained spelling of
     /// [`Tx::a11y_id`], which remains the dynamic path.
-    pub fn a11y_id(self, id: &str) -> Self {
+    pub fn a11y_id(self, id: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.a11y_id(self.id, id);
         self
     }
@@ -1082,14 +1116,14 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
 
     /// This widget's spoken accessibility label — the chained spelling
     /// of [`Tx::a11y_label`], which remains the dynamic path.
-    pub fn a11y_label(self, label: &str) -> Self {
+    pub fn a11y_label(self, label: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.a11y_label(self.id, label);
         self
     }
 
     /// What activating this widget does — the chained spelling of
     /// [`Tx::a11y_hint`], which remains the dynamic path.
-    pub fn a11y_hint(self, hint: &str) -> Self {
+    pub fn a11y_hint(self, hint: impl Into<LiveSource<StrKind>>) -> Self {
         self.tx.a11y_hint(self.id, hint);
         self
     }
@@ -2013,8 +2047,16 @@ impl<'a> Tx<'a> {
     /// This widget's accessibility IDENTIFIER: a stable authored key,
     /// NEVER spoken. Universal — every kind carries one. See
     /// [`Prop::A11yId`].
-    pub fn a11y_id(&mut self, widget: WidgetId, id: &str) {
-        self.set(widget, Prop::A11yId, id);
+    pub fn a11y_id(&mut self, widget: WidgetId, id: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::A11yId, id.into());
+    }
+
+    /// One live Str source onto one prop: a constant sets, a signal binds.
+    fn set_live(&mut self, widget: WidgetId, prop: Prop, src: LiveSource<StrKind>) {
+        match src.inner {
+            LiveInner::Const(value) => self.set(widget, prop, value),
+            LiveInner::Signal(signal) => self.bind(widget, prop, signal),
+        }
     }
 
     /// WHAT THIS WIDGET ACCEPTS FROM A PASTE: the closed kinds by name
@@ -2039,8 +2081,8 @@ impl<'a> Tx<'a> {
     /// key is not a spoken name. Leave it unset to keep whatever the
     /// platform derives from the control's own content; setting it
     /// OVERRIDES that.
-    pub fn a11y_label(&mut self, widget: WidgetId, label: &str) {
-        self.set(widget, Prop::A11yLabel, label);
+    pub fn a11y_label(&mut self, widget: WidgetId, label: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::A11yLabel, label.into());
     }
 
     /// This widget's accessibility HINT: what ACTIVATING it does, which is
@@ -2049,8 +2091,8 @@ impl<'a> Tx<'a> {
     /// prefixes "double tap to". Activation kinds only; the root rejects it
     /// elsewhere, since a hint with nothing to activate has no target on
     /// Android.
-    pub fn a11y_hint(&mut self, widget: WidgetId, hint: &str) {
-        self.set(widget, Prop::A11yHint, hint);
+    pub fn a11y_hint(&mut self, widget: WidgetId, hint: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::A11yHint, hint.into());
     }
 
     /// One-shot commands: momentary verbs into widget-owned state, riding

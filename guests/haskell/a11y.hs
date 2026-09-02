@@ -7,6 +7,7 @@
    tools/scenes/a11y.steps. -}
 
 import KayaApp
+import KayaWire (Value (..))
 
 -- The one the mark is under: the picture this app's own BUILD shipped.
 markName :: String
@@ -19,6 +20,9 @@ main = kayaMain $ \app -> do
   -- ENTER THIS GUEST'S HEAP — the handle goes to the blob channel.
   mark <- asset markName
   _ <- buildTx app $ do
+    -- A spoken name that FOLLOWS A SIGNAL: 'A11yLabel' takes a 'Signal'
+    -- as well as a 'String', the template zone's shape live.
+    spoken <- signal (VStr "Before")
     root <-
       column
         [A11yId "form", A11yLabel "Form"]
@@ -54,7 +58,12 @@ main = kayaMain $ \app -> do
             [A11yId "actions", A11yLabel "Actions"]
             [ buttonOn "Cancel" (return ()) [A11yId "cancel"],
               buttonOn "OK" (return ()) [A11yId "ok"]
-            ]
+            ],
+          labelText "Spoken" [A11yId "spoken", A11yLabel spoken],
+          buttonOn
+            "Rename"
+            (buildTx app (writeSignal spoken (VStr "After")) >> return ())
+            [A11yId "rename"]
         ]
     mount root
     return ()

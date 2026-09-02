@@ -48,6 +48,11 @@ with app.window():
             kaya.button("Cancel").a11y_id("cancel")
             kaya.button("OK").a11y_id("ok")
         actions.a11y_id("actions").a11y_label("Actions")
+        # A spoken name that FOLLOWS A SIGNAL: the surface Python always
+        # had, uniform across the nine since 2026-09-02.
+        spoken = kaya.signal("Before")
+        kaya.label(text="Spoken").a11y_id("spoken").a11y_label(spoken)
+        kaya.button("Rename", on_click=lambda: spoken.set("After")).a11y_id("rename")
     form.a11y_id("form").a11y_label("Form")
 
 sys.exit(app.run())

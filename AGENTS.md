@@ -799,6 +799,22 @@ in docs/deferred.md.
    IDE inspections (KT-69698), so a computed-and-never-applied local
    compiles clean, which is how a dead lowering once shipped a false
    green),
+   `tools/check-compose-state.sh` (a KayaSceneModel field a composable
+   DRAWS FROM must be composition state: Compose recomposes on a
+   `mutableStateOf` it read and never on a plain field, so `windowTitle`
+   shipped plain for a milestone with the bar composing once and only a
+   film caught it — the scenes read the task label, the other surface.
+   Reads each `KayaSceneModel.<field>` inside every `@Composable fun`
+   body, comments and strings blanked positionally first (a bare-word
+   census reported `rows` and `labels` off prose and KayaNode locals),
+   writes excluded (a composable STAMPING a field for the harness is not
+   a draw read), against the model's own declarations; the six plain
+   fields a composable may read are EXEMPT by name with a reason and
+   must each still be read somewhere, since a stale exemption is the
+   next stale audit — and the one ordering four of them lean on, the
+   alert fields written BEFORE `alertId` in APPLY_PRESENT_ALERT, is read
+   and held rather than assumed. Four watched negatives, counts printed,
+   the first of them the shipped defect itself),
    `tools/check-jni.sh` (every native a Kotlin or Java class declares is
    in a registration list. JNI's own check runs one way only: it fails
    loudly at attach for a registered native the class lacks, but a

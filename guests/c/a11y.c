@@ -34,6 +34,9 @@
 #define W_ACTIONS 22
 #define W_CANCEL 23
 #define W_OK 24
+#define W_SPOKEN 25
+#define W_RENAME 26
+#define SIG_SPOKEN 1
 
 /* A 2x2 RGB PNG (red/green over blue/white), embedded as source. */
 static const uint8_t TEST_PNG[75] = {
@@ -142,6 +145,18 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_ACTIONS, W_CANCEL);
     kaya_tx_add_child(&tx, W_ACTIONS, W_OK);
 
+    /* A spoken name that FOLLOWS A SIGNAL: the bind record the floor
+     * always had, the sugar tiers' live a11y setters take it since
+     * 2026-09-02. */
+    kaya_tx_create_signal(&tx, SIG_SPOKEN, kaya_str("Before"));
+    kaya_tx_create_widget(&tx, W_SPOKEN, KAYA_KIND_LABEL);
+    kaya_tx_set_text(&tx, W_SPOKEN, "Spoken");
+    kaya_tx_set_a11y_id(&tx, W_SPOKEN, "spoken");
+    kaya_tx_bind_a11y_label(&tx, W_SPOKEN, SIG_SPOKEN);
+    kaya_tx_create_widget(&tx, W_RENAME, KAYA_KIND_BUTTON);
+    kaya_tx_set_text(&tx, W_RENAME, "Rename");
+    kaya_tx_set_a11y_id(&tx, W_RENAME, "rename");
+
     kaya_tx_add_child(&tx, W_FORM, W_SAVE);
     kaya_tx_add_child(&tx, W_FORM, W_DETAILS);
     kaya_tx_add_child(&tx, W_FORM, W_RESET);
@@ -156,6 +171,8 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_FORM, W_CELLS);
     kaya_tx_add_child(&tx, W_FORM, W_FEED);
     kaya_tx_add_child(&tx, W_FORM, W_ACTIONS);
+    kaya_tx_add_child(&tx, W_FORM, W_SPOKEN);
+    kaya_tx_add_child(&tx, W_FORM, W_RENAME);
     kaya_tx_mount(&tx, 0, W_FORM); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);
@@ -165,7 +182,21 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
     const uint8_t *rec;
-    while (kaya_next_occurrence(&rec) != 0) {
+    for (;;) {
+        size_t size = kaya_next_occurrence(&rec);
+        if (size == 0)
+            break; /* shutdown */
+        if (size == KAYA_OCCURRENCE_WOKEN)
+            continue; /* no record; rec is NULL */
+        uint64_t id;
+        KayaVal keys[2];
+        uint32_t n_keys;
+        if (kaya_parse_click(rec, &id, keys, 2, &n_keys) && id == W_RENAME) {
+            uint8_t buf[256];
+            KayaTx tx = {buf, 0, sizeof buf};
+            kaya_tx_write_signal(&tx, SIG_SPOKEN, kaya_str("After"));
+            kaya_submit(tx.buf, tx.len);
+        }
     }
     return NULL;
 }

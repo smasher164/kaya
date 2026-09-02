@@ -1662,6 +1662,19 @@ sealed class Tx
     public void SetA11yHint(Widget w, string hint) =>
         Records.Add(KayaWire.TxSetA11yHint(w.Id, hint));
 
+    /// The SIGNAL-SOURCED forms of the trio — the live zone's half of the
+    /// template zone's Signal overloads, spelled as BindText is: a spoken
+    /// name that follows app state. Since 2026-09-02, uniform across the
+    /// nine bindings (docs/deferred.md, the live-zone a11y entry).
+    public void SetA11yId(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindA11yId(w.Id, s.Id));
+
+    public void SetA11yLabel(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindA11yLabel(w.Id, s.Id));
+
+    public void SetA11yHint(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindA11yHint(w.Id, s.Id));
+
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
     /// looks. Destructive and Prominent are button emphasis, Heading and
     /// Caption are label hierarchy, and the root refuses a role on a kind

@@ -249,10 +249,17 @@ expect label@net "net BND 20, VXUS 15 = $2370.00"
 # the top of a collection whose order moved under it.
 scroll_to_row column@ledger t11545
 expect_window column@ledger 0 4698
+# A CLICK INSIDE A POP'S TRANSITION IS DROPPED (the mac and android
+# title WATCHes' 4th/5th sightings, matrix 19 of 2026-09-02, both with
+# the instrument reading `click button#1 145ms after the last pop;
+# entries=0` and no push in 5s; docs/traps.md's Compose entrance-drop
+# entry measured the same window at ~half a second). Every `back` below
+# settles past it before the scene clicks again.
 # BACK TO THE DASHBOARD: the covered root is retained — its numbers and
 # each copy's independent sort survive the round trip.
 back
 expect_entries 0
+settle 600
 expect_title "portfolio"
 expect label#0 "Portfolio: $10023.00"
 expect label#1 "Transactions: 15003"
@@ -273,6 +280,7 @@ expect label@net "net BND 20, VXUS 15 = $2370.00"
 expect select#0 "Retirement"
 back
 expect_entries 0
+settle 600
 expect_title "portfolio"
 
 # THE STACKED FOLD (docs/adaptive-layout-plan.md D7), at the scene's END
@@ -307,6 +315,7 @@ expect_aligned column@accounts "stretch"
 # restored for the fold round trip below.
 back
 expect_entries 0
+settle 600
 expect_fills column@positions[brokerage]
 click button#1
 expect_title "Transactions"

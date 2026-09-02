@@ -634,6 +634,10 @@ pub(crate) struct Scene {
     /// takes EXACTLY ONE (the ScrolledWindow shape) and a second
     /// add_child fails loudly here, at the root.
     filled_scrolls: std::collections::HashSet<WidgetId>,
+    /// Set by every add_child, grow or axis write; the grow-inside-scroll
+    /// barrier runs only on a batch that set it (docs/deferred.md,
+    /// "`grow` INSIDE A SCROLL IS SILENTLY ZERO", ruled REFUSE 2026-09-02).
+    layout_dirty: bool,
     /// Per-select option count (options are its label children;
     /// append-only — the protocol has no remove_child). Feeds the
     /// selected-index upper-bound check at the live SetProp site.
@@ -1698,6 +1702,7 @@ impl Scene {
                                 if let Value::I64(mode) = &v {
                                     self.authored_axis.insert(widget, *mode);
                                 }
+                                self.layout_dirty = true;
                             }
                             // The fold rule's input (D7): a grower is a
                             // grower at evaluation time, not at write time.
@@ -1705,6 +1710,7 @@ impl Scene {
                                 if let Value::F64(w) = &v {
                                     self.grow_weights.insert(widget, *w);
                                 }
+                                self.layout_dirty = true;
                             }
                             out.push(ApplyOp::SetProp {
                                 id: widget,
@@ -1746,6 +1752,7 @@ impl Scene {
                                 if let Value::F64(w) = &current {
                                     self.grow_weights.insert(widget, *w);
                                 }
+                                self.layout_dirty = true;
                             }
                             self.bindings.entry(id).or_default().push((widget, prop));
                             out.push(ApplyOp::SetProp {
@@ -2462,6 +2469,7 @@ impl Scene {
                     );
                     self.parent_of.insert(child, parent);
                     self.children_of.entry(parent).or_default().push(child);
+                    self.layout_dirty = true;
                     out.push(ApplyOp::AddChild { parent, child });
                 }
                 TxOp::Mount { window, root } => {
@@ -2968,6 +2976,22 @@ impl Scene {
 
         self.fan_out_signals(&dirty, &mut out);
 
+        // Barrier: no grow along a scroll's own axis (ruled REFUSE
+        // 2026-09-02; docs/deferred.md, "`grow` INSIDE A SCROLL IS
+        // SILENTLY ZERO"). A barrier for the orphan wall's reason —
+        // ordering inside a batch is free, so the scroll may be attached
+        // last — and AFTER the fan-out because a signal-bound weight is
+        // only current once it has fanned out.
+        if self.layout_dirty {
+            self.layout_dirty = false;
+            if let Some(msg) = self.grow_in_scroll_message() {
+                for (sid, old) in &rollback {
+                    self.signals.insert(*sid, old.clone());
+                }
+                panic!("{msg}");
+            }
+        }
+
         // EVERY programmatic text write this batch produced, read off the
         // ops themselves rather than from the four sites that emit them.
         // One place, and it cannot be bypassed by a fifth site: this is
@@ -3010,6 +3034,7 @@ impl Scene {
             }
             for (widget, w) in grew {
                 self.grow_weights.insert(widget, w);
+                self.layout_dirty = true;
             }
             if let Some(bound) = self.window_bindings.get(&id) {
                 for (window, prop) in bound {
@@ -3895,6 +3920,148 @@ impl Scene {
             }
         }
         false
+    }
+
+    /// A live container's axis as the GUEST declared it: the creation
+    /// kind, or the guest's own `axis` write. A breakpoint flip is not
+    /// read on purpose — a stacked row's growers are the fold rule's
+    /// business (D7), and its horizontal weights are legal at every
+    /// width it was authored for.
+    fn authored_vertical(&self, id: WidgetId) -> bool {
+        let mode = self.authored_axis.get(&id).copied();
+        match self.widgets.get(&id) {
+            Some(WidgetKind::Scroll) => true,
+            Some(WidgetKind::Column) => mode.unwrap_or(1) == 1,
+            Some(WidgetKind::Row) => mode.unwrap_or(0) == 1,
+            _ => false,
+        }
+    }
+
+    /// The first `grow` that would silently be ZERO because it runs
+    /// along a scroll's own axis, as a refusal sentence, or None. A
+    /// scroll proposes unbounded extent to its content, so a weight on
+    /// a child of any vertical container under it has nothing to
+    /// divide; every other toolkit refuses (Flutter, Compose) or gives
+    /// the scroll a definite box (CSS), and kaya answered zero. Walks
+    /// each scroll's LIVE subtree — stamped copies are not in
+    /// `children_of` — and reads a For container's template bodies once,
+    /// at their declaration, rather than once per row. Every clause of
+    /// the sentence is read off the scene.
+    fn grow_in_scroll_message(&self) -> Option<String> {
+        let mut scrolls: Vec<WidgetId> = self
+            .widgets
+            .iter()
+            .filter(|(_, k)| **k == WidgetKind::Scroll)
+            .map(|(id, _)| *id)
+            .collect();
+        scrolls.sort_by_key(|id| id.0);
+        for scroll in scrolls {
+            let mut stack = vec![scroll];
+            while let Some(parent) = stack.pop() {
+                let Some(children) = self.children_of.get(&parent) else {
+                    continue;
+                };
+                let vertical = self.authored_vertical(parent);
+                for child in children {
+                    let weight = self.grow_weights.get(child).copied().unwrap_or(0.0);
+                    if vertical && weight > 0.0 {
+                        return Some(format!(
+                            "kaya: grow {weight} on {child:?} ({:?}) has nothing to divide: \
+                             its parent {parent:?} ({:?}) runs along the axis of scroll \
+                             {scroll:?}, which offers its content unbounded extent, so \
+                             the weight would silently be zero. Drop the grow, or put the \
+                             scroll INSIDE the container that should grow (docs/deferred.md, \
+                             \"grow inside a scroll\")",
+                            self.widgets[child],
+                            self.widgets[&parent]
+                        ));
+                    }
+                    // A For's rows are its template bodies' roots, stamped
+                    // into a vertical container; read the blueprint once.
+                    for site in self.for_sites.values().filter(|s| s.container == *child) {
+                        for body in &site.bodies {
+                            if let Some(msg) = Self::template_grow_in_scroll(body, scroll, *child) {
+                                return Some(msg);
+                            }
+                        }
+                    }
+                    stack.push(*child);
+                }
+            }
+        }
+        None
+    }
+
+    /// The template half of `grow_in_scroll_message`: a body's roots are
+    /// children of the (vertical) For container; inside the body, a
+    /// node's parent is its own `AddChild`, and a nested For or When
+    /// container is vertical like the live one.
+    fn template_grow_in_scroll(body: &TplBody, scroll: WidgetId, container: WidgetId) -> Option<String> {
+        let mut kinds: HashMap<u64, WidgetKind> = HashMap::new();
+        let mut axis: HashMap<u64, i64> = HashMap::new();
+        let mut grow: HashMap<u64, f64> = HashMap::new();
+        let mut parent: HashMap<u64, u64> = HashMap::new();
+        for op in &body.ops {
+            match op {
+                TplOp::Widget { node, kind } => {
+                    kinds.insert(*node, *kind);
+                }
+                TplOp::SetProp { node, prop: Prop::Axis, value: PropValue::Const(Value::I64(m)) } => {
+                    axis.insert(*node, *m);
+                }
+                TplOp::SetProp { node, prop: Prop::Grow, value: PropValue::Const(Value::F64(w)) } => {
+                    grow.insert(*node, *w);
+                }
+                TplOp::AddChild { parent: p, child } => {
+                    parent.insert(*child, *p);
+                }
+                TplOp::For { node, bodies, .. } => {
+                    kinds.insert(*node, WidgetKind::Column);
+                    for inner in bodies {
+                        if let Some(msg) = Self::template_grow_in_scroll(inner, scroll, container) {
+                            return Some(msg);
+                        }
+                    }
+                }
+                TplOp::When { node, body: inner, .. } => {
+                    kinds.insert(*node, WidgetKind::Column);
+                    if let Some(msg) = Self::template_grow_in_scroll(inner, scroll, container) {
+                        return Some(msg);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let vertical_node = |node: u64| match kinds.get(&node) {
+            Some(WidgetKind::Column) => axis.get(&node).copied().unwrap_or(1) == 1,
+            Some(WidgetKind::Row) => axis.get(&node).copied().unwrap_or(0) == 1,
+            Some(WidgetKind::Scroll) => true,
+            _ => false,
+        };
+        let mut nodes: Vec<u64> = grow.keys().copied().collect();
+        nodes.sort();
+        for node in nodes {
+            let weight = grow[&node];
+            if weight <= 0.0 {
+                continue;
+            }
+            let (vertical, parent_desc) = match parent.get(&node) {
+                Some(p) => (vertical_node(*p), format!("template node {p} ({:?})", kinds[p])),
+                None => (true, format!("the For container {container:?}")),
+            };
+            if vertical {
+                return Some(format!(
+                    "kaya: grow {weight} on template node {node} ({:?}) has nothing to \
+                     divide: it is stamped under {parent_desc}, which runs along the axis \
+                     of scroll {scroll:?}, which offers its content unbounded extent, so \
+                     the weight would silently be zero on every row. Drop the grow, or put \
+                     the scroll INSIDE the container that should grow (docs/deferred.md, \
+                     \"grow inside a scroll\")",
+                    kinds[&node]
+                ));
+            }
+        }
+        None
     }
 
     /// The first widget in `created` that no mounted root reaches, or
@@ -13270,5 +13437,190 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         assert_eq!(creates(&ops).len(), 3, "key 60 arrived at the bottom");
         assert_eq!(destroys(&ops), 3, "and key 30 slid off the top");
         assert_eq!(realized(&scene), (31..61).collect::<Vec<i64>>());
+    }
+    // --- Grow along a scroll's own axis is refused (ruled 2026-09-02) ---
+    //
+    // A scroll proposes unbounded extent, so a weight on a child of any
+    // vertical container under it silently read ZERO for a month
+    // (docs/deferred.md, "`grow` INSIDE A SCROLL IS SILENTLY ZERO").
+    // Each negative below is a should_panic on the barrier's own
+    // sentence; the positives are the shapes the tree ships today — the
+    // scroll scene's grown viewport, and the portfolio's grown detail
+    // column inside a stackable ROW inside its scroll.
+
+    fn scrolled(ops: Vec<TxOp>) -> Vec<TxOp> {
+        let mut tx = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ];
+        tx.extend(ops);
+        tx
+    }
+
+    #[test]
+    #[should_panic(expected = "has nothing to divide")]
+    fn grow_under_a_column_inside_a_scroll_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(scrolled(vec![
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(4) },
+        ]));
+    }
+
+    /// Ordering inside a batch is free: the scroll is attached LAST here,
+    /// after the grown subtree is complete, and the barrier still sees it.
+    #[test]
+    #[should_panic(expected = "has nothing to divide")]
+    fn grow_is_refused_when_the_scroll_is_attached_last() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(4) },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// The grow written in a LATER batch than the structure.
+    #[test]
+    #[should_panic(expected = "has nothing to divide")]
+    fn grow_written_after_the_structure_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(scrolled(vec![
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(4) },
+        ]));
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(4),
+            prop: Prop::Grow,
+            value: PropValue::Const(Value::F64(1.0)),
+        }]);
+    }
+
+    /// A signal-bound weight is current only after the fan-out, which is
+    /// why the barrier runs after it: zero at bind time, one at the write.
+    #[test]
+    #[should_panic(expected = "has nothing to divide")]
+    fn grow_through_a_signal_is_refused_at_the_write() {
+        let mut scene = Scene::new();
+        scene.apply(scrolled(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(0.0) },
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(4) },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Grow,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]));
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: Value::F64(1.0) }]);
+    }
+
+    /// The scroll's ONE child grown: the case the ledger measured as a
+    /// windowed table reporting its header alone.
+    #[test]
+    #[should_panic(expected = "has nothing to divide")]
+    fn a_grown_for_container_inside_a_scroll_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 3, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::TemplateEnd,
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// A TEMPLATE row grown inside a For inside a scroll: refused once, at
+    /// the blueprint, naming the template node — never per stamped row.
+    #[test]
+    #[should_panic(expected = "on template node 10")]
+    fn a_grown_template_root_inside_a_scroll_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 3, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// The shapes that ship: a grown scroll viewport (the scroll scene), a
+    /// grown child of a ROW under the scroll (the portfolio's detail column
+    /// — horizontal, bounded by the width), and a template node grown
+    /// inside a template ROW. None is refused.
+    #[test]
+    fn horizontal_grow_inside_a_scroll_is_legal() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Scroll },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Column },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 5, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(11),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(4), child: WidgetId(5) },
+            TxOp::AddChild { parent: WidgetId(3), child: WidgetId(4) },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        assert!(scene.grow_in_scroll_message().is_none());
     }
 }

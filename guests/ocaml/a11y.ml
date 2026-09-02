@@ -20,6 +20,9 @@ let () =
         core's own buffer to the blob table, and the close is safe
         because that table keeps its own reference. *)
      let mark = asset mark_name in
+     (* A spoken name that FOLLOWS A SIGNAL: [~a11y_label_bind], the
+        template zone's [?a11y_label_bind] in the live zone. *)
+     let spoken = signal (Str "Before") in
      let root =
        column ~a11y_id:"form" ~a11y_label:"Form"
          [
@@ -47,6 +50,9 @@ let () =
                button ~a11y_id:"cancel" ~text:"Cancel";
                button ~a11y_id:"ok" ~text:"OK";
              ];
+           label ~a11y_id:"spoken" ~a11y_label_bind:spoken ~text:"Spoken";
+           button ~a11y_id:"rename" ~text:"Rename"
+             ~on_click:(fun () -> write spoken (Str "After"));
          ]
          ()
      in

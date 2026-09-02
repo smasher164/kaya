@@ -564,6 +564,150 @@ def metrics_class(swift_src=None, wire_src=None):
     return bad
 
 
+
+# --- THE VERB TRACE: one ring, three harnesses ------------------------
+#
+# crates/kaya/src/vtrace.rs keeps what every harness verb did, attempt
+# by attempt, and writes it ONLY WHEN THE RUN FAILS to the file
+# KAYA_VERB_TRACE names. The two interpreter harnesses re-implement it
+# by hand (KayaVTrace in swift/KayaSwiftUI.swift and KayaCompose.kt),
+# and a hand-copied diagnostic with no compile-time link is the drift
+# class that let the ax observation sit spelled two ways for months
+# (docs/deferred.md, the flight recorder's BUILD entry). NO LANE CAN
+# SEE IT: the file is read by a human after a failure, so a ring whose
+# line shape drifted, or whose dump crept onto the pass path, reddens
+# nothing. So this holds, per harness: the env var by name, the four
+# line shapes compared FLATTENED (interpolation to <v>), exactly two
+# dump sites — one in the script runner AFTER the green verdict's text
+# and BEFORE the publish, one on the watchdog's fire path right before
+# its exit primitive — and none anywhere else.
+VTRACE = "crates/kaya/src/vtrace.rs"
+VTRACE_ENV = '"KAYA_VERB_TRACE"'
+VTRACE_LINES = [
+    "KAYA_VERB_TRACE: dump reason=<v> t=<v> records=<v> dropped=<v> "
+    "steps=<v>",
+    "KAYA_VERB_TRACE: step=<v> text=<v>",
+    "KAYA_VERB_TRACE: t=<v> step=<v> verb=<v> try=<v> what=<v>",
+    "KAYA_HARNESS: verb trace (<v> records, <v> dropped) appended to <v>",
+]
+# (label, lang, ring file, runner file, dump-call regex,
+#  runner (opener, closer), publish regex, fire-path exit regex)
+VTRACE_HARNESSES = [
+    ("harness.rs", "rust", VTRACE, HARNESS, r"vtrace::dump\(",
+     (r"fn run_with_log\(", "\n}"), r"watch\.published\(",
+     r"harness_exit\("),
+    ("KayaSwiftUI.swift", "swift", SWIFT, SWIFT, r"KayaVTrace\.dump\(",
+     (r"private func kayaRunScript\(", "\n}"), r"watchdog\.published\(",
+     r"_exit\(1\)"),
+    ("KayaCompose.kt", "kotlin", KOTLIN, KOTLIN, r"KayaVTrace\.dump\(",
+     (r"private fun runScript\(", "\n    }"), r"watchdog\.published\(",
+     r"\.halt\(1\)"),
+]
+VTRACE_OK = "KAYA_SELFTEST: OK"
+
+
+def vtrace_flat(lang, text):
+    """The ax flattener plus the ceiling gate's splice rule: one line
+    shape written three ways is one string once the interpolation is
+    <v> and the `+` splices and line breaks are gone."""
+    text = re.sub(r"\\\n\s*", "", text)
+    text = re.sub(r'"\s*\+\s*"', "", text)
+    text = ax_flatten(lang, text)
+    return re.sub(r"\s+", " ", text)
+
+
+def verb_trace(harness_src=None, swift_src=None, kotlin_src=None,
+               vtrace_src=None):
+    bad = []
+    for (label, lang, ring_rel, runner_rel, dump_pat, runner, publish_pat,
+         exit_pat), src in zip(VTRACE_HARNESSES,
+                               (harness_src, swift_src, kotlin_src)):
+        ring_src = vtrace_src if lang == "rust" else src
+        ring = source_text(
+            ring_src, ring_rel, bad,
+            lambda s, exc, label=label: (
+                "cannot read " + s + " for " + label + "\'s verb trace ("
+                + str(exc.strerror) + "): the ring this rule holds level "
+                "is not there"))
+        runner_text = source_text(
+            src, runner_rel, bad,
+            lambda s, exc, label=label: (
+                "cannot read " + s + " for " + label + "\'s verb trace ("
+                + str(exc.strerror) + "): the runner this rule holds "
+                "level is not there"))
+        if ring is None or runner_text is None:
+            continue
+        # The Rust runner's unit tests drive the ring too; the sites this
+        # clause counts are the shipped ones, above the test module.
+        runner_text = runner_text.split("\n#[cfg(test)]", 1)[0]
+        if VTRACE_ENV not in ring:
+            bad.append(f"{ring_rel} never names {VTRACE_ENV}: the ring "
+                       f"reads its file from a variable of another name, "
+                       f"or from none, and a runner setting the ruled one "
+                       f"gets no trace")
+        flat = vtrace_flat(lang, ring)
+        for line in VTRACE_LINES:
+            if line not in flat:
+                bad.append(f"{ring_rel} does not carry the verb-trace line "
+                           f"shape {line!r} the other rings carry — one "
+                           f"trace reads one way everywhere, or a reader "
+                           f"written against one harness misparses the "
+                           f"other two")
+        calls = [m.start() for m in re.finditer(dump_pat, runner_text)]
+        if len(calls) != 2:
+            bad.append(f"{runner_rel} has {len(calls)} verb-trace dump "
+                       f"site(s), want exactly 2 (the failed verdict and "
+                       f"the watchdog's fire path): a third is a dump on "
+                       f"a path that is not a failure, a first-or-only is "
+                       f"a wedge or a red verdict that leaves no trace")
+            continue
+        opener, closer = runner
+        head = re.search(opener, runner_text)
+        if head is None:
+            bad.append(f"{runner_rel} has no script runner matching "
+                       f"{opener!r} — re-point this clause rather than "
+                       f"weaken it")
+            continue
+        end = runner_text.find(closer, head.end())
+        body_start, body_end = head.start(), (end if end >= 0
+                                              else len(runner_text))
+        inside = [c for c in calls if body_start <= c < body_end]
+        outside = [c for c in calls if not body_start <= c < body_end]
+        if len(inside) != 1 or len(outside) != 1:
+            bad.append(f"{runner_rel}: {len(inside)} dump site(s) inside "
+                       f"the script runner and {len(outside)} outside it, "
+                       f"want one of each (the failed verdict, and the "
+                       f"watchdog's fire path)")
+            continue
+        body = runner_text[body_start:body_end]
+        at = inside[0] - body_start
+        ok_at = body.rfind(VTRACE_OK)
+        if ok_at < 0 or ok_at > at:
+            bad.append(f"{runner_rel}: the runner's dump site sits BEFORE "
+                       f"the green verdict's text, so a passing run would "
+                       f"write a trace — the rule is failure only")
+        publish = re.search(publish_pat, body[at:])
+        if publish is None:
+            bad.append(f"{runner_rel}: no {publish_pat!r} follows the "
+                       f"runner's dump site — after the publish the "
+                       f"watchdog may end the process at any moment, so "
+                       f"the dump must precede it")
+        elif VTRACE_OK in body[at:at + publish.start()]:
+            bad.append(f"{runner_rel}: the green verdict's text sits "
+                       f"between the runner's dump site and the publish "
+                       f"— the dump is on the pass path")
+        fire = runner_text[outside[0]:outside[0] + 1200]
+        if not re.search(exit_pat, fire):
+            bad.append(f"{runner_rel}: the watchdog's dump site is not "
+                       f"followed by its exit primitive {exit_pat!r} "
+                       f"within the fire path — a trace dumped somewhere "
+                       f"the process does not leave is a trace on a "
+                       f"path that is not the wedge")
+        elif VTRACE_OK in fire[:re.search(exit_pat, fire).start()]:
+            bad.append(f"{runner_rel}: the green verdict's text sits "
+                       f"between the watchdog's dump site and its exit")
+    return bad
+
 # --- the real clauses, run first so a missing mirror reports as one --
 window_out = window_tier()
 window_status = 1 if window_out else 0
@@ -601,6 +745,16 @@ if clip_out:
           "copies and nothing else pins them, so a drifted value "
           "ships a wrong clip kind silently:", file=sys.stderr)
     print("\n".join(clip_out), file=sys.stderr)
+
+vtrace_out = verb_trace()
+vtrace_status = 1 if vtrace_out else 0
+if vtrace_out:
+    print("check-verbs: the verb trace is not one ring in three "
+          "harnesses — the file is read by a human after a failure, so "
+          "a drifted line shape or a dump on the pass path reddens no "
+          "lane (docs/deferred.md, the flight recorder entry):",
+          file=sys.stderr)
+    print("\n".join(vtrace_out), file=sys.stderr)
 
 metrics_out = metrics_class()
 metrics_status = 1 if metrics_out else 0
@@ -1253,14 +1407,52 @@ print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers pinned, "
       f"{len(KEYED_ARMS) + len(COLUMN_ONLY)} watched negatives refused",
       file=sys.stderr)
 
+# The verb trace's watched negatives, each on a doctored copy with its
+# substitution count printed (kaya_gate.doctor), each demanding the
+# sentence the real clause would print.
+vtrace_texts = {rel: real(rel) for rel in (HARNESS, SWIFT, KOTLIN, VTRACE)}
+VTRACE_NEGATIVES = [
+    ("the SwiftUI verdict dump cut", SWIFT,
+     r'\n    KayaVTrace\.dump\("the verdict failed: [^\n]*\n', "\n",
+     "verb-trace dump site(s), want exactly 2"),
+    ("the Compose line shape drifted", KOTLIN,
+     r'records=\$\{recs\.size\} dropped=', "recs=${recs.size} dropped=",
+     "does not carry the verb-trace line shape"),
+    ("the SwiftUI env var renamed", SWIFT,
+     r'environment\["KAYA_VERB_TRACE"\]', 'environment["KAYA_VTRACE"]',
+     "never names"),
+    ("a Compose dump on the pass path", KOTLIN,
+     r'(\n\s+)(Log\.i\("kaya", "KAYA_SELFTEST: OK)',
+     r'\1KayaVTrace.dump("green")\1\2',
+     "verb-trace dump site(s), want exactly 2"),
+    ("the Rust watchdog dump moved off the fire path", HARNESS,
+     r'crate::vtrace::dump\("the step ceiling fired: no verdict"\);\n',
+     "", "verb-trace dump site(s), want exactly 2"),
+    ("the Rust ring's pointer line drifted", VTRACE,
+     r'appended to \{\}', "written to {}",
+     "does not carry the verb-trace line shape"),
+]
+for label, rel, pattern, repl, want in VTRACE_NEGATIVES:
+    doctored = g.doctor(label, vtrace_texts[rel], pattern, repl)
+    args = {HARNESS: "harness_src", SWIFT: "swift_src", KOTLIN: "kotlin_src",
+            VTRACE: "vtrace_src"}
+    out = verb_trace(**{args[rel]: doctored})
+    if not any(want in line for line in out):
+        fail(f"check-verbs SELF-TEST: {label} passed the verb-trace clause "
+             f"(wanted a finding naming {want!r}; got {out!r})")
+print(f"check-verbs: verb trace: {len(VTRACE_LINES)} line shapes in 3 "
+      f"harnesses, {len(VTRACE_NEGATIVES)} watched negatives refused",
+      file=sys.stderr)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
-        or metrics_status or keyed_status):
+        or metrics_status or keyed_status or vtrace_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
           f"the CLIP_* mirrors + the ink tolerance in 3 harnesses + "
-          f"the ax spelling in 3 harnesses + the windowed tier's loop "
+          f"the ax spelling in 3 harnesses + the verb trace in 3 "
+          f"harnesses + the windowed tier's loop "
           f"+ the metrics class channel + the keyed target arms on 4 "
           f"backends + spec hash against 2 interpreters")

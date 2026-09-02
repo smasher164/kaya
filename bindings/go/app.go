@@ -821,6 +821,50 @@ func (tx *Tx) SetA11yHint(w Widget, hint string) {
 	tx.emit(TxSetA11yHint(w.id, hint))
 }
 
+// The SIGNAL-SOURCED forms of the trio — the live zone's half of what
+// Tpl.BindA11yID and friends give a stamped copy, spelled as BindText is:
+// a spoken name that follows app state (a play/pause button's name
+// flipping with its state). Since 2026-09-02, uniform across the nine
+// bindings (docs/deferred.md, the live-zone a11y entry).
+func (tx *Tx) BindA11yID(w Widget, s Signal[string]) {
+	tx.emit(TxBindA11yId(w.id, s.id))
+}
+
+func (tx *Tx) BindA11yLabel(w Widget, s Signal[string]) {
+	tx.emit(TxBindA11yLabel(w.id, s.id))
+}
+
+func (tx *Tx) BindA11yHint(w Widget, s Signal[string]) {
+	tx.emit(TxBindA11yHint(w.id, s.id))
+}
+
+// BindA11yID binds this widget's identifier to a signal at construction.
+func (w Widget) BindA11yID(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindA11yID on a widget outside its build transaction — use Tx.BindA11yID inside a live transaction")
+	}
+	w.tx.BindA11yID(w, s)
+	return w
+}
+
+// BindA11yLabel binds this widget's spoken name to a signal at construction.
+func (w Widget) BindA11yLabel(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindA11yLabel on a widget outside its build transaction — use Tx.BindA11yLabel inside a live transaction")
+	}
+	w.tx.BindA11yLabel(w, s)
+	return w
+}
+
+// BindA11yHint binds this widget's hint to a signal at construction.
+func (w Widget) BindA11yHint(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindA11yHint on a widget outside its build transaction — use Tx.BindA11yHint inside a live transaction")
+	}
+	w.tx.BindA11yHint(w, s)
+	return w
+}
+
 // A11yHint sets this widget's hint at construction. Same transaction
 // discipline as Grow.
 func (w Widget) A11yHint(hint string) Widget {

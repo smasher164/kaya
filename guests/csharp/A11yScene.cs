@@ -68,6 +68,15 @@ static class A11yScene
                 });
                 tx.SetA11yId(actions, "actions");
                 tx.SetA11yLabel(actions, "Actions");
+                // A spoken name that FOLLOWS A SIGNAL: the live trio's
+                // Signal overloads, the template zone's shape live.
+                var spoken = tx.Signal("Before");
+                var spokenLabel = tx.Label("Spoken");
+                tx.SetA11yId(spokenLabel, "spoken");
+                tx.SetA11yLabel(spokenLabel, spoken);
+                tx.SetA11yId(
+                    tx.Button("Rename", onClick: inner => inner.Write(spoken, "After")),
+                    "rename");
             });
             tx.SetA11yId(form, "form");
             tx.SetA11yLabel(form, "Form");

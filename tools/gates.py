@@ -228,6 +228,7 @@ GATES = [
     ("check-c-bounds", ["tools/check-c-bounds.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),
     ("check-detekt", ["tools/check-detekt.sh"], True, ""),
+    ("check-compose-state", ["tools/check-compose-state.sh"], True, ""),
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),
     ("java-typecheck", ["tools/java-typecheck.sh"], True, ""),
     ("js-typecheck", ["tools/js-typecheck.sh"], True, ""),

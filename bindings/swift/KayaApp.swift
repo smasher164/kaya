@@ -2451,6 +2451,22 @@ final class KayaAppTx {
         tx.setA11yHint(w.id, hint)
     }
 
+    /// The SIGNAL-SOURCED forms of the trio — the live zone's half of
+    /// KayaTpl's KayaSignal overloads, spelled as bindText is: a spoken
+    /// name that follows app state. Since 2026-09-02, uniform across the
+    /// nine bindings (docs/deferred.md, the live-zone a11y entry).
+    func setA11yId(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindA11yId(w.id, s.id)
+    }
+
+    func setA11yLabel(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindA11yLabel(w.id, s.id)
+    }
+
+    func setA11yHint(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindA11yHint(w.id, s.id)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }

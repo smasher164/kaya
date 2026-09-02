@@ -44,6 +44,11 @@ libkaya or SwiftUI interpreter first, naming the build — a hand-spelled
 env line once ran the interpreter from before the edit and spent a
 failure on it (docs/traps.md). `--build` rebuilds both before running.
 
+A hand run that fails can keep its verb trace: `KAYA_VERB_TRACE=<file>
+tools/run-leg.py <scene> <lang>` appends the harness's attempt-by-attempt
+record to that file on a failure alone (crates/kaya/src/vtrace.rs; the
+lanes collect it into the flight-recorder bundle themselves).
+
 ## The regeneration workflow (any spec.rs change)
 
 1. Edit `crates/kaya/src/spec.rs` (records, enums, PROPS). The spec

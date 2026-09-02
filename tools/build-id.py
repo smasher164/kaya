@@ -132,6 +132,7 @@ GATES = {
     # else outside android/.
     "check-compose": ["android", "bindings/java"],
     "check-detekt": ["android"],
+    "check-compose-state": ["android", "docs"],
     "check-pins": ["android"],
     # The INTERFACE, not the implementation: kaya.h and the swift
     # sources, never a backend. Sound because the header's own freshness

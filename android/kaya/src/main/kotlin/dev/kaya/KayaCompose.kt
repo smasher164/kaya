@@ -997,6 +997,106 @@ internal fun kayaParseAcceptList(list: String): Pair<Int, List<String>> {
 /// the SwiftUI interpreter's channel of the same name.
 val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
 
+/**
+ * THE VERB TRACE, this interpreter's copy of crates/kaya/src/vtrace.rs:
+ * every attempt of every step, in a ring, written ONLY WHEN THE RUN
+ * FAILS to the file `KAYA_VERB_TRACE` names (unset or empty: no
+ * instrument, no recording). A RELATIVE name resolves under the app's
+ * own files directory, the one place a runner can read back with
+ * `run-as`. Three line shapes and the failure-only rule, held level with
+ * the Rust ring and the SwiftUI one by tools/check-verbs.sh.
+ */
+object KayaVTrace {
+    const val CAP = 2048
+    private class Rec(val atMs: Long, val step: Int, val verb: String, val attempt: Int, val what: String)
+    private val lock = Object()
+    private var on = false
+    private var named: String? = null
+    private var filesDir: (() -> java.io.File?)? = null
+    private var start = 0L
+    private var step = 0
+    private val steps = ArrayList<String>()
+    private val recs = ArrayList<Rec>()
+    private var head = 0
+    private var dropped = 0L
+
+    fun begin(startNanos: Long, filesDir: () -> java.io.File?) {
+        synchronized(lock) {
+            val env = System.getenv("KAYA_VERB_TRACE")
+            on = !env.isNullOrEmpty()
+            named = env
+            this.filesDir = filesDir
+            start = startNanos
+            step = 0
+            steps.clear()
+            recs.clear()
+            head = 0
+            dropped = 0
+        }
+    }
+
+    fun step(ordinal: Int, text: String) {
+        synchronized(lock) {
+            if (!on) return
+            step = ordinal
+            while (steps.size <= ordinal) steps.add("")
+            steps[ordinal] = text
+        }
+    }
+
+    /** One attempt of a step, numbered from 1 (the retry wrapper is the attempt point). */
+    fun attempt(verb: String, n: Int, what: String) {
+        synchronized(lock) {
+            if (!on) return
+            val rec = Rec((System.nanoTime() - start) / 1_000_000, step, verb, n, what)
+            if (recs.size < CAP) {
+                recs.add(rec)
+            } else {
+                recs[head] = rec
+                head = (head + 1) % CAP
+                dropped++
+            }
+        }
+    }
+
+    private fun quoted(s: String): String =
+        "\"" + s.replace('"', '\'').replace('\n', ' ').replace('\r', ' ') + "\""
+
+    /** Append the whole ring under `reason`. FAILURE ONLY — the failed verdict and the watchdog's fire path. */
+    fun dump(reason: String) {
+        synchronized(lock) {
+            if (!on) return
+            val env = named ?: return
+            // Resolved HERE, not at begin: the activity mounts after the
+            // script thread starts, so its files dir is known only now.
+            val p = if (env.startsWith("/")) {
+                env
+            } else {
+                val dir = filesDir?.invoke() ?: java.io.File(System.getProperty("java.io.tmpdir"))
+                java.io.File(dir, env).path
+            }
+            val now = (System.nanoTime() - start) / 1_000_000
+            val sb = StringBuilder()
+            sb.append("KAYA_VERB_TRACE: dump reason=${quoted(reason)} t=$now records=${recs.size} dropped=$dropped steps=${steps.size}\n")
+            for ((i, text) in steps.withIndex()) {
+                sb.append("KAYA_VERB_TRACE: step=$i text=${quoted(text)}\n")
+            }
+            for (i in 0 until recs.size) {
+                val r = recs[(head + i) % recs.size]
+                sb.append("KAYA_VERB_TRACE: t=${r.atMs} step=${r.step} verb=${r.verb} try=${r.attempt} what=${quoted(r.what)}\n")
+            }
+            // Append mode and ONE write, the Rust ring's rule.
+            try {
+                java.io.FileOutputStream(p, true).use { it.write(sb.toString().toByteArray(Charsets.UTF_8)) }
+            } catch (e: java.io.IOException) {
+                Log.e("kaya", "KAYA_HARNESS: verb trace could not be appended to $p: $e")
+                return
+            }
+            Log.e("kaya", "KAYA_HARNESS: verb trace (${recs.size} records, $dropped dropped) appended to $p")
+        }
+    }
+}
+
 /// The height a scroll viewport claims when it is measured with NO bound
 /// (see the clamp in KayaTableSurface). The display's own pixel height:
 /// an unbounded ask cannot be answered from the constraint, and a window
@@ -4908,8 +5008,18 @@ object KayaCompose {
             cfg.getOrNull(SemanticsProperties.EditableText) != null -> "field"
             else -> kayaAxRole(role, null, node.children.size, false)
         }
+        // A TEXT NODE THAT CARRIES A CONTENT DESCRIPTION HAS NO CLASS:
+        // the provider's AccessibilityNodeInfo names android.widget.TextView
+        // for a plain Text and nothing at all once a contentDescription
+        // rides it, so a label whose spoken name is authored read
+        // `unknown/<name>` (measured 2026-09-02, the a11y scene's
+        // label@spoken on three legs). The node's own Text semantics is
+        // the platform fact the class stood for; read it when the class
+        // is silent.
+        val className = info?.className
+            ?: if (cfg.getOrNull(SemanticsProperties.Text) != null) "android.widget.TextView" else null
         return KayaAxRead(
-            kayaAxRole(role, info?.className, node.children.size, kayaAxHeading(info)) +
+            kayaAxRole(role, className, node.children.size, kayaAxHeading(info)) +
                 "/" + kayaAxName(node),
             infoServed = info != null,
             fallback = fallbackRole + "/" + kayaAxName(node),
@@ -5751,6 +5861,9 @@ object KayaCompose {
                         Runtime.getRuntime().halt(leaving)
                     }
                     if (step != null && waitedMs >= ceilingMs) {
+                        // THE WEDGE IS WHAT THE TRACE IS FOR (crates/kaya/src/
+                        // vtrace.rs); the failed-verdict path dumps its own.
+                        KayaVTrace.dump("the step ceiling fired: no verdict")
                         Log.e("kaya", wedgeVerdict(step, waitedMs))
                         Runtime.getRuntime().halt(1)
                     }
@@ -5783,6 +5896,8 @@ object KayaCompose {
         watchdog.start()
         val start = System.nanoTime()
         Log.i("kaya", "KAYA_HARNESS: epoch ${System.currentTimeMillis()}")
+        // The verb trace counts from the same zero (crates/kaya/src/vtrace.rs).
+        KayaVTrace.begin(start) { mountedActivity?.filesDir }
         // Whether the run already carried the core's fault into
         // `failures`, so the sweep after the loop cannot report the same
         // one twice.
@@ -5802,6 +5917,7 @@ object KayaCompose {
                 val offset = (System.nanoTime() - start) / 1_000_000
                 Log.i("kaya", "KAYA_HARNESS: +${offset}ms $line")
                 watchdog.enter(line)
+                KayaVTrace.step(statements, line)
                 // The observation contract (harness.rs is the norm):
                 // every expect is a BOUNDED RETRY — each verb case
                 // appends exactly one failure on a miss, so the
@@ -5813,6 +5929,7 @@ object KayaCompose {
                 val stepStart = System.nanoTime()
                 var stepDeadline = stepStart + 5_000_000_000L
                 var retryStep = true
+                var attempt = 0
                 while (retryStep) {
                 retryStep = false
                 val failuresBefore = failures.size
@@ -7986,6 +8103,15 @@ object KayaCompose {
                     }
                     else -> failures.add("unknown step $line")
                 }
+                attempt++
+                KayaVTrace.attempt(
+                    parts[0], attempt,
+                    if (failures.size > failuresBefore) {
+                        "<- not yet: " + failures.subList(failuresBefore, failures.size).joinToString("; ")
+                    } else {
+                        "<- ok"
+                    },
+                )
                 val fault = KayaPresent.fault()?.toString(Charsets.UTF_8)
                 if (fault != null) {
                     // THE CORE FAULTED: a guard caught an app misuse, or a
@@ -8083,6 +8209,9 @@ object KayaCompose {
                 } else {
                     failures
                 }
+            // FAILURE ONLY, and BEFORE the publish: after it the watchdog
+            // may end the process at any moment (crates/kaya/src/vtrace.rs).
+            KayaVTrace.dump("the verdict failed: KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
             Log.e("kaya", "KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
             1
         }

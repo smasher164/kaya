@@ -811,6 +811,106 @@ func kayaDiag(_ msg: String) {
     FileHandle.standardError.write(line.data(using: .utf8)!)
 }
 
+/// THE VERB TRACE, this interpreter's copy of crates/kaya/src/vtrace.rs:
+/// every attempt of every step, in a ring, written ONLY WHEN THE RUN
+/// FAILS to the file `KAYA_VERB_TRACE` names (unset or empty: no
+/// instrument, no recording). A RELATIVE name resolves under
+/// kayaTempDir() — the app's Documents on iOS — so a runner that cannot
+/// know the container path can still name the file. Three line shapes
+/// and the failure-only rule, held level with the Rust ring and the
+/// Compose one by tools/check-verbs.sh.
+enum KayaVTrace {
+    static let cap = 2048
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var on = false
+    nonisolated(unsafe) private static var path = ""
+    nonisolated(unsafe) private static var start = Date()
+    nonisolated(unsafe) private static var step = 0
+    nonisolated(unsafe) private static var steps: [String] = []
+    nonisolated(unsafe) private static var recs:
+        [(atMs: Int, step: Int, verb: String, attempt: Int, what: String)] = []
+    nonisolated(unsafe) private static var head = 0
+    nonisolated(unsafe) private static var dropped = 0
+
+    static func begin(_ at: Date) {
+        let named = ProcessInfo.processInfo.environment["KAYA_VERB_TRACE"] ?? ""
+        lock.lock()
+        defer { lock.unlock() }
+        on = !named.isEmpty
+        path =
+            named.isEmpty || named.hasPrefix("/")
+            ? named : (kayaTempDir() as NSString).appendingPathComponent(named)
+        start = at
+        step = 0
+        steps = []
+        recs = []
+        head = 0
+        dropped = 0
+    }
+
+    static func step(_ ordinal: Int, _ text: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if !on { return }
+        step = ordinal
+        while steps.count <= ordinal { steps.append("") }
+        steps[ordinal] = text
+    }
+
+    /// One attempt of a step, numbered from 1 (the retry wrapper is the
+    /// attempt point, so every step's attempts are on the record).
+    static func attempt(_ verb: String, _ n: Int, _ what: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if !on { return }
+        let rec = (
+            atMs: Int(Date().timeIntervalSince(start) * 1000), step: step, verb: verb,
+            attempt: n, what: what
+        )
+        if recs.count < cap {
+            recs.append(rec)
+        } else {
+            recs[head] = rec
+            head = (head + 1) % cap
+            dropped += 1
+        }
+    }
+
+    private static func quoted(_ s: String) -> String {
+        "\""
+            + s.replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ") + "\""
+    }
+
+    /// Append the whole ring under `reason`. FAILURE ONLY — the failed
+    /// verdict and the step watchdog's fire path are the two callers.
+    static func dump(_ reason: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if !on || path.isEmpty { return }
+        let now = Int(Date().timeIntervalSince(start) * 1000)
+        var out =
+            "KAYA_VERB_TRACE: dump reason=\(quoted(reason)) t=\(now) records=\(recs.count) dropped=\(dropped) steps=\(steps.count)\n"
+        for (i, text) in steps.enumerated() {
+            out += "KAYA_VERB_TRACE: step=\(i) text=\(quoted(text))\n"
+        }
+        for r in Array(recs[head...]) + Array(recs[..<head]) {
+            out += "KAYA_VERB_TRACE: t=\(r.atMs) step=\(r.step) verb=\(r.verb) try=\(r.attempt) what=\(quoted(r.what))\n"
+        }
+        // O_APPEND and ONE write, the Rust ring's rule.
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        if fd < 0 { return }
+        let bytes = Array(out.utf8)
+        _ = bytes.withUnsafeBufferPointer { write(fd, $0.baseAddress, $0.count) }
+        close(fd)
+        FileHandle.standardError.write(
+            Data(
+                "KAYA_HARNESS: verb trace (\(recs.count) records, \(dropped) dropped) appended to \(path)\n"
+                    .utf8))
+    }
+}
+
 #if os(macOS)
     /// The app-side state that could explain a dropped scene request.
     func kayaDiagAppState() -> String {
@@ -4428,6 +4528,7 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     /// server-side walk found the tree with correct roles but nil for every
     /// identifier and label, and it is not what VoiceOver sees either.
     private func kayaAxCopy(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        kayaAxCopyCount += 1
         var value: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
         return err == .success ? value : nil
@@ -4485,8 +4586,14 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         let nav =
             kayaAxCopy(element, "AXChildrenInNavigationOrder" as String) as? [AXUIElement]
             ?? []
-        // Deduplicate by element identity: the three attributes overlap.
-        var out = windows + children
+        // Deduplicate by element identity across ALL THREE attributes: an
+        // AXApplication publishes the same window under kAXWindows and
+        // kAXChildren, and until 2026-09-02 only `nav` was deduplicated, so
+        // every walk descended each window subtree twice — measured on the
+        // a11y scene's 17 identifier walks: 1008 attribute reads per walk
+        // before, and the number in docs/deferred.md's entry after.
+        var out = windows
+        for c in children where !out.contains(where: { CFEqual($0, c) }) { out.append(c) }
         for n in nav where !out.contains(where: { CFEqual($0, n) }) { out.append(n) }
         return out
     }
@@ -4511,6 +4618,9 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     }
 
     private var kayaAxAnnounced = false
+    /// Every attribute read the walks make goes through kayaAxCopy; this
+    /// is the count KAYA_AX_COUNT reports per identifier walk.
+    private var kayaAxCopyCount = 0
 
     private func kayaAxRead(_ identifier: String) -> String? {
         guard !identifier.isEmpty else { return nil }
@@ -4566,7 +4676,14 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
             kayaAxDump(app)
         }
         var matches: [AXUIElement] = []
+        let readsBefore = kayaAxCopyCount
         kayaAxFindAll(app, identifier, 0, &matches)
+        // KAYA_AX_COUNT=1 prints what one identifier walk cost in attribute
+        // reads — the number the walk's dedup was measured by.
+        if ProcessInfo.processInfo.environment["KAYA_AX_COUNT"] != nil {
+            FileHandle.standardError.write(
+                Data("KAYA_AX_COUNT: '\(identifier)' reads=\(kayaAxCopyCount - readsBefore)\n".utf8))
+        }
         guard let hit = matches.first else { return nil }
         // AN AMBIGUOUS IDENTIFIER IS REFUSED, NOT RESOLVED. This read
         // addresses the tree BY IDENTIFIER, so with two elements carrying the
@@ -5624,6 +5741,9 @@ final class KayaStepWatchdog {
                     _exit(leaving)
                 }
                 if let step, waited >= ceiling {
+                    // THE WEDGE IS WHAT THE TRACE IS FOR (crates/kaya/src/
+                    // vtrace.rs); the failed-verdict path dumps its own.
+                    KayaVTrace.dump("the step ceiling fired: no verdict")
                     FileHandle.standardError.write(
                         Data((kayaWedgeVerdict(step, waited) + "\n").utf8))
                     _exit(1)
@@ -5679,6 +5799,9 @@ private func kayaRunScript(_ script: String) {
     watchdog.start()
     let start = Date()
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
+    // The verb trace counts from the same zero (crates/kaya/src/vtrace.rs).
+    KayaVTrace.begin(start)
+    var stepOrdinal = 0
     // Whether the run already carried the core's fault into `failures`,
     // so the sweep after the loop cannot report the same one twice.
     var reportedFault = false
@@ -5695,6 +5818,8 @@ private func kayaRunScript(_ script: String) {
             let offset = Int(Date().timeIntervalSince(start) * 1000)
             print("KAYA_HARNESS: +\(offset)ms \(line)")
             watchdog.enter(line)
+            KayaVTrace.step(stepOrdinal, line)
+            stepOrdinal += 1
             // The observation contract (harness.rs is the norm): every expect is
             // a BOUNDED RETRY — each verb case appends exactly one failure on a
             // miss, so the wrapper retracts it and re-runs until it passes or
@@ -5709,6 +5834,7 @@ private func kayaRunScript(_ script: String) {
                 let stepDeadline = Date().addingTimeInterval(15.0)
             #endif
             var retryStep = true
+            var attempt = 0
             while retryStep {
                 retryStep = false
                 let failuresBefore = failures.count
@@ -8137,6 +8263,12 @@ private func kayaRunScript(_ script: String) {
             default:
                 failures.append("unknown step \(line)")
             }
+                attempt += 1
+                KayaVTrace.attempt(
+                    String(parts[0]), attempt,
+                    failures.count > failuresBefore
+                        ? "<- not yet: " + failures[failuresBefore...].joined(separator: "; ")
+                        : "<- ok")
                 if let fault = kayaCoreFaultNote() {
                     // THE CORE FAULTED: a guard caught an app misuse, or a
                     // transaction died inside Scene::apply. Nothing after this
@@ -8254,6 +8386,9 @@ private func kayaRunScript(_ script: String) {
                 + "an empty window",
             at: 0)
     }
+    // FAILURE ONLY, and BEFORE the publish: after it the watchdog may
+    // end the process at any moment (crates/kaya/src/vtrace.rs).
+    KayaVTrace.dump("the verdict failed: KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))")
     FileHandle.standardError.write(
         "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))\n".data(using: .utf8)!)
     watchdog.published(1)

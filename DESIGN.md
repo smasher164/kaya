@@ -995,6 +995,15 @@ The known normalization worklist:
   verb cannot see it, because shares are percentages of the children's
   sum, which is total-invariant. `expect_root_fills` in the grow scene
   is the gate; the class does not get a fourth instance.
+- `grow` along a scroll's own axis is REFUSED at the root (ruled
+  2026-09-02). A scroll proposes unbounded extent, so a weight on a
+  child of any vertical container under it has nothing to divide and
+  read as silent zero for a month; Flutter and Compose refuse the same
+  shape. The barrier reads the GUEST-AUTHORED axis (a stacked row's
+  growers belong to the fold rule), walks each scroll's live subtree
+  and each For's blueprint once, and names the widget, its parent, the
+  scroll and the remedy. Horizontal `grow` inside a row under a scroll
+  stays legal, bounded by the width (the portfolio's detail column).
 - Spacing normalized to one default and one prop. Settled: 8 units
   between adjacent children on the main axis unless the container's
   `spacing` prop (F64, DIP, finite non-negative — nonsense dies at the

@@ -6688,3 +6688,44 @@ that follows reads as the deadline's rather than the sweep's. The
 rule: A MEASUREMENT WINDOW IS SIZED FOR THE CONTENDED RUN, and a
 deadline that expires says so beside the number it truncated.
 
+A FOURTH READING WITH A NEW FACE (matrix 19, 2026-09-02 02:15, host
+quiet at launch): ten AIM lines again, the tenth at w=520 — and NO
+cut-off sentence, no `PROVE: done` in the measurement, the poll
+returning well inside its deadline, and the guest's own verdict OK
+with EXIT=0 at 75s for the phase. The 180s settle cannot be what ended
+it, so the ps1 stopped between w=520 and w=480 for a reason prove.txt
+does not carry. The launcher prints the ps1's own psout.txt when the
+done line is missing now, so the next reading names the mechanism
+instead of the count.
+
+## A GtkLabel's text write re-derives its accessible name, clobbering an authored one (measured 2026-09-02)
+
+The a11y scene's new signal-bound label read `label/Spoken` on the
+linux lane's OCaml leg alone — the widget's TEXT, not the authored
+spoken name "Before" — while every other language's leg passed. The
+difference was ORDER: OCaml's constructors apply the a11y props before
+`text`, the others set text at construction and chain the a11y label
+after. GtkLabel updates its accessible LABEL property from every
+`set_text`, so a text that lands after `a11y_label` wins, and a label
+whose text follows a signal would lose its authored name on every
+write. crates/kaya/src/gtk.rs keeps the authored name per widget
+(CoreState::a11y_labels) and re-applies it after the label's text arm,
+so the name outlives the text. The rule: a prop whose lowering the
+toolkit re-derives from another prop is applied AGAIN after that other
+prop, or the binding that happens to write them in the other order is
+the one that finds it.
+
+## A Compose Text with a contentDescription has no class in its AccessibilityNodeInfo (measured 2026-09-02)
+
+Compose's provider names `android.widget.TextView` for a plain Text
+node and nothing at all once a `contentDescription` rides it, so the
+harness's role map — which reads the class — called an authored spoken
+name on a label `unknown/Before` on three android legs while TalkBack
+would speak it fine. The read consults the node's own
+`SemanticsProperties.Text` when the class is silent (the same
+platform-owned tree the provider derives from, one layer closer, as
+the read's Heading and EditableText fallbacks already do). The Image
+kind had the same shape a month earlier (`unknown/Logo` until the name
+rode Image's own parameter); a Text has no such parameter, so the read
+is where this one lives.
+

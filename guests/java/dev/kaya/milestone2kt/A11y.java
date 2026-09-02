@@ -47,6 +47,12 @@ final class A11y {
                     tx.button("Cancel").a11yId("cancel");
                     tx.button("OK").a11yId("ok");
                 }).a11yId("actions").a11yLabel("Actions");
+                // A spoken name that FOLLOWS A SIGNAL: the live trio's
+                // Signal overloads, the template zone's shape live.
+                KayaApp.Signal<String> spoken = tx.signal("Before");
+                tx.label("Spoken").a11yId("spoken").a11yLabel(spoken);
+                tx.button("Rename", inner -> inner.write(spoken, "After"))
+                        .a11yId("rename");
             }).a11yId("form").a11yLabel("Form"));
             return null;
         });

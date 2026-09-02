@@ -1443,6 +1443,15 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # byte-identical to before.
     if appearance:
         env["SIMCTL_CHILD_KAYA_APPEARANCE"] = appearance
+    # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
+    # interpreter resolves one under its Documents and the core the
+    # other under $HOME/Documents — the same container directory —
+    # because this runner cannot name the container before the launch
+    # without a simctl call on every passing leg. Both are written on a
+    # failure alone and pulled below (crates/kaya/src/vtrace.rs,
+    # fault.rs's KAYA_PANIC_LOG).
+    env["SIMCTL_CHILD_KAYA_VERB_TRACE"] = f"verb-trace-{name}.txt"
+    env["SIMCTL_CHILD_KAYA_PANIC_LOG"] = f"panic-{name}.txt"
     got = subprocess.run(
         ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
          udid, bundle_id],
@@ -1461,6 +1470,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # guest EXITS, so any capture here photographs the home screen.
     # KAYA_RECORD=1 is the visual record.)
     ok = "KAYA_SELFTEST: OK" in out
+    if not ok:
+        pull_container_files(udid, bundle_id, name, log)
     if simdrive_log is not None:
         # THE NUMBERS GO WHERE THE LANE'S OTHER FAILURE EVIDENCE GOES:
         # target/ios-simdrive-logs is cleared by the NEXT run, and the
@@ -1491,6 +1502,24 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
                   f"target/validate-failures/ios-{name}-simdrive.log",
                   file=log)
     return ok
+
+
+def pull_container_files(udid, bundle_id, name, log):
+    """A failed leg's verb trace and panic log, copied out of the app's
+    data container beside the leg's log for the flight recorder to adopt
+    (IosRecorder.ios_leg). FAIL TIME ONLY — the container lookup is a
+    simctl call, and the pass path pays nothing."""
+    data_container = out_of(["xcrun", "simctl", "get_app_container",
+                             udid, bundle_id, "data"]).strip()
+    for src_name, suffix in ((f"verb-trace-{name}.txt", ".vtrace"),
+                             (f"panic-{name}.txt", ".panic")):
+        src = pathlib.Path(data_container) / "Documents" / src_name
+        if not src.is_file():
+            continue
+        dest = (LEGS_DIR / f"{name}.log").with_suffix(suffix)
+        shutil.copy2(src, dest)
+        print(f"run-sim: {name} kept {src_name} from the app container "
+              f"({dest.stat().st_size} bytes)", file=log)
 
 
 # ------------------------------------------------------------- the pool

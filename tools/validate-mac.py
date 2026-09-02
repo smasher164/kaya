@@ -527,6 +527,11 @@ def _leg_worker(name, argv, env):
     leg_env = dict(os.environ, **env)
     leg_env.setdefault("KAYA_SELFTEST", "1")
     scratch = FLIGHTREC_SCRATCH / name
+    # THE VERB TRACE (crates/kaya/src/vtrace.rs and its two interpreter
+    # copies): written by the guest on a failure alone, adopted into the
+    # bundle by mac_leg, gone with the scratch either way.
+    scratch.mkdir(parents=True, exist_ok=True)
+    leg_env["KAYA_VERB_TRACE"] = str(scratch / "verb-trace.txt")
     with open(log, "w", encoding="utf-8", errors="replace") as lf:
         # The guest runs under `timeout`, which is both the 120s bound
         # and the sampler's anchor (the guest is timeout's descendant

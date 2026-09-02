@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — the flight recorder: one failure is enough evidence (Akhil, 2026-08-27)
+## ~~BUILD — the flight recorder: one failure is enough evidence (Akhil, 2026-08-27)~~ COMPLETE 2026-09-02: both interpreter harnesses carry the verb-trace ring, held level with the Rust one by check-verbs, and four lanes collect it into the bundle
 KEY: flightrec, flight recorder, capture bundle, journal jsonl, XDG_STATE_HOME, KAYA_FLIGHTREC_DIR, KAYA_VERB_TRACE, vtrace, verb trace, foreground sampler, PrintWindow shot, flightrec-selftest
 
 A leg that fails once and passes on the rerun leaves nothing behind but a
@@ -21,10 +21,42 @@ every FAIL collects the state that was live at the time.
 DEPTH LANDED 2026-08-27 — journal + windows + mac + the Rust verb trace.
 RUNNER BREADTH CLOSED 2026-08-29: all five lanes journal and print a
 terminal verdict, held by check-gates (refreshed 2026-08-31 — all six
-runner scripts reference flightrec). WHAT KEEPS THIS ENTRY UNSTRUCK:
-the two interpreter harnesses (KayaSwiftUI.swift, KayaCompose.kt)
-still have no verb-trace ring, so a FAIL inside either interpreter's
-own harness carries less state than a Rust-backend FAIL does.
+runner scripts reference flightrec). THE INTERPRETER RINGS CLOSED 2026-09-02,
+which is what struck the headline: `KayaVTrace` in
+swift/KayaSwiftUI.swift and KayaCompose.kt is each harness's copy of
+crates/kaya/src/vtrace.rs — the same 2048-record ring, the same four
+line shapes (`quoted` and all), begun at the step loop's zero, a step
+record beside `watchdog.enter`, one attempt record per turn of the
+`while retryStep` wrapper (the cheaper attempt point the entry named,
+so EVERY step's attempts are on the record where the Rust ring traces
+named verbs), and exactly two dumps: the failed verdict before its
+publish, and the watchdog's fire path before `_exit`/`halt`. A
+relative `KAYA_VERB_TRACE` resolves under the interpreter's own
+container directory (Documents on iOS, the files dir on Android), so a
+phone runner names the file without a container lookup on every
+passing leg. tools/check-verbs.sh's verb-trace clause holds the three
+level — the env var by name, the four shapes compared FLATTENED, two
+dump sites per runner with the runner's one AFTER the green verdict's
+text and BEFORE the publish and the watchdog's one before its exit —
+with six watched negatives (a verdict dump cut, a line shape drifted,
+the env var renamed, a dump on the pass path, the Rust watchdog's dump
+moved, the pointer line drifted). COLLECTION: the mac lane names the
+file in each leg's scratch and mac_leg adopts it (`verb-trace` in
+WANT_SECTIONS, so flightrec-selftest's N0 holds it); linux names it
+per leg in run_one and adopts it at fail; iOS passes a relative name
+through SIMCTL_CHILD_ and `pull_container_files` copies it out of the
+data container beside the log at fail time only; Android passes it as
+an intent extra and pulls it through `run-as` at fail time. Watched:
+the mac todos leg with an impossible expect appended wrote 226 lines
+(210 attempt records, dropped=0, the verdict's own sentence as the
+reason) and the same leg passing wrote nothing; the Compose ring the
+same way on a pool emulator, pulled through run-as. WHAT THIS DOES NOT
+COVER, stated: the Windows lane runs the Rust ring and does not name a
+file for it — its launchers are generated in one shape check-steps
+pins, so that arm is a launcher-shape change of its own; and the iOS
+pull is wired on the shape of the android one and first prints on the
+next iOS failure. The panic log rides the same slice (fault.rs's
+`KAYA_PANIC_LOG`, the iOS panic WATCH below).
 
 WHAT LANDED
 - THE JOURNAL, `tools/lib/flightrec.py` + `tools/lib/flightrec.sh`. JSONL
@@ -141,16 +173,15 @@ run_ssh, scp or mkdir. A lane ceiling noticed this once, after a whole
 matrix; N6 notices in seconds.
 
 WHAT IS OPEN
-- BREADTH: linux (`tools/validate-linux.sh`), iOS (`tools/ios/run-sim.sh`)
-  and Android (`tools/android/run-emulator.sh`) do not journal or capture.
-  Android and iOS already dump some at-fail evidence into
-  target/validate-failures; folding those into the bundle is the shape.
-- THE INTERPRETER RINGS. Both re-implement the verbs and their
-  `while retryStep` wrapper is a CHEAPER attempt point than Rust's, but a
-  hand-copied diagnostic in three harnesses with no compile-time link is
-  the drift class that let the ax observation sit spelled two ways for
-  months. If they get it, one slice, with a check-verbs clause pinning the
-  env var name, the failure-only rule and the line format.
+- ~~BREADTH: linux (`tools/validate-linux.sh`), iOS (`tools/ios/run-sim.sh`)
+  and Android (`tools/android/run-emulator.sh`) do not journal or capture.~~
+  CLOSED 2026-09-02: all five journal since 2026-08-29; the verb trace joins the linux, iOS
+  and Android bundles 2026-09-02 (above). Android and iOS still dump
+  their at-fail logcat and simdrive evidence into target/validate-failures
+  beside the bundle; folding those in is the remaining shape.
+- ~~THE INTERPRETER RINGS.~~ DONE 2026-09-02 (above): one slice, with
+  the check-verbs clause pinning the env var name, the failure-only rule
+  and the line format.
 - RETENTION IS PER-RUN-COUNT, not per-byte. A run whose every leg fails
   with a large bundle is bounded only by the section and bundle caps
   (2 MiB / 32 MiB, both printed). A byte ceiling across the whole home is
@@ -1880,7 +1911,7 @@ and every C guest. Doing it inside a feature milestone would mix a
 mechanical sweep into changes that need to be readable. Take it on its
 own, with the C guests compiled and the whole matrix run after.
 
-### The accessibility walk visits every window twice
+### ~~The accessibility walk visits every window twice~~ FIXED 2026-09-02, and measured smaller than filed
 
 `kayaAxKids` in swift/KayaSwiftUI.swift gathers an element's children
 from three attributes and deduplicates only the third:
@@ -1902,11 +1933,27 @@ past their 120s timeout under the 8-wide pool while the same binary
 passed standalone. Every `expect_ax` pays the walk, and halving it is
 one line: extend the `CFEqual` dedup to cover `windows + children`.
 
-WHY IT IS NOT DONE HERE: it changes the SwiftUI interpreter's shared
+~~WHY IT IS NOT DONE HERE: it changes the SwiftUI interpreter's shared
 read path, which every accessibility assertion on mac and iOS depends
 on, in the middle of a clipboard milestone. It wants its own slice with
 the a11y scene and the full matrix behind it — and a before/after read
-count, so the saving is measured rather than assumed.
+count, so the saving is measured rather than assumed.~~
+
+DONE 2026-09-02, WITH THE COUNT, AND THE COUNT SAYS "HALVING" WAS
+WRONG: `kayaAxKids` deduplicates all three attributes by element
+identity now, and `KAYA_AX_COUNT=1` prints what one identifier walk
+costs in attribute reads (every read goes through `kayaAxCopy`). On the
+a11y scene's 17 `expect_ax` walks, mac, same tree: 1008 reads per walk
+before, 888 after — 16,928 to 14,840 over the leg, a 12% saving. The
+window IS walked twice without the dedup (the two identical subtrees
+the trace showed are real), but the window is ~30 elements and the
+walk's bulk is the MENU BAR, which the AXApplication publishes under
+kAXChildren with every system menu item under it — ~220 elements read
+on every walk that no `expect_ax` can target (menus have their own
+read). So the next saving, if AX cost ever bites again, is a role-keyed
+prune of the menu bar in the identifier walks, not more dedup; recorded
+here rather than taken, since it changes which elements the walk can
+reach.
 
 ## Testing / infrastructure
 
@@ -3915,6 +3962,18 @@ reached the model inside the step ceiling on a starved host — the
 15,003-row fill rode the push's own transaction), and portfolio.py now
 posts the fill as the transaction after the push. This leg runs that
 same guest, so its next sighting is read against the split shape.
+FIFTH SIGHTING 2026-09-02 02:15 (matrix 19, host load 4 at launch),
+AGAINST THE SPLIT SHAPE, and the mac leg's fourth in the same matrix:
+`title "portfolio", wanted "Transactions"` after the third `back`, the
+click the instrument places inside the pop's transition. With the fill
+no longer riding the push, a push that reached the model would land in
+one small batch, so "no push in 5s" now reads as THE CLICK NEVER
+REACHED THE HANDLER — the entrance-drop window docs/traps.md measured
+(~half a second) on a click 145-240ms after a pop. REMEDY TAKEN IN THE
+SCENE (tools/scenes/portfolio.steps): every `back` settles 600ms past
+the transition before the scene clicks again, the trap's own measured
+remedy ("the same click after a settle 800 landed, every time"). The
+WATCH stays: the next sighting after the settle is a different premise.
 KEY: android portfolio title, wanted Transactions, title propagation
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
@@ -4156,7 +4215,7 @@ as a language story and was not one. When a whole lane is slow, the
 shape to look for is a shared serialising service, not a per-language
 trait.
 
-## Live-zone a11y props take only constants — except in Python
+## ~~Live-zone a11y props take only constants — except in Python~~ CLOSED 2026-09-02: the seven take a signal, receiver-keyed in the census, proven by the a11y scene on five lanes
 
 Opened 2026-08-11 by the props slice, which noticed it while landing the
 TEMPLATE zone's sourced a11y: Python's shared handle base gives its LIVE
@@ -4172,6 +4231,37 @@ the seven, as a sweep with a gate clause — never one binding at a time
 (the template-grow lesson, written where that clause lives). Python is
 left wide meanwhile: narrowing it would need an artificial wall in the
 one binding whose design makes the uniform width free.
+
+SWEPT 2026-09-02, the widening: it was SEVEN bindings, not seven-of-eight
+— JS shipped wide beside Python on its first day (one Handle class, both
+zones). Each of the seven took its OWN template-zone signal spelling
+into the live zone, which is why there is no new design here: Rust's
+live trio takes `impl Into<LiveSource<StrKind>>` (TplSource minus the
+element arm, since a row field means nothing live and the root refuses
+one); Go grows `Tx.BindA11yID/Label/Hint` and the chained `Widget.Bind…`
+forms beside BindText; C# and Swift add the `Signal` overloads their
+template zones already had; Java adds them on Tx and on the chained
+Widget; OCaml adds `bind_a11y_*` and threads `?a11y_id_bind` /
+`?a11y_label_bind` through every live constructor's `set_a11y` funnel;
+Haskell's `A11yId/Label/Hint` attrs take `LiveStrSource s => s` (String
+or Signal) beside new `bindA11y*` functions. No wire, spec or core
+change: the core's live SetProperty arm never gated the source, and
+every generated wire file already carried `tx_bind_a11y_*`.
+check-sugar-surface's census gained twenty-one RECEIVER-KEYED clauses
+(the template-grow lesson) and its three Haskell a11y patterns now pin
+the constraint instead of `String`. THE SCENE: tools/scenes/a11y.steps
+grew a live label whose spoken name is bound to a signal and a button
+that writes it — `expect_ax label@spoken "label/Before"`, `click
+button@rename`, `expect_ax label@spoken "label/After"` — in all ten
+guests (the C floor spells it with `kaya_tx_bind_a11y_label` and a
+click parse), so the widening is proven against every platform's real
+accessibility tree, not by grep. AND THE PROOF PAID FOR ITSELF ON ITS
+FIRST MATRIX: linux's OCaml leg read the label's TEXT (GtkLabel
+re-derives its accessible name from every text write, and OCaml's
+constructor writes text last), and android's three legs read
+`unknown/Before` (a Text carrying a contentDescription has no class in
+its AccessibilityNodeInfo) — both backend fixes and their measurements
+are in docs/traps.md, dated 2026-09-02.
 
 ## ~~tools/tpl-surfaces.py sees constructors, not props — three follow-ups~~
 
@@ -5115,7 +5205,7 @@ red naming what the chrome really drew, so the read cannot be an echo.
 The observation string did not move: `title "<want>"`, byte for byte,
 and the editor leg's whole verdict is byte-identical to the film's.
 
-## The CLASS behind the stale title bar has no gate (opened 2026-08-17 by the fix above)
+## ~~The CLASS behind the stale title bar has no gate (opened 2026-08-17 by the fix above)~~ CLOSED 2026-09-02: tools/check-compose-state.sh is the gate
 KEY: KayaSceneModel plain field, composition state, compose recomposition, one-field audit
 
 A `KayaSceneModel` field that decides what a composable DRAWS must be
@@ -5145,13 +5235,28 @@ Four (`sectionsRendered`, `formFactor`, `menuPresentation`,
 `splitPresentation`) are stamped BY the composition for the harness to
 read, not read to draw.
 
-The guard, when scheduled: a gate that reads the object's fields and the
+~~The guard, when scheduled: a gate that reads the object's fields and the
 `@Composable` bodies and fails a plain field a composable reads to draw,
 with the four ordering-safe alert fields exempted BY NAME and with the
 ordering itself asserted rather than assumed. It is deliberately not in
 this fix — landing a new gate is a four-way edit (the script, gates.sh's
 list, check-gates' census, the CLAUDE.md/AGENTS.md prose) and this slice
-was scoped to the defect and its ledger.
+was scoped to the defect and its ledger.~~
+THE GATE LANDED 2026-09-02, tools/check-compose-state.sh, exactly that
+shape: comments and strings blanked positionally, every
+`KayaSceneModel.<field>` inside every `@Composable fun` body classified
+read or write, a plain field READ to draw refused unless EXEMPT by name
+with its reason — the four alert fields, and the two registries
+(`sectionIndex`, `menuItems`) looked up through a key that IS state —
+each exemption held LIVE (a composable must still read it), and
+APPLY_PRESENT_ALERT read for its order with `alertId` last. The audit
+had decayed a third time by the time it ran: 56 fields, 17 state-backed,
+39 plain (the ledger's last count was 53/16/37; `canvases` and
+`presentationDark` joined 2026-08-26), 20 composables, 33 model reads
+classified, and the clean state is ZERO findings — every plain field a
+composable names is a write (the harness stamps) or an exempt registry.
+Four watched negatives, the first of them `windowTitle` made plain, the
+shipped defect itself. Keyed on android/ and docs/.
 
 ## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
 
@@ -7322,6 +7427,14 @@ bridge_slow at 651, 503 and 935ms in the same leg, the starved-runloop
 face the instruments were left in to name. Every other iOS leg passed
 and the same leg is green in every quiet matrix; recorded, not rerun
 for its own sake.
+SIGHTING 2026-09-02 02:15 (matrix 19, host quiet at launch): the same
+leg, the same sentence — `no row named picked; the picker lists
+['kaya-picked-33143']`, the picker still on the folder's row — but
+this time with the FIFTH FACE's numbers, not the starved one's: 34
+reads, slowest 11ms, zero timeouts, zero taps sent, 349ms after
+simdrive started. An aim miss at the parent directory with a healthy
+bridge, the editor-go face of 2026-08-22; recorded here so the two
+faces this sentence can wear are both on the record under it.
 
 Three matrices in a row, a different leg each time, every one 100%
 green solo: save-go's Save tap dropped twice (the sheet stayed up and
@@ -9235,6 +9348,17 @@ mac: click at +532ms, title at +599ms, where the fill-inside-the-push
 shape had taken seconds under load and 67ms is what the push costs.
 The android portfolio leg is the same guest, so its WATCH's premise
 moves with this too.
+FOURTH SIGHTING 2026-09-02 02:15 (matrix 19, host load 4 at launch, the
+split shape in place): `click button#1 145ms after the last pop;
+entries=0`, then `entries=0 top=""; last click button#1 5015ms ago` —
+byte for byte the third sighting's instrument, on a QUIET host, in the
+same matrix as the android leg's fifth. The starved-host reading no
+longer fits; what fits both is the click landing inside the pop's
+transition and being dropped (docs/traps.md, the Compose entrance-drop
+entry), since a push that ran would land in one small batch now.
+REMEDY TAKEN IN THE SCENE: a 600ms settle after every `back`
+(tools/scenes/portfolio.steps), the trap's measured remedy. The WATCH
+stays for a sighting after the settle.
 
 
 ## HOLD — the windows guest-side command scripts convert to python, at some point (Akhil, 2026-08-31)
@@ -9562,7 +9686,7 @@ fallback family is kaya's pick, per the amendment above), the chrome
 half a frozen observation of the styled headerbar.
 
 
-## DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO (2026-08-29; the header half CLOSED 2026-08-30)
+## ~~DESIGN — `grow` INSIDE A SCROLL IS SILENTLY ZERO (2026-08-29; the header half CLOSED 2026-08-30)~~ CLOSED 2026-09-02: ruled REFUSE (maintainer, 01:36), and the core refuses at a batch-end barrier
 KEY: grow inside scroll, unbounded main axis, sliver header, tableHeaderView, LazyColumn item, nested scroll, interim portfolio fix
 
 THE SECOND HALF CLOSED 2026-08-30, ratified by the maintainer as the
@@ -9573,10 +9697,28 @@ those children into the table's viewport as scroll-away header content —
 DERIVED from the shape, no new spelling in any binding — so "a list
 cannot own its header" is no longer true where it mattered, and the
 interim two-scroller portfolio shape below is GONE (the guest change was
-a DELETION). The FIRST half stands: `grow` along a scroll's own axis is
-still silently zero, and the ruling this entry asks for — take the given
-extent like a grown table does, or refuse loudly like Flutter and
-Compose — is still open.
+a DELETION). THE FIRST HALF CLOSED 2026-09-02: the maintainer ruled
+REFUSE ("i guess should refuse", the Flutter/Compose answer over the
+CSS one), and crates/kaya/src/scene.rs refuses at a BATCH-END BARRIER
+(`grow_in_scroll_message`, beside the orphan wall, after the fan-out so
+a signal-bound weight is read current): a weight above zero on a child
+of any VERTICAL container under a scroll — the scroll's own child, a
+column, a row the guest authored `axis` vertical, a For container, or a
+template node under a vertical template node — dies naming the widget,
+its parent, the scroll and the remedy, and a template's blueprint is
+read once at the For rather than per stamped row. SCOPED TO THE AUTHORED
+AXIS ON PURPOSE: the maintainer assumed nothing used the shape, and
+guests/python/portfolio.py's dashboard does — a `column(grow=1)` inside
+`row(stack_when=compact)` inside `scroll(grow=1)` — but that weight is
+HORIZONTAL, bounded by the width, and legal at every width it was
+authored for; when the row stacks, its growers are the fold rule's
+business (D7), so a breakpoint flip is deliberately not read by the
+barrier. Six should_panic negatives (the plain case, the scroll attached
+last in the batch, the grow written a batch later, the grow through a
+signal at its write, the grown For container, the grown template root)
+and one positive holding the shipped shapes legal; the mac legs for
+scroll, grow, a11y, table, windowed and portfolio green by hand. The
+original text follows for the research it carries.
 
 `grow` means "take a share of the leftover". A `scroll` offers its content
 an UNBOUNDED main extent. So `grow` along a scroll's own axis has nothing
@@ -10044,3 +10186,16 @@ panic hook (or stderr dup) writing into the app container — the flight
 recorder's ONE-FAILURE-IS-ENOUGH rule applied to the guest's own last
 words — wired in pyhost-main or the host entry, so the next single
 occurrence arrives with its sentence attached.
+THE HOOK IS IN (2026-09-02, with the flight recorder's interpreter
+slice): crates/kaya/src/fault.rs's `log_panics` installs a panic hook
+once per process — from `kaya_run`, which is the pyhost's entry, and
+from `fault::watch` — when `KAYA_PANIC_LOG` names a file, appending
+`KAYA_PANIC: <sentence> at <file>:<line>` BEFORE the default hook
+prints, so the sentence is on disk before the unwind reaches the
+extern "C" frame and aborts; a relative name resolves under
+`$HOME/Documents`, the iOS data container. tools/ios/run-sim.py sets
+it for every leg through SIMCTL_CHILD_, and a failed leg's
+`pull_container_files` copies it beside the log for the bundle's
+`panic` section. Unit-tested in fault.rs (sentence and location read
+back). The WATCH stays for the sighting itself: the next occurrence
+arrives with its sentence, and that is what closes it.

@@ -1700,7 +1700,11 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
 
 /// A kind's registry as plain widgets, in creation order — the harness's
 /// `kind#index` space and the candidate list a `kind@id[key.path]`
-/// target resolves over.
+/// target resolves over. HARNESS ONLY, like its two callers: shipped
+/// 2026-09-01 ungated, so the backend's non-harness build did not
+/// compile for a day and only tools/check-gtk.sh, which the sweep
+/// excludes, could see it (found 2026-09-02).
+#[cfg(feature = "harness")]
 fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4::Widget> {
     use crate::harness::TargetKind as K;
     use gtk4::prelude::Cast;
@@ -2478,6 +2482,13 @@ struct CoreState {
     /// row). A select's label children are OPTIONS — rows of the DropDown's
     /// StringList — so they leave the harness's label registry.
     select_options: HashMap<u64, (u64, u32)>,
+    /// The AUTHORED accessible name per widget: GtkLabel (and the
+    /// caption kinds) re-derive their accessible label from every text
+    /// write, so a `text` that lands after `a11y_label` clobbered the
+    /// authored name — measured 2026-09-02 on the a11y scene's OCaml leg,
+    /// whose constructor sets the props before the text. The text arms
+    /// re-apply it from here.
+    a11y_labels: HashMap<u64, String>,
     /// The DropDown's string model per select id (rows appended at
     /// AddChild; text arrives via the label's SetProp).
     select_models: HashMap<u64, gtk4::StringList>,
@@ -8025,6 +8036,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.set_text(&s);
+                    // The authored name outlives the text write (see
+                    // CoreState::a11y_labels).
+                    if let Some(name) = core.a11y_labels.get(&id.0) {
+                        use gtk4::prelude::{AccessibleExt, AccessibleExtManual};
+                        label.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+                        label.update_property(&[gtk4::accessible::Property::Label(name.as_str())]);
+                    }
                     // An option label's text lands in its DropDown row — the
                     // model both the popup and the collapsed button render —
                     // or its radio row's CheckButton label.
@@ -8092,6 +8110,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (w, Prop::A11yLabel, Value::Str(label)) => {
                     use gtk4::prelude::{AccessibleExt, AccessibleExtManual};
                     if !label.is_empty() {
+                        core.a11y_labels.insert(id.0, label.clone());
                         let widget = w.control();
                         // Promote a CONTAINER to a semantic group. GTK made
                         // GtkBox's role GENERIC in 4.12 — "a nameless
@@ -9216,6 +9235,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 radio_buttons: HashMap::new(),
                 radio_tags: HashMap::new(),
                 select_options: HashMap::new(),
+                a11y_labels: HashMap::new(),
                 select_models: HashMap::new(),
                 apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
                 ledger_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
