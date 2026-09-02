@@ -278,3 +278,67 @@ def blocks():
 def wired_scenes():
     """The scenes some leg runs — the gates' census surface."""
     return {scene for _name, scene, _lang in legs()}
+
+
+# THE LEG'S COMMAND AND SCRIPT, one copy: tools/validate-mac.py runs the
+# roster through these, and tools/run-leg.py runs ONE leg by hand through
+# the same two — a hand run that spelled its own env once ran a stale
+# interpreter for a whole failure (2026-09-01, docs/traps.md).
+KAYA_LIB_LANGS = ("csharp", "ocaml", "java")
+RUST_GUESTS = "target/rust-guests"
+CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
+
+
+def leg_argv(scene, lang, hs_bin):
+    """The guest command for one leg; `hs_bin(stem)` resolves a Haskell
+    binary (cabal list-bin) so this module does no I/O of its own."""
+    stem = guest_stem(scene)
+    if lang == "rust":
+        return [f"{RUST_GUESTS}/{stem}"]
+    if lang == "python":
+        return ["python3", f"guests/python/{stem}.py"]
+    if lang == "js":
+        return ["node", f"guests/js/{stem}.ts"]
+    if lang == "go":
+        return ["target/go-guests/kaya-go"]
+    if lang == "csharp":
+        return ["dotnet", "exec", CS_GUEST]
+    if lang == "ocaml":
+        return [f"_build/default/guests/ocaml/{stem}.exe"]
+    if lang == "haskell":
+        return [hs_bin(stem)]
+    if lang == "swift":
+        return [f"target/swift-guests/{stem}"]
+    if lang == "java":
+        return ["java", "-XstartOnFirstThread", "-cp",
+                "target/java-guests", "dev.kaya.milestone2kt.Main"]
+    if lang == "c":
+        return [f"target/c-guests/{stem}"]
+    raise ValueError(lang)
+
+
+def scene_script(root, scene):
+    """The scene script's TEXT for the interpreter's environment, comments
+    stripped: some transports fold newlines into `;`, and a leading
+    comment must not swallow the folded script. Newlines are kept."""
+    lines = [line for line in
+             (root / f"tools/scenes/{scene}.steps").read_text(
+                 encoding="utf-8").splitlines()
+             if not line.startswith("#")]
+    return "\n".join(lines)
+
+
+def leg_env(root, scene, lang, appearance=""):
+    """Per-leg env, never a persisting export (the shell's one
+    KAYA_SELFTEST_SCRIPT export once ran another scene's steps)."""
+    env = {"KAYA_SELFTEST": "1" if scene == "milestone2" else scene,
+           "KAYA_SELFTEST_SCRIPT": scene_script(root, scene),
+           "KAYA_SWIFTUI_LIB": str(root / "target/swiftui/libkaya_swiftui.dylib")}
+    if lang in KAYA_LIB_LANGS:
+        env["KAYA_LIB"] = str(root / "target/debug/libkaya.dylib")
+    if lang == "python":
+        env["PYTHONPATH"] = str(root / "bindings/python")
+    if appearance:
+        env["KAYA_APPEARANCE"] = appearance
+    return env
+

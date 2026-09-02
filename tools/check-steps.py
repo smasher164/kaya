@@ -2447,6 +2447,49 @@ def js_launchers(files, node_version):
     return bad
 
 
+# NO `if exist X rmdir X & mkdir Y` IN ONE cmd STRING (2026-09-01): cmd
+# runs everything after the `&` INSIDE the if, so a directory that never
+# existed is never created — the JS binding's staging died on it, and
+# two older staging lines carried the same latent shape. Statements are
+# read whole (a python string continues across lines), so a shape split
+# over two source lines is still one command.
+STRING_PIECE = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+SSH_STATEMENT = re.compile(r"(?:must_ssh|run_ssh)\((?:[^()]|\([^()]*\))*\)")
+
+
+def cmd_precedence(text):
+    bad = []
+    for m in SSH_STATEMENT.finditer(text):
+        pieces = [a or b for a, b in STRING_PIECE.findall(m.group(0))]
+        stmt = "".join(pieces)
+        if "if exist" in stmt and " & " in stmt:
+            line = text[:m.start()].count("\n") + 1
+            bad.append(f"tools/deploy-win.py:{line}: `if exist … & …` in "
+                       f"one cmd string — the tail runs inside the if; "
+                       f"split it into two must_ssh calls")
+    return bad
+
+
+ONE_STRING = "must_ssh('cmd /c \"if exist C:\\\\x rmdir /s /q C:\\\\x & mkdir C:\\\\x\"')\n"
+SPLIT_PAIR = ("must_ssh('cmd /c \"if exist C:\\\\x rmdir /s /q C:\\\\x\"')\n"
+              "must_ssh('cmd /c \"mkdir C:\\\\x\"')\n")
+TWO_LINES = ("must_ssh('cmd /c \"if exist C:\\\\x rmdir /s /q '\n"
+             "         'C:\\\\x & mkdir C:\\\\x\"')\n")
+if not cmd_precedence(ONE_STRING):
+    selftest_fail("a one-string `if exist … & mkdir` passed the cmd "
+                  "precedence clause")
+if cmd_precedence(SPLIT_PAIR):
+    selftest_fail("a split rmdir/mkdir pair was refused by the cmd "
+                  "precedence clause")
+if not cmd_precedence(TWO_LINES):
+    selftest_fail("a one-string shape split over two source lines passed")
+out = cmd_precedence(read_rel("tools/deploy-win.py"))
+if out:
+    print("check-steps: cmd runs the tail of `if exist … & …` inside the "
+          "if (docs/traps.md, 2026-09-01):", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+
 _deploy_text = read_rel("tools/deploy-win.py")
 _node_version = re.search(r'^NODE_VERSION = "([0-9.]+)"$', _deploy_text, re.M)
 if _node_version is None:

@@ -11132,11 +11132,23 @@ impl crate::harness::Stage for GtkStage {
                         .find(|(_, native)| native.widget() == *w)
                         .and_then(|(wid, _)| core.widget_tags.get(&wid.0).cloned())
                 };
-                let node = candidates
+                let Some(node) = candidates
                     .iter()
                     .filter(|w| w.widget_name() == id)
                     .find_map(|w| tag_of(w))
-                    .and_then(|tag| crate::harness::table_tag_node(&tag))?;
+                    .and_then(|tag| crate::harness::table_tag_node(&tag))
+                else {
+                    // The miss says what the registry held: one sentence
+                    // for every cause is what cost a stale-interpreter run
+                    // on the mac (docs/traps.md, 2026-09-01).
+                    let with_id = candidates.iter().filter(|w| w.widget_name() == id).count();
+                    let tagged = candidates.iter().filter(|w| tag_of(w).is_some()).count();
+                    eprintln!(
+                        "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] unresolved: {} live, {with_id} carrying the id, {tagged} tagged",
+                        candidates.len()
+                    );
+                    return None;
+                };
                 return candidates
                     .iter()
                     .position(|w| {

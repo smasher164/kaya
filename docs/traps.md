@@ -6651,3 +6651,40 @@ at C:\kaya\kaya-gui with a directory junction from node_modules. The
 rule: A TYPESCRIPT PACKAGE CONSUMED WITHOUT A BUILD STEP LIVES OUTSIDE
 node_modules AND IS LINKED IN; a copy is what breaks.
 
+## A hand-run leg uses whatever interpreter last built, and swift-typecheck builds nothing (measured 2026-09-01)
+
+The first keyed-target run on the mac read `no such target
+button@transactions[retirement]` and the arm was blamed: the run had
+been spelled by hand — KAYA_SWIFTUI_LIB, KAYA_SELFTEST, the script text
+— against target/swiftui/libkaya_swiftui.dylib, which was the dylib
+from BEFORE the Swift edit; tools/swift-typecheck.sh had passed, and it
+compiles the interpreter without building it. The lanes never see this
+(they verify both artifacts' build ids before any leg), a hand run had
+no such wall, and the keyed miss printed one sentence for every cause.
+Two guards now: tools/run-leg.py runs one mac leg through the lane's
+own command and env mapping (tools/lib/lanes/mac.py, one copy) AFTER
+`build-id --verify` on libkaya and the interpreter, refusing a stale one
+naming the build (or rebuilding both with --build); and every backend's
+keyed miss prints what the registry held (live count, copies carrying
+the id, tagged copies). The rule: A HAND RUN GOES THROUGH THE RUNNER'S
+OWN VERIFICATION; the env line typed from memory is where a stale
+artifact hides.
+
+## The caption-centre probe's "honest under-run" was the guest's 45s settle against a contended probe (measured 2026-09-02)
+
+The windows lane's caption-centre phase read `planned 11 measurements
+and reported 10` on three contended matrices (2026-08-31, 2026-09-01,
+2026-09-02) and was recorded each time as a pre-existing class. The
+mechanism, read on the third: the probe's scratch scene ends in
+`settle 45000`, the toolbar leaves the screen when that settle ends, and
+a probe that took 75s under contention (21s quiet) reached its eleventh
+width, 480, after the window was gone — its script died on the dead
+hwnd before `PROVE: done`, the runner's 25-try poll expired, and the
+verdict counted what had been written. The settle is 180s now (the
+runner kills the guest the moment the probe is done, so a quiet run
+pays nothing), the poll covers it, and an expiry prints that the probe
+was CUT OFF with the number of AIM lines it had managed, so the count
+that follows reads as the deadline's rather than the sweep's. The
+rule: A MEASUREMENT WINDOW IS SIZED FOR THE CONTENDED RUN, and a
+deadline that expires says so beside the number it truncated.
+

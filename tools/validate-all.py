@@ -111,6 +111,38 @@ def run_lane(name, argv, env=None):
 
 
 T0 = time.monotonic()
+# THE HOST'S LOAD RIDES THE RECORD (2026-09-01): three ceilings fired in
+# one evening on a host whose fifteen-minute load ran 143-189 beside the
+# lanes, and the cause was read by hand an hour later. Printed at launch
+# and again beside every anomaly WITH THE TOP CONSUMERS, because the
+# load figure alone cannot tell the host from the lanes — five lanes
+# and their warm pools put every quiet matrix's own fifteen-minute
+# figure at ~135 by its end (measured on three of them the same night).
+# A consumer at the top of the list that is not a lane's process is the
+# host; the pools are expected there.
+LOAD_AT_LAUNCH = os.getloadavg()
+
+
+def top_consumers(n=4):
+    """The n busiest processes by CPU share, as `pcpu name`."""
+    got = subprocess.run(["ps", "-Ao", "pcpu=,comm="], stdout=subprocess.PIPE,
+                         text=True, encoding="utf-8", errors="replace",
+                         check=False)
+    rows = []
+    for line in got.stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            try:
+                rows.append((float(parts[0]), pathlib.Path(parts[1]).name))
+            except ValueError:
+                continue
+    rows.sort(reverse=True)
+    return ", ".join(f"{name} {cpu:.0f}%" for cpu, name in rows[:n])
+
+
+print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
+      f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); top consumers: "
+      f"{top_consumers()}", flush=True)
 if MODE == "parallel":
     # ALL FIVE PLATFORM LANES START TOGETHER. The one gate sweep waits
     # for Android's recorded process, then runs at niceness 10.
@@ -273,7 +305,14 @@ BUDGETS = {
     # the 420-456 incremental band. The ceiling covers the
     # deploy-heavy mode; an incremental run drifting past ~460 is
     # still the signal the old 480 was for.
-    "windows": 520,
+    # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
+    # column (2026-09-01) and the four quiet matrices since read 498,
+    # 442, 488 and 559 — 520 left 1.05x over that band's top where the
+    # other lanes keep ~1.2x, and the 559 fired on a run whose other
+    # lanes were 20-30% over their own quiet readings together (the
+    # host, per the anomaly's own consumer list). 600 is 1.2x over the
+    # band's top.
+    "windows": 600,
     # 540 since 2026-08-10, raised in the commit that makes the lane
     # slower, as this block asks. The save scene added a leg measured
     # at 21s STANDALONE (the panel is typed into, so it is the slowest
@@ -358,12 +397,18 @@ if MODE == "parallel":
         print(f"{name}: {verdict} ({secs}s, {legs} legs)")
         budget = BUDGETS.get(name, 0)
         if budget > 0 and secs > budget:
+            now = os.getloadavg()
             print(f"{name}: DURATION ANOMALY — {secs}s exceeds the "
                   f"{budget}s ceiling. A lane that slows down by this "
                   f"much changed in kind, not in degree: look for work "
                   f"added to EVERY leg (an env export, a per-leg wait, "
                   f"a rebuild that stopped caching) before assuming it "
-                  f"is load.")
+                  f"is load. Host load was {LOAD_AT_LAUNCH[0]:.1f} at "
+                  f"launch and reads {now[0]:.1f} / {now[1]:.1f} / "
+                  f"{now[2]:.1f} (1, 5, 15 min) now; top consumers: "
+                  f"{top_consumers()} — a consumer there that is not "
+                  f"a lane's process is the host, the pools are "
+                  f"expected.")
             if verdict == "PASS" and not keep_lane_log(name):
                 status = 1
             status = 1

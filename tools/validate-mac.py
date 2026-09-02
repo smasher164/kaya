@@ -869,57 +869,24 @@ def scene_script(scene):
     return _scripts[scene]
 
 
-KAYA_LIB_LANGS = ("csharp", "ocaml", "java")
+KAYA_LIB_LANGS = lane.KAYA_LIB_LANGS
 
 
 def leg_argv(scene, lang):
-    stem = lane.guest_stem(scene)
-    if lang == "rust":
-        return [str(RUST_GUESTS / stem)]
-    if lang == "python":
-        return ["python3", f"guests/python/{stem}.py"]
-    if lang == "js":
-        # node runs the .ts directly (type stripping; docs/js-plan.md
-        # §1); the binding finds libkaya by walking up from its own
-        # directory and the interpreter through KAYA_SWIFTUI_LIB.
-        return ["node", f"guests/js/{stem}.ts"]
-    if lang == "go":
-        return ["target/go-guests/kaya-go"]
-    if lang == "csharp":
-        # `dotnet exec` everywhere — the shell body's two bare
-        # `dotnet` spellings (window, panels) were the same operation.
-        return ["dotnet", "exec", CS_GUEST]
-    if lang == "ocaml":
-        return [f"_build/default/guests/ocaml/{stem}.exe"]
-    if lang == "haskell":
-        return [hs_bin(stem)]
-    if lang == "swift":
-        return [f"target/swift-guests/{stem}"]
-    if lang == "java":
-        return ["java", "-XstartOnFirstThread", "-cp",
-                "target/java-guests", "dev.kaya.milestone2kt.Main"]
-    if lang == "c":
-        return [f"target/c-guests/{stem}"]
-    raise ValueError(lang)
+    # ONE COPY, in the lane module: tools/run-leg.py runs a leg by hand
+    # through the same mapping and the same env.
+    return lane.leg_argv(scene, lang, hs_bin)
 
 
 def leg_env(scene, lang, appearance=""):
-    """Per-leg env, never a persisting export: the shell's one
-    KAYA_SELFTEST_SCRIPT export persisted across groups, and a leg
-    placed after another scene's export silently ran that scene's
-    steps — which one did."""
-    env = {"KAYA_SELFTEST": "1" if scene == "milestone2" else scene,
-           "KAYA_SELFTEST_SCRIPT": scene_script(scene)}
-    if lang in KAYA_LIB_LANGS:
-        env["KAYA_LIB"] = str(ROOT / "target/debug/libkaya.dylib")
-    if appearance:
-        env["KAYA_APPEARANCE"] = appearance
+    """Per-leg env, never a persisting export (the shell's one
+    KAYA_SELFTEST_SCRIPT export once ran another scene's steps)."""
+    env = lane.leg_env(ROOT, scene, lang, appearance)
+    # The lane's own script cache; the module's loader re-reads.
+    env["KAYA_SELFTEST_SCRIPT"] = scene_script(scene)
     return env
 
 
-# The queue is the lane module's ORDER — scene groups in their own
-# language order, the drain barriers, the panel-mode rotations and the
-# serial families exactly as declared there.
 for _entry in lane.ORDER:
     _kind = _entry[0]
     if _entry == ("drain",):

@@ -34,6 +34,16 @@ architecture). This file is the how-to layer: the recipes that repeat.
   it; the linux container points it at the mount.
 - `tools/checks/` + `tools/check-*.sh` — the gate layer.
 
+## Running one mac leg by hand
+
+    tools/run-leg.py <scene> <lang> [--build] [--appearance=dark]
+
+It runs the leg exactly as tools/validate-mac.py would (the same
+command and env, from tools/lib/lanes/mac.py), and REFUSES a stale
+libkaya or SwiftUI interpreter first, naming the build — a hand-spelled
+env line once ran the interpreter from before the edit and spent a
+failure on it (docs/traps.md). `--build` rebuilds both before running.
+
 ## The regeneration workflow (any spec.rs change)
 
 1. Edit `crates/kaya/src/spec.rs` (records, enums, PROPS). The spec

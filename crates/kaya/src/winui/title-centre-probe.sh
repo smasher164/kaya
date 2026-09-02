@@ -53,7 +53,12 @@ cat >> "$WORK/scenes/toolbar.steps" <<'STEPS'
 
 # SCRATCH ONLY, appended by title-centre-probe.sh and never written to the
 # shipped file: the settle is the window the external probe measures in.
-settle 45000
+# LONG ENOUGH FOR A CONTENDED PROBE: at 45s the toolbar left the screen
+# before the eleventh width on a matrix whose probe took 75s, and the
+# verdict read an "honest under-run" for weeks without naming this
+# (2026-09-02, docs/traps.md). The runner kills the guest the moment
+# the probe is done, so the quiet path pays none of it.
+settle 180000
 STEPS
 
 # Guest and probe launchers. Shipped as FILES, never echoed over ssh: two
@@ -77,11 +82,15 @@ ssh "$HOST" "schtasks /run /tn kaya_tcp_p" >/dev/null
 # POLLED, NOT SLEPT: the ps1 ends with "PROVE: done", so waiting is a
 # read of that line rather than a 50s guess (measured 2026-08-20: the
 # sweep itself finishes in well under half that, and the guess was most
-# of this phase's minute). The deadline is the old guess.
+# of this phase's minute). The deadline covers the settle above, and an
+# expiry SAYS SO, with how far the sweep got — a count read after a
+# cut-off is the deadline's number, not the sweep's.
 tries=0
 until ssh "$HOST" "cmd /c type $R\\prove.txt" 2>/dev/null | grep -q "^PROVE: done"; do
     tries=$((tries + 1))
-    if [ "$tries" -gt 25 ]; then
+    if [ "$tries" -gt 85 ]; then
+        aims=$(ssh "$HOST" "cmd /c type $R\\prove.txt" 2>/dev/null | grep -c "^AIM ")
+        echo "title-centre-probe: gave up after ~170s waiting for PROVE: done — the probe was CUT OFF with $aims AIM line(s) written; the measurement count below is this deadline's, not the sweep's"
         break
     fi
     sleep 2

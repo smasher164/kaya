@@ -439,3 +439,38 @@ The fifteenth matrix, with the keyed button on the portfolio's five
 legs: ALL PASS on all five lanes and 52 gates, 1,549 legs in 629s (mac
 374s, linux 428s, windows 442s, iOS 523s, android 214s).
 
+## Guards from the day's failures
+
+Five, each on the path the failure took: tools/run-leg.py (a hand run
+verifies both artifacts first; watched refusing the stale libkaya and
+passing after --build), keyed-miss diagnostics on GTK and WinUI beside
+the SwiftUI one, check-steps' cmd-precedence rule (`if exist … & …` in
+one string, which also found the junction unlink's own spelling and two
+older staging lines were split ahead of it), post-fetch verification of
+both VM toolchains in deploy-win, and the host's load averages and top
+CPU consumers printed at the matrix's launch and beside every duration
+anomaly. THE LOAD GUARD'S FIRST DRAFT WAS WRONG AND ITS FIRST ANOMALY
+SAID SO: the sixteenth matrix's windows lane read 559s against 520 and
+the line blamed "a fifteen-minute figure far above the launch figure"
+on the host — but every quiet matrix's own five lanes and pools put
+that figure at ~135 by the end (three readings the same night), so the
+figure cannot discriminate; the consumers can (Notes and Finder at ~70%
+each were the host's that time), and the line prints them now. The
+Windows ceiling moves to 600 for a roster grown 201 -> 239 legs (498,
+442, 488, 559 across the four quiet matrices since).
+
+## The caption-centre under-run, read
+
+The seventeenth matrix (quiet launch, every leg green on every lane)
+failed the windows lane on the caption-centre probe alone: 10 of 11
+measurements, the third such reading in three days. This time the
+mechanism was read rather than recorded: the probe's guest settles for
+45s, the probe took 75s under the matrix, and the eleventh width ran
+against a window that had already left. The settle is 180s, the poll
+covers it, and an expiry names the cut (docs/traps.md).
+The eighteenth matrix, with the guards and the probe's settle in: ALL
+PASS on all five lanes and 52 gates, 1,549 legs in 633s (mac 364s,
+linux 518s, windows 432s with its probe at 11 of 11, iOS 552s, android
+225s); the launch line named the warm pools as the top consumers, which
+is what a quiet host reads.
+

@@ -647,7 +647,8 @@ if "0x0" not in (_fglock or ""):
 # split moved it). ONE RECURSIVE COPY OF THE WHOLE GO TREE, not a loop
 # over SCENES: the guests are ONE PROGRAM.
 must_ssh('cmd /c "if exist C:\\kaya\\guests\\go rmdir /s /q '
-         'C:\\kaya\\guests\\go & mkdir C:\\kaya\\guests\\go"')
+         'C:\\kaya\\guests\\go"')
+must_ssh('cmd /c "mkdir C:\\kaya\\guests\\go"')
 if scp_dir_to(sorted((ROOT / "guests/go").iterdir()),
               "C:/kaya/guests/go/") != 0:
     die("deploy-win: could not ship the go guests")
@@ -689,14 +690,24 @@ def fetch_zip(url, sha256, dest):
             f"C:\\kaya\\fetch-zip.ps1 -Url {url} -Sha256 {sha256} -Dest {dest}")
 
 
-must_ssh('cmd /c "C:\\kaya\\go127\\go\\bin\\go.exe version 2>nul | findstr '
-         f'/c:go{GO_VERSION} >nul && echo go{GO_VERSION} present || '
+GO_PRESENT = ('C:\\kaya\\go127\\go\\bin\\go.exe version 2>nul | findstr '
+              f'/c:go{GO_VERSION} >nul')
+NODE_PRESENT = (NODE_DIR + '\\node.exe --version 2>nul | findstr '
+                f'/c:v{NODE_VERSION} >nul')
+must_ssh('cmd /c "' + GO_PRESENT + f' && echo go{GO_VERSION} present || '
          + fetch_zip(f"https://go.dev/dl/go{GO_VERSION}.windows-arm64.zip",
                      GO_WIN_ARM64_SHA256, "C:\\kaya\\go127") + '"')
-must_ssh('cmd /c "' + NODE_DIR + '\\node.exe --version 2>nul | findstr '
-         f'/c:v{NODE_VERSION} >nul && echo node{NODE_VERSION} present || '
+must_ssh('cmd /c "' + NODE_PRESENT + f' && echo node{NODE_VERSION} present || '
          + fetch_zip(f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-win-arm64.zip",
                      NODE_WIN_ARM64_SHA256, "C:\\kaya\\node24") + '"')
+# VERIFIED AFTER THE FETCH, not only before it: a provisioning step that
+# "succeeded" without producing the toolchain is exactly how the Go pin
+# went uninstalled for weeks (docs/traps.md) — the lane refuses here,
+# naming the version the launchers will not find.
+must_ssh('cmd /c "' + GO_PRESENT + f' || (echo deploy-win: go{GO_VERSION} is not '
+         'at C:\\kaya\\go127 after provisioning & exit /b 1)"')
+must_ssh('cmd /c "' + NODE_PRESENT + f' || (echo deploy-win: node v{NODE_VERSION} '
+         'is not at C:\\kaya\\node24 after provisioning & exit /b 1)"')
 
 
 # A hung or leftover guest keeps kaya.dll locked: the next deploy's copy
@@ -942,10 +953,14 @@ else:
     # a renamed example would poison the build; a stale flat-module
     # kaya_app.py beside the kaya/ package would be a second import
     # mechanism.
-    must_ssh('cmd /c "if exist C:\\kaya\\cs rmdir /s /q C:\\kaya\\cs & '
-             'mkdir C:\\kaya\\cs"')
+    # A `rmdir` and a `mkdir` are two commands, never `if exist X rmdir
+    # X & mkdir Y` in one: cmd runs the mkdir INSIDE the if, so a path
+    # that never existed is never created (tools/check-steps.sh holds it).
+    must_ssh('cmd /c "if exist C:\\kaya\\cs rmdir /s /q C:\\kaya\\cs"')
+    must_ssh('cmd /c "mkdir C:\\kaya\\cs"')
     must_ssh('cmd /c "if exist C:\\kaya\\bindings\\python rmdir /s /q '
-             'C:\\kaya\\bindings\\python & mkdir C:\\kaya\\bindings\\python"')
+             'C:\\kaya\\bindings\\python"')
+    must_ssh('cmd /c "mkdir C:\\kaya\\bindings\\python"')
     if scp_dir_to(ROOT / "bindings/python/kaya",
                   "C:/kaya/bindings/python/") != 0:
         die("deploy-win: could not ship the python binding")
@@ -963,8 +978,7 @@ else:
     # junction without touching its target; a leftover REAL directory
     # from an older deploy makes that rmdir fail, which the exit /b 0
     # tolerates and the /s below then removes).
-    must_ssh('cmd /c "if exist C:\\kaya\\node_modules\\kaya-gui rmdir '
-             'C:\\kaya\\node_modules\\kaya-gui 2>nul & exit /b 0"')
+    must_ssh('cmd /c "rmdir C:\\kaya\\node_modules\\kaya-gui 2>nul & exit /b 0"')
     must_ssh('cmd /c "if exist C:\\kaya\\node_modules rmdir /s /q '
              'C:\\kaya\\node_modules"')
     must_ssh('cmd /c "if exist C:\\kaya\\kaya-gui rmdir /s /q '
@@ -1357,8 +1371,8 @@ def rec_suite_start():
         sys.exit(1)
     # A recorder left over from an aborted run would fight this one.
     run_ssh('cmd /c "taskkill /f /im record-win.exe 2>nul & exit /b 0"')
-    run_ssh('cmd /c "if exist C:\\kaya\\frames rmdir /s /q C:\\kaya\\frames '
-            '& mkdir C:\\kaya\\frames"')
+    run_ssh('cmd /c "if exist C:\\kaya\\frames rmdir /s /q C:\\kaya\\frames"')
+    run_ssh('cmd /c "mkdir C:\\kaya\\frames"')
     must_ssh('schtasks /create /tn kaya_record /tr "wscript '
              'C:\\kaya\\run-hidden.vbs record.cmd" /sc once /st 00:00 /it '
              "/rl highest /f >nul && schtasks /run /tn kaya_record >nul")

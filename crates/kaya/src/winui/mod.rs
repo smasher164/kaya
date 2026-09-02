@@ -16765,6 +16765,11 @@ impl crate::harness::Stage for WinUiStage {
                         .filter(|(control, _)| carries_id(*control, &id))
                         .find_map(|(_, tag)| crate::harness::table_tag_node(tag));
                     let Some(node) = node else {
+                        let with_id = core.button_controls.iter().filter(|c| carries_id(*c, &id)).count();
+                        eprintln!(
+                            "KAYA_DIAG keyed target button@{id}[{keys}] unresolved: {} live, {with_id} carrying the id",
+                            core.button_controls.len()
+                        );
                         return Ok(None);
                     };
                     return Ok(core
