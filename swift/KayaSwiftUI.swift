@@ -5801,6 +5801,15 @@ private func kayaRunScript(_ script: String) {
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
     // The verb trace counts from the same zero (crates/kaya/src/vtrace.rs).
     KayaVTrace.begin(start)
+    // AN UNCAUGHT NSException IS THE THIRD WAY A RUN ENDS, and the one
+    // that leaves nothing: the failed verdict and the watchdog dump the
+    // ring, a crash did not (measured 2026-09-02 — the portfolio leg's
+    // off-main tile above died with a backtrace and no trace). The
+    // runtime prints the exception, calls this, then aborts.
+    NSSetUncaughtExceptionHandler { exception in
+        KayaVTrace.dump(
+            "an uncaught NSException: \(exception.name.rawValue): \(exception.reason ?? "")")
+    }
     var stepOrdinal = 0
     // Whether the run already carried the core's fault into `failures`,
     // so the sweep after the loop cannot report the same one twice.
@@ -8709,7 +8718,15 @@ func kayaCurrentTableTrackWidth(_ table: KayaNode) -> Double? {
 func kayaTableHorizontal(_ spec: Substring) -> (content: Double, viewport: Double)? {
     guard let node = kayaTarget(spec, "column", kayaScene.columns) else { return nil }
     #if os(macOS)
-        if let driver = kayaTableDrivers[node.id] { return driver.horizontalExtents() }
+        // ON THE MAIN THREAD: `NSTableView.frame` re-tiles a dirty table
+        // inside the read, and a tile from the harness thread is an
+        // NSException (measured 2026-09-02, the portfolio leg after a
+        // header_click; docs/traps.md).
+        if let driver = kayaTableDrivers[node.id] {
+            return Thread.isMainThread
+                ? driver.horizontalExtents()
+                : DispatchQueue.main.sync { driver.horizontalExtents() }
+        }
     #endif
     // The SYNTHESIZED tier's own pair, measured by its layout into the
     // placement box (docs/tables-plan.md, ruled 2026-08-29).
@@ -8730,7 +8747,10 @@ func kayaTableTrailing(_ spec: Substring) -> (Double, Double)? {
     guard let node = kayaTarget(spec, "column", kayaScene.columns) else { return nil }
     #if os(macOS)
         if let driver = kayaTableDrivers[node.id] {
-            let edges = driver.trailingEdges()
+            // The same main-thread rule as kayaTableHorizontal's read.
+            let edges = Thread.isMainThread
+                ? driver.trailingEdges()
+                : DispatchQueue.main.sync { driver.trailingEdges() }
             return (edges.visible, edges.content)
         }
     #endif

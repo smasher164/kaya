@@ -40,8 +40,8 @@ impl Default for Presentation {
 /// The scale and the appearance the §7.1 hash is taken at, pinned by the
 /// verb rather than read from the lane's display: one frozen string on
 /// five platforms needs every input to be one thing.
-pub const CANONICAL_SCALE: f64 = 1.0;
-pub const CANONICAL_MODE: Mode = Mode::Light;
+pub(crate) const CANONICAL_SCALE: f64 = 1.0;
+pub(crate) const CANONICAL_MODE: Mode = Mode::Light;
 
 /// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance, for
 /// the two backends written in Rust.

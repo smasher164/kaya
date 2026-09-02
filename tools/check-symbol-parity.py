@@ -55,9 +55,9 @@ def check(texts):
 
     # --- The root: wire::SYMBOLS, (value, name) in wire order. -------
     wt = texts[wire]
-    consts = dict(re.findall(r"pub const (SYMBOL_[A-Z0-9_]+): u32 = (\d+);",
+    consts = dict(re.findall(r"pub(?:\(crate\))? const (SYMBOL_[A-Z0-9_]+): u32 = (\d+);",
                              wt))
-    m = re.search(r"pub const SYMBOLS:[^=]*=\s*&\[(.*?)\];", wt, re.S)
+    m = re.search(r"pub(?:\(crate\))? const SYMBOLS:[^=]*=\s*&\[(.*?)\];", wt, re.S)
     if not m:
         return "refused", (f"{wire}: no SYMBOLS table — the vocabulary "
                            f"moved and this gate went vacuous")
@@ -89,7 +89,7 @@ def check(texts):
     ct = texts[capi]
     cfloor = {"SYMBOL_" + c[len("KAYA_SYMBOL_"):]: int(v)
               for c, v in re.findall(
-                  r"pub const (KAYA_SYMBOL_[A-Z0-9_]+): u32 = (\d+);", ct)}
+                  r"pub(?:\(crate\))? const (KAYA_SYMBOL_[A-Z0-9_]+): u32 = (\d+);", ct)}
     held(capi, cfloor, "the KAYA_SYMBOL_* block")
     for c, v in cfloor.items():
         if c in root_by_cname and v != root_by_cname[c][0]:

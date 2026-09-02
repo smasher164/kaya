@@ -16,42 +16,42 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
-pub const REC_PAD: u16 = 0;
-pub const REC_BUTTON_CLICKED: u16 = 1;
-pub const REC_TEXT_CHANGED: u16 = 2;
-pub const REC_TOGGLED: u16 = 3;
-pub const REC_VALUE_CHANGED: u16 = 4;
-pub const REC_CLOSE_REQUESTED: u16 = 5;
-pub const REC_WINDOW_CLOSED: u16 = 6;
-pub const REC_ALERT_RESULT: u16 = 7;
-pub const REC_ENTRY_POPPED: u16 = 8;
-pub const REC_BACK_REQUESTED: u16 = 9;
-pub const REC_SECTION_SELECTED: u16 = 10;
+pub(crate) const REC_PAD: u16 = 0;
+pub(crate) const REC_BUTTON_CLICKED: u16 = 1;
+pub(crate) const REC_TEXT_CHANGED: u16 = 2;
+pub(crate) const REC_TOGGLED: u16 = 3;
+pub(crate) const REC_VALUE_CHANGED: u16 = 4;
+pub(crate) const REC_CLOSE_REQUESTED: u16 = 5;
+pub(crate) const REC_WINDOW_CLOSED: u16 = 6;
+pub(crate) const REC_ALERT_RESULT: u16 = 7;
+pub(crate) const REC_ENTRY_POPPED: u16 = 8;
+pub(crate) const REC_BACK_REQUESTED: u16 = 9;
+pub(crate) const REC_SECTION_SELECTED: u16 = 10;
 // Menu occurrences. Each carries the button_clicked body shape — u64
 // item id, u32 path_len, u32 reserved, then path_len key values (empty
 // for a bar activation, the anchor copy's key path for a node-anchored
 // context item) — then the payload for the stateful pair (a Bool for
 // toggled, an F64 index for value_changed).
-pub const REC_MENU_ACTIVATED: u16 = 11;
-pub const REC_MENU_TOGGLED: u16 = 12;
-pub const REC_MENU_VALUE_CHANGED: u16 = 13;
+pub(crate) const REC_MENU_ACTIVATED: u16 = 11;
+pub(crate) const REC_MENU_TOGGLED: u16 = 12;
+pub(crate) const REC_MENU_VALUE_CHANGED: u16 = 13;
 /// The picker's one answer: `count` files, each three consecutive
 /// values — I64 handle, Str name, Str local_path. Cancel is count zero.
-pub const REC_FILE_DIALOG_RESULT: u16 = 14;
+pub(crate) const REC_FILE_DIALOG_RESULT: u16 = 14;
 /// The clipboard's two answers: the privileged read's, and the one that
 /// arrives because the user pasted.
-pub const REC_CLIPBOARD_RESULT: u16 = 15;
-pub const REC_PASTED: u16 = 16;
+pub(crate) const REC_CLIPBOARD_RESULT: u16 = 15;
+pub(crate) const REC_PASTED: u16 = 16;
 /// The undo pair (docs/undo-plan.md D5/§3): kaya routed an undo or a
 /// redo, and this says what the CORE put back. Same body shape for both.
-pub const REC_UNDONE: u16 = 17;
-pub const REC_REDONE: u16 = 18;
-pub const REC_SORT_REQUESTED: u16 = 19;
+pub(crate) const REC_UNDONE: u16 = 17;
+pub(crate) const REC_REDONE: u16 = 18;
+pub(crate) const REC_SORT_REQUESTED: u16 = 19;
 /// THE CANVAS'S TWO ASKS (docs/canvas-plan.md §3.2.1): the core hands a
 /// redraw canvas the size it was assigned and takes back a drawing, and
 /// hands a ticking one the same size plus the frame's time.
-pub const REC_DRAW_REQUESTED: u16 = 20;
-pub const REC_TICK: u16 = 21;
+pub(crate) const REC_DRAW_REQUESTED: u16 = 20;
+pub(crate) const REC_TICK: u16 = 21;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

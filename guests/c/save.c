@@ -86,7 +86,7 @@ static void make_scene_files(void) {
 static void read_back(uint64_t handle, char *out, size_t cap) {
     int64_t raw;
     uint32_t seekable;
-    int rc = kaya_open_picked(handle, FILE_MODE_READ, &raw, &seekable);
+    int rc = kaya_open_picked(handle, KAYA_FILE_MODE_READ, &raw, &seekable);
     if (rc != 0) {
         snprintf(out, cap, "open failed: %s", strerror(rc));
         return;
@@ -110,13 +110,13 @@ static void read_back(uint64_t handle, char *out, size_t cap) {
     close(fd);
 }
 
-/* FILE_MODE_WRITE truncates, on a picked file and on a save destination
+/* KAYA_FILE_MODE_WRITE truncates, on a picked file and on a save destination
  * alike; the destination only adds the create, which is the CORE's
  * (there is no FILE_MODE_CREATE to ask for — docs/save-plan.md D1). */
 static void write_back(uint64_t handle, const char *bytes, char *out, size_t cap) {
     int64_t raw;
     uint32_t seekable;
-    int rc = kaya_open_picked(handle, FILE_MODE_WRITE, &raw, &seekable);
+    int rc = kaya_open_picked(handle, KAYA_FILE_MODE_WRITE, &raw, &seekable);
     if (rc != 0) {
         /* Without the create this is where a save destination answers
          * ENOENT, for a file the user just named. */

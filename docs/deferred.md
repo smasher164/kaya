@@ -1874,7 +1874,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
   (2) signal-bound entry titles have wire + scene + fan-out but no
   binding sugar.
 
-### Swift reads its constants straight out of the C header, and the header is not namespaced
+### ~~Swift reads its constants straight out of the C header, and the header is not namespaced~~ CLOSED 2026-09-02: the header carries the KAYA_ prefix alone, 271 defines where 516 stood
 
 Swift is the ONE binding with no generated constants: every other
 language's kaya-bindgen emitter walks `spec.enums` and writes them out,
@@ -1902,14 +1902,37 @@ Every `REC_*`, every `TX_*`, every
 name no public header should take. Any C or Swift consumer that includes
 kaya.h inherits all of them.
 
-WHY IT IS A SLICE AND NOT A RENAME. Fixing it means deciding how the
+~~WHY IT IS A SLICE AND NOT A RENAME. Fixing it means deciding how the
 Swift binding should name what the header exposes at all — generated
 constants like the other seven, a Swift enum wrapping them, or a
 prefixed header it keeps reading — and each answer rewrites call sites
 across the Swift binding, the SwiftUI interpreter, every Swift guest
 and every C guest. Doing it inside a feature milestone would mix a
 mechanical sweep into changes that need to be readable. Take it on its
-own, with the C guests compiled and the whole matrix run after.
+own, with the C guests compiled and the whole matrix run after.~~
+TAKEN ON ITS OWN 2026-09-02, and it was smaller than the count above
+made it look. Re-measured: 516 defines, 266 unprefixed — but 223 of
+those were exact twins of a KAYA_ define in the same header (`KIND_LABEL
+3` beside `KAYA_KIND_LABEL 3`), and only 43 stood unprefixed alone
+(CLIP_*, FILE_MODE_*, PLATFORM_*, SIZE_POLICY_*, SIZE_CLASS_COMPACT_BELOW,
+REC_* out of ring.rs, CANONICAL_SCALE out of canvas.rs, HEADER_SIZE,
+HARNESS_FRAME_HZ). The leak's mechanism: `mod wire` is PRIVATE, and
+cbindgen exports every `pub const` it parses regardless — it honours
+`pub(crate)`, which is what the 275 consts in wire.rs, ring.rs and
+canvas.rs are now (crate-internal either way). The names a consumer
+needs that had no twin got one in capi.rs, const-asserted against the
+core's own like every row there (KAYA_CLIP_*, KAYA_FILE_MODE_*,
+KAYA_PLATFORM_*, KAYA_SIZE_POLICY_*, KAYA_SIZE_CLASS_COMPACT_BELOW,
+KAYA_CANONICAL_SCALE, KAYA_HEADER_SIZE; HARNESS_FRAME_HZ renamed in
+place; REC_* need none, KAYA_OCCURRENCE_* being the same numbers). The
+Swift binding keeps reading the header — the choice the entry weighed
+against generated constants and an enum, kept because it costs zero
+re-declarations — and its 12 real references, plus the two save guests'
+three, moved to the KAYA_ names; every other consumer in the tree
+already used them. The header is 271 defines, all KAYA_. Three gates
+that read `pub const` out of wire.rs by regex (check-verbs,
+check-file-modes, check-symbol-parity) read `pub(crate)` too.
+docs/traps.md carries the cbindgen finding.
 
 ### ~~The accessibility walk visits every window twice~~ FIXED 2026-09-02, and measured smaller than filed
 

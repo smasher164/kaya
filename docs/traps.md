@@ -6715,6 +6715,19 @@ toolkit re-derives from another prop is applied AGAIN after that other
 prop, or the binding that happens to write them in the other order is
 the one that finds it.
 
+## cbindgen exports every `pub const` it parses, private module or not (measured 2026-09-02)
+
+`mod wire;` in crates/kaya/src/lib.rs is private, and every one of its
+251 `pub const`s reached crates/kaya/include/kaya.h as a bare `#define`
+anyway — 266 unprefixed defines across wire.rs, ring.rs and canvas.rs,
+the majority of the header, beside the 249 KAYA_ ones capi.rs meant to
+export. cbindgen reads item visibility, not module reachability, and
+it honours `pub(crate)`: the three modules' consts are `pub(crate)` now
+(crate-internal either way) and the header is 271 defines, all KAYA_.
+The rule: A CONST THAT MUST NOT REACH THE HEADER IS `pub(crate)`, and a
+`pub const` anywhere in the crate is a public C name whether or not its
+module is.
+
 ## A Compose Text with a contentDescription has no class in its AccessibilityNodeInfo (measured 2026-09-02)
 
 Compose's provider names `android.widget.TextView` for a plain Text
@@ -6728,4 +6741,21 @@ the read's Heading and EditableText fallbacks already do). The Image
 kind had the same shape a month earlier (`unknown/Logo` until the name
 rode Image's own parameter); a Text has no such parameter, so the read
 is where this one lives.
+
+## An NSTableView `frame` read off the main thread can re-tile, and a tile off-main is an NSException (measured 2026-09-02)
+
+The mac portfolio leg died at its first `expect_column_edges` after a
+`header_click`, in `KayaTableDriver.horizontalExtents` on the HARNESS
+thread: `-[NSTableView frame]` → `tile` → `setFrameSize:` and an
+uncaught NSException, with a backtrace and no verdict. Twenty matrices
+had run the same read green because `frame` re-tiles only when the
+table is dirty and the main thread usually gets there first; the header
+click's re-sort made it dirty at the moment the harness read it. The
+two driver reads (`horizontalExtents`, `trailingEdges`) hop to the main
+thread now. The rule the harness already states for AX and clicks
+holds for GEOMETRY too: a read of an AppKit view's frame is a main-
+thread call, because AppKit reserves the right to lay out inside it.
+And the recorder's rule grew a third exit: the SwiftUI ring dumps from
+an `NSSetUncaughtExceptionHandler` as well, since this crash was the
+first mac failure with a recorder and it kept nothing.
 

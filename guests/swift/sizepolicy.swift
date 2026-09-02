@@ -59,7 +59,7 @@ func bar(_ d: KayaDraw, _ box: KayaViewbox, _ frame: UInt32) {
 }
 
 /// Seconds back to the frame the harness drove. The clock is the core's
-/// `HARNESS_FRAME_HZ`; the guest reads the time it was HANDED and never
+/// `KAYA_HARNESS_FRAME_HZ`; the guest reads the time it was HANDED and never
 /// one of its own.
 func frameOf(_ time: Double) -> UInt32 {
     UInt32(max((time * 60.0).rounded(), 0.0))

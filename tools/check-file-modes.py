@@ -280,11 +280,11 @@ def check(root):
     # --- 1. wire.rs: the C ABI's names. -------------------------------
     text = read(WIRE)
     declared = {name: int(value) for name, value in
-                re.findall(r"pub const FILE_MODE_([A-Z_]+)\s*:\s*u32"
+                re.findall(r"pub(?:\(crate\))? const FILE_MODE_([A-Z_]+)\s*:\s*u32"
                            r"\s*=\s*(\d+)\s*;", text)}
     if not declared:
         gone(WIRE, "the FILE_MODE constants",
-             "pub const FILE_MODE_*: u32")
+             "pub(crate) const FILE_MODE_*: u32")
     for name, number in known.items():
         have = declared.get(name.upper())
         if have is None:

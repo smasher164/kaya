@@ -52,7 +52,7 @@ var destination: KayaPickedFile?
 /// Read a handle back through kaya, with Foundation's own file API.
 func readBack(_ file: KayaPickedFile) -> String {
     do {
-        let (handle, _) = try file.open(UInt32(FILE_MODE_READ))
+        let (handle, _) = try file.open(UInt32(KAYA_FILE_MODE_READ))
         let data = handle.readDataToEndOfFile()
         try? handle.close()
         return String(decoding: data, as: UTF8.self)
@@ -62,10 +62,10 @@ func readBack(_ file: KayaPickedFile) -> String {
 }
 
 /// Write `text` through a handle and report what the file says
-/// afterwards. `FILE_MODE_WRITE` truncates; a destination adds create.
+/// afterwards. `KAYA_FILE_MODE_WRITE` truncates; a destination adds create.
 func writeBack(_ file: KayaPickedFile, _ text: String) -> String {
     do {
-        let (handle, _) = try file.open(UInt32(FILE_MODE_WRITE))
+        let (handle, _) = try file.open(UInt32(KAYA_FILE_MODE_WRITE))
         handle.write(Data(text.utf8))
         // Closed before the reopen, so what comes back is the FILE's bytes.
         try? handle.close()

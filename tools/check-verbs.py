@@ -67,7 +67,7 @@ def clip_mirrors(wire_src=None, swift_src=None, kotlin_src=None):
     swift = source_text(swift_src, SWIFT, bad, cannot(SWIFT))
     kotlin = source_text(kotlin_src, KOTLIN, bad, cannot(KOTLIN))
 
-    rows = re.findall(r"pub const (CLIP_[A-Z_0-9]+): u\d+ = (\d+);",
+    rows = re.findall(r"pub(?:\(crate\))? const (CLIP_[A-Z_0-9]+): u\d+ = (\d+);",
                       wire or "")
     if wire is not None and not rows:
         bad.append("no CLIP_* constants extracted from " + WIRE
@@ -555,7 +555,7 @@ def metrics_class(swift_src=None, wire_src=None):
                            "class; the core derives from the width")
 
     if wire and not re.search(
-            r"pub const SIZE_CLASS_COMPACT_BELOW: f64 = 600\.0;",
+            r"pub(?:\(crate\))? const SIZE_CLASS_COMPACT_BELOW: f64 = 600\.0;",
             wire):
         bad.append("wire.rs does not pin SIZE_CLASS_COMPACT_BELOW at "
                    "the ruled 600.0 — the scenes hold the boundary "
@@ -654,6 +654,17 @@ def verb_trace(harness_src=None, swift_src=None, kotlin_src=None,
                            f"written against one harness misparses the "
                            f"other two")
         calls = [m.start() for m in re.finditer(dump_pat, runner_text)]
+        # THE CRASH SITE: an uncaught NSException ends a SwiftUI run
+        # before either dump, so its handler dumps too — the one third
+        # site allowed, and only inside that handler's own block.
+        crash = [c for c in calls
+                 if runner_text.rfind("NSSetUncaughtExceptionHandler", 0, c) >= 0
+                 and c - runner_text.rfind("NSSetUncaughtExceptionHandler", 0, c) < 300]
+        calls = [c for c in calls if c not in crash]
+        if len(crash) > 1 or (crash and lang != "swift"):
+            bad.append(f"{runner_rel} dumps the verb trace from "
+                       f"{len(crash)} uncaught-exception handler(s) — one, "
+                       f"and only where NSException exists")
         if len(calls) != 2:
             bad.append(f"{runner_rel} has {len(calls)} verb-trace dump "
                        f"site(s), want exactly 2 (the failed verdict and "
@@ -1191,7 +1202,7 @@ for name, text in (("KayaSwiftUI.swift", swift),
 # APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP: all of them. VALUE: only the
 # types reachable through the spec's PROPS PropKinds (the scene's prop
 # typing keeps the rest off the pump).
-rows = re.findall(r"pub const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
+rows = re.findall(r"pub(?:\(crate\))? const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
                   r"MENU_KIND|MPROP)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
 # THE CANVAS VOCABULARIES, which no gate held until 2026-08-26. They
 # ride the op stream as i64 rather than u32, so the sweep above cannot
@@ -1202,7 +1213,7 @@ rows = re.findall(r"pub const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
 # Kotlin spells a Long literal with an L suffix, so the value pattern
 # allows one.
 canvas_rows = re.findall(
-    r"pub const ((?:DRAW|PAINT|FILL|TEXT_ALIGN|TEXT_BASELINE)"
+    r"pub(?:\(crate\))? const ((?:DRAW|PAINT|FILL|TEXT_ALIGN|TEXT_BASELINE)"
     r"_[A-Z_0-9]+): i64 = (\d+);", wire)
 if len(canvas_rows) < 21:
     fail(f"only {len(canvas_rows)} canvas constants found in wire.rs — "
@@ -1431,6 +1442,10 @@ VTRACE_NEGATIVES = [
     ("the Rust ring's pointer line drifted", VTRACE,
      r'appended to \{\}', "written to {}",
      "does not carry the verb-trace line shape"),
+    ("a SwiftUI dump on the pass path (outside the crash handler)", SWIFT,
+     r'(\n\s+)(print\("KAYA_SELFTEST: OK)',
+     r'\1KayaVTrace.dump("green")\1\2',
+     "verb-trace dump site(s), want exactly 2"),
 ]
 for label, rel, pattern, repl, want in VTRACE_NEGATIVES:
     doctored = g.doctor(label, vtrace_texts[rel], pattern, repl)

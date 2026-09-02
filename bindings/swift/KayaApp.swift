@@ -450,7 +450,7 @@ struct KayaWidget {
     @discardableResult
     func fixed() -> KayaWidget {
         let (_, tx) = kayaDeclaring()
-        tx.tx.setSizePolicy(id, UInt32(SIZE_POLICY_FIXED))
+        tx.tx.setSizePolicy(id, UInt32(KAYA_SIZE_POLICY_FIXED))
         return self
     }
 
@@ -468,7 +468,7 @@ struct KayaWidget {
         // answer path never asks which policy it holds, and a tick
         // canvas — which is asked once as a draw_requested before its
         // first frame — cannot be called with the wrong arity.
-        declareDrawing(UInt32(SIZE_POLICY_REDRAW)) { d, size, _ in handler(d, size) }
+        declareDrawing(UInt32(KAYA_SIZE_POLICY_REDRAW)) { d, size, _ in handler(d, size) }
     }
 
     /// The same on the platform's FRAME CLOCK, the handler also receiving
@@ -477,7 +477,7 @@ struct KayaWidget {
     /// count is part of the scene and never a fact about the machine.
     @discardableResult
     func onTick(_ handler: @escaping (KayaDraw, KayaViewbox, Double) -> Void) -> KayaWidget {
-        declareDrawing(UInt32(SIZE_POLICY_TICK), handler)
+        declareDrawing(UInt32(KAYA_SIZE_POLICY_TICK), handler)
     }
 
     @discardableResult
@@ -721,11 +721,11 @@ func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
         return b
     }
     switch clip.kind {
-    case UInt32(CLIP_TEXT): return .text(str(0))
-    case UInt32(CLIP_HTML): return .html(str(0))
-    case UInt32(CLIP_IMAGE): return .image(bytes(0))
-    case UInt32(CLIP_CUSTOM): return .custom(id: str(0), bytes: bytes(1))
-    case UInt32(CLIP_FILES):
+    case UInt32(KAYA_CLIP_TEXT): return .text(str(0))
+    case UInt32(KAYA_CLIP_HTML): return .html(str(0))
+    case UInt32(KAYA_CLIP_IMAGE): return .image(bytes(0))
+    case UInt32(KAYA_CLIP_CUSTOM): return .custom(id: str(0), bytes: bytes(1))
+    case UInt32(KAYA_CLIP_FILES):
         // The picker's own three-per-file grouping, so a guest that
         // decodes a dialog result decodes this with the same loop.
         var out: [KayaPickedFile] = []
@@ -1007,15 +1007,15 @@ struct KayaCopyRef {
             values.append(.i64(Int64(bitPattern: handle)))
         }
         if let image {
-            present |= UInt32(CLIP_IMAGE)
+            present |= UInt32(KAYA_CLIP_IMAGE)
             values.append(.blob(kayaRegisterBlob(Data(image))))
         }
         if let html {
-            present |= UInt32(CLIP_HTML)
+            present |= UInt32(KAYA_CLIP_HTML)
             values.append(.str(html))
         }
         if let text {
-            present |= UInt32(CLIP_TEXT)
+            present |= UInt32(KAYA_CLIP_TEXT)
             values.append(.str(text))
         }
         tx.tx.copy(present, UInt32(files.count), UInt32(custom.count), values)
@@ -1214,7 +1214,7 @@ struct KayaPickedFile {
     /// chose and post the result back. THE DESCRIPTOR BECOMES SWIFT'S:
     /// `closeOnDealloc` is true, so it closes exactly once and the core
     /// keeps no claim.
-    func open(_ mode: UInt32 = UInt32(FILE_MODE_READ))
+    func open(_ mode: UInt32 = UInt32(KAYA_FILE_MODE_READ))
         throws -> (file: FileHandle, seekable: Bool)
     {
         var raw: Int64 = 0

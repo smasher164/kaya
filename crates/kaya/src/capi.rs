@@ -279,6 +279,54 @@ const _: () = assert!(KAYA_TX_CREATE_BREAKPOINT == wire::TX_CREATE_BREAKPOINT);
 pub const KAYA_SIZE_CLASS_NONE: i64 = 0;
 pub const KAYA_SIZE_CLASS_COMPACT: i64 = 1;
 pub const KAYA_SIZE_CLASS_REGULAR: i64 = 2;
+
+// THE HEADER SPEAKS ONE PREFIX (2026-09-02; docs/deferred.md, "Swift reads
+// its constants straight out of the C header"): cbindgen exported every
+// `pub const` in wire.rs, ring.rs and canvas.rs verbatim, 266 unprefixed
+// defines beside the 249 KAYA_ ones, 223 of them exact twins. Those
+// consts are pub(crate) now, so the header carries the KAYA_ names alone
+// — and the values a C or Swift consumer needs that had no twin get one
+// here, const-asserted against the core's own like every row above.
+pub const KAYA_CLIP_TEXT: u32 = 1;
+pub const KAYA_CLIP_HTML: u32 = 2;
+pub const KAYA_CLIP_IMAGE: u32 = 4;
+pub const KAYA_CLIP_FILES: u32 = 8;
+pub const KAYA_CLIP_CUSTOM: u32 = 16;
+const _: () = assert!(KAYA_CLIP_TEXT == wire::CLIP_TEXT);
+const _: () = assert!(KAYA_CLIP_HTML == wire::CLIP_HTML);
+const _: () = assert!(KAYA_CLIP_IMAGE == wire::CLIP_IMAGE);
+const _: () = assert!(KAYA_CLIP_FILES == wire::CLIP_FILES);
+const _: () = assert!(KAYA_CLIP_CUSTOM == wire::CLIP_CUSTOM);
+pub const KAYA_FILE_MODE_READ: u32 = 0;
+pub const KAYA_FILE_MODE_WRITE: u32 = 1;
+pub const KAYA_FILE_MODE_READ_WRITE: u32 = 2;
+const _: () = assert!(KAYA_FILE_MODE_READ == wire::FILE_MODE_READ);
+const _: () = assert!(KAYA_FILE_MODE_WRITE == wire::FILE_MODE_WRITE);
+const _: () = assert!(KAYA_FILE_MODE_READ_WRITE == wire::FILE_MODE_READ_WRITE);
+pub const KAYA_PLATFORM_MAC: u32 = 1;
+pub const KAYA_PLATFORM_IOS: u32 = 2;
+pub const KAYA_PLATFORM_LINUX: u32 = 3;
+pub const KAYA_PLATFORM_WINDOWS: u32 = 4;
+pub const KAYA_PLATFORM_ANDROID: u32 = 5;
+const _: () = assert!(KAYA_PLATFORM_MAC == wire::PLATFORM_MAC);
+const _: () = assert!(KAYA_PLATFORM_IOS == wire::PLATFORM_IOS);
+const _: () = assert!(KAYA_PLATFORM_LINUX == wire::PLATFORM_LINUX);
+const _: () = assert!(KAYA_PLATFORM_WINDOWS == wire::PLATFORM_WINDOWS);
+const _: () = assert!(KAYA_PLATFORM_ANDROID == wire::PLATFORM_ANDROID);
+pub const KAYA_SIZE_POLICY_SCALE: u32 = 0;
+pub const KAYA_SIZE_POLICY_FIXED: u32 = 1;
+pub const KAYA_SIZE_POLICY_REDRAW: u32 = 2;
+pub const KAYA_SIZE_POLICY_TICK: u32 = 3;
+const _: () = assert!(KAYA_SIZE_POLICY_SCALE == wire::SIZE_POLICY_SCALE);
+const _: () = assert!(KAYA_SIZE_POLICY_FIXED == wire::SIZE_POLICY_FIXED);
+const _: () = assert!(KAYA_SIZE_POLICY_REDRAW == wire::SIZE_POLICY_REDRAW);
+const _: () = assert!(KAYA_SIZE_POLICY_TICK == wire::SIZE_POLICY_TICK);
+pub const KAYA_SIZE_CLASS_COMPACT_BELOW: f64 = 600.0;
+const _: () = assert!(KAYA_SIZE_CLASS_COMPACT_BELOW == wire::SIZE_CLASS_COMPACT_BELOW);
+pub const KAYA_CANONICAL_SCALE: f64 = 1.0;
+const _: () = assert!(KAYA_CANONICAL_SCALE == crate::canvas::CANONICAL_SCALE);
+pub const KAYA_HEADER_SIZE: usize = 8;
+const _: () = assert!(KAYA_HEADER_SIZE == wire::HEADER_SIZE);
 const _: () = assert!(
     KAYA_SIZE_CLASS_NONE == wire::SIZE_CLASS_NONE as i64
         && KAYA_SIZE_CLASS_COMPACT == wire::SIZE_CLASS_COMPACT as i64
@@ -3363,11 +3411,11 @@ fn drive_frame(time: f64) {
 /// hand-copied-constant class one surface over
 /// (tools/check-file-modes.sh's trap), and a leg's frame count is part
 /// of the scene.
-pub const HARNESS_FRAME_HZ: f64 = 60.0;
+pub const KAYA_HARNESS_FRAME_HZ: f64 = 60.0;
 static HARNESS_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// THE HARNESS'S FRAME CLOCK: advance by exactly one frame at
-/// `HARNESS_FRAME_HZ` and drive it. Wall clock never reaches a tick
+/// `KAYA_HARNESS_FRAME_HZ` and drive it. Wall clock never reaches a tick
 /// under the harness, so a leg's frame count is what the scene's `frame`
 /// verbs advanced and not a fact about the machine's load.
 ///
@@ -3383,13 +3431,13 @@ pub extern "C" fn kaya_harness_frame() {
 }
 
 /// The harness clock's NEXT step, in seconds. ONE COUNTER FOR THE
-/// PROCESS, which is the same reason `HARNESS_FRAME_HZ` is one number: a
+/// PROCESS, which is the same reason `KAYA_HARNESS_FRAME_HZ` is one number: a
 /// leg's frame count is part of the scene, so the backends that own their
 /// own scene (GTK, WinUI) advance this clock rather than keeping one of
 /// their own.
 pub(crate) fn harness_frame_time() -> f64 {
     let n = HARNESS_FRAMES.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    n as f64 / HARNESS_FRAME_HZ
+    n as f64 / KAYA_HARNESS_FRAME_HZ
 }
 
 /// Presentation-side occurrences the core produced rather than a user

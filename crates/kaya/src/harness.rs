@@ -349,7 +349,7 @@ pub enum Step {
     /// leg's frame count is part of the scene: a scene that asserts the
     /// figure at frame 0, advances, and asserts it at frame N is exactly
     /// as reproducible on a loaded machine as on an idle one. The number
-    /// of frames per second is the core's `HARNESS_FRAME_HZ`, so three
+    /// of frames per second is the core's `KAYA_HARNESS_FRAME_HZ`, so three
     /// harnesses share one clock rather than three counters.
     Frame(u32),
     /// Expect the container's children to span its content box along

@@ -19,79 +19,79 @@ use crate::protocol::{
     WindowId,
 };
 
-pub const HEADER_SIZE: usize = 8;
+pub(crate) const HEADER_SIZE: usize = 8;
 
 // Transaction record kinds (guest -> core).
-pub const TX_CREATE_SIGNAL: u16 = 1;
-pub const TX_WRITE_SIGNAL: u16 = 2;
-pub const TX_CREATE_WIDGET: u16 = 3;
-pub const TX_SET_PROPERTY: u16 = 4;
-pub const TX_ADD_CHILD: u16 = 5;
-pub const TX_MOUNT: u16 = 6;
-pub const TX_CREATE_COLLECTION: u16 = 7;
-pub const TX_COLLECTION_INSERT: u16 = 8;
-pub const TX_COLLECTION_UPDATE: u16 = 9;
-pub const TX_COLLECTION_REMOVE: u16 = 10;
-pub const TX_CREATE_FOR: u16 = 11;
-pub const TX_CREATE_WHEN: u16 = 12;
-pub const TX_TEMPLATE_END: u16 = 13;
-pub const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
-pub const TX_COLLECTION_MOVE: u16 = 15;
-pub const TX_VARIANT_CASE: u16 = 16;
-pub const TX_WIDGET_COMMAND: u16 = 17;
-pub const TX_SET_WINDOW_PROP: u16 = 18;
-pub const TX_CREATE_WINDOW: u16 = 19;
-pub const TX_DESTROY_WINDOW: u16 = 20;
-pub const TX_SHOW_ALERT: u16 = 21;
-pub const TX_PUSH_ENTRY: u16 = 22;
-pub const TX_POP_ENTRY: u16 = 23;
-pub const TX_SET_ENTRY_PROP: u16 = 24;
-pub const TX_ADD_SECTION: u16 = 25;
-pub const TX_SELECT_SECTION: u16 = 26;
-pub const TX_SET_SECTION_PROP: u16 = 27;
-pub const TX_MENU_ITEM_CREATE: u16 = 28;
-pub const TX_MENU_ITEM_APPEND: u16 = 29;
-pub const TX_MENUBAR_APPEND: u16 = 30;
-pub const TX_CONTEXT_ATTACH: u16 = 31;
-pub const TX_CONTEXT_ATTACH_NODE: u16 = 32;
-pub const TX_SET_MENU_PROP: u16 = 33;
-pub const TX_SHOW_FILE_DIALOG: u16 = 34;
+pub(crate) const TX_CREATE_SIGNAL: u16 = 1;
+pub(crate) const TX_WRITE_SIGNAL: u16 = 2;
+pub(crate) const TX_CREATE_WIDGET: u16 = 3;
+pub(crate) const TX_SET_PROPERTY: u16 = 4;
+pub(crate) const TX_ADD_CHILD: u16 = 5;
+pub(crate) const TX_MOUNT: u16 = 6;
+pub(crate) const TX_CREATE_COLLECTION: u16 = 7;
+pub(crate) const TX_COLLECTION_INSERT: u16 = 8;
+pub(crate) const TX_COLLECTION_UPDATE: u16 = 9;
+pub(crate) const TX_COLLECTION_REMOVE: u16 = 10;
+pub(crate) const TX_CREATE_FOR: u16 = 11;
+pub(crate) const TX_CREATE_WHEN: u16 = 12;
+pub(crate) const TX_TEMPLATE_END: u16 = 13;
+pub(crate) const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
+pub(crate) const TX_COLLECTION_MOVE: u16 = 15;
+pub(crate) const TX_VARIANT_CASE: u16 = 16;
+pub(crate) const TX_WIDGET_COMMAND: u16 = 17;
+pub(crate) const TX_SET_WINDOW_PROP: u16 = 18;
+pub(crate) const TX_CREATE_WINDOW: u16 = 19;
+pub(crate) const TX_DESTROY_WINDOW: u16 = 20;
+pub(crate) const TX_SHOW_ALERT: u16 = 21;
+pub(crate) const TX_PUSH_ENTRY: u16 = 22;
+pub(crate) const TX_POP_ENTRY: u16 = 23;
+pub(crate) const TX_SET_ENTRY_PROP: u16 = 24;
+pub(crate) const TX_ADD_SECTION: u16 = 25;
+pub(crate) const TX_SELECT_SECTION: u16 = 26;
+pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
+pub(crate) const TX_MENU_ITEM_CREATE: u16 = 28;
+pub(crate) const TX_MENU_ITEM_APPEND: u16 = 29;
+pub(crate) const TX_MENUBAR_APPEND: u16 = 30;
+pub(crate) const TX_CONTEXT_ATTACH: u16 = 31;
+pub(crate) const TX_CONTEXT_ATTACH_NODE: u16 = 32;
+pub(crate) const TX_SET_MENU_PROP: u16 = 33;
+pub(crate) const TX_SHOW_FILE_DIALOG: u16 = 34;
 /// The clipboard pair: one clip out, one privileged read in.
-pub const TX_COPY: u16 = 35;
-pub const TX_READ_CLIPBOARD: u16 = 36;
+pub(crate) const TX_COPY: u16 = 35;
+pub(crate) const TX_READ_CLIPBOARD: u16 = 36;
 /// The head-of-batch undo group marker (docs/undo-plan.md D2).
-pub const TX_UNDO_GROUP: u16 = 37;
+pub(crate) const TX_UNDO_GROUP: u16 = 37;
 /// The three text-range records (docs/ranges-plan.md D6). Byte offsets
 /// on this channel; the core converts to the backend's unit before it
 /// lowers (docs/ranges-units.md §7).
-pub const TX_HIGHLIGHT_RANGES: u16 = 38;
-pub const TX_SELECT_RANGE: u16 = 39;
-pub const TX_REVEAL_RANGE: u16 = 40;
+pub(crate) const TX_HIGHLIGHT_RANGES: u16 = 38;
+pub(crate) const TX_SELECT_RANGE: u16 = 39;
+pub(crate) const TX_REVEAL_RANGE: u16 = 40;
 /// The save dialog's request (docs/save-plan.md D2). Its ANSWER is the
 /// picker's — a file_dialog_result carrying one file or none — because
 /// the two dialogs share one id space, one live slot and one result
 /// grammar.
-pub const TX_SHOW_SAVE_DIALOG: u16 = 41;
-pub const TX_SET_BRAND_ACCENT: u16 = 42;
+pub(crate) const TX_SHOW_SAVE_DIALOG: u16 = 41;
+pub(crate) const TX_SET_BRAND_ACCENT: u16 = 42;
 /// The brand typeface REQUEST (docs/styling-plan.md Slice 2b). Its
 /// per-platform pairs ride the wire where the accent's never do: a
 /// binding cannot resolve its platform (the JVM says "Linux" on
 /// Android) but a lowering IS its platform.
-pub const TX_SET_BRAND_TYPEFACE: u16 = 43;
+pub(crate) const TX_SET_BRAND_TYPEFACE: u16 = 43;
 /// The app's declared identity (docs/app-identity-plan.md). Uses the
 /// typeface's mask-plus-always-written-slot convention, so the two
 /// records decode the same way.
-pub const TX_SET_APP_IDENTITY: u16 = 44;
+pub(crate) const TX_SET_APP_IDENTITY: u16 = 44;
 /// The column header bar on a For's container: titles plus the sort
 /// indicator, one atomic declaration (docs/tables-plan.md).
-pub const TX_SET_COLUMN_HEADERS: u16 = 45;
+pub(crate) const TX_SET_COLUMN_HEADERS: u16 = 45;
 /// The whole drawing on a canvas, one atomic declaration
 /// (docs/canvas-plan.md §3.1).
-pub const TX_SET_DRAWING: u16 = 46;
+pub(crate) const TX_SET_DRAWING: u16 = 46;
 /// WHAT A CANVAS DOES WITH A TRACK BIGGER THAN ITS VIEWBOX
 /// (docs/canvas-plan.md §3.2.1).
-pub const TX_SET_SIZE_POLICY: u16 = 47;
-pub const TX_CREATE_BREAKPOINT: u16 = 48;
+pub(crate) const TX_SET_SIZE_POLICY: u16 = 47;
+pub(crate) const TX_CREATE_BREAKPOINT: u16 = 48;
 /// The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
 /// docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
 /// width. `compact` is the only class a binding can spell today.
@@ -99,123 +99,123 @@ pub const TX_CREATE_BREAKPOINT: u16 = 48;
 /// the core then derives the class from the width at
 /// SIZE_CLASS_COMPACT_BELOW; iOS reports its own class and the
 /// boundary is never consulted there.
-pub const SIZE_CLASS_NONE: u32 = 0;
-pub const SIZE_CLASS_COMPACT: u32 = 1;
-pub const SIZE_CLASS_REGULAR: u32 = 2;
+pub(crate) const SIZE_CLASS_NONE: u32 = 0;
+pub(crate) const SIZE_CLASS_COMPACT: u32 = 1;
+pub(crate) const SIZE_CLASS_REGULAR: u32 = 2;
 /// The kaya-owned boundary (Material's compact edge) for platforms
 /// that report no class of their own.
-pub const SIZE_CLASS_COMPACT_BELOW: f64 = 600.0;
+pub(crate) const SIZE_CLASS_COMPACT_BELOW: f64 = 600.0;
 /// `sorted`'s no-column sentinel (alert_choice's cancel precedent).
-pub const SORT_NONE: u32 = u32::MAX;
+pub(crate) const SORT_NONE: u32 = u32::MAX;
 /// `direction`'s two values, read only when `sorted` names a column.
-pub const SORT_ASC: u32 = 0;
-pub const SORT_DESC: u32 = 1;
+pub(crate) const SORT_ASC: u32 = 0;
+pub(crate) const SORT_DESC: u32 = 1;
 
 // Apply record kinds (core -> presentation pump).
-pub const APPLY_CREATE: u16 = 1;
-pub const APPLY_SET_PROP: u16 = 2;
-pub const APPLY_ADD_CHILD: u16 = 3;
-pub const APPLY_MOUNT: u16 = 4;
-pub const APPLY_DESTROY: u16 = 5;
-pub const APPLY_MOVE_CHILD: u16 = 6;
-pub const APPLY_COMMAND: u16 = 7;
-pub const APPLY_SET_WINDOW_PROP: u16 = 8;
-pub const APPLY_CREATE_WINDOW: u16 = 9;
-pub const APPLY_DESTROY_WINDOW: u16 = 10;
-pub const APPLY_PRESENT_ALERT: u16 = 11;
-pub const APPLY_PUSH_ENTRY: u16 = 12;
-pub const APPLY_POP_ENTRY: u16 = 13;
-pub const APPLY_SET_ENTRY_PROP: u16 = 14;
-pub const APPLY_ADD_SECTION: u16 = 15;
-pub const APPLY_SELECT_SECTION: u16 = 16;
-pub const APPLY_SET_SECTION_PROP: u16 = 17;
-pub const APPLY_MENU_ITEM_CREATE: u16 = 18;
-pub const APPLY_MENU_ITEM_APPEND: u16 = 19;
-pub const APPLY_MENUBAR_APPEND: u16 = 20;
-pub const APPLY_CONTEXT_ATTACH: u16 = 21;
-pub const APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
-pub const APPLY_SET_MENU_PROP: u16 = 23;
-pub const APPLY_PRESENT_FILE_DIALOG: u16 = 24;
-pub const APPLY_COPY: u16 = 25;
-pub const APPLY_READ_CLIPBOARD: u16 = 26;
+pub(crate) const APPLY_CREATE: u16 = 1;
+pub(crate) const APPLY_SET_PROP: u16 = 2;
+pub(crate) const APPLY_ADD_CHILD: u16 = 3;
+pub(crate) const APPLY_MOUNT: u16 = 4;
+pub(crate) const APPLY_DESTROY: u16 = 5;
+pub(crate) const APPLY_MOVE_CHILD: u16 = 6;
+pub(crate) const APPLY_COMMAND: u16 = 7;
+pub(crate) const APPLY_SET_WINDOW_PROP: u16 = 8;
+pub(crate) const APPLY_CREATE_WINDOW: u16 = 9;
+pub(crate) const APPLY_DESTROY_WINDOW: u16 = 10;
+pub(crate) const APPLY_PRESENT_ALERT: u16 = 11;
+pub(crate) const APPLY_PUSH_ENTRY: u16 = 12;
+pub(crate) const APPLY_POP_ENTRY: u16 = 13;
+pub(crate) const APPLY_SET_ENTRY_PROP: u16 = 14;
+pub(crate) const APPLY_ADD_SECTION: u16 = 15;
+pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
+pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
+pub(crate) const APPLY_MENU_ITEM_CREATE: u16 = 18;
+pub(crate) const APPLY_MENU_ITEM_APPEND: u16 = 19;
+pub(crate) const APPLY_MENUBAR_APPEND: u16 = 20;
+pub(crate) const APPLY_CONTEXT_ATTACH: u16 = 21;
+pub(crate) const APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
+pub(crate) const APPLY_SET_MENU_PROP: u16 = 23;
+pub(crate) const APPLY_PRESENT_FILE_DIALOG: u16 = 24;
+pub(crate) const APPLY_COPY: u16 = 25;
+pub(crate) const APPLY_READ_CLIPBOARD: u16 = 26;
 /// Reset the focused editable's NATIVE undo history in this window
 /// (docs/undo-plan.md A1). Targetless on purpose: the core does not know
 /// what is focused and never will — the backends do, and each already
 /// asks itself that question for role enablement.
-pub const APPLY_CLEAR_UNDO: u16 = 27;
+pub(crate) const APPLY_CLEAR_UNDO: u16 = 27;
 /// The three text-range records, apply side — NATIVE units.
-pub const APPLY_HIGHLIGHT_RANGES: u16 = 28;
-pub const APPLY_SELECT_RANGE: u16 = 29;
-pub const APPLY_REVEAL_RANGE: u16 = 30;
-pub const APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
-pub const APPLY_SET_BRAND: u16 = 32;
+pub(crate) const APPLY_HIGHLIGHT_RANGES: u16 = 28;
+pub(crate) const APPLY_SELECT_RANGE: u16 = 29;
+pub(crate) const APPLY_REVEAL_RANGE: u16 = 30;
+pub(crate) const APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
+pub(crate) const APPLY_SET_BRAND: u16 = 32;
 /// The brand typeface, unresolved: the request's body verbatim, because
 /// the LOWERING is what resolves a family name (Slice 2b).
-pub const APPLY_SET_TYPEFACE: u16 = 33;
+pub(crate) const APPLY_SET_TYPEFACE: u16 = 33;
 /// The app's identity, uninspected: the declaration's body verbatim,
 /// because the LOWERING is what decodes a picture (app-identity-plan I5).
-pub const APPLY_SET_APP_IDENTITY: u16 = 34;
+pub(crate) const APPLY_SET_APP_IDENTITY: u16 = 34;
 /// The header bar for the For's live container, with the core-minted
 /// sort tag appended after the titles — { u32 tag_len; bytes } — which
 /// the backend hands to kaya_emit_sort_requested verbatim on a header
 /// click, exactly as a button's click tag rides (a stamped copy's
 /// identity is a node id plus key path no backend can compute).
-pub const APPLY_SET_COLUMN_HEADERS: u16 = 35;
+pub(crate) const APPLY_SET_COLUMN_HEADERS: u16 = 35;
 
 /// The RASTER a canvas's declaration produced: premultiplied RGBA8
 /// device pixels the backend blits (docs/canvas-plan.md §1.1). No op
 /// crosses this channel.
-pub const APPLY_SET_DRAWING: u16 = 36;
+pub(crate) const APPLY_SET_DRAWING: u16 = 36;
 
 /// The stacked fold (docs/adaptive-layout-plan.md D7): { u64 child;
 /// u64 table } — render the child inside the grown table's viewport as
 /// scroll-away content above row 0; table 0 restores it. Core-derived
 /// from a stack_when row's own shape; no guest record spells it.
-pub const APPLY_FOLD: u16 = 37;
+pub(crate) const APPLY_FOLD: u16 = 37;
 
 // Value types.
-pub const VALUE_BOOL: u32 = 1;
-pub const VALUE_I64: u32 = 2;
-pub const VALUE_F64: u32 = 3;
-pub const VALUE_STR: u32 = 4;
-pub const VALUE_BLOB: u32 = 5;
+pub(crate) const VALUE_BOOL: u32 = 1;
+pub(crate) const VALUE_I64: u32 = 2;
+pub(crate) const VALUE_F64: u32 = 3;
+pub(crate) const VALUE_STR: u32 = 4;
+pub(crate) const VALUE_BLOB: u32 = 5;
 
 // Widget kinds.
-pub const KIND_COLUMN: u32 = 1;
-pub const KIND_BUTTON: u32 = 2;
-pub const KIND_LABEL: u32 = 3;
-pub const KIND_ENTRY: u32 = 4;
-pub const KIND_ROW: u32 = 5;
-pub const KIND_CHECKBOX: u32 = 6;
-pub const KIND_SLIDER: u32 = 7;
-pub const KIND_IMAGE: u32 = 8;
-pub const KIND_SCROLL: u32 = 9;
-pub const KIND_PROGRESS: u32 = 10;
-pub const KIND_SELECT: u32 = 11;
-pub const KIND_RADIO: u32 = 12;
-pub const KIND_GRID: u32 = 13;
-pub const KIND_TEXTAREA: u32 = 14;
-pub const KIND_CANVAS: u32 = 15;
+pub(crate) const KIND_COLUMN: u32 = 1;
+pub(crate) const KIND_BUTTON: u32 = 2;
+pub(crate) const KIND_LABEL: u32 = 3;
+pub(crate) const KIND_ENTRY: u32 = 4;
+pub(crate) const KIND_ROW: u32 = 5;
+pub(crate) const KIND_CHECKBOX: u32 = 6;
+pub(crate) const KIND_SLIDER: u32 = 7;
+pub(crate) const KIND_IMAGE: u32 = 8;
+pub(crate) const KIND_SCROLL: u32 = 9;
+pub(crate) const KIND_PROGRESS: u32 = 10;
+pub(crate) const KIND_SELECT: u32 = 11;
+pub(crate) const KIND_RADIO: u32 = 12;
+pub(crate) const KIND_GRID: u32 = 13;
+pub(crate) const KIND_TEXTAREA: u32 = 14;
+pub(crate) const KIND_CANVAS: u32 = 15;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
-pub const DRAW_MOVE_TO: i64 = 1;
-pub const DRAW_LINE_TO: i64 = 2;
-pub const DRAW_CLOSE: i64 = 3;
-pub const DRAW_STROKE: i64 = 4;
-pub const DRAW_FILL: i64 = 5;
-pub const DRAW_FONT: i64 = 6;
-pub const DRAW_TEXT: i64 = 7;
+pub(crate) const DRAW_MOVE_TO: i64 = 1;
+pub(crate) const DRAW_LINE_TO: i64 = 2;
+pub(crate) const DRAW_CLOSE: i64 = 3;
+pub(crate) const DRAW_STROKE: i64 = 4;
+pub(crate) const DRAW_FILL: i64 = 5;
+pub(crate) const DRAW_FONT: i64 = 6;
+pub(crate) const DRAW_TEXT: i64 = 7;
 
 // Paint roles (§3.4). Resolved in the core, per appearance.
-pub const PAINT_SERIES: i64 = 1;
-pub const PAINT_SERIES_FILL: i64 = 2;
-pub const PAINT_GRID: i64 = 3;
-pub const PAINT_AXIS: i64 = 4;
-pub const PAINT_GROUND: i64 = 5;
+pub(crate) const PAINT_SERIES: i64 = 1;
+pub(crate) const PAINT_SERIES_FILL: i64 = 2;
+pub(crate) const PAINT_GRID: i64 = 3;
+pub(crate) const PAINT_AXIS: i64 = 4;
+pub(crate) const PAINT_GROUND: i64 = 5;
 
-pub const FILL_NONZERO: i64 = 0;
-pub const FILL_EVEN_ODD: i64 = 1;
+pub(crate) const FILL_NONZERO: i64 = 0;
+pub(crate) const FILL_EVEN_ODD: i64 = 1;
 
 // The size policy (§3.2.1): what a canvas does when layout gives it a
 // track that is not its viewbox. `scale` is the default — the mode a
@@ -223,19 +223,19 @@ pub const FILL_EVEN_ODD: i64 = 1;
 // guest's declaration means: `fixed` is the one true property, `redraw`
 // is an on_draw handler, `tick` is an on_tick handler (redraw plus the
 // frame drive).
-pub const SIZE_POLICY_SCALE: u32 = 0;
-pub const SIZE_POLICY_FIXED: u32 = 1;
-pub const SIZE_POLICY_REDRAW: u32 = 2;
-pub const SIZE_POLICY_TICK: u32 = 3;
+pub(crate) const SIZE_POLICY_SCALE: u32 = 0;
+pub(crate) const SIZE_POLICY_FIXED: u32 = 1;
+pub(crate) const SIZE_POLICY_REDRAW: u32 = 2;
+pub(crate) const SIZE_POLICY_TICK: u32 = 3;
 
 // SVG's text-anchor and dominant-baseline.
-pub const TEXT_ALIGN_START: i64 = 0;
-pub const TEXT_ALIGN_MIDDLE: i64 = 1;
-pub const TEXT_ALIGN_END: i64 = 2;
-pub const TEXT_BASELINE_ALPHABETIC: i64 = 0;
-pub const TEXT_BASELINE_MIDDLE: i64 = 1;
-pub const TEXT_BASELINE_TOP: i64 = 2;
-pub const TEXT_BASELINE_BOTTOM: i64 = 3;
+pub(crate) const TEXT_ALIGN_START: i64 = 0;
+pub(crate) const TEXT_ALIGN_MIDDLE: i64 = 1;
+pub(crate) const TEXT_ALIGN_END: i64 = 2;
+pub(crate) const TEXT_BASELINE_ALPHABETIC: i64 = 0;
+pub(crate) const TEXT_BASELINE_MIDDLE: i64 = 1;
+pub(crate) const TEXT_BASELINE_TOP: i64 = 2;
+pub(crate) const TEXT_BASELINE_BOTTOM: i64 = 3;
 
 /// The (value, name) table for every draw opcode, paint role, fill rule,
 /// text align and text baseline — the second spelling of the five
@@ -245,7 +245,7 @@ pub const TEXT_BASELINE_BOTTOM: i64 = 3;
 /// `spec::tests::canvas_names_match_the_spec_enums`, and against the
 /// three hand-copied surfaces by tools/check-symbol-parity.sh —
 /// check-file-modes' hand-copied-numbers trap, one surface over.
-pub const DRAW_OPS: &[(i64, &str)] = &[
+pub(crate) const DRAW_OPS: &[(i64, &str)] = &[
     (DRAW_MOVE_TO, "move_to"),
     (DRAW_LINE_TO, "line_to"),
     (DRAW_CLOSE, "close"),
@@ -255,7 +255,7 @@ pub const DRAW_OPS: &[(i64, &str)] = &[
     (DRAW_TEXT, "text"),
 ];
 
-pub const PAINTS: &[(i64, &str)] = &[
+pub(crate) const PAINTS: &[(i64, &str)] = &[
     (PAINT_SERIES, "series"),
     (PAINT_SERIES_FILL, "series_fill"),
     (PAINT_GRID, "grid"),
@@ -263,25 +263,25 @@ pub const PAINTS: &[(i64, &str)] = &[
     (PAINT_GROUND, "ground"),
 ];
 
-pub const FILL_RULES: &[(i64, &str)] = &[(FILL_NONZERO, "nonzero"), (FILL_EVEN_ODD, "even_odd")];
+pub(crate) const FILL_RULES: &[(i64, &str)] = &[(FILL_NONZERO, "nonzero"), (FILL_EVEN_ODD, "even_odd")];
 
 /// The size policy's (value, name) table — the same second spelling the
 /// five draw vocabularies have, and read by the core's own refusal when
 /// a guest sends a number outside it.
-pub const SIZE_POLICIES: &[(i64, &str)] = &[
+pub(crate) const SIZE_POLICIES: &[(i64, &str)] = &[
     (SIZE_POLICY_SCALE as i64, "scale"),
     (SIZE_POLICY_FIXED as i64, "fixed"),
     (SIZE_POLICY_REDRAW as i64, "redraw"),
     (SIZE_POLICY_TICK as i64, "tick"),
 ];
 
-pub const TEXT_ALIGNS: &[(i64, &str)] = &[
+pub(crate) const TEXT_ALIGNS: &[(i64, &str)] = &[
     (TEXT_ALIGN_START, "start"),
     (TEXT_ALIGN_MIDDLE, "middle"),
     (TEXT_ALIGN_END, "end"),
 ];
 
-pub const TEXT_BASELINES: &[(i64, &str)] = &[
+pub(crate) const TEXT_BASELINES: &[(i64, &str)] = &[
     (TEXT_BASELINE_ALPHABETIC, "alphabetic"),
     (TEXT_BASELINE_MIDDLE, "middle"),
     (TEXT_BASELINE_TOP, "top"),
@@ -297,140 +297,140 @@ pub fn vocab_name(table: &[(i64, &'static str)], value: i64) -> Option<&'static 
 }
 
 // Property keys.
-pub const PROP_TEXT: u32 = 1;
-pub const PROP_CHECKED: u32 = 2;
-pub const PROP_VALUE: u32 = 3;
-pub const PROP_MIN: u32 = 4;
-pub const PROP_MAX: u32 = 5;
-pub const PROP_SOURCE: u32 = 6;
-pub const PROP_GROW: u32 = 7;
-pub const PROP_SPACING: u32 = 8;
-pub const PROP_ALIGN: u32 = 9;
-pub const PROP_INDETERMINATE: u32 = 10;
-pub const PROP_COLUMNS: u32 = 11;
+pub(crate) const PROP_TEXT: u32 = 1;
+pub(crate) const PROP_CHECKED: u32 = 2;
+pub(crate) const PROP_VALUE: u32 = 3;
+pub(crate) const PROP_MIN: u32 = 4;
+pub(crate) const PROP_MAX: u32 = 5;
+pub(crate) const PROP_SOURCE: u32 = 6;
+pub(crate) const PROP_GROW: u32 = 7;
+pub(crate) const PROP_SPACING: u32 = 8;
+pub(crate) const PROP_ALIGN: u32 = 9;
+pub(crate) const PROP_INDETERMINATE: u32 = 10;
+pub(crate) const PROP_COLUMNS: u32 = 11;
 /// The accessibility identifier (never spoken) and label (spoken).
-pub const PROP_A11Y_ID: u32 = 12;
-pub const PROP_A11Y_LABEL: u32 = 13;
-pub const PROP_A11Y_HINT: u32 = 14;
+pub(crate) const PROP_A11Y_ID: u32 = 12;
+pub(crate) const PROP_A11Y_LABEL: u32 = 13;
+pub(crate) const PROP_A11Y_HINT: u32 = 14;
 /// Which clip representations a widget accepts, a mask over the `clip`
 /// enum (docs/clipboard-plan.md §0). Per-widget because whether Paste
 /// is live is the intersection of what the clipboard offers and what
 /// the focused target takes.
-pub const PROP_ACCEPTS: u32 = 15;
-pub const PROP_ROLE: u32 = 16;
+pub(crate) const PROP_ACCEPTS: u32 = 15;
+pub(crate) const PROP_ROLE: u32 = 16;
 /// A container's own padding (the window inset one level down): DIP
 /// between its bounds and its children, uniform all sides. Layout,
 /// carried by the spacing kinds.
-pub const PROP_INSET: u32 = 17;
-pub const PROP_AXIS: u32 = 18;
+pub(crate) const PROP_INSET: u32 = 17;
+pub(crate) const PROP_AXIS: u32 = 18;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
 /// both ride as a mask. The canonical order richest-first is files,
 /// image, html, text — kaya defines it once rather than leaving each
 /// app to get the wire's preference order right.
-pub const CLIP_TEXT: u32 = 1;
-pub const CLIP_HTML: u32 = 2;
-pub const CLIP_IMAGE: u32 = 4;
-pub const CLIP_FILES: u32 = 8;
-pub const CLIP_CUSTOM: u32 = 16;
+pub(crate) const CLIP_TEXT: u32 = 1;
+pub(crate) const CLIP_HTML: u32 = 2;
+pub(crate) const CLIP_IMAGE: u32 = 4;
+pub(crate) const CLIP_FILES: u32 = 8;
+pub(crate) const CLIP_CUSTOM: u32 = 16;
 
 /// Window property ids (spec::WINDOW_PROPS) — their own namespace;
 /// windows are not widgets.
-pub const WPROP_TITLE: u32 = 1;
-pub const WPROP_WIDTH: u32 = 2;
-pub const WPROP_HEIGHT: u32 = 3;
-pub const WPROP_VETO_CLOSE: u32 = 4;
-pub const WPROP_SECTIONS_PRESENTATION: u32 = 5;
-pub const WPROP_PANES: u32 = 6;
-pub const WPROP_DIRTY: u32 = 7;
-pub const WPROP_INSET: u32 = 8;
+pub(crate) const WPROP_TITLE: u32 = 1;
+pub(crate) const WPROP_WIDTH: u32 = 2;
+pub(crate) const WPROP_HEIGHT: u32 = 3;
+pub(crate) const WPROP_VETO_CLOSE: u32 = 4;
+pub(crate) const WPROP_SECTIONS_PRESENTATION: u32 = 5;
+pub(crate) const WPROP_PANES: u32 = 6;
+pub(crate) const WPROP_DIRTY: u32 = 7;
+pub(crate) const WPROP_INSET: u32 = 8;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
-pub const SPROP_TITLE: u32 = 1;
-pub const SPROP_ICON: u32 = 2;
-pub const SPROP_SYMBOL: u32 = 3;
+pub(crate) const SPROP_TITLE: u32 = 1;
+pub(crate) const SPROP_ICON: u32 = 2;
+pub(crate) const SPROP_SYMBOL: u32 = 3;
 
 /// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
 /// and `radio_group` are the grouping nodes.
-pub const MENU_KIND_MENU: u32 = 1;
-pub const MENU_KIND_ACTION: u32 = 2;
-pub const MENU_KIND_TOGGLE: u32 = 3;
-pub const MENU_KIND_RADIO_GROUP: u32 = 4;
-pub const MENU_KIND_RADIO_OPTION: u32 = 5;
-pub const MENU_KIND_SEPARATOR: u32 = 6;
+pub(crate) const MENU_KIND_MENU: u32 = 1;
+pub(crate) const MENU_KIND_ACTION: u32 = 2;
+pub(crate) const MENU_KIND_TOGGLE: u32 = 3;
+pub(crate) const MENU_KIND_RADIO_GROUP: u32 = 4;
+pub(crate) const MENU_KIND_RADIO_OPTION: u32 = 5;
+pub(crate) const MENU_KIND_SEPARATOR: u32 = 6;
 
 /// Menu property ids (spec::MENU_PROPS) — their own typed surface
 /// table, separate from widget/window/entry/section props.
-pub const MPROP_LABEL: u32 = 1;
-pub const MPROP_ENABLED: u32 = 2;
-pub const MPROP_CHECKED: u32 = 3;
-pub const MPROP_VALUE: u32 = 4;
-pub const MPROP_ICON: u32 = 5;
-pub const MPROP_PRIMARY: u32 = 6;
-pub const MPROP_SHORTCUT: u32 = 7;
-pub const MPROP_ROLE: u32 = 8;
-pub const MPROP_SYMBOL: u32 = 9;
+pub(crate) const MPROP_LABEL: u32 = 1;
+pub(crate) const MPROP_ENABLED: u32 = 2;
+pub(crate) const MPROP_CHECKED: u32 = 3;
+pub(crate) const MPROP_VALUE: u32 = 4;
+pub(crate) const MPROP_ICON: u32 = 5;
+pub(crate) const MPROP_PRIMARY: u32 = 6;
+pub(crate) const MPROP_SHORTCUT: u32 = 7;
+pub(crate) const MPROP_ROLE: u32 = 8;
+pub(crate) const MPROP_SYMBOL: u32 = 9;
 
 /// The sections_presentation enum's wire values (spec enum
 /// "sections_presentation"): ADVISORY, the width/height precedent.
-pub const SECTIONS_PRESENTATION_AUTO: u32 = 0;
-pub const SECTIONS_PRESENTATION_BAR: u32 = 1;
-pub const SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
+pub(crate) const SECTIONS_PRESENTATION_AUTO: u32 = 0;
+pub(crate) const SECTIONS_PRESENTATION_BAR: u32 = 1;
+pub(crate) const SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
 
 /// The panes enum's wire values (spec enum "panes"): the declared
 /// ceiling on side-by-side stack entries. VALUES ARE THE COUNTS
 /// THEMSELVES (alert_choice's index precedent) — 0 is deliberately
 /// unassigned so an unset default cannot alias a legal ceiling.
-pub const PANES_ONE: u32 = 1;
-pub const PANES_TWO: u32 = 2;
-pub const PANES_THREE: u32 = 3;
+pub(crate) const PANES_ONE: u32 = 1;
+pub(crate) const PANES_TWO: u32 = 2;
+pub(crate) const PANES_THREE: u32 = 3;
 
 /// Navigation-entry property ids (spec::ENTRY_PROPS) — their own
 /// typed table, not WINDOW_PROPS with applicability checks (see
 /// DESIGN.md, Navigation).
-pub const EPROP_TITLE: u32 = 1;
-pub const EPROP_INTERCEPT_BACK: u32 = 2;
+pub(crate) const EPROP_TITLE: u32 = 1;
+pub(crate) const EPROP_INTERCEPT_BACK: u32 = 2;
 
 /// The alert_choice enum's wire values (spec enum "alert_choice"):
 /// action indices, and the deliberately-not-an-index cancel sentinel
 /// every platform-native dismissal resolves to.
-pub const ALERT_CHOICE_ACTION0: u32 = 0;
-pub const ALERT_CHOICE_ACTION1: u32 = 1;
-pub const ALERT_CHOICE_CANCEL: u32 = u32::MAX;
+pub(crate) const ALERT_CHOICE_ACTION0: u32 = 0;
+pub(crate) const ALERT_CHOICE_ACTION1: u32 = 1;
+pub(crate) const ALERT_CHOICE_CANCEL: u32 = u32::MAX;
 
 /// What kaya_open_picked opens a handle for (spec enum "file_mode").
 /// Three modes cover every platform; writability is DISCOVERABLE but
 /// never REQUESTABLE, so the open is fallible in ways the pick is not.
-pub const FILE_MODE_READ: u32 = 0;
-pub const FILE_MODE_WRITE: u32 = 1;
-pub const FILE_MODE_READ_WRITE: u32 = 2;
+pub(crate) const FILE_MODE_READ: u32 = 0;
+pub(crate) const FILE_MODE_WRITE: u32 = 1;
+pub(crate) const FILE_MODE_READ_WRITE: u32 = 2;
 
 /// The align enum's wire values (spec enum "align").
 // The arrangement axis (docs/adaptive-layout-plan.md D1).
-pub const AXIS_HORIZONTAL: u32 = 0;
-pub const AXIS_VERTICAL: u32 = 1;
-pub const ALIGN_START: u32 = 0;
-pub const ALIGN_CENTER: u32 = 1;
-pub const ALIGN_END: u32 = 2;
-pub const ALIGN_STRETCH: u32 = 3;
-pub const ALIGN_BASELINE: u32 = 4;
+pub(crate) const AXIS_HORIZONTAL: u32 = 0;
+pub(crate) const AXIS_VERTICAL: u32 = 1;
+pub(crate) const ALIGN_START: u32 = 0;
+pub(crate) const ALIGN_CENTER: u32 = 1;
+pub(crate) const ALIGN_END: u32 = 2;
+pub(crate) const ALIGN_STRETCH: u32 = 3;
+pub(crate) const ALIGN_BASELINE: u32 = 4;
 
 /// Which platform a per-platform brand value is for (spec enum
 /// "platform"). ONE ENTRY PER BACKEND ROSTER ROW, not per operating
 /// system: the roster is what reads these, so a tag no backend serves
 /// would be a value no lowering could pick.
-pub const PLATFORM_MAC: u32 = 1;
-pub const PLATFORM_IOS: u32 = 2;
-pub const PLATFORM_LINUX: u32 = 3;
-pub const PLATFORM_WINDOWS: u32 = 4;
-pub const PLATFORM_ANDROID: u32 = 5;
+pub(crate) const PLATFORM_MAC: u32 = 1;
+pub(crate) const PLATFORM_IOS: u32 = 2;
+pub(crate) const PLATFORM_LINUX: u32 = 3;
+pub(crate) const PLATFORM_WINDOWS: u32 = 4;
+pub(crate) const PLATFORM_ANDROID: u32 = 5;
 
 /// The platform vocabulary as one table, in wire order: `(id, name)`.
 /// The NAME is what the root's wall prints, so the sentence comes from
 /// the same place the values do.
-pub const PLATFORMS: &[(u32, &str)] = &[
+pub(crate) const PLATFORMS: &[(u32, &str)] = &[
     (PLATFORM_MAC, "mac"),
     (PLATFORM_IOS, "ios"),
     (PLATFORM_LINUX, "linux"),
@@ -488,39 +488,39 @@ pub fn platform_name(tag: i64) -> Option<&'static str> {
         .and_then(|t| PLATFORMS.iter().find(|(id, _)| *id == t).map(|(_, n)| *n))
 }
 
-pub const ROLE_DESTRUCTIVE: u32 = 1;
-pub const ROLE_PROMINENT: u32 = 2;
-pub const ROLE_HEADING: u32 = 3;
-pub const ROLE_CAPTION: u32 = 4;
+pub(crate) const ROLE_DESTRUCTIVE: u32 = 1;
+pub(crate) const ROLE_PROMINENT: u32 = 2;
+pub(crate) const ROLE_HEADING: u32 = 3;
+pub(crate) const ROLE_CAPTION: u32 = 4;
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
 /// per-platform glyph table on these numbers.
-pub const SYMBOL_ADD: u32 = 1;
-pub const SYMBOL_REMOVE: u32 = 2;
-pub const SYMBOL_DELETE: u32 = 3;
-pub const SYMBOL_EDIT: u32 = 4;
-pub const SYMBOL_DONE: u32 = 5;
-pub const SYMBOL_CLOSE: u32 = 6;
-pub const SYMBOL_SEARCH: u32 = 7;
-pub const SYMBOL_SETTINGS: u32 = 8;
-pub const SYMBOL_REFRESH: u32 = 9;
-pub const SYMBOL_INFO: u32 = 10;
-pub const SYMBOL_WARNING: u32 = 11;
-pub const SYMBOL_BACK: u32 = 12;
-pub const SYMBOL_FORWARD: u32 = 13;
-pub const SYMBOL_MORE: u32 = 14;
-pub const SYMBOL_COPY: u32 = 15;
-pub const SYMBOL_PASTE: u32 = 16;
-pub const SYMBOL_STAR: u32 = 17;
-pub const SYMBOL_LOCK: u32 = 18;
-pub const SYMBOL_PERSON: u32 = 19;
-pub const SYMBOL_HOME: u32 = 20;
+pub(crate) const SYMBOL_ADD: u32 = 1;
+pub(crate) const SYMBOL_REMOVE: u32 = 2;
+pub(crate) const SYMBOL_DELETE: u32 = 3;
+pub(crate) const SYMBOL_EDIT: u32 = 4;
+pub(crate) const SYMBOL_DONE: u32 = 5;
+pub(crate) const SYMBOL_CLOSE: u32 = 6;
+pub(crate) const SYMBOL_SEARCH: u32 = 7;
+pub(crate) const SYMBOL_SETTINGS: u32 = 8;
+pub(crate) const SYMBOL_REFRESH: u32 = 9;
+pub(crate) const SYMBOL_INFO: u32 = 10;
+pub(crate) const SYMBOL_WARNING: u32 = 11;
+pub(crate) const SYMBOL_BACK: u32 = 12;
+pub(crate) const SYMBOL_FORWARD: u32 = 13;
+pub(crate) const SYMBOL_MORE: u32 = 14;
+pub(crate) const SYMBOL_COPY: u32 = 15;
+pub(crate) const SYMBOL_PASTE: u32 = 16;
+pub(crate) const SYMBOL_STAR: u32 = 17;
+pub(crate) const SYMBOL_LOCK: u32 = 18;
+pub(crate) const SYMBOL_PERSON: u32 = 19;
+pub(crate) const SYMBOL_HOME: u32 = 20;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
 /// never a per-backend glyph string.
-pub const SYMBOLS: &[(u32, &str)] = &[
+pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_ADD, "add"),
     (SYMBOL_REMOVE, "remove"),
     (SYMBOL_DELETE, "delete"),
@@ -553,13 +553,13 @@ pub fn symbol_name(value: i64) -> Option<&'static str> {
 }
 
 // set_property sources.
-pub const SOURCE_CONST: u32 = 0;
-pub const SOURCE_SIGNAL: u32 = 1;
-pub const SOURCE_ELEMENT: u32 = 2;
+pub(crate) const SOURCE_CONST: u32 = 0;
+pub(crate) const SOURCE_SIGNAL: u32 = 1;
+pub(crate) const SOURCE_ELEMENT: u32 = 2;
 
 // One-shot commands.
-pub const COMMAND_CLEAR: u32 = 1;
-pub const COMMAND_FOCUS: u32 = 2;
+pub(crate) const COMMAND_CLEAR: u32 = 1;
+pub(crate) const COMMAND_FOCUS: u32 = 2;
 
 fn pad8(n: usize) -> usize {
     (n + 7) & !7
@@ -1758,7 +1758,7 @@ pub(crate) fn pasted_body(tag: &[u8], clip: &crate::protocol::Representation) ->
 /// The four closed kinds, by the names an accept list spells them —
 /// the same names the `clip` enum uses, so there is one vocabulary and
 /// not a wire spelling beside a guest spelling.
-pub const CLIP_NAMES: &[(&str, u32)] = &[
+pub(crate) const CLIP_NAMES: &[(&str, u32)] = &[
     ("text", CLIP_TEXT),
     ("html", CLIP_HTML),
     ("image", CLIP_IMAGE),
