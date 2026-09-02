@@ -37,6 +37,7 @@ import base64
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import signal
@@ -111,6 +112,26 @@ if run(["xcrun", "simctl", "help"], stdout=subprocess.DEVNULL,
 
 TARGET_DIR = ROOT / "target/aarch64-apple-ios-sim/debug"
 BUNDLES = ROOT / "target/ios-bundles"
+# THE RESIDENT XCUITEST DRIVER (tools/ios/xcuidrive/KayaDrive.swift says
+# what it is and why it is a test): built once per run into BUNDLES,
+# started once per pool device right after the boot, proven before the
+# first leg by xcuidrive_proof, stopped in cleanup.
+XCUIDRIVE_SRC = ROOT / "tools/ios/xcuidrive"
+XCUIDRIVE_BUILD = ROOT / "target/ios-xcuidrive"
+# NOT under dev.kaya.: device preparation uninstalls every dev.kaya. app
+# and refuses any that remains, and the driver is installed by xcodebuild
+# while that runs (measured 2026-09-02, the first run of this driver).
+XCUIDRIVE_RUNNER_ID = "dev.kayalane.drive.runner"
+# OPT-IN. An XCUITest session and simdrive both drive the simulator's
+# accessibility, and they conflict: a driver bootstrapping during
+# admission broke simdrive's reads on every phone (measured
+# 2026-09-02, docs/traps.md). So the driver runs only under this flag,
+# and then in ISOLATION — after admission, before any pooled
+# simdrive leg — proving itself and stopping. The default matrix path
+# is byte-identical to before. The iOS drag arm that needs the driver
+# live during legs must sequence those legs away from simdrive ones
+# (docs/dnd-plan.md §5).
+XCUIDRIVE = bool(os.environ.get("KAYA_IOS_XCUIDRIVE"))
 IOS_MIN = "16.0"
 os.chdir(ROOT)
 
@@ -1522,6 +1543,315 @@ def pull_container_files(udid, bundle_id, name, log):
               f"({dest.stat().st_size} bytes)", file=log)
 
 
+# ------------------------------------------------------ the xcui driver
+_drive_procs = {}
+_drive_threads = []
+_drive_results = {}
+
+
+def _plist_write(path, value):
+    with open(path, "wb") as f:
+        plistlib.dump(value, f)
+
+
+def xcuidrive_build():
+    """The test bundle, its runner and the stub target app, by hand: a
+    .xctest is a dylib plus an Info.plist, XCTRunner.app is shipped in
+    the platform's Agents dir as a template, and xcodebuild's
+    test-without-building takes an xctestrun that names them
+    (`man 5 xcodebuild.xctestrun`) — no project anywhere. The Swift
+    overlay for XCTest lives in the platform's usr/lib, which is why
+    the -I/-L pair is there; Testing.framework needs lib_TestingInterop
+    beside it or the runner dies at load (measured 2026-09-02)."""
+    plat = out_of(["xcrun", "-sdk", "iphonesimulator",
+                   "--show-sdk-platform-path"]).strip()
+    dev = pathlib.Path(plat) / "Developer"
+    build = XCUIDRIVE_BUILD
+    shutil.rmtree(build, ignore_errors=True)
+    xctest = build / "KayaDrive.xctest"
+    xctest.mkdir(parents=True)
+    if run(["xcrun", "-sdk", "iphonesimulator", "swiftc", "-target",
+            "arm64-apple-ios17.0-simulator", "-parse-as-library",
+            "-emit-library", "-module-name", "KayaDrive",
+            "-F", str(dev / "Library/Frameworks"),
+            "-F", str(dev / "Library/PrivateFrameworks"),
+            "-I", str(dev / "usr/lib"), "-L", str(dev / "usr/lib"),
+            "-lXCTestSwiftSupport", "-framework", "XCTest",
+            "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",
+            "-Xlinker", "-rpath", "-Xlinker", "@loader_path/Frameworks",
+            "-o", str(xctest / "KayaDrive"),
+            str(XCUIDRIVE_SRC / "KayaDrive.swift")]).returncode != 0:
+        return "the xcui driver did not compile (tools/ios/xcuidrive)"
+    _plist_write(xctest / "Info.plist", {
+        "CFBundleDevelopmentRegion": "en", "CFBundleExecutable": "KayaDrive",
+        "CFBundleIdentifier": "dev.kayalane.drive",
+        "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "KayaDrive",
+        "CFBundlePackageType": "BNDL", "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": "1", "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
+        "DTPlatformName": "iphonesimulator", "MinimumOSVersion": "17.0",
+        "XCTContainsUITests": True})
+    target = build / "KayaDriveTarget.app"
+    target.mkdir()
+    if run(["xcrun", "-sdk", "iphonesimulator", "swiftc", "-target",
+            "arm64-apple-ios17.0-simulator", "-parse-as-library",
+            "-framework", "UIKit", "-o", str(target / "KayaDriveTarget"),
+            str(XCUIDRIVE_SRC / "Target.swift")]).returncode != 0:
+        return "the xcui driver's target app did not compile"
+    _plist_write(target / "Info.plist", {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleExecutable": "KayaDriveTarget",
+        "CFBundleIdentifier": "dev.kayalane.drive.target",
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "KayaDriveTarget", "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": "1.0", "CFBundleVersion": "1",
+        "CFBundleSupportedPlatforms": ["iPhoneSimulator"],
+        "DTPlatformName": "iphonesimulator", "LSRequiresIPhoneOS": True,
+        "MinimumOSVersion": "17.0", "UIDeviceFamily": [1, 2]})
+    runner = build / "KayaDrive-Runner.app"
+    shutil.copytree(dev / "Library/Xcode/Agents/XCTRunner.app", runner,
+                    symlinks=True)
+    (runner / "XCTRunner").rename(runner / "KayaDrive-Runner")
+    info = plistlib.loads((runner / "Info.plist").read_bytes())
+    info.update(CFBundleExecutable="KayaDrive-Runner",
+                CFBundleIdentifier=XCUIDRIVE_RUNNER_ID,
+                CFBundleName="KayaDrive-Runner")
+    _plist_write(runner / "Info.plist", info)
+    shutil.copytree(xctest, runner / "PlugIns/KayaDrive.xctest")
+    fw = runner / "Frameworks"
+    fw.mkdir()
+    # The whole Testing stack, not a hand-picked few: libXCTestSwiftSupport
+    # reexports XCTest and links Testing and _Testing_Foundation, Testing
+    # links lib_TestingInterop, and a member missing from THIS bundle is
+    # resolved from the runtime root by luck on some devices and not
+    # others — a driver that loaded standalone died in the pool
+    # (measured 2026-09-02). Copying the family closes that.
+    for name in ("XCTest", "XCUIAutomation", "Testing",
+                 "_Testing_Foundation", "_Testing_CoreGraphics",
+                 "_Testing_CoreImage", "_Testing_UIKit"):
+        shutil.copytree(dev / f"Library/Frameworks/{name}.framework",
+                        fw / f"{name}.framework", symlinks=True)
+    for name in ("XCTestCore", "XCTestSupport", "XCTAutomationSupport"):
+        shutil.copytree(dev / f"Library/PrivateFrameworks/{name}.framework",
+                        fw / f"{name}.framework", symlinks=True)
+    for lib in ("libXCTestSwiftSupport.dylib", "libXCTestBundleInject.dylib",
+                "lib_TestingInterop.dylib"):
+        shutil.copy2(dev / "usr/lib" / lib, fw / lib)
+    for argv in (["codesign", "--force", "--sign", "-",
+                  str(runner / "PlugIns/KayaDrive.xctest")],
+                 ["codesign", "--force", "--sign", "-", "--entitlements",
+                  str(runner / "RunnerEntitlements.plist"), str(runner)],
+                 ["codesign", "--force", "--sign", "-", str(target)]):
+        if run(argv, stdout=subprocess.DEVNULL,
+               stderr=subprocess.DEVNULL).returncode != 0:
+            return f"codesign failed: {' '.join(argv)}"
+    return ""
+
+
+def xcuidrive_start(udid):
+    """One resident driver on one device: its own request dir, its own
+    xctestrun, one xcodebuild. Ready when the test's loop has written
+    `ready`; a driver that never gets there fails the LANE at prep_join,
+    since a lane whose hands are missing must not run legs that assume
+    them."""
+    d = DRIVE_DIR / udid
+    d.mkdir(parents=True, exist_ok=True)
+    testrun = XCUIDRIVE_BUILD / f"kayadrive-{udid}.xctestrun"
+    _plist_write(testrun, {"KayaDrive": {
+        "TestBundlePath": "__TESTHOST__/PlugIns/KayaDrive.xctest",
+        "TestHostPath": "__TESTROOT__/KayaDrive-Runner.app",
+        "TestHostBundleIdentifier": XCUIDRIVE_RUNNER_ID,
+        "UITargetAppPath": "__TESTROOT__/KayaDriveTarget.app",
+        "IsUITestBundle": True, "IsXCTRunnerHostedTestBundle": True,
+        "ProductModuleName": "KayaDrive",
+        "TestingEnvironmentVariables": {
+            "DYLD_FRAMEWORK_PATH": "__TESTROOT__/KayaDrive-Runner.app/Frameworks",
+            "DYLD_LIBRARY_PATH": "__TESTROOT__/KayaDrive-Runner.app/Frameworks",
+            "KAYA_DRIVE_DIR": str(d)},
+        "DependentProductPaths": ["__TESTROOT__/KayaDrive-Runner.app",
+                                  "__TESTROOT__/KayaDriveTarget.app"],
+        "SystemAttachmentLifetime": "deleteOnSuccess",
+        "UserAttachmentLifetime": "deleteOnSuccess"}})
+    # xcodebuild reads SDKROOT, and the dev shell's names a nix macOS SDK.
+    env = {k: v for k, v in os.environ.items() if k != "SDKROOT"}
+    with open(d / "xcodebuild.log", "w", encoding="utf-8") as log:
+        proc = subprocess.Popen(
+            ["xcodebuild", "test-without-building", "-xctestrun",
+             str(testrun), "-destination",
+             f"platform=iOS Simulator,id={udid}", "-resultBundlePath",
+             str(d / "result.xcresult")],
+            stdout=log, stderr=subprocess.STDOUT, env=env)
+    _drive_procs[udid] = proc
+    started = time.monotonic()
+    while not (d / "ready").is_file():
+        if proc.poll() is not None or time.monotonic() - started > 150:
+            tail = (d / "xcodebuild.log").read_text(
+                encoding="utf-8", errors="replace").splitlines()[-25:]
+            _drive_results[udid] = (
+                f"xcodebuild exit={proc.poll()} after "
+                f"{int(time.monotonic() - started)}s with no ready file; "
+                "last lines:\n" + "\n".join(tail))
+            return
+        time.sleep(0.2)
+    _drive_results[udid] = f"ready in {int(time.monotonic() - started)}s"
+
+
+def xcuidrive_selfcheck(app, bundle_id):
+    """Build the driver, start ONE on UDIDS[0], prove it with a real tap
+    on kaya's `step` button, and stop it — all SERIAL and in isolation,
+    with no pooled leg in flight, so its XCUITest session never overlaps
+    a simdrive one. Runs only under KAYA_IOS_XCUIDRIVE; a failure fails
+    the lane, since a driver that cannot serve is worth nothing to the
+    arm that will use it."""
+    err = xcuidrive_build()
+    if err:
+        die(f"run-sim: {err}")
+    udid = UDIDS[0]
+    xcuidrive_start(udid)
+    got = _drive_results.get(udid, "never started")
+    print(f"run-sim: xcui driver selfcheck on {udid}: {got}",
+          file=sys.stderr, flush=True)
+    ok = got.startswith("ready in")
+    if ok:
+        with open(LEGS_DIR / "xcuidrive-proof.log", "w", encoding="utf-8",
+                  buffering=1) as log:
+            ok = xcuidrive_proof(udid, log, app, bundle_id)
+            print((LEGS_DIR / "xcuidrive-proof.log").read_text(
+                encoding="utf-8", errors="replace"), file=sys.stderr,
+                flush=True)
+    xcuidrive_stop_all()
+    if not ok:
+        die("run-sim: the xcui driver selfcheck FAILED (KAYA_IOS_XCUIDRIVE)")
+    print("run-sim: xcui driver selfcheck PASSED", file=sys.stderr, flush=True)
+
+
+def xcuidrive(udid, verb, timeout=30):
+    """One verb to the device's driver: (ok, body)."""
+    d = DRIVE_DIR / udid
+    resp = d / "response"
+    resp.unlink(missing_ok=True)
+    part = d / "request.part"
+    part.write_text(verb + "\n", encoding="utf-8")
+    part.rename(d / "request")
+    started = time.monotonic()
+    while not resp.is_file():
+        proc = _drive_procs.get(udid)
+        if proc is not None and proc.poll() is not None:
+            return False, f"the driver on {udid} exited {proc.returncode}"
+        if time.monotonic() - started > timeout:
+            return False, f"no answer to `{verb}` within {timeout}s"
+        time.sleep(0.02)
+    lines = resp.read_text(encoding="utf-8").splitlines()
+    resp.unlink(missing_ok=True)
+    return bool(lines) and lines[0] == "ok", "\n".join(lines[1:])
+
+
+def _frame_of(body):
+    x, y, w, h = (int(v) for v in body.split()[0].split(","))
+    return x, y, w, h
+
+
+def xcuidrive_proof(udid, log, app, bundle_id):
+    """A REAL TAP REACHES A REAL KAYA WIDGET AND THE MODEL REACTS, before
+    the first leg: the milestone2 guest's `step` button is found by its
+    label, tapped at its centre, and the two changes its handler makes —
+    the status label to `step 1` and the inserted `Work` group — are read
+    back, all through the platform's accessibility, none of it through
+    kaya's harness. The linux lane's dragprobe.py, on this lane's terms;
+    it was watched failing with the driver answering nothing (a dead
+    runner) and with the tap aimed off the button (the label never
+    changes). DRAG is not asserted here: a synthetic pan does not move
+    kaya's SwiftUI ScrollView (docs/traps.md, the same class as the
+    simdrive pan chore), and no draggable widget exists yet — the drag
+    verb is proven when the iOS drag arm lands (docs/dnd-plan.md §5)."""
+    run(["xcrun", "simctl", "install", udid, str(app)], stdout=log,
+        stderr=log)
+    run(["xcrun", "simctl", "terminate", udid, bundle_id],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # LIVE, not a self-test: no KAYA_SELFTEST, so the interpreter shows
+    # the scene and stays up for the driver to touch. The interpreter
+    # dylib is found by absolute path, exactly as a leg's launch does it
+    # (run_swiftui_on) — the default leaf-name dlopen does not search the
+    # bundle root, so an unset lib is an app that exits at once.
+    container = out_of(["xcrun", "simctl", "get_app_container", udid,
+                        bundle_id]).strip()
+    penv = dict(os.environ,
+                SIMCTL_CHILD_KAYA_SWIFTUI_LIB=f"{container}/libkaya_swiftui.dylib")
+    if run(["xcrun", "simctl", "launch", udid, bundle_id], stdout=log,
+           stderr=log, env=penv).returncode != 0:
+        print(f"xcuidrive-proof: {bundle_id} would not launch", file=log)
+        return False
+    try:
+        ok, body = xcuidrive(udid, f"attach {bundle_id}")
+        print(f"xcuidrive-proof: attach -> {ok} {body}", file=log)
+        if not ok:
+            return False
+        # The button, by label; retried, since the app was launched a
+        # moment ago.
+        button = None
+        for _ in range(50):
+            ok, body = xcuidrive(udid, "find step")
+            if ok:
+                button = _frame_of(body)
+                break
+            time.sleep(0.1)
+        print(f"xcuidrive-proof: step button -> {ok} {body}", file=log)
+        if not ok:
+            return False
+        bx, by, bw, bh = button
+        ok, body = xcuidrive(udid, f"tap {bx + bw // 2} {by + bh // 2}")
+        if not ok:
+            print(f"xcuidrive-proof: tap -> {body}", file=log)
+            return False
+        # The two model changes the click makes: the status label and the
+        # inserted group. Read back, retried for the transaction to apply.
+        for want in ("step 1", "Work"):
+            found = False
+            for _ in range(30):
+                ok, body = xcuidrive(udid, f"find {want}")
+                if ok:
+                    found = True
+                    break
+                time.sleep(0.1)
+            print(f"xcuidrive-proof: after the tap, find {want!r} -> "
+                  f"{ok} {body}", file=log)
+            if not found:
+                print(f"xcuidrive-proof: the tap did not reach the button "
+                      f"({want!r} never appeared)", file=log)
+                return False
+        print(f"xcuidrive-proof: TAP LANDED on {bundle_id} through the "
+              f"resident driver (status became `step 1`, `Work` inserted)",
+              file=log)
+        return True
+    finally:
+        run(["xcrun", "simctl", "terminate", udid, bundle_id],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def xcuidrive_stop_all():
+    """Every resident runner told to quit, then killed if it lingers,
+    then SHOWN gone: a leaked xcodebuild would sit on the pool device
+    into the next run."""
+    if not _drive_procs:
+        return
+    for udid, proc in _drive_procs.items():
+        if proc.poll() is None:
+            xcuidrive(udid, "quit", timeout=5)
+    deadline = time.monotonic() + 20
+    for udid, proc in _drive_procs.items():
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        run(["xcrun", "simctl", "terminate", udid, XCUIDRIVE_RUNNER_ID],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    left = subprocess.run(["pgrep", "-fl", "KayaDrive-Runner"],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                          check=False, **TEXT).stdout.strip()
+    print(f"run-sim: xcui drivers stopped ({len(_drive_procs)}); runner "
+          f"processes left: {left or 'none'}", file=sys.stderr, flush=True)
+    _drive_procs.clear()
+
+
 # ------------------------------------------------------------- the pool
 # Legs run in a pool as wide as the simulator pool: each claims a
 # device, runs against it, and reports through a verdict file; drain()
@@ -1530,6 +1860,7 @@ def pull_container_files(udid, bundle_id, name, log):
 # phone pool's saturation gate.
 LEGS_DIR = pathlib.Path(tempfile.mkdtemp())
 PREP_DIR = pathlib.Path(tempfile.mkdtemp())
+DRIVE_DIR = pathlib.Path(tempfile.mkdtemp())
 
 # THE FLIGHT RECORDER. This lane had none while it was the lane with
 # the intermittent legs, so every rerun erased the only evidence; the
@@ -1550,6 +1881,8 @@ status = 0
 
 
 def cleanup():
+    if XCUIDRIVE:
+        xcuidrive_stop_all()
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
     shutil.rmtree(PREP_DIR, ignore_errors=True)
@@ -1874,6 +2207,12 @@ if SUITE in ("swift", "all"):
                                      BUNDLES / f"{guest}swift-bin",
                                      ident))
         if guest == "milestone2":
+            if XCUIDRIVE:
+                # SERIAL and isolated: join admission, drain any queued
+                # leg, run the selfcheck alone, then resume queueing.
+                prep_join()
+                drain()
+                xcuidrive_selfcheck(app, "dev.kaya.milestone2swift")
             queue_scene_leg("swift", guest, "swift", app,
                             "dev.kaya.milestone2swift", "1", "milestone2")
         elif guest == "canvas":
@@ -1898,6 +2237,9 @@ if SUITE in ("swift", "all"):
 # NARROWER, and nothing enforces this: check-steps' wired() keys on
 # scene x runner and never on language, so any future divergence has to
 # be written down in the module.
+if XCUIDRIVE and SUITE not in ("swift", "all"):
+    print("run-sim: KAYA_IOS_XCUIDRIVE selfcheck rides the swift suite's "
+          "milestone2 bundle; this suite runs without it", file=sys.stderr)
 if SUITE in ("go", "all"):
     cargo_ios(["build", "--locked", "--target", "aarch64-apple-ios-sim",
                "--lib"])

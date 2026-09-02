@@ -1,0 +1,143 @@
+# XCUITest as the iOS lane's one driver — subsuming simdrive and clipctl
+
+Asked by the maintainer 2026-09-02 ("consider if XCUITest can end up
+subsuming simdrive"). This is the measured answer and the conversion
+plan. Nothing here is built beyond the driver and the probes; the
+conversion is a slice of its own, sequenced in §5.
+
+## §0 — What the lane has today, and why it is two tools
+
+- **tools/ios/simdrive** (Swift, host-side, one process per verb): reads
+  the simulator's accessibility tree and delivers HID taps through
+  SimulatorKit's PRIVATE frameworks (`SimDeviceLegacyHIDClient`, Indigo
+  messages hand-packed from idb's header). It exists because the
+  document picker is a remote view controller in another process, which
+  the in-app harness cannot read, and because the paste-permission alert
+  belongs to SpringBoard. Its verbs: `state`, `choose`, `cancel`,
+  `describe`, `navstrip`, `savestate`, `savename`, `savepress`,
+  `savecancel`, `press`, `swipe`. Its own comments record the cost of the
+  route: taps dropped under load with no error, so `choose` and
+  `savepress` walk and re-tap in rounds of six; `savename` sets AXValue
+  and reads it back because a set that routes nowhere is silent; a
+  private class "may have moved again in this Xcode"; and no pan reaches
+  the content at all (the 2026-08-30 chore).
+- **tools/ios/clipctl** (Swift, run INSIDE the simulator by `simctl
+  spawn`): the foreign clipboard principal — writes seeds, reads the
+  board, and is HELD ALIVE after a write because the pasteboard daemon
+  fetches item data from the setter lazily (a writer that exits leaves a
+  reader empty 1-in-5). Its foreign reads raise the paste prompt, which
+  the host answers through simdrive's `press Allow Paste`. Holding and
+  releasing those writers has its own machinery in run-sim.py
+  (`clip_seed`, `clip_release_holder`, a census at the verdict), born of
+  a process-group kill that wedged the pasteboard daemon.
+- The two meet the guest through ONE file protocol (`KayaSimdrive.ask`
+  in the interpreter, `simdrive_watch` on the host): a request file, a
+  response file whose first line is ok/err.
+
+## §1 — What XCUITest was measured to do (2026-09-02, iOS 26.5 sim, Xcode 26.6)
+
+The resident driver (tools/ios/xcuidrive, docs/traps.md's build recipe)
+attached to the LocalStorage export probe with its Files save sheet up,
+and to SpringBoard, and did each of these first try:
+
+| simdrive / clipctl today | XCUITest, measured |
+|---|---|
+| `describe` / `navstrip`: walk the picker's tree through the private AX bridge, per-attribute round trips | `app.debugDescription`: the whole remote picker in ONE snapshot — `FullDocumentManagerViewControllerNavigationBar`, the `Save` button, `More`, the back button `On My iPhone`, the `Search` field, `DOC.browsingRoot … Title: On My iPhone`, the `Browse View (Picker)` container. 121 lines. |
+| `savestate`: the name field's value | `find DOCPicker.filenameTextField` → its frame; `value` → `kaya-export-xcui-2`. The field has a stable identifier. |
+| `savename`: set AXValue, read back, retry the set up to five times | tap the field (it takes keyboard focus), `type` the name: the typing REPLACED the suggested value, and `value` read back exactly what was typed. No retry. |
+| `savepress`: find Save in the strip, tap, poll for the sheet gone, six rounds | `find Save` → tap its centre → the sheet left (`find Save` then fails) and the export probe wrote its result file. One tap. |
+| `press Allow Paste` on SpringBoard's pid (run-sim's `clip_press`) | `sb_find Allow Paste` on `XCUIApplication(bundleIdentifier: "com.apple.springboard")` → frame 44,462 288×48 → `sb_tap` → a parked clipctl read returned its content. |
+| clipctl `write` + a held writer process | `pb_write` from the driver: clipctl's `types` then reports `public.utf8-plain-text`. The driver IS a held writer — it never exits — so the seed/hold/release/census machinery has nothing to hold. |
+| clipctl `read` (parked on the prompt until the host presses Allow) | `pb_read`: the content read on a background queue with the main runloop pumped, the driver pressing `Allow Paste` on SpringBoard itself when it appears → `foreign-from-clipctl` (types `public.utf8-plain-text,dev.kaya/staged`); an own-content read returns with no prompt. |
+| `swipe` (no pan reaches the content) | `press(forDuration:thenDragTo:)` scrolled Settings 317pt. kaya's own SwiftUI ScrollView still ignores a synthetic pan (docs/traps.md) — the same on both routes. |
+| a tap on the app's own widget | `tap` at the `step` button's centre: kaya's handler ran (`step 1`, `Work` inserted). |
+
+Two things measured on the way, both in docs/traps.md: a per-element
+walk asking `isHittable` is a snapshot per element and wedged the driver
+(`debugDescription` is one snapshot); and a pasteboard content read on
+the test thread, or behind a semaphore, deadlocks because the reply
+rides the runner's main runloop.
+
+Latency, standalone on a calm host, from XCUITest's own action log: an
+existence check or `find` 20–50ms; a `tap` ~1.1s and a `drag` ~1.5s
+(XCUITest waits for the app to go idle after each touch); `attach`
+1–3s. A dialog verb that makes a few finds and one tap is therefore
+~1.5s; simdrive's is ~100ms when a tap lands and ~18–48s when it spends
+its six rounds.
+
+NOT measured yet: the OPEN picker (`state`/`choose`/`cancel` — rows as
+cells, `Open`/`Done` in the strip; the same mechanism as Save, but the
+filedialog legs must show it), the `type` verb's iOS route for kaya's
+own fields, and those latencies under a five-lane matrix.
+
+## §2 — The design
+
+ONE resident XCUITest driver per pool simulator, started at boot before
+admission and stopped at the end, the only accessibility client on the
+device — which is what dissolves the conflict the opt-in exists for
+(docs/traps.md: an XCUITest session and simdrive cannot share the
+bridge). It serves the SAME file protocol the guest already speaks:
+`simdrive_watch` routes each request to the device's driver instead of
+spawning simdrive, and `KayaSimdrive.ask` in the interpreter does not
+change. The verbs keep their names and their answer shapes (`state`
+prints the directory then one row per line; `savestate` the directory
+then the name; a failure names what the picker DID offer), so
+check-steps and the scenes are untouched.
+
+The clipboard crossings move into the driver too: `clip_seed` becomes a
+`pb_write` (the driver is the foreign principal AND the held writer),
+`clip_read` a `pb_read` that answers its own prompt, `clip_press`
+`sb_tap Allow Paste`, `types` the driver's. The design's foreignness is
+preserved: the runner is not the app, so the app's own reads still
+prompt and the seed is still attributed to another principal. What
+goes: clipctl, its build, `simctl spawn` per crossing, the holder
+processes and their census.
+
+## §3 — What it buys
+
+- No private frameworks: SimulatorKit's HID client and its hand-packed
+  Indigo messages, the class that "may have moved again", the AX bridge
+  round trips — all replaced by a supported API that Apple keeps working
+  across Xcode releases.
+- One driver, one session, no coexistence rule; the drag arm's real
+  touches and the dialog legs' taps come from the same hands.
+- Fewer rounds: the Save flow that needed six-round re-tap loops landed
+  once. (Under the matrix that may not hold; the rounds can stay as a
+  guard with a count that reads 1 when healthy.)
+- The pasteboard machinery collapses to three verbs in a process that
+  never exits.
+
+## §4 — Risks and what to measure
+
+- Latency under load: every find is an accessibility snapshot; the
+  dialog legs make tens per verb. Measure the leg times before and after
+  on the swift suite standalone and under the matrix.
+- The runner is a foreground app at start and after each guest exits;
+  a guest launched by `simctl launch` came forward over it every time
+  measured, but a leg that reads "the frontmost app" must never be one
+  the runner wins.
+- Memory: four resident runners (≈ a UIKit app each).
+- `type` semantics: XCUITest's typing goes through the keyboard, with
+  autocorrect; the picker's field took a hyphenated name verbatim, but
+  a kaya text field under the `type` verb must be measured the same way.
+- Device recovery: a lane that erases and reboots one device mid-run
+  must restart that device's driver (the opt-in code has no such path).
+
+## §5 — Conversion order, each step validated by its legs then a matrix
+
+0. Commit the opt-in driver as it stands (the checkpoint this plan
+   builds on).
+1. Resident from boot, one per device, started BEFORE admission; the
+   export probe's `savename`/`savepress` through the driver. Admission
+   is then the first consumer and the coexistence flag goes.
+2. The save legs: `savestate`/`savename`/`savepress`/`savecancel`
+   routed by `simdrive_watch` to the driver.
+3. The filedialog legs: `state`/`choose`/`cancel` — the open picker's
+   rows and confirm, measured first on one filedialog leg.
+4. The clipboard: `clip_press` → `sb_tap`; then `clip_seed`/`clip_read`/
+   `types` → `pb_write`/`pb_read`; retire the holder machinery and its
+   census.
+5. Delete simdrive and clipctl, their build steps and `built_tool`
+   entries; sweep the docs (`KEY:` on the ledger entry) and the gates'
+   censuses; the `swipe` verb goes with them.
+6. The drag arm (docs/dnd-plan.md §5) uses `drag` on the one driver.

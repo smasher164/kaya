@@ -6785,3 +6785,60 @@ protocol's injector onto a GTK drop target before the first leg, and it
 was watched failing twice on the way — under `/bin/true` and under a
 stub that replays the gesture through sway's IPC — printing `NO DROP on
 wayland within 10s; saw nothing; injector … exit 0` both times.
+
+## A synthetic pan does not move kaya's SwiftUI ScrollView, though it scrolls system apps (measured 2026-09-02)
+
+The resident XCUITest driver (tools/ios/xcuidrive) delivers real touches:
+an `XCUICoordinate.press(forDuration:thenDragTo:)` scrolled Settings'
+table 317pt and moved `General` off screen, and a `tap` reached kaya's
+own `step` button and its handler ran (the status label became `step 1`,
+the `Work` group appeared). But the SAME press-drag, and
+`XCUIElement.swipeUp()`, moved kaya's ScrollView not at all — the rows'
+accessibility frames were byte-identical before and after, run after
+run. This is the simdrive pan chore one route over (the 2026-08-30 entry:
+SimulatorKit's HID move stream is not read as a pan either): SwiftUI's
+ScrollView on the simulator ignores synthetic drags that a UIKit
+scroll view honours. So the iOS driver's PROOF asserts a tap, not a pan
+(tools/ios/run-sim.py, xcuidrive_proof), and the iOS drag arm, when it
+lands, must verify its OWN gesture reaches the drop interaction rather
+than assume a scroll pan works (docs/dnd-plan.md §5).
+
+## The XCUITest runner dies at load without the whole Testing framework family beside it (measured 2026-09-02)
+
+A hand-built `.xctest` in a copied `XCTRunner.app` needs more than
+XCTest/XCUIAutomation in its `Frameworks`: `libXCTestSwiftSupport.dylib`
+reexports XCTest and links `Testing.framework` and
+`_Testing_Foundation.framework`, and `Testing` links
+`lib_TestingInterop.dylib`. A member missing from the bundle is resolved
+from the simulator runtime root by luck on some devices and not others —
+the driver loaded standalone on one phone and died on another with
+`The bundle "KayaDrive" couldn't be loaded … _Testing_Foundation … no
+such file`. tools/ios/run-sim.py's `xcuidrive_build` copies the four
+`_Testing_*` frameworks, the three private XCTest frameworks and the
+three support dylibs; the runner's own rpaths (`/System/Developer`,
+`/Developer`) resolve into the runtime for everything else. Two more
+non-obvious pieces: the driver's bundle ids live OUTSIDE `dev.kaya.` (as
+`dev.kayalane.*`) because device preparation uninstalls every `dev.kaya.`
+app and the driver is installed by xcodebuild while that runs; and the
+proof launches its guest LIVE with `KAYA_SWIFTUI_LIB` set to the
+container dylib (a plain launch with no lib exits at once, since the
+default leaf-name `dlopen` does not search the bundle root).
+
+## An XCUITest per-element walk is a snapshot per element, and a pasteboard read on the test thread deadlocks (measured 2026-09-02)
+
+Two ways the resident driver (tools/ios/xcuidrive) wedged while it was
+being taught simdrive's verbs. A `describe` that iterated
+`descendants(matching: .any).allElementsBoundByIndex` asking each for
+`isHittable` never answered: every property read is an accessibility
+snapshot, so 300 elements were 300 snapshots of a remote picker.
+`app.debugDescription` is the whole tree in ONE snapshot — 121 lines for
+the Files save sheet — and is what `describe` prints now. And a
+`UIPasteboard.general.string` read of another principal's clip raised
+the paste-permission alert FOR THE RUNNER and blocked the test thread;
+moved to a background queue behind a semaphore it still never returned,
+even for the runner's own content, because the pasteboard's reply is
+delivered through the runner's MAIN RUNLOOP. The read runs on a queue
+now while the test thread pumps `RunLoop.current.run(until:)` and taps
+`Allow Paste` on SpringBoard when it appears; a foreign clip then reads
+back with `prompt=pressed`, an own clip with `prompt=none`
+(docs/xcuidrive-plan.md §1).

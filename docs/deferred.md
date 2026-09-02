@@ -10199,8 +10199,27 @@ container layout recorded". TWO consequences, one fixed and one held:
   windows leg wired (deploy-win's resize block, five languages).
   KEY: adaptive winui, axis-state pass, reindex vertical, depth stub adaptive
 
-## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30)
-KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion
+## PROPOSED — XCUITest as the iOS lane's one driver, subsuming simdrive and clipctl (asked 2026-09-02)
+KEY: xcuidrive, simdrive, clipctl, simdrive_watch, KayaSimdrive.ask, savename, savepress, clip_seed, clip_press, Allow Paste, xcuidrive-plan
+
+The maintainer asked whether XCUITest can end up subsuming simdrive.
+MEASURED YES, 2026-09-02, on the export probe's live Files sheet and on
+SpringBoard through the resident driver: the whole remote picker in one
+snapshot, the name field found by identifier and set by typing with a
+read-back, Save tapped once and the sheet gone, `Allow Paste` found and
+pressed on SpringBoard, and the pasteboard written and read (foreign
+clips included, the driver answering its own prompt) from a process
+that never exits — which is also the held writer clipctl's machinery
+exists to be. docs/xcuidrive-plan.md holds the table of measurements,
+the design (one resident driver per device, the SAME file protocol the
+guest speaks, `simdrive_watch` routing to it) and the six-step
+conversion order. Not yet measured: the OPEN picker's rows and confirm,
+the `type` verb on kaya's own fields, and latency under the matrix.
+Awaits the maintainer's go; the opt-in driver is the checkpoint it
+builds on.
+
+## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30) — the guaranteed path is BUILT and PROVEN STANDALONE 2026-09-02 (a resident XCUITest driver, tools/ios/xcuidrive: a real tap changed kaya's model, a real drag scrolled a system app), wired opt-in behind KAYA_IOS_XCUIDRIVE and its in-lane selfcheck green (the swift suite ALL PASS with it, 2026-09-02); kaya's SwiftUI ScrollView ignores a synthetic pan (docs/traps.md); stays open for the subsumption slice the entry above proposes
+KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion, xcuidrive, resident driver
 
 The maintainer asked for host-driven scrolling so visual checks need no
 human in the loop. What is MEASURED, so nobody re-derives it:
@@ -10225,12 +10244,26 @@ human in the loop. What is MEASURED, so nobody re-derives it:
   dx/dy-first, phase sequences 1/2…/3 in the first int. The missing
   ingredient is unknown; possibly a display/source id or a runtime gate.
 
-THE GUARANTEED PATH if pan synthesis is ever needed: a resident XCUITest
-driver (XCUICoordinate press/drag), the industry answer — a small runner
-app in tools/ios beside simdrive. Until a need bigger than screenshot
-framing exists, the fold's visual checks get by without it: the shorter
-recents (RECENT = 8) puts the seam and the ledger's opening on the FIRST
-screen of a phone, which was the capture this hunt was for.
+THE GUARANTEED PATH, BUILT 2026-09-02 for the drag-and-drop plan's iOS
+arm (docs/dnd-plan.md §5 step 0): a resident XCUITest driver, tools/ios/
+xcuidrive, serving `attach`/`find`/`describe`/`value`/`tap`/`press`/
+`drag`/`swipe`/`type` and SpringBoard and pasteboard verbs over two
+files exactly as simdrive does, built by hand (a .xctest in a copied
+XCTRunner.app, an xctestrun, no project). PROVEN STANDALONE: a tap on
+kaya's `step` button made the status label read `step 1` and inserted
+the `Work` group; a press-drag scrolled Settings 317pt. LANE-VALIDATED
+OPT-IN: an XCUITest session and simdrive both drive the simulator's
+accessibility and CONFLICT (a driver bootstrapping during admission
+broke simdrive's reads, docs/traps.md), so the driver is wired behind
+KAYA_IOS_XCUIDRIVE and runs its proof in isolation after admission —
+the swift suite passed with it (39 legs, the selfcheck's tap landing, no
+runner left behind); the default matrix path is unchanged. THE PAN THIS
+CHORE CHASED IS STILL NOT REACHABLE by synthesis — a synthetic pan does
+not move kaya's own SwiftUI ScrollView (docs/traps.md), the SimulatorKit
+finding one route over — so the driver's value is the TAP and, for the
+drag arm, a real touch into a drop interaction, not a scroll. The way
+out of the conflict is not sequencing but SUBSUMPTION — one driver for
+the whole lane, the PROPOSED entry above (docs/xcuidrive-plan.md).
 
 ## WATCH — AN iOS GUEST'S PANIC MESSAGE DIES WITH ITS PTY (2026-08-30)
 KEY: pyhost panic message, kaya_run abort, ips crash report, panic hook file

@@ -140,6 +140,14 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   `dev.kaya.` bundle ids, uninstalls that finite list through `simctl`,
   then warms and probes LocalStorage before any leg. Do not keep an
   unrelated `dev.kaya.*` app on those UDIDs.
+  A resident XCUITest driver (tools/ios/xcuidrive) starts on each pool
+  device after its preparation and serves `attach`/`find`/`tap`/`drag`
+  over two files, simdrive's protocol; its `dev.kayalane.*` ids sit
+  outside the `dev.kaya.` sweep on purpose. A real tap on kaya's `step`
+  button proves it before the first leg (xcuidrive_proof). iOS admission
+  and the driver are load-sensitive: a busy host (a leftover emulator,
+  a parallel matrix) fails the LocalStorage probe with "no size" —
+  a slow host, not a verdict.
 - Android: `tools/android/run-emulator.sh` (env via intent extras;
   scripts fold newlines to `;` for transport — comments are stripped
   first; verdicts read from logcat; on FAIL the runner dumps

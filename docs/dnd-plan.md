@@ -102,7 +102,7 @@ each lane has:
 | linux, Wayland | `wl_data_device.start_drag` needs an implicit pointer grab from a real button press; the image had only a virtual keyboard (`wtype`) and a capability-less seat | AVAILABLE since 2026-09-02: tools/linux/wlpointer is a vendored `zwlr_virtual_pointer_v1` client (sway's own `seat cursor press` succeeds on the deviceless seat and delivers nothing, docs/traps.md), the lane boots one sway per pool slot so a seat's pointer disturbs nobody, and tools/linux/dragprobe.py proves a real drag lands at every lane start |
 | windows | `SetCursorPos` + `mouse_event`/`SendInput`, which the caption-centre probe and the undo probe already do in the guest session | Available today; `StartDragAsync` is documented unsupported when elevated and the lane runs every leg `/rl highest`, so real input is the route |
 | android | `adb shell input draganddrop x1 y1 x2 y2 [ms]`: a real long-press swipe through the real window manager | Available today; needs a coordinate, which the harness can derive from a testTag's `boundsInWindow` |
-| iOS | No host-driven pan reaches the simulator's content (measured 2026-08-30); the guaranteed path is a resident XCUITest driver | NOT available without that driver |
+| iOS | The resident XCUITest driver (tools/ios/xcuidrive, 2026-09-02) delivers real touches: a tap changed kaya's model and a press-drag scrolled a system app (proven standalone). A synthetic PAN does not move kaya's SwiftUI ScrollView (docs/traps.md). XCUITest and simdrive conflict over the accessibility bridge, so the driver is opt-in (KAYA_IOS_XCUIDRIVE) and the drag legs must run apart from simdrive legs | BUILT, proven standalone and lane-validated under the flag; the drag arm proves its gesture reaches the drop interaction when it lands |
 
 **Cross-app is where every platform hedges.** Explorer-to-WinUI-3 file
 drops are a known-broken path (microsoft-ui-xaml #10119, still a
@@ -383,8 +383,20 @@ the wayland clipboard legs; then iOS.
    reaching a real widget on its lane before any drag arm exists.
    WAYLAND DONE 2026-09-02: tools/linux/run-suites.sh's wayland pool,
    tools/linux/wlpointer, and tools/linux/dragprobe.py driving a real
-   drag through both protocols' injectors before the first leg. iOS
-   next.
+   drag through both protocols' injectors before the first leg. iOS BUILT +
+   PROVEN STANDALONE 2026-09-02: tools/ios/xcuidrive, a resident XCUITest
+   driver (a real tap changed kaya's model, a real drag scrolled a system
+   app), wired OPT-IN behind KAYA_IOS_XCUIDRIVE with an isolated
+   post-admission proof (run-sim.py, xcuidrive_selfcheck). Lane-validated
+   under the flag (the swift suite ALL PASS with the selfcheck) — an
+   XCUITest session and simdrive CONFLICT over the simulator's
+   accessibility bridge (docs/traps.md), so the default matrix path is
+   unchanged until docs/xcuidrive-plan.md's subsumption makes it the one
+   driver. TWO NOTES for the iOS drag arm below: a synthetic
+   pan does not move kaya's SwiftUI ScrollView, so drive the drop
+   interaction with `drag` and verify the gesture landed, not scroll; and
+   sequence the drag legs away from the simdrive picker/clipboard legs,
+   since XCUITest and simdrive cannot share the device concurrently.
 1. The five probes (§2), each written down with its number.
 2. Spec and core: the records, the two occurrences, the hover answer
    computed from the two declarations, `dropped` routed like `pasted`,
