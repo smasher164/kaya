@@ -2929,7 +2929,12 @@ def picker_ios(text, path, probe_text, probe_path):
                    f"verdict")
 
     # Exactly two warmed export attempts around one measured-failure
-    # reseed, cleanup first, no open-ended retry.
+    # reseed, cleanup first, no open-ended retry. Each attempt may run
+    # its probe ONCE MORE, on the slow-flow code (76) alone: under
+    # matrix load the flow that did not finish reads like the stale
+    # export, and a reseed on that reading erased a healthy device
+    # twice (2026-09-01), so the second read is of the device the first
+    # left warm — never a loop, never on any other code.
     order = []
     for token in ("picker_cleanup(udid)", "picker_warm(udid)",
                   "picker_export_probe(udid)", "picker_reseed(udid)"):
@@ -2941,15 +2946,22 @@ def picker_ios(text, path, probe_text, probe_path):
         bad.append(f"{path}: picker_prepare does not clean every "
                    f"prior-run kaya app before warming and probing "
                    f"LocalStorage")
-    if len(probe_calls) != 2 or len(warm_calls) != 2 \
+    slow_guarded = (
+        len(probe_calls) == 4
+        and prepare[probe_calls[0]:probe_calls[1]].count("if rc == 76:") == 1
+        and prepare[probe_calls[2]:probe_calls[3]].count("if rc == 76:") == 1
+        and prepare.count("if rc == 76:") == 2)
+    if not slow_guarded or len(warm_calls) != 2 \
             or len(reseed_calls) != 1 \
-            or not (warm_calls[0] < probe_calls[0] < reseed_calls[0]
-                    < warm_calls[1] < probe_calls[1]) \
+            or not (warm_calls[0] < probe_calls[0] < probe_calls[1]
+                    < reseed_calls[0] < warm_calls[1] < probe_calls[2]
+                    < probe_calls[3]) \
             or re.search(r"(?m)^\s*(for|while)\b", prepare) \
             or "if rc != 75:" not in prepare:
         bad.append(f"{path}: picker_prepare must spell exactly two "
                    f"warmed export attempts around one "
-                   f"measured-failure reseed, with no open-ended "
+                   f"measured-failure reseed, each re-run at most once "
+                   f"on the slow-flow code alone, with no open-ended "
                    f"retry")
 
     # The prior-run app census is scoped exactly to the dev.kaya.
@@ -3227,13 +3239,33 @@ picker_selftest(doc, "does not use bounded simctl uninstalls and "
 
 # Exactly two attempts: taking away the post-reseed proof must fail.
 doc, hits = sub_count(
-    r"(?m)^    rc = picker_export_probe\(udid\)\n"
-    r"(?=    if rc == 0:\n        return 0\n    if rc == 75:\n)", "",
+    r"(?m)(^    if not picker_reseed\(udid\) or not picker_warm\(udid\):\n"
+    r"        return 1\n)    rc = picker_export_probe\(udid\)\n", r"\1",
     RUN_SIM)
 ios_applied(hits, "the post-reseed export removal")
 picker_selftest(doc, "exactly two warmed export attempts",
                 "a picker preparation that trusts its reseed without "
                 "probing")
+
+# The slow-flow re-run is on code 76 alone: a re-run on any failure
+# would turn the measured stale export into two probes of a stale
+# device and then a reseed of it anyway, quietly doubling the wait.
+doc, hits = sub_count(r"if rc == 76:", "if rc != 0:", RUN_SIM)
+ios_applied(hits, "the unguarded slow re-run", want=2)
+picker_selftest(doc, "exactly two warmed export attempts",
+                "a picker preparation that re-probes on every failure")
+
+# And once: a third probe of the same warmed device is the open-ended
+# retry the rule refuses.
+doc, hits = sub_count(
+    r"(?m)^(    if rc == 76:\n        # Once more.*\n(?:        #.*\n)*"
+    r"        print\(f\"run-sim: re-probing \{udid\} after a slow export flow\",\n"
+    r"              file=sys\.stderr\)\n        rc = picker_export_probe\(udid\)\n)",
+    r"\1        if rc == 76:\n            rc = picker_export_probe(udid)\n",
+    RUN_SIM)
+ios_applied(hits, "the third slow re-run")
+picker_selftest(doc, "exactly two warmed export attempts",
+                "a picker preparation that re-probes a slow device twice")
 
 # Recovery must stay on the one device that failed admission.
 doc, hits = sub_count(r'"erase", udid', '"erase", "all"', RUN_SIM)

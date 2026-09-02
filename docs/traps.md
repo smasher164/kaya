@@ -6515,3 +6515,92 @@ through the addon's own `exit` rather than Node's. The verdict was
 never at risk — the core prints it on the UI thread before kaya_run
 returns — which is why the lane's note said "verdict was OK but the leg
 exited nonzero", the honest shape for an exit-path death.
+A SECOND SIGHTING the same day, two x11 legs of one matrix
+(listdetail-js, select-js: verdict OK, then Bus error and Segmentation
+fault within the second), on the ORDERLY path this time: the addon's
+`exit` was `std::process::exit`, which is libc `exit`, which runs
+Node's static destructors — V8's platform teardown — while the worker
+thread is still executing the app. harness_exit is `_exit` on unix
+now (it was already TerminateProcess on Windows and `_exit` in the
+SwiftUI arm), and the addon's exit is harness_exit. The rule: A
+PROCESS WITH A LIVE FOREIGN THREAD LEAVES BY `_exit`; libc's `exit` is
+a courtesy to a host that is single-threaded, and this one is not.
+
+## A wayland resize request racing the compositor's configure is dropped, and GTK adopts what arrived (measured 2026-09-01)
+
+`resize_window 900x600` on the linux lane's headless weston, issued
+while the configure from the previous `resize_window 560x600` was still
+in flight: gtk.rs's metrics instrument read `default=900x600
+allocated=560x600` and then `default=575x600 allocated=575x600` — the
+compositor answered with the toplevel's NATURAL width and GTK4 wrote
+that into the window's default size, so the 900 was gone from both
+sides. The verb had polled 1s for the width to cross the size-class
+boundary and continued in silence, and the fold assertion three steps
+later reported a folded column, which was TRUE of a 575-wide surface
+(docs/deferred.md's wayland fold WATCH, five sightings before the
+instrument). The rule: a wayland size request is not an action until
+the surface holds the size; re-issue it until the width is on the
+wanted side, and refuse loudly naming the width the surface holds
+rather than letting a later assertion read a premise nobody pinned.
+The same run showed the table sibling — a report chain that needed a
+relayout signal after the pass that measured the first row, which
+under load did not come for 15s; the measuring pass now derives from
+what it measured (gtk.rs window_report).
+
+## An iOS window's FIRST metrics report can precede the pump's first call, and a report with no scene to take it was dropped (measured 2026-09-01)
+
+`adaptive-swiftui` read `row@narrow axis "horizontal", wanted
+"vertical"` on the day's fifth matrix with the metrics line reading
+`metrics window=0 375x734 class=1` — portrait, compact, the width the
+breakpoint fires on, so the 2026-08-29 orientation cause was NOT this.
+The chain: on iOS the app's own window exists before any batch, so
+KayaWindowMetricsReporter's onAppear fires as soon as the root view
+lays out; the presentation scene is built lazily inside the FIRST
+`kaya_next_commands` call of the interpreter's pump; and
+`with_window_scene` answered a report made before that call with
+`return R::default()` — dropped, with the diag line already printed. A
+phone never resizes and never changes class, so nothing re-reported,
+the batch that declared the breakpoint found no latched metrics to
+evaluate against, and the row stayed horizontal for the leg's life. On
+the mac the window is created by the first batch, so the report always
+follows the scene, which is why this was iOS-only and load-shaped. Fixed
+in capi.rs: every report is latched (`METRICS_REPORTED`) whether or not
+a scene exists, and `presentation_scene()` seeds a new scene from the
+latch, the same shape `PRESENTATION_REPORTED` already had for the
+scale and appearance; the unit test was watched failing with the seed
+removed. The rule: A REPORT THE BACKEND MAKES ONCE MUST BE LATCHED ON
+THE CORE'S SIDE, because the backend has no reason to say it twice and
+the scene that needs it may not exist yet.
+
+## The matrix's gate-skip token, taken over stale artifacts, makes the mac lane sweep all 52 gates a second time (measured 2026-09-01)
+
+validate-all hands validate-mac a fingerprint so the mac lane skips the
+sweep the matrix runs itself. The fingerprint's keyed keys carry
+libkaya's and the SwiftUI interpreter's REAL BYTES (build-id.py's
+ARTIFACT_GATES). Taken at t0 with NO build first, it keyed the previous
+build's artifacts; the mac lane then built the tree's own, compared,
+mismatched, and ran the whole sweep inside its lane under matrix
+contention: 791s against a 620 ceiling with every leg green and the sum
+of leg times DOWN (285s against 495s the matrix before) — the anomaly
+was entirely in "core-build+gates" (535s). It went unnoticed while the
+ladder was followed to the letter, because a standalone sweep on the
+same tree minutes before the matrix leaves the artifacts current. Fixed:
+validate-all runs `gates.sh --build` (the sweep's own BUILD list) before
+taking the token. The rule: A FINGERPRINT OVER ARTIFACT BYTES IS TAKEN
+AFTER THE BUILD, or it attests the run before.
+
+## scroll_to_row before the synthesized tier's first placement read "not a windowed tier" (measured 2026-09-01)
+
+varied-python on iOS, the day's sixth matrix: `scroll_to_row
+column@varied r200` at +3ms answered `column@varied is not a windowed
+tier on this backend`, and the same verb on the same table at +30844ms
+scrolled it. KayaSynthesizedWindow registers itself in
+kayaTableWindows at its first placement (attach/placed), and under
+matrix load the harness's first steps ran before that placement — an
+expect_window at +2ms had passed because it reads the core's band, not
+the tier's registration. The verb waits for the registration now,
+bounded at 5s, and the refusal says the wait happened. The rule: AN
+ACTION ON A VIEWPORT IS AN ACTION ON A VIEWPORT THAT HAS LAID OUT; a
+verb that refuses on the tier's own registration must wait for the
+first layout the way every expect waits for its value.
+

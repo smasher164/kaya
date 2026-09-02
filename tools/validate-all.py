@@ -126,6 +126,15 @@ if MODE == "parallel":
     # skip its own sweep while the matrix still owns the later
     # sweep's rc. Nothing survives this invocation; a hand-run of
     # validate-mac has no token and sweeps.
+    # BUILT BEFORE THE TOKEN IS TAKEN (2026-09-01): the keyed keys carry
+    # libkaya's and the interpreter's REAL BYTES, so a token taken over
+    # the previous build's artifacts mismatches the mac lane's own fresh
+    # build, and the lane then runs all 52 gates a second time under
+    # contention — measured as the mac lane's 791s against 620 on the
+    # day's fifth matrix, every leg green and the sum of leg times
+    # DOWN, with nothing amiss but a stale token.
+    if subprocess.run(["tools/gates.sh", "--build"]).returncode != 0:
+        sys.exit(1)
     got = subprocess.run(["tools/gates.sh", "--fingerprint"],
                          stdout=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace",
@@ -284,7 +293,19 @@ BUDGETS = {
     # controls); with the scene fully graduated it measures 610s at
     # 267 legs. Raising a ceiling to fit an environmental anomaly is
     # how a guard stops guarding.
-    "ios": 540,
+    #
+    # 600 since 2026-09-01: 540 was set against the 74-leg roster, and
+    # the lane has run 113 legs since 2026-08-31 — five accepted
+    # matrices measured 452, 460, 465, 475 and 491s under it, headroom
+    # of 1.10-1.19x where the other lanes keep ~1.25x. The fourth
+    # matrix of 2026-09-01 then measured 551s with every leg green:
+    # the windows lane, whose roster had not moved, was 7-20% over its
+    # own band on the same host, and the LocalStorage admission hit
+    # the slow-flow re-probe on two of three phones. 600 is 1.22x over
+    # the band's top; run-sim.py prints the admission's per-device
+    # time and the join's wait now, so the next anomaly says whether
+    # the admission reached the critical path.
+    "ios": 600,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a
     # COLD BOOT (docs/traps.md), and the reboot run then carries
     # ~60-90s of emulator startup that the old 250 — set against a

@@ -427,7 +427,10 @@ unsafe extern "C" fn open_picked(env: Env, info: CbInfo) -> Value {
 unsafe extern "C" fn exit(env: Env, info: CbInfo) -> Value {
     let [v] = unsafe { args::<1>(env, info) };
     let code = unsafe { u64_arg(env, v, "exit") }.unwrap_or(1);
-    std::process::exit(code as i32)
+    // `_exit` on unix: libc's `exit` runs Node's static destructors
+    // under a worker still executing the app (docs/traps.md, the Node
+    // exit entry).
+    crate::exit_hard(code as i32)
 }
 
 // ------------------------------------------------------------ the pump

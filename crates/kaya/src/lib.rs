@@ -173,3 +173,36 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
         )
     }
 }
+
+/// The exit every host-facing path leaves by — the harness's fire
+/// paths and the Node addon's `exit` alike. TerminateProcess on Windows
+/// (loader shutdown under a wedged COM thread held exit itself past the
+/// grace, 2026-08-27) and `_exit` on unix (libc's `exit` runs the HOST's
+/// static destructors, and a Node host's are V8's teardown under a
+/// worker still executing the app — verdict printed, then SIGSEGV on
+/// the way out, 2026-09-01); both in docs/traps.md. What is flushed is
+/// this crate's own stdio; the verdict is already on it.
+pub(crate) fn exit_hard(code: i32) -> ! {
+    use std::io::Write;
+    let _ = std::io::stderr().flush();
+    let _ = std::io::stdout().flush();
+    #[cfg(windows)]
+    unsafe {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn TerminateProcess(process: *mut core::ffi::c_void, code: u32) -> i32;
+            fn GetCurrentProcess() -> *mut core::ffi::c_void;
+        }
+        TerminateProcess(GetCurrentProcess(), code as u32);
+    }
+    #[cfg(unix)]
+    unsafe {
+        unsafe extern "C" {
+            fn _exit(code: i32) -> !;
+        }
+        _exit(code)
+    }
+    #[cfg(not(unix))]
+    std::process::exit(code)
+}
+

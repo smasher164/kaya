@@ -4391,23 +4391,18 @@ pub const EXIT_GRACE: Duration = Duration::from_secs(3);
 /// invariant's own sentence; the SwiftUI arm's `_exit(` is this same
 /// choice. `win_exit_tests` proves both halves on the windows guest
 /// (tools/deploy-win.sh's unit phase).
+///
+/// UNIX IS `_exit` TOO (2026-09-01): libc's `exit` runs the HOST's
+/// atexit handlers and static destructors, and a Node host's are V8's
+/// teardown while the worker thread is still executing the app —
+/// verdict printed, then SIGSEGV or SIGBUS on the way out, two x11
+/// legs of one matrix (docs/traps.md, the Node exit entry). The
+/// verdict is flushed above; nothing the host would do at exit is
+/// owed to a lane that compares the verdict line.
 pub(crate) fn harness_exit(code: i32) -> ! {
-    use std::io::Write;
-    let _ = std::io::stderr().flush();
-    let _ = std::io::stdout().flush();
-    #[cfg(windows)]
-    unsafe {
-        TerminateProcess(GetCurrentProcess(), code as u32);
-    }
-    std::process::exit(code)
+    crate::exit_hard(code)
 }
 
-#[cfg(windows)]
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn TerminateProcess(process: *mut core::ffi::c_void, code: u32) -> i32;
-    fn GetCurrentProcess() -> *mut core::ffi::c_void;
-}
 
 fn step_ceiling() -> Duration {
     match std::env::var("KAYA_STEP_CEILING_MS").ok().and_then(|v| v.parse::<u64>().ok()) {

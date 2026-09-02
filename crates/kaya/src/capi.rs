@@ -1638,10 +1638,29 @@ static PRESENTATION_REPORTED: Mutex<Option<crate::canvas::Presentation>> = Mutex
 /// The presentation scene, built at the pre-scene facts both latches hold.
 /// `kaya_next_commands` builds it lazily on the first call; the unit suite
 /// reaches the same seeding here (`a_presentation_reported_before_the_scene_exists_seeds_it`).
+/// Every window-metrics report ever made, by window: the iOS reporter
+/// fires on the app's OWN window before the pump's first call builds
+/// the presentation scene, a phone never re-reports, and a report the
+/// scene was not there to take left the breakpoint unevaluated for the
+/// leg's whole life (docs/traps.md, the first-metrics-report entry).
+/// Seeded into every new presentation scene below.
+static METRICS_REPORTED: Mutex<Vec<(u64, f64, i64)>> = Mutex::new(Vec::new());
+
+fn latch_window_metrics(window: u64, width: f64, size_class: i64) {
+    let mut latched = METRICS_REPORTED.lock().unwrap_or_else(|e| e.into_inner());
+    latched.retain(|(w, _, _)| *w != window);
+    latched.push((window, width, size_class));
+}
+
 fn presentation_scene() -> Scene {
     let mut scene = Scene::new();
     if WINDOWING_DECLARED.load(std::sync::atomic::Ordering::SeqCst) {
         scene.declare_windowing();
+    }
+    // A scene this new declares no breakpoints, so seeding emits nothing.
+    let latched = METRICS_REPORTED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    for (window, width, size_class) in latched {
+        let _ = scene.set_window_metrics(crate::protocol::WindowId(window), width, size_class);
     }
     if let Some(p) = *PRESENTATION_REPORTED
         .lock()
@@ -3285,6 +3304,7 @@ pub extern "C" fn kaya_window_metrics(window: u64, width: f64, height: f64, size
     ) {
         return;
     }
+    latch_window_metrics(window, width, size_class);
     with_window_scene("reporting a window's content size", |scene| {
         (
             scene.set_window_metrics(crate::protocol::WindowId(window), width, size_class),
@@ -3938,5 +3958,28 @@ mod tests {
                 assert_eq!(*value, row.kind, "kind mismatch for {:?}", row.name);
             }
         }
+    }
+
+
+    /// The iOS reporter's first report can precede the pump's first call
+    /// (docs/traps.md, the first-metrics-report entry): a report made
+    /// while no presentation scene exists must still reach the scene
+    /// that is built next, or the breakpoint declared in the first
+    /// batch is never evaluated on a phone, which re-reports nothing.
+    #[test]
+    fn window_metrics_reported_before_the_presentation_scene_seed_it() {
+        latch_window_metrics(7_001, 375.0, KAYA_SIZE_CLASS_COMPACT);
+        let scene = presentation_scene();
+        assert_eq!(
+            scene.window_metrics_of(crate::protocol::WindowId(7_001)),
+            Some((375.0, KAYA_SIZE_CLASS_COMPACT))
+        );
+        // The latest report per window wins.
+        latch_window_metrics(7_001, 724.0, KAYA_SIZE_CLASS_REGULAR);
+        let scene = presentation_scene();
+        assert_eq!(
+            scene.window_metrics_of(crate::protocol::WindowId(7_001)),
+            Some((724.0, KAYA_SIZE_CLASS_REGULAR))
+        );
     }
 }

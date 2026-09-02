@@ -6117,6 +6117,25 @@ private func kayaRunScript(_ script: String) {
                 // the norm).
                 let rawKey = parts[2...].joined(separator: " ")
                 let key = rawKey.hasPrefix("\"") ? kayaQuoted(Array(parts[2...])) : rawKey
+                // THE TIER'S WINDOW REGISTERS AT ITS FIRST PLACEMENT, and a
+                // scroll issued before that read "not a windowed tier" on a
+                // table that was one 800ms later (varied-python under matrix
+                // load, 2026-09-01, docs/traps.md). An action on a viewport
+                // that has not laid out yet waits for it, bounded.
+                var registered = false
+                for _ in 0..<250 {
+                    registered = DispatchQueue.main.sync { () -> Bool in
+                        guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
+                            return true
+                        }
+                        #if os(macOS)
+                            if kayaTableDrivers[node.id] != nil { return true }
+                        #endif
+                        return kayaTableWindows[node.id] != nil
+                    }
+                    if registered { break }
+                    usleep(20_000)
+                }
                 let off = DispatchQueue.main.sync { () -> String? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return "no such target \(parts[1])"
@@ -6138,7 +6157,8 @@ private func kayaRunScript(_ script: String) {
                     // mac native driver and the synthesized one are the
                     // two that do, and iOS's REGULAR-width native tier is
                     // still SwiftUI's own Table (§4 names macOS's).
-                    return "\(parts[1]) is not a windowed tier on this backend"
+                    return "\(parts[1]) is not a windowed tier on this backend "
+                        + "(no synthesized window registered for it within 5s)"
                 }
                 if let off { failures.append("scroll_to_row: \(off)") }
             case "expect_shares":

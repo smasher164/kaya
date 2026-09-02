@@ -178,10 +178,15 @@ def matrix_parallel_problem(text):
         return ("tools/validate-all.py's run_lane no longer backgrounds and "
                 "records every concurrent matrix unit")
     gate_lines = [line for line in lines if "tools/gates.sh" in line]
+    # The build LEADS the fingerprint: the keyed keys carry the
+    # artifacts' real bytes, and a token over the previous build's
+    # made the mac lane sweep twice (docs/traps.md, 2026-09-01).
+    build = 'if subprocess.run(["tools/gates.sh", "--build"]).returncode != 0:'
     fingerprint = 'got = subprocess.run(["tools/gates.sh", "--fingerprint"],'
-    if gate_lines != [fingerprint, GATE_LAUNCH]:
+    if gate_lines != [build, fingerprint, GATE_LAUNCH]:
         return ("tools/validate-all.py must invoke gates only for the "
-                "same-tree fingerprint and the one delayed niced sweep")
+                "artifact build, the same-tree fingerprint taken after it, "
+                "and the one delayed niced sweep")
     return None
 
 
@@ -537,6 +542,20 @@ if n != 1:
          "priority clause is not reading the real matrix")
 elif matrix_parallel_problem(doctored) is None:
     fail("self-test N12: an ordinary-priority delayed sweep passed")
+
+# N12b — a token taken over the previous build's artifacts is the
+# duplicate mac sweep measured 2026-09-01.
+doctored, n = re.subn(
+    r'(?m)^    if subprocess\.run\(\["tools/gates\.sh", "--build"\]\)'
+    r'\.returncode != 0:\n        sys\.exit\(1\)\n', "", matrix_text,
+    count=1)
+print("check-gates: self-test N12b removed the pre-token build, "
+      f"{n} substitution(s)")
+if n != 1:
+    fail("self-test N12b did not remove exactly one pre-token build — the "
+         "token clause is not reading the real matrix")
+elif matrix_parallel_problem(doctored) is None:
+    fail("self-test N12b: a token taken over stale artifacts passed")
 
 # N13 — narrowing the iOS runner's pool must be reported.
 doctored, n = re.subn(

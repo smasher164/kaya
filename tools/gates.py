@@ -434,6 +434,11 @@ def main(args):
     if args == ["--selftest"]:
         return 0 if selftest() else 1
 
+    if args == ["--build"]:
+        # validate-all's t0: the keyed keys carry the artifacts' REAL
+        # bytes, so the token is taken only after the same builds the
+        # sweep itself starts with.
+        return 0 if build() else 1
     if args == ["--fingerprint"]:
         fp = fingerprint()
         if fp is None:
@@ -443,7 +448,7 @@ def main(args):
 
     if args:
         print(f"gates.sh: unknown argument {args[0]!r} — "
-              f"usage: gates.sh [--list | --selftest | --fingerprint]",
+              f"usage: gates.sh [--list | --selftest | --fingerprint | --build]",
               file=sys.stderr)
         return 1
 

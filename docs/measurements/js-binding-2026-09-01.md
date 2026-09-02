@@ -203,3 +203,133 @@ title WATCH, its third sighting today. iOS 0 legs: one simulator
 reseed, and device preparation is all-or-nothing, so the lane refused
 every leg — a simulator-state fault, not the tree's; the same lane was
 113 green standalone forty minutes earlier.
+
+## The two wayland WATCHes, instrumented and read
+
+Both instruments went into gtk.rs and the three non-mac lanes ran
+concurrently (linux, iOS, android — the matrix's load without the
+matrix). The two legs failed on cue, and their logs carried the premise.
+
+THE FOLD (portfolio-python-wayland). The scene asks `resize_window
+900x600`, expects the summary column unfolded, `resize_window 560x600`,
+expects it folded, `resize_window 900x600`, expects it unfolded. The
+window-metrics lines around the last request:
+
+    KAYA_DIAG window_metrics default=900x600 allocated=560x600 mapped=true
+    KAYA_DIAG window_metrics default=575x600 allocated=575x600 mapped=true
+
+The toplevel's default size was set to 900 and the compositor's next
+configure delivered 575 — the window's natural width — and GTK adopted
+it as the new default. The request was lost to a configure already in
+flight from the 560 step, and the fold derivation then read a 575-wide
+surface, which is compact, which is folded: a CORRECT verdict over a
+premise nothing held. The verb waited 1s for the width to cross the
+600 boundary and then moved on in silence. Now it re-issues
+`set_default_size` every 500ms until the width is on the wanted side
+and refuses after 5s naming the width the surface holds; the re-issue
+prints a KAYA_DIAG line.
+
+THE TABLE (table-js-wayland). Serial runs of the four table legs
+(python and js, both protocols) all showed one healthy chain: the
+apply-time report `first=0 count=0 page=0.0 average=0.0 laid_out=false`,
+then the window's metrics, then `first=0 count=8 page=199.0
+average=28.0 laid_out=true` — with an invisible pass between them that
+measured the first row (the average is the pitch it measured) and
+derived count 0 from the extent it had read BEFORE measuring. The
+failing leg's log had the first report, the metrics line, and then
+nothing for 15s until the header click's own pass reported (0, 8)
+over torn-down rows. The chain needed one more relayout signal after
+the measuring pass, and under load it did not come. window_report now
+re-reads the extent after it measures, so the pass that measures the
+first row is the pass that realizes the page. Every pass prints its
+inputs and whether it sent, the adjustment's changed signal prints its
+values, and a deferred pass says so — a failing leg's log now shows
+the whole chain.
+
+THE RUN WITH BOTH FIXES: linux ALL PASS 683 legs (legs 290s), android
+ALL PASS 123, iOS ALL PASS 113, all three concurrent, the host's
+five-minute load peaking at 120 during the iOS boots. The android
+title instrument stayed quiet. The matrix decides the two WATCHes.
+
+## The fourth matrix (every lane and gate green; the iOS ceiling)
+
+Launched at load 4.6 with the trust reading TRUE: mac PASS 391 legs in
+364s, linux PASS 683 in 511s, windows PASS 201 in 469s, iOS PASS 113 in
+551s, android PASS 123 in 223s, the gate sweep 52/52 in 393s; 619s wall,
+1,511 legs, both wayland legs green. The one red was the iOS lane's
+DURATION ANOMALY, 551s against a 540s ceiling set against the 74-leg
+roster — the lane has been 113 legs since 2026-08-31 and its five
+accepted matrices measured 452-491s under it. Investigated before any
+number moved: the windows lane, whose roster has not changed, was 7-20%
+over its own band on the same host; the LocalStorage admission hit the
+slow-flow re-probe on two of three phones, which is backgrounded under
+the swift build and reaches the critical path only if it outlasts it,
+and nothing timed that. So the runner prints the admission's per-device
+time and the join's wait now, and the ceiling is re-set to 600 against
+the 113-leg band (1.22x its top) with the whole reasoning beside the
+number.
+
+## The fifth matrix (three findings, all measured, all fixed)
+
+Launched at load 3.8 on the tree with the iOS ceiling re-set: linux PASS
+683 in 501s, windows PASS 201 in 462s, android PASS 123 in 225s, the
+sweep 52/52 in 414s; mac PASS 391 legs but 791s against 620; iOS FAIL,
+112 of 113, `adaptive-swiftui` reading `row@narrow axis "horizontal",
+wanted "vertical"` in 565s.
+
+THE MAC ANOMALY WAS A DUPLICATE SWEEP. The flight recorder's per-leg
+times summed to 285s against 495s the matrix before, no leg grew, and
+the lane's `core-build+gates` phase read 535s: the lane had run all 52
+gates itself because the matrix's skip token — a fingerprint whose
+keyed keys carry the artifacts' real bytes — was taken at t0 over the
+previous build's libkaya, and the lane's own fresh build of the edited
+tree no longer matched it. validate-all builds before it takes the
+token now (docs/traps.md).
+
+THE iOS ADMISSION REACHED THE CRITICAL PATH, timed by the instruments
+the fourth matrix asked for: two phones' LocalStorage admission took
+143s and 149s (the slow-flow re-probe path) against 37s on the third,
+and the join waited 99s past the builds. The probe's failed drive was
+followed by the full 60s result wait it could not satisfy; that wait is
+a 5s grace now, and the drive's last words are printed on the slow path
+so the next run says why simdrive failed.
+
+THE ADAPTIVE LEG WAS A DROPPED REPORT, a second cause under the
+2026-08-29 entry's sentence: `metrics window=0 375x734 class=1` was the
+right premise, and the core had not taken it — on iOS the app's window
+lays out before the pump's first call builds the presentation scene,
+and `with_window_scene` answered a report made before that with
+nothing. Every report is latched and seeds the next scene now
+(capi.rs); the unit test was watched failing with the seed removed.
+
+## The sixth matrix (two more premises, both measured, both fixed)
+
+The token fix held: mac PASS 391 in 347s with no second sweep; windows
+PASS 201 in 498s; android PASS 123 in 250s; the sweep 52/52 in 395s; the
+adaptive leg PASSED with the latch; the admission join waited 28s
+(65s, 74s, 88s per phone; the slow phone's drive said the save dialog
+was still up after six presses of Save across 47s). Two reds:
+
+- linux 681 of 683, listdetail-js-x11 and select-js-x11: `KAYA_SELFTEST:
+  OK` then Bus error and Segmentation fault inside the second — the
+  Node exit race's second sighting, on the ORDERLY path: the addon's
+  exit was libc `exit`, which runs Node's static destructors under the
+  worker still executing the app. harness_exit is `_exit` on unix now
+  and the addon exits through it (docs/traps.md, the Node exit entry).
+- iOS 112 of 113, varied-python: `scroll_to_row column@varied` at +3ms
+  refused "not a windowed tier" and the same verb scrolled the same
+  table at +30844ms — the synthesized window registers at its first
+  placement, and the harness got there first under load. The verb
+  waits for the registration, bounded at 5s (docs/traps.md).
+
+## The seventh matrix: ALL PASS
+
+Launched at load 4.8: mac PASS 391 in 344s, linux PASS 683 in 509s,
+windows PASS 201 in 480s, iOS PASS 113 in 506s, android PASS 123 in
+225s, the sweep 52/52 in 388s; 623s wall, 1,511 legs, no anomaly on
+any lane. Every finding of the day's five matrices is green under it:
+the two wayland legs, the adaptive leg with the latch, the two x11 JS
+legs through the hard exit, the varied leg through the waiting verb,
+the mac lane without its second sweep, the iOS lane under its re-set
+ceiling with the admission timed.
+

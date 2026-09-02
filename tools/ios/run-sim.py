@@ -971,7 +971,10 @@ def picker_cleanup(udid):
 
 
 def picker_export_probe(udid):
-    """0 healthy, 75 the measured LocalStorage failure, 1 otherwise."""
+    """0 healthy, 75 the measured LocalStorage failure, 76 the flow that
+    did not finish in time (a slow host, not a stale export — the two
+    read alike under matrix load, and the second erased a healthy
+    device twice, 2026-09-01), 1 otherwise."""
     probe_name = f"kaya-export-preflight-{os.getpid()}-{now_ms()}"
     run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
          EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
@@ -1017,17 +1020,17 @@ def picker_export_probe(udid):
         print(f"run-sim: the LocalStorage export probe launch named no "
               f"pid on {udid}: {launch.stdout}", file=sys.stderr)
         return 1
-    for _ in range(80):
+    for _ in range(240):
         if ready_file.is_file() and ready_file.stat().st_size:
             break
         time.sleep(0.25)
     if not (ready_file.is_file() and ready_file.stat().st_size):
         print(f"run-sim: the LocalStorage export probe never presented "
-              f"its picker on {udid}", file=sys.stderr)
+              f"its picker on {udid} within 60s", file=sys.stderr)
         run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
              EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
-        return 1
+        return 76
     denv = dict(os.environ,
                 KAYA_SIMDRIVE_LOG=str(PREP_DIR /
                                       f"export-{udid}-simdrive.log"))
@@ -1045,7 +1048,10 @@ def picker_export_probe(udid):
         drive_rc = drive.returncode
         drive_out = drive.stdout
     result = ""
-    for _ in range(80):
+    # A drive that failed cannot finish the flow: a short grace for a
+    # late result, not the full minute — two slow phones held the
+    # admission join 99s past the builds on 2026-09-01's fifth matrix.
+    for _ in range(240 if drive_rc == 0 else 20):
         if result_file.is_file() and result_file.stat().st_size:
             result = result_file.read_text(
                 encoding="utf-8", errors="replace").splitlines()[0]
@@ -1056,6 +1062,19 @@ def picker_export_probe(udid):
         stderr=subprocess.DEVNULL)
     if result == "ok":
         return 0
+    if not result and drive_rc != 0:
+        # What the drive said, since its log dies with the run.
+        print(f"run-sim: the drive's last words on {udid}: "
+              + " | ".join(drive_out.strip().splitlines()[-3:]),
+              file=sys.stderr)
+        # The flow never finished: nothing here says the export is
+        # stale, only that the host was slow. The log below may well
+        # carry an FP -1005 from the Files app's own warm-up, which is
+        # what made this read as 75 and erase a healthy device.
+        print(f"run-sim: the LocalStorage export probe did not finish on "
+              f"{udid} (drive rc={drive_rc}); a slow host, not a verdict",
+              file=sys.stderr)
+        return 76
     logq = subprocess.run(
         ["timeout", "30", "xcrun", "simctl", "spawn", udid, "log",
          "show", "--style", "compact", "--start", started, "--predicate",
@@ -1105,6 +1124,13 @@ def picker_prepare(udid):
     if not picker_warm(udid):
         return 1
     rc = picker_export_probe(udid)
+    if rc == 76:
+        # Once more before any verdict: the first attempt's slowness is
+        # the host's, and the second reads the device it left warm
+        # (check-steps holds this to ONE re-run on that code alone).
+        print(f"run-sim: re-probing {udid} after a slow export flow",
+              file=sys.stderr)
+        rc = picker_export_probe(udid)
     if rc == 0:
         return 0
     if rc != 75:
@@ -1114,6 +1140,10 @@ def picker_prepare(udid):
     if not picker_reseed(udid) or not picker_warm(udid):
         return 1
     rc = picker_export_probe(udid)
+    if rc == 76:
+        print(f"run-sim: re-probing {udid} after a slow export flow on "
+              f"the reseeded device", file=sys.stderr)
+        rc = picker_export_probe(udid)
     if rc == 0:
         return 0
     if rc == 75:
@@ -1472,8 +1502,12 @@ def prep_join():
     if _prep_joined:
         return
     _prep_joined = True
+    _join_started = time.monotonic()
     for t in _prep_threads:
         t.join()
+    print(f"run-sim: device preparation joined after waiting "
+          f"{int(time.monotonic() - _join_started)}s past the builds",
+          file=sys.stderr, flush=True)
     for udid in UDIDS:
         rc = _prep_results.get(udid, "missing")
         if rc != 0:
@@ -1591,7 +1625,15 @@ boot_pool()
 # that follows needs no devices.
 for _udid in UDIDS:
     def _prep(u=None):
+        # Timed per device: the admission is off the critical path only
+        # while it finishes under the swift build it overlaps, and a
+        # slow-flow re-probe (76) costs a minute — the 551s iOS lane of
+        # 2026-09-01's fourth matrix carried two of them.
+        _prep_started = time.monotonic()
         _prep_results[u] = picker_prepare(u)
+        print(f"run-sim: LocalStorage admission on {u} took "
+              f"{int(time.monotonic() - _prep_started)}s (rc="
+              f"{_prep_results[u]})", file=sys.stderr, flush=True)
     _t = threading.Thread(target=_prep, kwargs={"u": _udid})
     _t.start()
     _prep_threads.append(_t)

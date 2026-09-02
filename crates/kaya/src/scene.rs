@@ -1403,6 +1403,10 @@ impl Scene {
     /// platform has none). THE CORE EVALUATES the declared breakpoints
     /// here — one rule, every platform (docs/adaptive-layout-plan.md
     /// D3). A report that changes nothing emits nothing.
+    pub(crate) fn window_metrics_of(&self, window: WindowId) -> Option<(f64, i64)> {
+        self.window_metrics.get(&window).copied()
+    }
+
     pub(crate) fn set_window_metrics(
         &mut self,
         window: WindowId,

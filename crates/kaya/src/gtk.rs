@@ -1654,7 +1654,16 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     }
     {
         let pending = pending.clone();
-        adjustment.connect_changed(move |_| schedule_window_report(&pending, id));
+        adjustment.connect_changed(move |adj| {
+            eprintln!(
+                "KAYA_DIAG vadjustment changed for={id} upper={:.1} page_size={:.1} \
+                 pending={}",
+                adj.upper(),
+                adj.page_size(),
+                pending.get()
+            );
+            schedule_window_report(&pending, id);
+        });
     }
     // A TABLE JUST LAID OUT SHOWS ITS FIRST COLUMN. Without this
     // `expect_at_end` can pass before anything scrolled — measured on the
@@ -1772,6 +1781,7 @@ fn run_scheduled_report(pending: Rc<std::cell::Cell<bool>>, id: u64) {
         pending.set(false);
         return;
     }
+    eprintln!("KAYA_DIAG window_report for={id} deferred: the core is borrowed");
     glib::timeout_add_local(std::time::Duration::from_millis(1), move || {
         run_scheduled_report(pending.clone(), id);
         glib::ControlFlow::Break
@@ -1829,11 +1839,22 @@ fn presentation_report(core: &mut CoreState) {
 /// (docs/adaptive-layout-plan.md D3) — canvas_track_report's shape: the
 /// scene answers with the setter/revert ops and they apply right here.
 fn window_metrics_report(core: &mut CoreState) {
-    use gtk4::prelude::GtkWindowExt;
+    use gtk4::prelude::{GtkWindowExt, WidgetExt};
     let (width, _height) = core.window.default_size();
     if width <= 0 {
         return;
     }
+    // The wayland resize trap's instrument (docs/traps.md): the width
+    // this report hands the core beside what the toplevel actually holds
+    // at that moment, so a fold read against the wrong width names it.
+    eprintln!(
+        "KAYA_DIAG window_metrics default={}x{} allocated={}x{} mapped={}",
+        width,
+        _height,
+        core.window.width(),
+        core.window.height(),
+        core.window.is_mapped()
+    );
     let scene = &mut core.scene;
     let Some(ops) = crate::fault::guard("reporting the window's content size", || {
         scene.set_window_metrics(
@@ -2221,8 +2242,20 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     }
 
     let laid_out = rows.iter().any(|(_, height)| *height > 0.0);
-    let average = if total > 0 && band.extent > 0.0 {
-        band.extent / total as f64
+    // THE PASS THAT MEASURES DERIVES FROM WHAT IT MEASURED (2026-09-01,
+    // docs/traps.md's wayland resize entry, the table sibling):
+    // `band` was read before the rows were, so the first laid-out pass
+    // used to derive count 0 from an extent of 0 and leave the page to
+    // whichever relayout signal came next — and under matrix load that
+    // signal did not come for 15s. The extent is re-read here instead.
+    let extent = if heights.is_empty() {
+        band.extent
+    } else {
+        crate::fault::guard("reading a window's geometry", || scene.window_geometry(id).extent)
+            .unwrap_or(band.extent)
+    };
+    let average = if total > 0 && extent > 0.0 {
+        extent / total as f64
     } else {
         0.0
     };
@@ -2267,7 +2300,16 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         }
     };
 
-    if last != Some((first, count)) {
+    // The same WATCH's instrument for a table: EVERY pass with the
+    // inputs it derived the range from, and whether the range moved.
+    let sent = last != Some((first, count));
+    eprintln!(
+        "KAYA_DIAG window_report for={id} first={first} count={count} page={page:.1} \
+         average={average:.1} total={total} laid_out={laid_out} value={value:.1} \
+         rows={} sent={sent}",
+        rows.len()
+    );
+    if sent {
         let scene = &mut core.scene;
         let ops = crate::fault::guard("reporting a window range", || {
             scene.window_moved(id, first, count)
@@ -2296,6 +2338,11 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     if let Some((band, realized)) = settled {
         let above = (band.offset - spacing).max(0.0);
         let below = (band.extent - band.offset - realized).max(0.0);
+        eprintln!(
+            "KAYA_DIAG spacers for={id} above={above:.1} below={below:.1} \
+             extent={:.1} realized={realized:.1}",
+            band.extent
+        );
         set_spacer(&top, band.first > 0 && above > 0.5, above);
         set_spacer(&bottom, below > 0.5, below);
         set_table_scrolling(&body, grown || band.extent > f64::from(TABLE_MAX_CONTENT));
@@ -9773,14 +9820,50 @@ impl crate::harness::Stage for GtkStage {
         // for the SAME SIDE OF THE BOUNDARY, not for equality — a window
         // manager is free to grant a different size, so exact equality never
         // held and every resize paid the full timeout.
+        // RE-ISSUED WHILE IT WAITS, AND LOUD WHEN IT NEVER LANDS
+        // (2026-09-01, docs/traps.md's wayland resize entry): on
+        // wayland the compositor decides the surface's size, and a request
+        // racing a configure already in flight was measured lost — the
+        // metrics report read default 900 against an allocated 560, then
+        // the toplevel settled at 575, its natural width, and the fold
+        // assertion three steps later was the one that failed. The
+        // request goes again every half second until the width is on the
+        // wanted side of the boundary; five seconds without it is this
+        // verb's own refusal, naming the size the surface holds.
         let want_regular = width >= 600.0;
-        for _ in 0..100 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut requested = std::time::Instant::now();
+        let mut holds = None;
+        loop {
             let now = Self::on_main(move |core| window_width(core, window));
+            holds = now;
             if matches!(now, Some(w) if (f64::from(w) >= 600.0) == want_regular) {
                 break;
             }
+            if std::time::Instant::now() >= deadline {
+                panic!(
+                    "kaya: resize_window {width}x{height} on window#{window} never landed: \
+                     the surface holds width {holds:?} after 5s of re-requests — on wayland \
+                     the compositor decides the size, and a request racing its configure \
+                     can be dropped (docs/traps.md, the wayland resize entry)"
+                );
+            }
+            if requested.elapsed() >= std::time::Duration::from_millis(500) {
+                eprintln!(
+                    "KAYA_DIAG resize_window {width}x{height} on window#{window} re-requested: \
+                     the surface holds width {holds:?}"
+                );
+                Self::on_main_mut(move |core| {
+                    use gtk4::prelude::GtkWindowExt;
+                    if let Some(target) = gtk_window_read(core, window) {
+                        target.set_default_size(width as i32, height as i32);
+                    }
+                });
+                requested = std::time::Instant::now();
+            }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        let _ = holds;
         Self::on_main_mut(move |core| {
             refresh_nav(core, window);
         });

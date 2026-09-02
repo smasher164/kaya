@@ -3783,7 +3783,7 @@ the ruling's boundary.
 KEY: python-first, tranche, generators, keyed, build-id, runner
 conversion, leg tables
 
-## WATCH — portfolio-python-wayland's fold flickers folded
+## ~~WATCH — portfolio-python-wayland's fold flickers folded~~ (CLOSED 2026-09-01: a resize request lost to the compositor's configure in flight, and a table report chain one relayout signal too long — both read at the premise, both fixed in gtk.rs, matrix ALL PASS)
 
 Two sightings in eight hours, same sentence both times:
 `column#9 fold reads "folded", wanted it not folded` — 2026-09-01
@@ -3817,7 +3817,31 @@ surface's first size report, not in the fold alone. The table sibling
 recurred on the next matrix (two of two), js's leg only, with the
 python guest of the same shape green beside it both times: the timing
 of a slower-starting guest against the compositor's configure is the
-premise to pin.
+premise to pin. THE INSTRUMENT IS IN (2026-09-01 evening, gtk.rs):
+every window_metrics report prints the width it hands the core beside
+the toplevel's allocated size and mapped state, and every CHANGE of a
+table's reported row window prints its inputs (page, average, total,
+laid_out, scroll value) as KAYA_DIAG lines — a failing leg's log now
+carries the premise. Next sighting: read those lines, do not rerun.
+READ 2026-09-01 evening (docs/measurements/js-binding-2026-09-01.md):
+both legs failed under the three-lane load with the instruments in.
+The fold's metrics lines read `default=900x600 allocated=560x600`
+then `default=575x600 allocated=575x600` after the scene's last
+`resize_window 900x600` — the request was lost to a configure still
+in flight from the 560 step, the toplevel settled at its natural
+width, and 575 is compact, so the fold verdict was CORRECT over a
+width nobody held; the verb had waited 1s and moved on in silence.
+The table's log had the apply-time (0, 0) report, the metrics line
+and then nothing for 15s: the pass that measured the first row
+derived its count from the extent read BEFORE the measurement (0),
+and the relayout signal the chain needed after it never came. Both
+fixes are in gtk.rs: resize_window re-issues the request every 500ms
+until the width is on the wanted side and refuses after 5s naming
+the width the surface holds; window_report re-reads the extent after
+it measures, so the measuring pass realizes the page itself. The
+three lanes then ran concurrently at load 120 and all passed (683,
+123, 113). The fourth matrix of the day (17:00) was ALL PASS on all
+five lanes and 52 gates, 1,511 legs, both legs green under it.
 KEY: portfolio wayland fold, column#9 folded, surface width premise
 
 ## The iOS clipboard seed holder never retires, and killing it for real wedges the pasteboard (2026-09-01)
@@ -3860,9 +3884,20 @@ read) and keep the flight-recorder bundle.
 THIRD AND FOURTH SIGHTINGS 2026-09-01 (the second and third matrices
 of the JS binding day, 15:26 and 16:04), `title "portfolio", wanted
 "Transactions"` both times, the first also reading `label@count
-"15003 of 15003"` — the pre-navigation screen again. The instruction
-stands: instrument which screen the model believes is current at the
-title read.
+"15003 of 15003"` — the pre-navigation screen again. The trace of the
+fourth: `back` at +16787ms, its asserts green by +17028ms, `click
+button#1` at +17029ms, and the title never moved in 5s — the click
+landed 240ms after the pop, inside the popped-to pane's entrance
+animation, which is the shape docs/traps.md's Compose entrance-drop
+entry measured. THE INSTRUMENT IS IN (2026-09-01 evening,
+KayaCompose.kt): the click verb prints a KAYA_DIAG line when no batch
+answers it within its wait, with the model's entry count, and
+expect_title's refusal carries the model's stack depth and top title
+plus how long ago the last click was and how many batches followed —
+so the next sighting says whether the push never reached the model or
+the surfaces lagged it. Next sighting: read those, do not rerun.
+Quiet with the instrument in on the 2026-09-01 evening three-lane run
+(android 123 green at host load 120).
 KEY: android portfolio title, wanted Transactions, title propagation
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
@@ -9778,8 +9813,17 @@ container layout recorded". TWO consequences, one fixed and one held:
   the missing-key and the two-orientation branches each watched refusing.
   Full arithmetic, the pad canary, and the vacuous-loop lesson are in
   docs/traps.md.
+  A SECOND CAUSE, 2026-09-01 (the day's fifth matrix): the same
+  sentence with the metrics line reading 375x734 class=1 — portrait,
+  compact, the right premise — because the report itself had been
+  DROPPED: on iOS the app's own window lays out before the pump's
+  first `kaya_next_commands` builds the presentation scene, and a
+  report with no scene to take it returned nothing; a phone never
+  re-reports. capi.rs latches every report and seeds new scenes from
+  the latch now (docs/traps.md, the first-metrics-report entry), the
+  unit test watched failing with the seed removed.
   KEY: adaptive-swiftui narrow, UISupportedInterfaceOrientations,
-  ios bundle orientation, check-staging N4 N5
+  ios bundle orientation, check-staging N4 N5, METRICS_REPORTED
 
 - ~~**GAP — the mac NATIVE table cannot be reached when it overflows**~~ —
   CLOSED 2026-08-29, and the iOS SYNTHESIZED tier with it, so all five

@@ -550,6 +550,9 @@ val kayaSelectionWash = HashMap<Long, Int>()
  */
 @Volatile
 var kayaBatches = 0
+/** The last `click` verb: its target, the batch count it saw, and when —
+ * for expect_title's refusal (the android portfolio WATCH's instrument). */
+var kayaLastClick: Triple<String, Int, Long>? = null
 
 /**
  * The main-axis extent each node was allocated, by node id — what
@@ -5854,6 +5857,7 @@ object KayaCompose {
                     "click" -> {
                         kayaAwaitQuiet()
                         val answered = kayaBatches
+                        kayaLastClick = Triple(parts[1], answered, System.nanoTime())
                         val ok = onUi(activity) {
                             // A click on a TEXT KIND focuses it — what a
                             // native tap does, and the only way a scene
@@ -5872,7 +5876,22 @@ object KayaCompose {
                             }
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
-                        else kayaAwaitAnswer(answered)
+                        else {
+                            kayaAwaitAnswer(answered)
+                            // THE WATCH'S INSTRUMENT (docs/deferred.md, the
+                            // android portfolio title entry): a click the
+                            // app never answered is said here, at the
+                            // click, rather than deduced three steps later
+                            // from a title that did not move.
+                            if (kayaBatches == answered) {
+                                Log.i(
+                                    "kaya",
+                                    "KAYA_DIAG click ${parts[1]} was emitted and no batch " +
+                                        "answered it within the wait; entries=" +
+                                        "${onUi(activity) { KayaSceneModel.navEntries.size }}"
+                                )
+                            }
+                        }
                     }
                     "toggle" -> {
                         val ok = onUi(activity) {
@@ -6997,7 +7016,22 @@ object KayaCompose {
                         val chrome =
                             if (hasChrome) onUi(activity) { kayaChromeTitle(activity) } else null
                         if (got != want) {
-                            failures.add("${prefix}title \"$got\", wanted \"$want\"")
+                            // The model's own view rides the refusal: the
+                            // stack depth, the top entry's title, and how
+                            // the last click was answered — which tells a
+                            // push that never reached the model apart from
+                            // a title the surfaces have not caught up to.
+                            val model = onUi(activity) {
+                                val entries = KayaSceneModel.navEntries
+                                "entries=${entries.size} top=\"${entries.lastOrNull()?.title ?: ""}\""
+                            }
+                            val click = kayaLastClick?.let { (target, seen, at) ->
+                                val ms = (System.nanoTime() - at) / 1_000_000
+                                "last click $target ${ms}ms ago, batches since=${kayaBatches - seen}"
+                            } ?: "no click yet"
+                            failures.add(
+                                "${prefix}title \"$got\", wanted \"$want\" ($model; $click)"
+                            )
                         } else if (!hasChrome) {
                             // No catalog, no bar: the task label is the
                             // only surface this title has, and saying so
