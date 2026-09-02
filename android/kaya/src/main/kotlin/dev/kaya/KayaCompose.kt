@@ -7558,6 +7558,41 @@ object KayaCompose {
                                 )
                         }
                     }
+                    "expect_breadth" -> {
+                        // The cross-axis twin of expect_fills' widget half
+                        // (harness.rs Step::ExpectBreadth): the widget's
+                        // recorded cross rect against its container's
+                        // recorded cross breadth, the readers expect_aligned
+                        // classifies from. A container target is refused as
+                        // harness.rs refuses it.
+                        val short = onUi(activity) {
+                            if (parts[1].startsWith("row") || parts[1].startsWith("column")) {
+                                return@onUi "${parts[1]} is a container; expect_breadth reads a widget"
+                            }
+                            kayaWidgetTarget(parts[1])?.let { widget ->
+                                val parent = (KayaSceneModel.columns + KayaSceneModel.rows)
+                                    .firstOrNull { c -> c.children.any { it.id == widget.id } }
+                                    ?: return@let "no parent — not a flex child"
+                                val inner = kayaContainerCross[parent.id] ?: 0.0
+                                if (inner <= 0.0) return@let "no container layout recorded"
+                                val rect = kayaCrossRects[widget.id]
+                                    ?: return@let "no cross box recorded — not a flex child"
+                                if (rect.second >= inner - 2.0) {
+                                    ""
+                                } else {
+                                    "spans ${Math.round(rect.second)}px of its parent's " +
+                                        "${Math.round(inner)}px breadth"
+                                }
+                            }
+                        }
+                        if (short == null) {
+                            failures.add("no such target: ${parts[1]}")
+                        } else if (short.isEmpty()) {
+                            observed.add("${parts[1]} spans its breadth")
+                        } else {
+                            failures.add("${parts[1]} is short of its breadth ($short)")
+                        }
+                    }
                     "expect_fills" -> {
                         // ONE VERB, TWO SUBJECTS (harness.rs
                         // Step::ExpectFills).
@@ -9672,10 +9707,11 @@ fun KayaRender(
     isRoot: Boolean = false,
     flexVertical: Boolean? = null,
     flexStretch: Boolean = false,
+    flexAlign: Long = KayaCompose.ALIGN_START,
 ) {
     val attachment = KayaSceneModel.contextMenus[node.id]
     if (attachment == null) {
-        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch, flexAlign)
         return
     }
     Box(
@@ -9686,7 +9722,7 @@ fun KayaRender(
             onLongClick = { KayaSceneModel.openContextWidget = node.id },
         )
     ) {
-        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch, flexAlign)
         val open = KayaSceneModel.openContextWidget == node.id
         DropdownMenu(
             expanded = open,
@@ -9825,6 +9861,12 @@ private fun KayaRenderCore(
      * nested-container GAP).
      */
     flexStretch: Boolean = false,
+    /**
+     * That container's align MODE, for the one kind whose cross-axis
+     * default is not the container's: a scroll spans under start and
+     * stretch (ruled 2026-09-02) and is positioned by center and end.
+     */
+    flexAlign: Long = KayaCompose.ALIGN_START,
 ) {
     // The mounted root fills its window — the same normalization GTK
     // and UIKit needed. A Compose Column wraps its width even when
@@ -9858,7 +9900,14 @@ private fun KayaRenderCore(
             boxFill =
                 if (flexVertical) boxFill.fillMaxHeight() else boxFill.fillMaxWidth()
         }
-        if (flexStretch || crossing) {
+        // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode and
+        // under stretch (ruled 2026-09-02): a viewport is a region, not
+        // content — hugging left a 79pt pannable strip in a 375pt window
+        // on iOS (docs/traps.md). Center and end still position a hugging
+        // one; the scene's expect_breadth holds this on every lane.
+        val scrollSpans = node.kind == KayaCompose.KIND_SCROLL &&
+            (flexAlign == KayaCompose.ALIGN_START || flexAlign == KayaCompose.ALIGN_STRETCH)
+        if (flexStretch || crossing || scrollSpans) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
         }
@@ -10133,6 +10182,7 @@ private fun KayaRenderCore(
                                 child,
                                 flexVertical = true,
                                 flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                                flexAlign = node.align,
                             )
                         }
                     }
@@ -10194,6 +10244,7 @@ private fun KayaRenderCore(
                                 child,
                                 flexVertical = false,
                                 flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                                flexAlign = node.align,
                             )
                         }
                     }

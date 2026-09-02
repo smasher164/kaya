@@ -1876,6 +1876,95 @@ def _proof_worker(name, app, bundle_id):
             f"{'PASS' if ok else 'FAIL'}\n", encoding="utf-8")
 
 
+def xcuidrive_pan_witness(udid, log, app, bundle_id):
+    """A REAL PAN IN THE EMPTY AREA RIGHT OF THE ROWS scrolls kaya's scroll
+    — the scroll ruling of 2026-09-02, witnessed by the one instrument
+    that found the 79pt strip: the driver drags at the window's middle,
+    where every pan died while the viewport hugged its labels, and row 1
+    must move. The scene's expect_breadth holds the geometry on all five
+    lanes; this holds the user's gesture on the one lane that has hands."""
+    run(["xcrun", "simctl", "install", udid, str(app)], stdout=log,
+        stderr=log)
+    run(["xcrun", "simctl", "terminate", udid, bundle_id],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    container = out_of(["xcrun", "simctl", "get_app_container", udid,
+                        bundle_id]).strip()
+    penv = dict(os.environ,
+                SIMCTL_CHILD_KAYA_SWIFTUI_LIB=f"{container}/libkaya_swiftui.dylib")
+    if run(["xcrun", "simctl", "launch", udid, bundle_id], stdout=log,
+           stderr=log, env=penv).returncode != 0:
+        print(f"xcuidrive-pan: {bundle_id} would not launch", file=log)
+        return False
+    try:
+        ok, body = xcuidrive(udid, f"attach {bundle_id}")
+        print(f"xcuidrive-pan: attach -> {ok} {body}", file=log)
+        if not ok:
+            return False
+        ok, body = xcuidrive(udid, "frame")
+        if not ok:
+            return False
+        _x, _y, width, height = _frame_of(body)
+        before = None
+        for _ in range(50):
+            ok, body = xcuidrive(udid, "find row 1")
+            if ok:
+                before = _frame_of(body)
+                break
+            time.sleep(0.1)
+        print(f"xcuidrive-pan: row 1 before -> {ok} {body}", file=log)
+        if before is None:
+            return False
+        mid = width // 2
+        ok, body = xcuidrive(udid, f"drag {mid} {int(height * 0.8)} {mid} "
+                                   f"{int(height * 0.35)} 60")
+        if not ok:
+            print(f"xcuidrive-pan: drag -> {body}", file=log)
+            return False
+        time.sleep(0.8)
+        ok, body = xcuidrive(udid, "find row 1")
+        print(f"xcuidrive-pan: row 1 after -> {ok} {body}", file=log)
+        if not ok:
+            return False
+        after = _frame_of(body)
+        moved = before[1] - after[1]
+        if moved < 100:
+            print(f"xcuidrive-pan: a pan at x={mid} moved row 1 by {moved}pt "
+                  f"— the viewport does not span the window's width", file=log)
+            return False
+        print(f"xcuidrive-pan: PAN LANDED at x={mid}: row 1 moved {moved}pt",
+              file=log)
+        return True
+    finally:
+        run(["xcrun", "simctl", "terminate", udid, bundle_id],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _witness_worker(name, fn, app, bundle_id):
+    with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
+              errors="replace", buffering=1) as log:
+        slot = _claim_device()
+        t0 = time.monotonic()
+        try:
+            ok = fn(UDIDS[slot], log, app, bundle_id)
+        finally:
+            _release_device(slot)
+        secs = int(time.monotonic() - t0)
+        (LEGS_DIR / f"{name}.secs").write_text(f"{secs}\n",
+                                               encoding="utf-8")
+        (LEGS_DIR / f"{name}.verdict").write_text(
+            f"{'PASS' if ok else 'FAIL'}\n", encoding="utf-8")
+
+
+def queue_xcuidrive_pan(app, bundle_id):
+    prep_join()
+    name = "xcuidrive-pan"
+    _leg_names.append(name)
+    th = threading.Thread(target=_witness_worker,
+                          args=(name, xcuidrive_pan_witness, app, bundle_id))
+    th.start()
+    _leg_threads.append(th)
+
+
 def queue_xcuidrive_proof(app, bundle_id):
     """The driver's app-widget proof rides the pool like a leg and
     reports like one (admission is its dialog proof)."""
@@ -2143,6 +2232,8 @@ if SUITE in ("swift", "all"):
                                      f"dev.kaya.{guest}swift",
                                      BUNDLES / f"{guest}swift-bin",
                                      ident))
+        if guest == "scroll":
+            queue_xcuidrive_pan(app, "dev.kaya.scrollswift")
         if guest == "milestone2":
             queue_xcuidrive_proof(app, "dev.kaya.milestone2swift")
             queue_scene_leg("swift", guest, "swift", app,

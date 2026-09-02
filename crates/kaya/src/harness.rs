@@ -360,6 +360,7 @@ pub enum Step {
     /// cannot see it either, since the root can be forced full-size by
     /// its window while its children pool the leftover in slack.
     ExpectFills(Target),
+    ExpectBreadth(Target),
     /// Expect the container's children to sit at the given cross-axis
     /// placement — the observation the `align` prop is verified by.
     /// The stage CLASSIFIES from geometry (which edges or centers
@@ -691,6 +692,7 @@ impl Step {
             Step::Click(t)
             | Step::ExpectFocused(t)
             | Step::ExpectFills(t)
+            | Step::ExpectBreadth(t)
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
             | Step::ExpectAtEnd(t)
@@ -815,6 +817,7 @@ impl Step {
             // is not retried.
             Step::Frame(_) => false,
             Step::ExpectFills { .. } => true,
+            Step::ExpectBreadth { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
             Step::ExpectFolded { .. } => true,
@@ -1094,6 +1097,17 @@ pub trait Stage: Send + 'static {
     /// widget that draws at a HARD SIZE inside a correct track splits
     /// its container exactly right and renders wrong, silently.
     fn widget_fills(&self, target: Target) -> String;
+    /// Whether a WIDGET spans its flex container's content box along
+    /// that container's CROSS axis — the breadth `widget_fills` cannot
+    /// see, since it reads the track along the main axis: the empty
+    /// string when it does (within two device units), otherwise a short
+    /// platform-flavored description of the widget's breadth and the
+    /// box, failure text only, never compared across platforms. The
+    /// observation expect_breadth verifies. It exists for the scroll
+    /// ruling of 2026-09-02: a scroll spans its parent's cross axis by
+    /// default, and every backend hugged its content until the iOS
+    /// driver's real pans found a 79pt viewport in a 375pt window.
+    fn widget_spans_breadth(&self, target: Target) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: one of "start", "center", "end", "stretch",
     /// or "baseline" when the corresponding coincidence holds for every
@@ -1585,6 +1599,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectShares(parse_target(target)?, parse_string(text)?)
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
+            "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
             "expect_axis" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_axis wants a target and an axis string: {line:?}")
@@ -3857,6 +3872,24 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }))
             }
+            Step::ExpectBreadth(t) => {
+                // The cross-axis twin of expect_fills' widget half: the
+                // widget's breadth against its container's content box.
+                // A container target is refused — its children's breadth
+                // is expect_aligned's question.
+                if matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    Some(Err(format!("{t:?} is a container; expect_breadth reads a widget")))
+                } else {
+                    Some(poll(|| {
+                        let short = stage.widget_spans_breadth(*t);
+                        if short.is_empty() {
+                            Ok(format!("{} spans its breadth", target_spec(t)))
+                        } else {
+                            Err(format!("{} is short of its breadth ({short})", target_spec(t)))
+                        }
+                    }))
+                }
+            }
             Step::ExpectAxis(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     Some(Err(format!("{t:?} is not a container target")))
@@ -5217,6 +5250,14 @@ mod tests {
                 "draws 96pt of a 126pt track".into()
             }
         }
+        /// The same shape: index 0 spans, every other index is short.
+        fn widget_spans_breadth(&self, t: Target) -> String {
+            if t.index == 0 {
+                String::new()
+            } else {
+                "spans 79pt of its parent's 375pt breadth".into()
+            }
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -5976,6 +6017,9 @@ mod tests {
             fn widget_fills(&self, _: Target) -> String {
                 "draws 96pt of a 126pt track".into()
             }
+            fn widget_spans_breadth(&self, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -6219,6 +6263,9 @@ mod tests {
             fn widget_fills(&self, _: Target) -> String {
                 "draws 96pt of a 126pt track".into()
             }
+            fn widget_spans_breadth(&self, _: Target) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -6359,6 +6406,35 @@ mod tests {
     /// and read the wrong geometry. The mock answers by INDEX (0 fills,
     /// anything else is short), so the two halves below fail for
     /// different reasons rather than the same one.
+    /// expect_breadth reads widget_spans_breadth and refuses a container:
+    /// index 0 spans, index 1 is short, and the container refusal names
+    /// the verb, so all three answers are walked on one mock.
+    #[test]
+    fn expect_breadth_reads_a_widget_against_its_container_breadth() {
+        let steps = parse("expect_breadth scroll#0").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectBreadth(Target { kind: TargetKind::Scroll, index: 0, id: None, keys: None })
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (scroll#0 spans its breadth)");
+        let steps = parse("expect_breadth scroll#1").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_ne!(code, 0);
+        assert!(verdict.contains("short of its breadth (spans 79pt of its parent's 375pt breadth)"), "{verdict}");
+        let steps = parse("expect_breadth column#0").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_ne!(code, 0);
+        assert!(verdict.contains("expect_breadth reads a widget"), "{verdict}");
+    }
+
     #[test]
     fn expect_fills_reads_a_widget_against_its_track() {
         let steps = parse("expect_fills textarea#0").unwrap();

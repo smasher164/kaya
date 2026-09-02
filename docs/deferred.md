@@ -10220,7 +10220,7 @@ be fully featured and robust before we build out more features"): §5
 of the plan records each step; the picker findings on the way are in
 docs/traps.md.
 
-## WATCH — kaya's iOS scroll viewport is content-width: a user pan right of the rows scrolls nothing (measured 2026-09-02)
+## ~~WATCH — kaya's iOS scroll viewport is content-width: a user pan right of the rows scrolls nothing (measured 2026-09-02)~~ RULED AND FIXED 2026-09-02 (maintainer: a scroll spans its parent's cross axis by default; "i agree"): all five backends span under start and stretch, `expect_breadth scroll#0` holds it on every lane, and the iOS driver's pan at the window's middle is the `xcuidrive-pan` leg
 KEY: iOS scroll viewport width, content-width scroll, kindScroll frame, ScrollView cross axis, pannable strip
 
 Found by the resident driver's real pans on the scroll guest: the
@@ -10237,8 +10237,13 @@ row, as on the other three platforms), or hug its content as it does
 now on the two SwiftUI backends? Nothing in the shared scenes can see
 it — `expect_overflow` and `scroll_end` are vertical and programmatic —
 so the driver's pan on the scroll guest (aimed inside and outside the
-strip) is the only observation until a `expect_viewport_width`-style
-verb exists. Not changed here: a layout ruling, not infrastructure.
+strip) was the only observation until `expect_breadth` (the cross-axis
+twin of expect_fills' widget half) landed with the ruling — DESIGN.md's
+align bullet carries the rule; GTK, WinUI, SwiftUI and Compose each got
+the arm, all four measured hugging before it (iOS 79pt, GTK 84px by
+AT-SPI, the mac 68pt of 508 by the watched negative — the doctored
+SwiftUI arm failed `expect_breadth scroll#0` with that sentence and the
+restored one passed — Compose and WinUI by their arms' own code).
 
 ## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30) — the guaranteed path is BUILT and PROVEN STANDALONE 2026-09-02 (a resident XCUITest driver, tools/ios/xcuidrive: a real tap changed kaya's model, a real drag scrolled a system app), wired opt-in behind KAYA_IOS_XCUIDRIVE and its in-lane selfcheck green (the swift suite ALL PASS with it, 2026-09-02); kaya's SwiftUI ScrollView ignores a synthetic pan (docs/traps.md); stays open for the subsumption slice the entry above proposes
 KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion, xcuidrive, resident driver

@@ -4,6 +4,12 @@
 # content's end edge back, and the trailing click proves the
 # scrolled-to content is live (the bottom button writes the status
 # label at the top).
+# A SCROLL SPANS ITS PARENT'S CROSS AXIS (ruled 2026-09-02): the
+# viewport is a region, not content, and a user pans anywhere across it.
+# Every backend hugged the 29 labels' width until the iOS driver's real
+# pans found a 79pt strip in a 375pt window (docs/traps.md); the widget
+# half of the breadth question, read from geometry on all five lanes.
+expect_breadth scroll#0
 expect_overflow scroll#0
 expect label#0 "at top"
 scroll_end scroll#0

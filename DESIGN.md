@@ -1075,6 +1075,18 @@ The known normalization worklist:
   stretched nested column beside a hugging label); start rides every
   other scene's geometry, and end keeps a live classification arm
   with the recordings as its visual record until a scene earns it.
+  A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode and
+  under stretch (ruled 2026-09-02): a viewport is a region, not
+  content, and every platform's own scrolling surface fills its
+  container. Under `start` every backend had hugged the scroll's
+  content — 79pt in a 375pt window on iOS, 84px in 530 on GTK — which
+  the iOS driver's real pans found and no scene could, since
+  scroll_end drives the toolkit's scroll API and never touches the
+  width. `center` and `end` still position a hugging scroll; in a
+  row a scroll already crosses. Gate: `expect_breadth <widget>`, the
+  cross-axis twin of expect_fills' widget half — the widget's
+  recorded breadth against its container's content box, ±2 — on the
+  scroll scene, plus the iOS driver's pan at the window's middle.
   Stretch earned its scene 2026-08-22, the day the portfolio
   dashboard's first photograph caught the mode inexpressible on the
   two interpreter backends while every model observable stayed green,

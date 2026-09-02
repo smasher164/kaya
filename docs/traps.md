@@ -6879,6 +6879,16 @@ lands outside the scroll view and nothing pans. The harness's own
 `scroll_end` (ScrollViewReader's proxy) never touches the viewport's
 width, which is why the scroll scene is green on this lane and this
 was invisible until real input. The driver's scroll route WORKS —
-aim the drag inside the scroll's frame — and the width is a kaya
-layout question, on the ledger (docs/deferred.md, "iOS scroll
-viewport width").
+aim the drag inside the scroll's frame — and the width was a kaya
+layout question — RULED the same day: a scroll spans its parent's cross
+axis (DESIGN.md's align bullet; the struck ledger WATCH). AND THE FIX HAS
+A TRAP OF ITS OWN: a `.frame(maxWidth: .infinity)` AROUND a SwiftUI
+ScrollView widens only a wrapper — a vertical ScrollView is as wide as
+its content whatever is proposed to it — so the harness's cell reader
+on that wrapper answered "spans its breadth" while the driver's pan at
+x=187 still moved 0pt (the `xcuidrive-pan` leg's first run). The frame
+goes on the CONTENT inside the ScrollView, and `expect_breadth` reads a
+scroll's breadth from the ScrollView's own box (`scrollViewportW`),
+never from its cell. Watched both ways: doctored arms failing with
+`spans 68pt of its parent's 508pt breadth` (mac) and `spans 84px of its
+parent's 498px breadth` (GTK), and the pan witness moving 288pt after.

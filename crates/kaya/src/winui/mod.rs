@@ -2378,6 +2378,13 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // breadth clause is what holds it).
         let crossing = matches!(widget, NativeWidget::Row(_) | NativeWidget::Column(_))
             && effective_vertical(core, *child) != vertical;
+        // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode
+        // and under stretch (ruled 2026-09-02; the scene's expect_breadth
+        // holds it): a viewport is a region, not content. Center and end
+        // still position a hugging one. Stamped through the same arm as
+        // the crossing rule, since both size where the mode would place.
+        let crossing = crossing
+            || (matches!(widget, NativeWidget::Scroll(_)) && matches!(mode, 0 | 3));
         // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
         // track renders identically (track = desired), a star track is
         // the grower's box, and a declared Width/Height still outranks
@@ -17078,6 +17085,48 @@ impl crate::harness::Stage for WinUiStage {
                     drawn.round() as i64,
                     track.round() as i64
                 ),
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let element: FrameworkElement = match target_element(core, t)? {
+                Some(e) => e.cast()?,
+                None => return Ok("<no such target>".to_owned()),
+            };
+            let Ok(parent) = element.Parent()?.cast::<Grid>() else {
+                return Ok("parent is not a flex container".to_owned());
+            };
+            // The parent's axis from the registries, container_fills'
+            // breadth clause's rule: a Grid in `columns` lays out
+            // vertically, so its cross axis is width.
+            let parent_vertical = if core.columns.iter().any(|g| g == &parent) {
+                true
+            } else if core.rows.iter().any(|g| g == &parent) {
+                false
+            } else {
+                return Ok("parent is not a flex container".to_owned());
+            };
+            parent.UpdateLayout()?;
+            let pad = parent.Padding()?;
+            let (breadth, inner) = if parent_vertical {
+                (element.ActualWidth()?, parent.ActualWidth()? - pad.Left - pad.Right)
+            } else {
+                (element.ActualHeight()?, parent.ActualHeight()? - pad.Top - pad.Bottom)
+            };
+            if inner <= 0.0 {
+                return Ok("no container layout recorded".to_owned());
+            }
+            Ok(if breadth >= inner - 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "spans {}dip of its parent's {}dip breadth",
+                    breadth.round() as i64,
+                    inner.round() as i64
+                )
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

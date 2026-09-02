@@ -587,6 +587,19 @@ fn set_container_vertical(widget: &gtk4::Widget, vertical: bool) {
     unsafe { widget.set_data(AXIS_KEY, vertical) }
 }
 
+/// The scroll KIND, by a key of its own: a textarea's flex child is a
+/// GtkScrolledWindow too, and the breadth rule below is the scroll's alone.
+const SCROLL_KEY: &str = "kaya-scroll-kind";
+fn is_scroll_kind(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to
+    // `true` by set_scroll_kind below.
+    unsafe { widget.data::<bool>(SCROLL_KEY).is_some() }
+}
+fn set_scroll_kind(widget: &gtk4::Widget) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(SCROLL_KEY, true) }
+}
+
 /// A row in a column, or a column in a row — the child's main axis IS the
 /// parent's cross axis, so its own breadth is what the parent's cross box
 /// hands out.
@@ -635,6 +648,15 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     // allocated baseline it hands out is the one discriminator cross_mode
     // has that spanning geometry cannot fake.
     if align != gtk4::Align::Baseline && crosses_container(child, vertical_container) {
+        align = gtk4::Align::Fill;
+    }
+    // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode and
+    // under stretch (ruled 2026-09-02): a viewport is a region, not
+    // content, and every platform's own scrolling surface fills its
+    // container — hugging left a 79pt pannable strip in a 375pt window
+    // on iOS and an 84px one here (docs/traps.md). Center and end still
+    // POSITION a hugging scroll; the scene's expect_breadth holds this.
+    if is_scroll_kind(child) && matches!(mode, 0 | 3) {
         align = gtk4::Align::Fill;
     }
     if vertical_container {
@@ -6649,6 +6671,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // the same declaration filled correctly on SwiftUI and
                     // Compose (measured 2026-08-30).
                     set_container_vertical(scrolled.upcast_ref::<gtk4::Widget>(), true);
+                    set_scroll_kind(scrolled.upcast_ref::<gtk4::Widget>());
                     core.scrolls.push(scrolled.clone());
                     NativeWidget::Scroll(scrolled)
                 }
@@ -11417,6 +11440,51 @@ impl crate::harness::Stage for GtkStage {
                 String::new()
             } else {
                 format!("draws {}px of a {}px track", drawn.round(), track.round())
+            }
+        })
+    }
+
+    fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            // The LAYOUT widget, as widget_fills reads it.
+            let Some(control) = target_widget(core, t) else {
+                return "<no such target>".to_string();
+            };
+            let widget = core
+                .widgets
+                .values()
+                .find(|w| w.control() == control)
+                .map_or(control, |w| w.widget());
+            while glib::MainContext::default().iteration(false) {}
+            let Some(parent) = widget.parent() else {
+                return "no parent — not a flex child".to_string();
+            };
+            // The parent's axis from its LAYOUT MANAGER, container_fills'
+            // breadth clause's rule — never the AXIS_KEY the lowering
+            // stamps, which would copy the model this is here to check.
+            let Some(parent_vertical) = parent.layout_manager().and_then(|m| {
+                m.downcast_ref::<flex::FlexLayout>()
+                    .map(|f| f.orientation() == gtk4::Orientation::Vertical)
+                    .or_else(|| {
+                        m.downcast_ref::<gtk4::BoxLayout>()
+                            .map(|b| b.orientation() == gtk4::Orientation::Vertical)
+                    })
+            }) else {
+                return "parent is not a flex container".to_string();
+            };
+            // The ALLOCATION is the breadth (the CSS box would be the
+            // content box); the parent's width()/height() IS its content
+            // box on GTK4.
+            let breadth = flex::child_extent(&widget, !parent_vertical).round() as i32;
+            let across = if parent_vertical { parent.width() } else { parent.height() };
+            if across <= 0 {
+                return "no container layout recorded".to_owned();
+            }
+            if breadth >= across - 2 {
+                String::new()
+            } else {
+                format!("spans {breadth}px of its parent's {across}px breadth")
             }
         })
     }

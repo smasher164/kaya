@@ -72,8 +72,10 @@ matrix — 365s for 114 legs (matrix 25) against 416s and 431s for 113
 with simdrive and clipctl (matrices 24 and 23), admission 11–14s a
 phone and each cancel 3–6s. Scrolling: the driver's pan DOES scroll
 kaya's ScrollView when it starts inside the scroll's frame; the earlier
-"no pan" was kaya's iOS scroll being only as wide as its content (a
-ledger WATCH, docs/traps.md). The `type` verb's iOS route is the driver's since the same day: the
+"no pan" was kaya's iOS scroll being only as wide as its content — ruled
+the same day: a scroll spans its parent's cross axis on every backend
+(DESIGN.md), held by `expect_breadth scroll#0` on all five lanes and by
+the `xcuidrive-pan` leg, a real pan at the window's middle. The `type` verb's iOS route is the driver's since the same day: the
 interpreter keeps the caret-to-end and the settle and asks the host for
 the KEYS (`type_b64`, real presses through the simulator's keyboard);
 `insertText`, the in-process stand-in the arm used while the platform

@@ -381,6 +381,9 @@ final class KayaNode: Identifiable {
     // The scroll observations (scroll viewports only), recorded by the
     // render's readers, never a model copy.
     var scrollViewportH = 0.0
+    /// The ScrollView's OWN width — the real scrolling surface, which
+    /// expect_breadth reads for a scroll instead of its flex cell.
+    var scrollViewportW = 0.0
     var scrollContentH = 0.0
     var scrollContentMaxY = 0.0
     /// Progress-only: the platform's activity mode (Value carries the
@@ -7515,6 +7518,52 @@ private func kayaRunScript(_ script: String) {
                 case let other?:
                     failures.append("\(parts[1]) aligns \"\(other)\", wanted \"\(want)\"")
                 }
+            case "expect_breadth":
+                // The cross-axis twin of expect_fills' widget half (harness.rs
+                // Step::ExpectBreadth): the widget's recorded cross rect against
+                // its container's recorded cross breadth, both from the same
+                // readers expect_aligned classifies from. A container target is
+                // refused as harness.rs refuses it.
+                let short = DispatchQueue.main.sync { () -> String? in
+                    if parts[1].hasPrefix("row") || parts[1].hasPrefix("column") {
+                        return "\(parts[1]) is a container; expect_breadth reads a widget"
+                    }
+                    guard let widget = kayaAnyTarget(parts[1]) else { return nil }
+                    guard
+                        let parent = (kayaScene.columns + kayaScene.rows).first(where: { c in
+                            c.children.contains(where: { $0.id == widget.id })
+                        })
+                    else { return "no parent — not a flex child" }
+                    guard let inner = kayaContainerCross[parent.id], inner > 0 else {
+                        return "no container layout recorded"
+                    }
+                    // A SCROLL'S BREADTH IS ITS SCROLL VIEW'S, never its cell's:
+                    // the cell wrapper spanned while the ScrollView inside it
+                    // hugged, and only the driver's real pan saw the difference.
+                    let breadth: Double
+                    if widget.kind == kindScroll {
+                        guard widget.scrollViewportW > 0 else {
+                            return "no scroll viewport recorded"
+                        }
+                        breadth = widget.scrollViewportW
+                    } else {
+                        guard let rect = kayaCrossRects[widget.id] else {
+                            return "no cross box recorded — not a flex child"
+                        }
+                        breadth = rect.1
+                    }
+                    if breadth >= inner - 2 { return "" }
+                    return "spans \(Int(breadth.rounded()))pt of its parent's \(Int(inner.rounded()))pt breadth"
+                }
+                guard let short else {
+                    failures.append("no such target: \(parts[1])")
+                    break
+                }
+                if short.isEmpty {
+                    observed.append("\(parts[1]) spans its breadth")
+                } else {
+                    failures.append("\(parts[1]) is short of its breadth (\(short))")
+                }
             case "expect_fills":
                 // ONE VERB, TWO SUBJECTS (harness.rs Step::ExpectFills). A
                 // CONTAINER's children span its content box — the
@@ -12403,6 +12452,10 @@ struct KayaRender: View {
     /// Whether that container aligns its children `stretch` — the CROSS axis's
     /// half of the question `flexVertical` answers for the main one. Only the
     /// widgets whose natural size is a fixed frame need it.
+    /// That container's align MODE, for the one kind whose cross-axis
+    /// default is not the container's: a scroll spans under start and
+    /// stretch (ruled 2026-09-02) and is positioned by center and end.
+    var flexAlign: Int64 = alignStart
     var flexStretch = false
     /// Grouped section header/footer dress (KayaGroupedSections.kayaBare).
     @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
@@ -12496,6 +12549,7 @@ struct KayaRender: View {
                             ) {
                                 KayaRender(
                                     node: child, flexVertical: vertical,
+                                    flexAlign: node.align,
                                     flexStretch: node.align == alignStretch)
                                     // The grower renders AT its track, leaf or
                                     // container, and stretch spans the cross
@@ -12777,10 +12831,31 @@ struct KayaRender: View {
             // scrolling API scroll_end drives; the geometry readers record
             // viewport, content, and the content's bottom edge in the
             // viewport's space.
+            //
+            // AND IT SPANS ITS PARENT'S CROSS AXIS (ruled 2026-09-02): a
+            // vertical ScrollView is as wide as its content unless told
+            // otherwise, which left a 79pt pannable strip in a 375pt window
+            // that the iOS driver's real pans found (docs/traps.md). Under
+            // the default mode and stretch it takes the whole breadth;
+            // center and end still position a hugging one. In a row it
+            // already crosses.
+            let scrollSpans = flexVertical != nil && (flexAlign == alignStart || flexAlign == alignStretch)
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     if let content = node.children.first {
                         KayaRender(node: content)
+                            // ON THE CONTENT, not around the ScrollView: a
+                            // vertical ScrollView is as wide as its content
+                            // whatever is proposed to it, so a frame outside
+                            // it widened only a wrapper — the harness read the
+                            // wrapper as spanning while the iOS driver's pan
+                            // at the window's middle still moved nothing
+                            // (measured 2026-09-02, the pan witness's first
+                            // run). Height stays the content's: it is what
+                            // scrolls.
+                            .frame(
+                                maxWidth: (flexVertical == true && scrollSpans) ? .infinity : nil,
+                                alignment: .topLeading)
                             .background(
                                 GeometryReader { g in
                                     Color.clear
@@ -12804,10 +12879,12 @@ struct KayaRender: View {
                         Color.clear
                             .onAppear {
                                 node.scrollViewportH = g.size.height
+                                node.scrollViewportW = g.size.width
                                 kayaScrollProxies[node.id] = proxy
                             }
                             .onChange(of: g.size) { _, size in
                                 node.scrollViewportH = size.height
+                                node.scrollViewportW = size.width
                             }
                     }
                 )
