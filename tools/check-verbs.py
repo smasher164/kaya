@@ -1182,14 +1182,85 @@ if failures:
     for f_ in failures:
         print(f"check-verbs: {f_}", file=sys.stderr)
     raise SystemExit(1)
+# --- THE KEYED TARGET REACHES EVERY TAGGED KIND (2026-09-01) --------
+# `kind@id[key.path]` used to resolve for `column` alone on all four
+# backends — each early-returned on any other kind — so no scene could
+# click a stamped button (docs/deferred.md's keyed-target entry, the
+# portfolio's per-account affordance). Every occurrence tag carries the
+# table tag's own node-and-keys layout, so the arms resolve any tagged
+# kind through it now; this pins each arm's generic spelling and refuses
+# the column-only guard coming back. Byte-frozen markers, doctored away
+# one at a time and watched red.
+KEYED_ARMS = [
+    ("crates/kaya/src/gtk.rs",
+     "let candidates = kind_registry(core, kind);",
+     "let candidates: Vec<gtk4::Widget> = Vec::new();"),
+    ("crates/kaya/src/winui/mod.rs",
+     "K::Button => find(&core.button_controls, &id),",
+     "K::Button => None,"),
+    ("swift/KayaSwiftUI.swift",
+     'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)',
+     "kayaTableStamp($0.sortTag)"),
+    ("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
+     'tableStamp(if (kind == "column") n.sortTag else n.tag)',
+     "tableStamp(n.sortTag)"),
+]
+COLUMN_ONLY = [
+    ("crates/kaya/src/gtk.rs",
+     "if kind != K::Column {\n                    return None;"),
+    ("swift/KayaSwiftUI.swift", 'guard kind == "column" else { return nil }'),
+    ("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
+     'if (kind != "column") return null'),
+]
+
+
+def keyed_problems(texts):
+    bad = []
+    for rel, marker, _ in KEYED_ARMS:
+        if texts[rel].count(marker) != 1:
+            bad.append(f"{rel}: the keyed target arm no longer spells "
+                       f"`{marker}` exactly once — a stamped copy of a "
+                       f"non-column kind cannot be driven by key")
+    for rel, guard in COLUMN_ONLY:
+        if guard in texts[rel]:
+            bad.append(f"{rel}: the column-only guard `{guard.strip()}` "
+                       f"is back in the keyed target arm")
+    return bad
+
+
+keyed_texts = {rel: (ROOT / rel).read_text(encoding="utf-8")
+               for rel, _, _ in KEYED_ARMS}
+keyed_out = keyed_problems(keyed_texts)
+for rel, marker, broken in KEYED_ARMS:
+    doctored = dict(keyed_texts)
+    doctored[rel] = g.doctor(f"keyed arm marker cut from {rel}",
+                             keyed_texts[rel], re.escape(marker), broken)
+    if not keyed_problems(doctored):
+        fail(f"check-verbs SELF-TEST: {rel}'s keyed arm passed with "
+             f"`{marker}` doctored to `{broken}`")
+for rel, guard in COLUMN_ONLY:
+    doctored = dict(keyed_texts)
+    doctored[rel] = keyed_texts[rel] + "\n" + guard + "\n"
+    if not keyed_problems(doctored):
+        fail(f"check-verbs SELF-TEST: {rel}'s column-only guard "
+             f"restored passed")
+if keyed_out:
+    print("check-verbs: the keyed harness target must reach every "
+          "tagged kind on every backend:", file=sys.stderr)
+    print("\n".join(keyed_out), file=sys.stderr)
+keyed_status = 1 if keyed_out else 0
+print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers pinned, "
+      f"{len(KEYED_ARMS) + len(COLUMN_ONLY)} watched negatives refused",
+      file=sys.stderr)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
-        or metrics_status):
+        or metrics_status or keyed_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
           f"the CLIP_* mirrors + the ink tolerance in 3 harnesses + "
           f"the ax spelling in 3 harnesses + the windowed tier's loop "
-          f"+ the metrics class channel + spec hash against 2 "
-          f"interpreters")
+          f"+ the metrics class channel + the keyed target arms on 4 "
+          f"backends + spec hash against 2 interpreters")

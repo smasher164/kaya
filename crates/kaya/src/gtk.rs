@@ -1698,6 +1698,31 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     }
 }
 
+/// A kind's registry as plain widgets, in creation order — the harness's
+/// `kind#index` space and the candidate list a `kind@id[key.path]`
+/// target resolves over.
+fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4::Widget> {
+    use crate::harness::TargetKind as K;
+    use gtk4::prelude::Cast;
+    match kind {
+        K::Button => core.buttons.iter().map(|w| w.clone().upcast()).collect(),
+        K::Checkbox => core.checkboxes.iter().map(|w| w.clone().upcast()).collect(),
+        K::Slider => core.sliders.iter().map(|w| w.clone().upcast()).collect(),
+        K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
+        K::Label => core.labels.iter().map(|w| w.clone().upcast()).collect(),
+        K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
+        K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
+        K::Image => core.images.iter().map(|w| w.clone().upcast()).collect(),
+        K::Scroll => core.scrolls.iter().map(|w| w.clone().upcast()).collect(),
+        K::Progress => core.progresses.iter().map(|w| w.clone().upcast()).collect(),
+        K::Select => core.selects.iter().map(|w| w.clone().upcast()).collect(),
+        K::Radio => core.radios.iter().map(|w| w.clone().upcast()).collect(),
+        K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
+        K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
+        K::Canvas => core.canvases.iter().map(|w| w.clone().upcast()).collect(),
+    }
+}
+
 fn build_spacer() -> gtk4::Box {
     let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     spacer.add_css_class(TABLE_SPACER_CLASS);
@@ -2414,6 +2439,12 @@ struct CoreState {
     buttons: Vec<gtk4::Button>,
     checkboxes: Vec<gtk4::CheckButton>,
     labels: Vec<gtk4::Label>,
+    /// Every tagged widget's occurrence tag (the on_click_node encoding:
+    /// the template node and the copy's key path), by widget id — what a
+    /// `kind@id[key.path]` target resolves through for every tagged kind,
+    /// not the table's sort tag alone (docs/deferred.md, the keyed-target
+    /// entry, 2026-09-01).
+    widget_tags: HashMap<u64, Vec<u8>>,
     entries: Vec<gtk4::Entry>,
     sliders: Vec<gtk4::Scale>,
     images: Vec<gtk4::Picture>,
@@ -6464,6 +6495,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 // tag: focus resolution wants every widget, paste delivery wants the
 // identity tag, and the editable flag is cut/copy's enablement answer.
             let clip_tag = tag.clone();
+            if let Some(t) = &clip_tag {
+                core.widget_tags.insert(id.0, t.clone());
+            }
             let clip_editable =
                 matches!(kind, WidgetKind::Entry | WidgetKind::Textarea);
             let native = match kind {
@@ -9160,6 +9194,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     veto
                 },
                 widgets: HashMap::new(),
+                widget_tags: HashMap::new(),
                 buttons: Vec::new(),
                 checkboxes: Vec::new(),
                 labels: Vec::new(),
@@ -11065,22 +11100,47 @@ impl crate::harness::Stage for GtkStage {
                     .map(|i| i as isize)
             }
             if let Some(keys) = keys.as_deref() {
-                if kind != K::Column {
-                    return None;
+                if kind == K::Column {
+                    let node = core
+                        .columns
+                        .iter()
+                        .zip(&core.column_ids)
+                        .filter(|(column, _)| column.widget_name() == id)
+                        .find_map(|(_, widget)| table_tag(core, *widget))
+                        .and_then(|tag| crate::harness::table_tag_node(&tag))?;
+                    return core
+                        .columns
+                        .iter()
+                        .zip(&core.column_ids)
+                        .position(|(_, widget)| {
+                            table_tag(core, *widget).is_some_and(|tag| {
+                                crate::harness::table_tag_matches_keys(&tag, node, keys)
+                            })
+                        })
+                        .map(|i| i as isize);
                 }
-                let node = core
-                    .columns
+                // EVERY OTHER TAGGED KIND resolves through its occurrence
+                // tag, the same node-and-keys encoding the table's sort
+                // tag carries: the template node is read off any copy
+                // carrying the authored id, then the copy whose key path
+                // matches is the target (a stamped button by key —
+                // docs/deferred.md's keyed-target entry, 2026-09-01).
+                let candidates = kind_registry(core, kind);
+                let tag_of = |w: &gtk4::Widget| -> Option<Vec<u8>> {
+                    core.widgets
+                        .iter()
+                        .find(|(_, native)| native.widget() == *w)
+                        .and_then(|(wid, _)| core.widget_tags.get(&wid.0).cloned())
+                };
+                let node = candidates
                     .iter()
-                    .zip(&core.column_ids)
-                    .filter(|(column, _)| column.widget_name() == id)
-                    .find_map(|(_, widget)| table_tag(core, *widget))
+                    .filter(|w| w.widget_name() == id)
+                    .find_map(|w| tag_of(w))
                     .and_then(|tag| crate::harness::table_tag_node(&tag))?;
-                return core
-                    .columns
+                return candidates
                     .iter()
-                    .zip(&core.column_ids)
-                    .position(|(_, widget)| {
-                        table_tag(core, *widget).is_some_and(|tag| {
+                    .position(|w| {
+                        tag_of(w).is_some_and(|tag| {
                             crate::harness::table_tag_matches_keys(&tag, node, keys)
                         })
                     })
@@ -11103,24 +11163,7 @@ impl crate::harness::Stage for GtkStage {
                     })
                     .map(|i| i as isize);
             }
-            let widgets: Vec<gtk4::Widget> = match kind {
-                K::Button => core.buttons.iter().map(|w| w.clone().upcast()).collect(),
-                K::Checkbox => core.checkboxes.iter().map(|w| w.clone().upcast()).collect(),
-                K::Slider => core.sliders.iter().map(|w| w.clone().upcast()).collect(),
-                K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
-                K::Label => core.labels.iter().map(|w| w.clone().upcast()).collect(),
-                K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
-                K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
-                K::Image => core.images.iter().map(|w| w.clone().upcast()).collect(),
-                K::Scroll => core.scrolls.iter().map(|w| w.clone().upcast()).collect(),
-                K::Progress => core.progresses.iter().map(|w| w.clone().upcast()).collect(),
-                K::Select => core.selects.iter().map(|w| w.clone().upcast()).collect(),
-                K::Radio => core.radios.iter().map(|w| w.clone().upcast()).collect(),
-                K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
-                K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
-                K::Canvas => core.canvases.iter().map(|w| w.clone().upcast()).collect(),
-            };
-            find(widgets, &id)
+            find(kind_registry(core, kind), &id)
         })
     }
 

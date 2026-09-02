@@ -8987,8 +8987,27 @@ ARTIFACT against the guest's BOOK, derives both net lines, and refuses
 any net line whose money the dashboard does not also say — four new
 watched negatives (N20-N23, 23 in the gate, up from 19).
 
-## OPEN — the keyed harness target answers for `column` alone, so a stamped button cannot be driven (found 2026-08-26)
+## ~~OPEN — the keyed harness target answers for `column` alone, so a stamped button cannot be driven (found 2026-08-26)~~ (CLOSED 2026-09-01: every occurrence tag carries the table tag's node-and-keys layout, so all four backends resolve `kind@id[key.path]` for any tagged kind; WinUI's buttons registry carries its controls; the portfolio's per-account Transactions button is the proof on five lanes)
 KEY: resolve_id keyed arm, kind@id[key.path], button@id, stamped button target, winui buttons registry, click tags
+
+CLOSED 2026-09-01. The click tag a stamped button is created with
+(`wire::click_tag(node, path)`) has exactly the table sort tag's
+layout — the template node, a count, the key values — so
+`table_tag_node`/`table_tag_matches_keys` read it unchanged, and the
+keyed arm generalized on all four backends: gtk.rs keeps every tagged
+widget's tag by id (`widget_tags`) and resolves any kind's registry
+through it; winui keeps the Button controls beside the click tags
+(`button_controls`), which also closes the documented `button@id`
+divergence, and resolves stamped buttons by key (its other registries
+still hold controls without tags — stated in the arm); KayaSwiftUI and
+KayaCompose read a node's `tag` where they read the table's `sortTag`.
+tools/check-verbs.sh pins each arm's generic spelling and refuses the
+column-only guard, seven watched negatives. THE PROOF IS THE
+AFFORDANCE THIS ENTRY NAMED: guests/python/portfolio.py's account
+cards carry a stamped "Transactions" button (a11y id `transactions`)
+that opens the view filtered to the card's account, and
+tools/scenes/portfolio.steps clicks `button@transactions[retirement]`
+and reads the count, the net line and the filter's own selection.
 
 `kind@id[key.path]` resolves only when kind is `column`: gtk.rs and
 winui/mod.rs both early-return on `if kind != K::Column`, and
@@ -9331,7 +9350,7 @@ and the adaptive scene's 520 both become the ruled 600 boundary, so
 those scenes' frozen widths move with the slice.
 
 
-## DESIGN — THE NINTH BINDING: JS/TS (Akhil, 2026-08-31; every day-one ruling recorded, integer contract included — BUILD READY)
+## ~~DESIGN — THE NINTH BINDING: JS/TS (Akhil, 2026-08-31; every day-one ruling recorded, integer contract included — BUILD READY)~~ (COMPLETE 2026-09-01, 913512a through f9946a5: libkaya is the addon, the ambient sugar with its four JS-only shapes, 42 guests, the mac, linux and windows lanes all carrying the JS legs, eight censuses with a ninth column; npm distribution rides the packaging milestone)
 RULED 2026-09-01 (the maintainer, after the sugar review — docs/js-plan.md
 §4 has the mechanisms and the rejected candidates): four JS-only shapes
 join the ported surface. The IMPLICIT TRANSACTION (a mutation on the app

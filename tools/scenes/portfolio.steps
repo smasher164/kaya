@@ -259,6 +259,21 @@ expect label#1 "Transactions: 15003"
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
 expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
+# A STAMPED BUTTON DRIVEN BY KEY (2026-09-01): each account card carries
+# its own Transactions button, a stamped copy the keyed target reaches
+# — the affordance docs/portfolio-plan.md §5 recorded as unreachable
+# while `kind@id[key.path]` answered for columns alone. The view opens
+# filtered to the card's account, so the count, the net line and the
+# filter's own selection say which card was clicked.
+click button@transactions[retirement]
+expect_entries 1
+expect_title "Transactions"
+expect label@count "4698 of 15003 transactions"
+expect label@net "net BND 20, VXUS 15 = $2370.00"
+expect select#0 "Retirement"
+back
+expect_entries 0
+expect_title "portfolio"
 
 # THE STACKED FOLD (docs/adaptive-layout-plan.md D7), at the scene's END
 # so the phone cut costs nothing above it: stacked, the summary renders

@@ -476,11 +476,22 @@ def closed_transactions():
     screen.clear()
 
 
-def open_transactions():
-    # A freshly opened view shows the whole book, unsorted: the state
-    # belongs to the screen, and the screen is new.
-    view["account"] = None
+def open_account_transactions(account):
+    """The stamped affordance: each account card's own Transactions
+    button, whose click arrives with the card's key (the account), opens
+    the view filtered to it — the natural affordance docs/portfolio-plan.md
+    §5 recorded as unreachable while `kind@id[key]` answered for columns
+    alone (2026-09-01)."""
+    open_transactions(account=account)
+
+
+def open_transactions(account=None):
+    # A freshly opened view shows the book for one account or all of it,
+    # unsorted: the state belongs to the screen, and the screen is new.
+    view["account"] = account
     view["sort"] = None
+    filter_index = next(i for i, (_, value) in enumerate(FILTERS)
+                        if value == account)
     with app.push_entry(TRANSACTIONS, title="Transactions",
                         on_popped=closed_transactions):
         count_line = kaya.signal("")
@@ -500,7 +511,8 @@ def open_transactions():
                 kaya.label(bind=first_line).a11y_id("first")
                 kaya.label(bind=last_line).a11y_id("last")
                 kaya.label(bind=net_signal).a11y_id("net")
-                kaya.select([name for name, _ in FILTERS], selected=0,
+                kaya.select([name for name, _ in FILTERS],
+                            selected=filter_index,
                             on_select=on_filter)  # select#0
                 recent = kaya.collection(Txn)
                 # UNGROWN: a summary table hugs its rows (the empty-row
@@ -623,6 +635,11 @@ with app.window(title="portfolio", width=900, height=600):
                                 kaya.label(bind=item.price)
                                 kaya.label(bind=item.value)
                         kaya.caption(bind=account.total)
+                        # A STAMPED BUTTON, one per card, driven by key:
+                        # `button@transactions[retirement]` in the scene.
+                        kaya.button("Transactions",
+                                    on_click=open_account_transactions
+                                    ).a11y_id("transactions")
     for account in ACCOUNT_ORDER:
         name, _ = BOOK[account]
         accounts.insert(

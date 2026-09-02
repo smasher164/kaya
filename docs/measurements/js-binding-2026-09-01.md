@@ -421,3 +421,21 @@ green standalone; the fourteenth matrix ALL PASS on all five lanes and
 52 gates, 1,549 legs in 615s (mac 370s, linux 432s, windows 488s, iOS
 523s, android 194s). tools/guest-floor.py sweeps the JS guests now.
 
+## The keyed harness target reaches stamped buttons
+
+The click tag a stamped copy is created with has the table sort tag's
+own layout, so the keyed arm generalized on all four backends without a
+new encoding (gtk keeps every tagged widget's tag by id; winui keeps its
+Button controls beside the click tags, which also closes the `button@id`
+divergence; the two interpreters read a node's own tag where they read
+the table's). The proof is the portfolio's per-account "Transactions"
+button, clicked as `button@transactions[retirement]` and read back
+through the count, the net line and the filter's own selection: green
+on the mac (once the interpreter was rebuilt — the first miss was a
+stale dylib, not the arm), linux x11 and wayland (9s, 7s), windows (3s),
+android (8s) and iOS (11s). check-verbs pins the four arms with seven
+watched negatives; check-steps' sortTag clauses follow the spelling.
+The fifteenth matrix, with the keyed button on the portfolio's five
+legs: ALL PASS on all five lanes and 52 gates, 1,549 legs in 629s (mac
+374s, linux 428s, windows 442s, iOS 523s, android 214s).
+

@@ -2915,14 +2915,17 @@ object KayaCompose {
                     KayaSceneModel.nodes[it.id] === it && it.a11yId == id
                 }
             }
-            if (kind != "column") return null
+            // A stamped copy of ANY tagged kind resolves by key: the table's
+            // sort tag and a widget's occurrence tag carry the same
+            // node-and-keys encoding (the keyed-target entry, 2026-09-01).
+            val stampOf = { n: KayaNode -> tableStamp(if (kind == "column") n.sortTag else n.tag) }
             val live = registry.filter { KayaSceneModel.nodes[it.id] === it }
             val node = live.asSequence()
                 .filter { it.a11yId == id }
-                .mapNotNull { tableStamp(it.sortTag)?.node }
+                .mapNotNull { stampOf(it)?.node }
                 .firstOrNull() ?: return null
             return live.firstOrNull {
-                tableStamp(it.sortTag)?.let { stamp ->
+                stampOf(it)?.let { stamp ->
                     stamp.node == node && stamp.keys == keys
                 } == true
             }

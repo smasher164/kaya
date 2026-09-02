@@ -5297,14 +5297,26 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
         guard let keys else {
             return registry.first { kayaScene.nodes[$0.id] === $0 && $0.a11yId == id }
         }
-        guard kind == "column" else { return nil }
+        // A stamped copy of ANY tagged kind resolves by key: the table's
+        // sort tag and a widget's occurrence tag carry the same node-and-
+        // keys encoding (the keyed-target entry, 2026-09-01).
+        let stampOf: (KayaNode) -> KayaTableStamp? = { kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag) }
         let live = registry.filter { kayaScene.nodes[$0.id] === $0 }
         guard
             let node = live.lazy.filter({ $0.a11yId == id })
-                .compactMap({ kayaTableStamp($0.sortTag)?.node }).first
-        else { return nil }
+                .compactMap({ stampOf($0)?.node }).first
+        else {
+            // The miss says what the registry held: a keyed target that
+            // resolves nothing is otherwise one sentence for every cause.
+            let withId = live.filter { $0.a11yId == id }
+            kayaDiag(
+                "keyed target \(text) unresolved: \(live.count) live \(kind)s, \(withId.count) carrying id \(id), tags "
+                    + withId.map { "\($0.tag.count)b" }.joined(separator: ",") + "; ids "
+                    + Set(live.map { $0.a11yId }).sorted().joined(separator: ","))
+            return nil
+        }
         return live.first {
-            guard let stamp = kayaTableStamp($0.sortTag) else { return false }
+            guard let stamp = stampOf($0) else { return false }
             return stamp.node == node && stamp.keys == keys
         }
     }

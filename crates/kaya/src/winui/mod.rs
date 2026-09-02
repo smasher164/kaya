@@ -409,6 +409,11 @@ struct CoreState {
     // direct writes — that is the stage's user path, and the APPLY path
     // arms apply_quiet instead (see that field).
     buttons: Vec<Vec<u8>>,
+    /// The controls beside those tags, creation order: what `button@id`
+    /// reads its AutomationId off and what `button@id[key.path]` matches
+    /// a tag against (2026-09-01 — before this the buttons registry held
+    /// tags alone and answered None for any `button@id`).
+    button_controls: Vec<Button>,
     checkboxes: Vec<CheckBox>,
     labels: Vec<TextBlock>,
     entries: Vec<TextBox>,
@@ -11460,6 +11465,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // this backend never learns what it means.
                     let tag = tag.expect("buttons carry a click tag");
                     core.buttons.push(tag.clone());
+                    core.button_controls.push(button.clone());
                     let handler = RoutedEventHandler::new(move |_, _| {
                         click_sink.send_click_tag(&tag);
                         Ok(())
@@ -14527,6 +14533,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             parents: HashMap::new(),
             folded_into: HashMap::new(),
             buttons: Vec::new(),
+            button_controls: Vec::new(),
             checkboxes: Vec::new(),
             labels: Vec::new(),
             entries: Vec::new(),
@@ -16746,7 +16753,30 @@ impl crate::harness::Stage for WinUiStage {
                     .map(|i| i as isize)
             }
             if let Some(keys) = keys.as_deref() {
+                if kind == K::Button {
+                    // A STAMPED BUTTON BY KEY: the template node off any
+                    // copy carrying the authored id, then the copy whose
+                    // click tag names that node and these keys
+                    // (docs/deferred.md's keyed-target entry, 2026-09-01).
+                    let node = core
+                        .button_controls
+                        .iter()
+                        .zip(&core.buttons)
+                        .filter(|(control, _)| carries_id(*control, &id))
+                        .find_map(|(_, tag)| crate::harness::table_tag_node(tag));
+                    let Some(node) = node else {
+                        return Ok(None);
+                    };
+                    return Ok(core
+                        .buttons
+                        .iter()
+                        .position(|tag| crate::harness::table_tag_matches_keys(tag, node, keys))
+                        .map(|i| i as isize));
+                }
                 if kind != K::Column {
+                    // The other registries hold controls without their
+                    // tags; a keyed target on them is this arm's stated
+                    // divergence until they carry both.
                     return Ok(None);
                 }
                 return TABLES.with_borrow(|tables| {
@@ -16797,7 +16827,7 @@ impl crate::harness::Stage for WinUiStage {
                 // resolves None HERE ALONE, the dirty read-table's
                 // documented-divergence shape, until a scene needs it
                 // and the registry grows a controls vec.
-                K::Button => None,
+                K::Button => find(&core.button_controls, &id),
                 K::Checkbox => find(&core.checkboxes, &id),
                 K::Slider => find(&core.sliders, &id),
                 K::Entry => find(&core.entries, &id),

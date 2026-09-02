@@ -382,8 +382,8 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
 
     if (stable is not None and starget is not None) and not (
         "type == valueStr" in stable
-        and "kayaTableStamp($0.sortTag)?.node" in starget
-        and "guard let stamp = kayaTableStamp($0.sortTag) else"
+        and 'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)' in starget
+        and "guard let stamp = stampOf($0) else"
         in starget
         and "stamp.node == node && stamp.keys == keys" in starget
     ):
@@ -604,8 +604,11 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
 
     if (ktable is not None and ktarget is not None) and not (
         "type != VALUE_STR" in ktable
-        and "tableStamp(it.sortTag)?.node" in ktarget
-        and "tableStamp(it.sortTag)?.let { stamp ->" in ktarget
+        # The stamp comes off the table's sortTag OR a widget's own
+        # occurrence tag (one layout; the keyed-target entry, 2026-09-01).
+        and 'tableStamp(if (kind == "column") n.sortTag else n.tag)' in ktarget
+        and "stampOf(it)?.node" in ktarget
+        and "stampOf(it)?.let { stamp ->" in ktarget
         and "stamp.node == node && stamp.keys == keys" in ktarget
     ):
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt "
@@ -749,8 +752,8 @@ if not target_out:
         "strict UTF-8")
     target_watch(
         "Swift sortTag route", 1, "swift", S,
-        "kayaTableStamp($0.sortTag)?.node",
-        "kayaTableStamp($0.tag)?.node",
+        'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)',
+        "kayaTableStamp($0.tag)",
         "check-steps: swift/KayaSwiftUI.swift keyed targets do not "
         "resolve through the table sortTag")
     target_watch(
@@ -853,7 +856,8 @@ if not target_out:
         "kayaStartSelftest() call(s), wanted 1")
     target_watch(
         "Compose sortTag route", 1, "kotlin", K,
-        "tableStamp(it.sortTag)?.node", "tableStamp(it.tag)?.node",
+        'tableStamp(if (kind == "column") n.sortTag else n.tag)',
+        "tableStamp(n.tag)",
         "check-steps: android/kaya/src/main/kotlin/dev/kaya/"
         "KayaCompose.kt keyed targets do not resolve through the "
         "table sortTag")

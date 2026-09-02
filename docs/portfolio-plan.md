@@ -159,6 +159,15 @@ awkward gets a line here, the editor's discipline.
   by its filter — the same "one account's history", one screen later.
   Widening the keyed arm to every kind is a harness slice of its own
   (ledgered), not something to smuggle in behind an app.
+  CLOSED 2026-09-01: that slice landed (docs/deferred.md's keyed-target
+  entry) — every occurrence tag carries the table tag's node-and-keys
+  layout, so all four backends resolve `kind@id[key.path]` for any
+  tagged kind — and the natural shape is the shipped one: each account
+  card carries its own "Transactions" button (a11y id `transactions`),
+  the click arrives with the card's key and opens the view filtered to
+  that account with the filter's own selection set to match, and the
+  scene clicks `button@transactions[retirement]` on five lanes. The
+  live dashboard button stays as the whole-book route.
 
 ## §6 — the transactions view
 
