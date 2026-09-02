@@ -154,7 +154,10 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   write `<verb>` to `request` (part-then-rename), read `response`.
   iOS admission is load-sensitive: a busy host fails the LocalStorage
   probe with "no size" — a slow host, not a verdict; never erase the
-  pool to chase it.
+  pool to chase it. To EXERCISE the recovery path on purpose,
+  `KAYA_IOS_RESEED_TEST=<udid>` puts that healthy phone through erase,
+  boot, driver restart, warm and probe once (fault injection, by hand).
+  The `type` verb's keys on this lane are the driver's too.
 - Android: `tools/android/run-emulator.sh` (env via intent extras;
   scripts fold newlines to `;` for transport — comments are stripped
   first; verdicts read from logcat; on FAIL the runner dumps

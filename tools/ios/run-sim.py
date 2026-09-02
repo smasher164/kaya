@@ -1056,6 +1056,14 @@ def picker_prepare(udid):
         print(f"run-sim: re-probing {udid} after a slow export flow",
               file=sys.stderr)
         rc = picker_export_probe(udid)
+    if rc == 0 and os.environ.get("KAYA_IOS_RESEED_TEST") == udid:
+        # FAULT INJECTION, by hand only: a healthy device is put through
+        # the recovery path anyway — erase, boot, driver restart, warm,
+        # probe — so the path that fires once a month is exercised on
+        # demand rather than trusted (docs/xcuidrive-plan.md §5 step 6).
+        print(f"run-sim: KAYA_IOS_RESEED_TEST — reseeding healthy {udid} "
+              f"to exercise the recovery path", file=sys.stderr)
+        rc = 75
     if rc == 0:
         return 0
     if rc != 75:
@@ -1295,7 +1303,9 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     watcher_stop = None
     watcher = None
     simdrive_log = None
-    if scene in ("filedialog", "clipboard", "save", "editor"):
+    # The host bridge serves the picker, the clipboard AND, since
+    # 2026-09-02, the `type` verb's keys — so every scene that types.
+    if scene in ("filedialog", "clipboard", "save", "editor", "undo", "ranges"):
         data_container = out_of(["xcrun", "simctl", "get_app_container",
                                  udid, bundle_id, "data"]).strip()
         simdrive_log = SIMDRIVE_LOG_DIR / f"{name}.log"

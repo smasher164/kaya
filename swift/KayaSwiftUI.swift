@@ -5944,13 +5944,15 @@ private func kayaRunScript(_ script: String) {
                             "type \"\(typed)\" reached no window — nothing was typed")
                     }
                 #else
-                    // The same verb, through the only input path this
-                    // platform has in process (kayaTypeAtFocus carries the
-                    // deviation and what was measured in its place).
-                    if !kayaTypeAtFocus(typed) {
-                        failures.append(
-                            "type \"\(typed)\" reached no editable first responder "
-                                + "— nothing was typed")
+                    // REAL KEY EVENTS HERE TOO, since 2026-09-02: the resident
+                    // XCUITest driver on the host types through the
+                    // simulator's keyboard (tools/ios/xcuidrive, `type_b64`).
+                    // This side still owns contract point 3 (the caret to
+                    // the end, nothing selected) and point 4 (the settle);
+                    // `insertText`, the in-process stand-in the arm used
+                    // while the platform had no key route, is gone.
+                    if let why = kayaTypeThroughHost(typed) {
+                        failures.append("type \"\(typed)\": \(why)")
                     }
                 #endif
             case "expect":
@@ -13523,33 +13525,29 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
     /// exactly as a user's typing fills it, and each emits the ordinary
     /// `text_changed`. Only the COALESCING differs, and point 5 hands
     /// granularity to the platform explicitly.
-    func kayaTypeAtFocus(_ text: String) -> Bool {
-        guard let input = kayaAwaitFocusedTextInput() else { return false }
+    /// The `type` verb's iOS half since 2026-09-02: the caret to the end
+    /// in process (contract point 3), the KEYS from the host's resident
+    /// XCUITest driver — real presses through the simulator's keyboard,
+    /// which the field must hold (a `focus` before the `type`, as every
+    /// scene already does) — and the settle (point 4). Nil on success, the
+    /// sentence otherwise.
+    func kayaTypeThroughHost(_ text: String) -> String? {
+        guard let input = kayaAwaitFocusedTextInput() else {
+            return "reached no editable first responder — nothing was typed"
+        }
         let before = DispatchQueue.main.sync { () -> String? in
-            // CONTRACT POINT 3: TYPING APPENDS. iOS is gentler than macOS here
-            // — becoming first responder does not select the whole contents —
-            // but one script is compared byte-for-byte on all five lanes, so
-            // the caret goes to the end with nothing selected, explicitly.
-            // Before the keys and not between them: a selection change mid-run
-            // breaks the field's own coalescing.
             if let end = input.textRange(from: input.endOfDocument, to: input.endOfDocument) {
                 input.selectedTextRange = end
             }
             return kayaScene.focusedId.flatMap { kayaScene.nodes[$0]?.text }
         }
-        for ch in text {
-            let sent = DispatchQueue.main.sync { () -> Bool in
-                // UITextInput REFINES UIKeyInput, so the control that
-                // holds the caret is by construction the one that takes
-                // a keystroke — no cast, no optional path to get wrong.
-                input.insertText(String(ch))
-                return true
-            }
-            if !sent { return false }
-            Thread.sleep(forTimeInterval: 0.001)
+        let payload = Data(text.utf8).base64EncodedString()
+        let (ok, lines) = KayaSimdrive.ask("type_b64 \(payload)", timeout: 60)
+        if !ok {
+            return lines.first ?? "the host refused to type without saying why"
         }
         kayaSettleTypedText(from: before)
-        return true
+        return nil
     }
 
     /// Contract point 4: block until the typed text has LANDED.

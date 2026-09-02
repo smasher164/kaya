@@ -329,6 +329,13 @@ final class KayaDrive: XCTestCase {
         case "type":
             a.typeText(rest)
             return (true, "typed \(rest.count) character(s)")
+        case "type_b64":
+            // The harness's `type` verb on iOS: the text base64-framed, since
+            // the request line is word-split on the host.
+            guard words.count == 2, let data = Data(base64Encoded: words[1]),
+                  let text = String(data: data, encoding: .utf8) else { return (false, "type_b64 <base64>") }
+            a.typeText(text)
+            return (true, "typed \(text.count) character(s)")
         case "tap":
             guard let p = coordinate(a, words, 1) else { return (false, "tap X Y") }
             p.tap()
@@ -342,6 +349,23 @@ final class KayaDrive: XCTestCase {
             let hold = words.count > 5 ? (Double(words[5]) ?? 100) / 1000 : 0.1
             p1.press(forDuration: hold, thenDragTo: p2)
             return (true, "dragged")
+        case "flick":
+            // press-drag with XCUITest's fast velocity: a scroll flick
+            guard let p1 = coordinate(a, words, 1), let p2 = coordinate(a, words, 3) else { return (false, "flick X1 Y1 X2 Y2") }
+            p1.press(forDuration: 0.02, thenDragTo: p2, withVelocity: .fast, thenHoldForDuration: 0.05)
+            return (true, "flicked")
+        case "swipe_win":
+            // XCUIElement's own swipe on the main window
+            guard words.count == 2 else { return (false, "swipe_win up|down|left|right") }
+            let w = a.windows.firstMatch
+            switch words[1] {
+            case "up": w.swipeUp()
+            case "down": w.swipeDown()
+            case "left": w.swipeLeft()
+            case "right": w.swipeRight()
+            default: return (false, "direction up|down|left|right")
+            }
+            return (true, "swiped window \(words[1])")
         case "swipe":
             guard words.count > 2 else { return (false, "swipe <label> up|down|left|right") }
             let dir = words[words.count - 1]

@@ -70,8 +70,16 @@ Measured since, by the conversion itself: the OPEN picker's `state`/
 and the cancel are in docs/traps.md), and the lane under a five-lane
 matrix — 365s for 114 legs (matrix 25) against 416s and 431s for 113
 with simdrive and clipctl (matrices 24 and 23), admission 11–14s a
-phone and each cancel 3–6s. Still unmeasured: the `type` verb's iOS
-route for kaya's own fields.
+phone and each cancel 3–6s. Scrolling: the driver's pan DOES scroll
+kaya's ScrollView when it starts inside the scroll's frame; the earlier
+"no pan" was kaya's iOS scroll being only as wide as its content (a
+ledger WATCH, docs/traps.md). The `type` verb's iOS route is the driver's since the same day: the
+interpreter keeps the caret-to-end and the settle and asks the host for
+the KEYS (`type_b64`, real presses through the simulator's keyboard);
+`insertText`, the in-process stand-in the arm used while the platform
+had no key route, is deleted. Measured first by hand on the undo guest
+(tap the entry, keyboard up, `type milk`, the field reads `milk`), then
+the undo and ranges legs green with each `type` answered in ~350ms.
 
 ## §2 — The design
 
@@ -150,6 +158,13 @@ processes and their census.
 5. DONE: tools/ios/simdrive (gone) and tools/ios/clipctl (gone)
    deleted with their build steps; swift-typecheck compiles the driver
    against the platform's XCTest instead; the docs swept.
-6. NEXT: the drag arm (docs/dnd-plan.md §5) uses `drag` on the one
-   driver, and a device reseed restarts its driver (picker_reseed) —
-   built, not yet exercised by a reseed.
+6. DONE, the robustness pass the maintainer asked for the same evening:
+   a device reseed restarts its driver — EXERCISED by fault injection,
+   `KAYA_IOS_RESEED_TEST=<udid> tools/ios/run-sim.sh swift` puts a
+   healthy phone through erase, boot, driver restart (ready in 9s), warm
+   and probe (admission 56s with the erase inside it), and the suite
+   passed with every driver alive at the verdict; the `type` verb's iOS
+   keys come from the driver (above); and the driver's pan scrolls
+   kaya's ScrollView inside the scroll's frame, which turned up the
+   content-width viewport (the ledger WATCH). NEXT: the drag arm
+   (docs/dnd-plan.md §5) uses `drag` on the one driver.

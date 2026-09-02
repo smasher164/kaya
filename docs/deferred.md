@@ -10220,6 +10220,26 @@ be fully featured and robust before we build out more features"): §5
 of the plan records each step; the picker findings on the way are in
 docs/traps.md.
 
+## WATCH — kaya's iOS scroll viewport is content-width: a user pan right of the rows scrolls nothing (measured 2026-09-02)
+KEY: iOS scroll viewport width, content-width scroll, kindScroll frame, ScrollView cross axis, pannable strip
+
+Found by the resident driver's real pans on the scroll guest: the
+scroll's frame is `{{16, 194.3}, {79, 567.7}}` in a 375pt window — as
+wide as its labels — so a drag anywhere right of x≈95 lands outside the
+scroll view and does not pan, while one on the rows scrolls 288pt
+(docs/traps.md). SwiftUI's `ScrollView(.vertical)` sizes its cross
+axis to its content unless told otherwise; the mac backend is the same
+SwiftUI, the widget backends (GTK's scrolled window, WinUI's
+ScrollViewer, Compose's verticalScroll) fill their allocation. SO THIS
+IS A UNIFORMITY QUESTION FOR THE MAINTAINER: should a `scroll` take its
+parent's cross-axis width (the user's thumb works anywhere across the
+row, as on the other three platforms), or hug its content as it does
+now on the two SwiftUI backends? Nothing in the shared scenes can see
+it — `expect_overflow` and `scroll_end` are vertical and programmatic —
+so the driver's pan on the scroll guest (aimed inside and outside the
+strip) is the only observation until a `expect_viewport_width`-style
+verb exists. Not changed here: a layout ruling, not infrastructure.
+
 ## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30) — the guaranteed path is BUILT and PROVEN STANDALONE 2026-09-02 (a resident XCUITest driver, tools/ios/xcuidrive: a real tap changed kaya's model, a real drag scrolled a system app), wired opt-in behind KAYA_IOS_XCUIDRIVE and its in-lane selfcheck green (the swift suite ALL PASS with it, 2026-09-02); kaya's SwiftUI ScrollView ignores a synthetic pan (docs/traps.md); stays open for the subsumption slice the entry above proposes
 KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion, xcuidrive, resident driver
 

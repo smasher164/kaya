@@ -6864,3 +6864,21 @@ cancel, but not kaya's own picker, so it stays the last resort; and a
 row is a `Cell` whose identifier splits the extension with a comma
 (`picked, txt`) while its stem is the cell's static text — the driver
 joins them back with a dot.
+
+## kaya's iOS scroll viewport is as wide as its content, so a pan outside that strip scrolls nothing (measured 2026-09-02)
+
+The resident driver's pans did not move the scroll guest's rows from
+x=187, whatever the gesture — press-drag, fast flick, the window's own
+swipeUp, a slow long drag — while the same press-drag moved Settings'
+table 317pt. Then a drag that started ON a row's text scrolled 288pt.
+Mapped: x=30, 60 and 80 scroll; 100, 130, 187 and 300 do not. The
+accessibility tree has the reason: the scroll's container is
+`{{16, 194.3}, {79, 567.7}}` — 79pt wide, the width of its 29 labels —
+inside a 375pt window, so a user's thumb anywhere right of the labels
+lands outside the scroll view and nothing pans. The harness's own
+`scroll_end` (ScrollViewReader's proxy) never touches the viewport's
+width, which is why the scroll scene is green on this lane and this
+was invisible until real input. The driver's scroll route WORKS —
+aim the drag inside the scroll's frame — and the width is a kaya
+layout question, on the ledger (docs/deferred.md, "iOS scroll
+viewport width").
