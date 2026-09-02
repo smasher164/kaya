@@ -28,6 +28,8 @@ type Floor = {
   assetRelease(handle: number): void;
   assetWhyNot(name: string): string;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
+  pickedRead(handle: number): Uint8Array;
+  pickedWrite(handle: number, bytes: Uint8Array): void;
   startPump(cb: (record: Uint8Array | null) => void): void;
   exit(code: number): never;
 };
@@ -176,18 +178,30 @@ export function assetMissSentence(name: string): string {
  * file first (DESIGN.md, File dialogs).
  *
  * THE DESCRIPTOR BECOMES NODE'S: close it with fs.closeSync. On Windows
- * the core hands back a HANDLE rather than a CRT descriptor, and Node
- * links its own CRT, so the redemption there is docs/js-plan.md §6's
- * open item and refused here by name. */
+ * the core hands back a HANDLE rather than a CRT descriptor, and node.exe
+ * links its C runtime statically, so no descriptor can cross — the
+ * streaming route is refused there by name and read/write below are the
+ * spelling that works everywhere (docs/js-plan.md §6). */
 export function openPicked(handle: number, mode: number): { fd: number; seekable: boolean } {
   if (process.platform === "win32") {
     throw new Error(
-      "kaya: opening a picked file is not wired on Windows for the JS binding yet " +
-        "(docs/js-plan.md §6) — read it by its local_path where the picker supplied one",
+      "kaya: a picked file cannot become a node descriptor on Windows (node.exe's C runtime is " +
+        "its own) — use file.read() and file.write(bytes), which go through the addon (docs/js-plan.md §6)",
     );
   }
   const { raw, seekable } = lib.openPicked(handle, mode);
   return { fd: raw, seekable };
+}
+
+/** The picked file's whole content, read by the addon over the platform
+ * handle. Works on every desktop; BLOCKS, possibly for a long time. */
+export function readPicked(handle: number): Uint8Array {
+  return lib.pickedRead(handle);
+}
+
+/** Replace the picked file's content, written by the addon. */
+export function writePicked(handle: number, bytes: Uint8Array): void {
+  lib.pickedWrite(handle, bytes);
 }
 
 /** From the worker, end the PROCESS with a code: process.exit there ends
@@ -247,15 +261,36 @@ export function surrenderMainThread(): never {
   // execArgv rides along (type stripping flags, inspector); argv past
   // the entry is the app's own. workerData marks the spawn so a guest
   // that reads it can tell the two threads apart.
+  // THE SCENE IS QUEUED BEFORE THE PLATFORM LOOP STARTS, as in every
+  // other binding: the worker flips `ready` from app.run(), by which
+  // point its module body has submitted the scene, and only then does
+  // this thread enter kaya_run. Entering at once raced the worker's
+  // module evaluation — on the Windows lane the harness clicked
+  // `button#0 of 0` at +3ms, before the first batch existed (2026-09-01,
+  // docs/js-plan.md §3). Bounded: a guest that never calls app.run()
+  // still gets its loop, after a sentence.
+  const ready = new Int32Array(new SharedArrayBuffer(4));
   new Worker(resolve(entry), {
     argv: process.argv.slice(2),
     execArgv: process.execArgv,
-    workerData: { kayaAppThread: true },
+    workerData: { kayaAppThread: true, ready },
   });
+  if (Atomics.wait(ready, 0, 0, 60_000) === "timed-out") {
+    writeSync(2, "kaya: the app thread has not called app.run() within 60s — entering the platform loop anyway\n");
+  }
   // The addon's own exit, not process.exit: the verdict is out and the
   // pump has been waited for inside run(); Node's teardown of a live
   // worker is the exit-path crash this avoids (docs/js-plan.md §3).
   return lib.exit(lib.run());
+}
+
+/** The worker's half of the handshake above: app.run() calls it once
+ * the scene is queued, and the main thread enters kaya_run. */
+export function signalReady(): void {
+  const ready = (workerData as { ready?: Int32Array } | null)?.ready;
+  if (ready === undefined) return;
+  Atomics.store(ready, 0, 1);
+  Atomics.notify(ready, 0);
 }
 
 export const spawnedByKaya: boolean = (workerData as { kayaAppThread?: boolean } | null)?.kayaAppThread === true;

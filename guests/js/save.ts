@@ -18,7 +18,7 @@
 //
 // See guests/rust/save.rs and tools/scenes/save.steps.
 
-import { closeSync, mkdirSync, readFileSync, writeFileSync, writeSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,41 +47,22 @@ function reason(e: unknown): string {
 
 /** Read a handle back through kaya, with the guest's own file API. */
 function readBack(picked: kaya.PickedFile): string {
-  let fd: number;
+  // The addon reads over the platform handle — the same spelling on
+  // every desktop, Windows included (docs/js-plan.md §6).
   try {
-    ({ fd } = picked.open(kaya.wire.FILE_MODE_READ));
-  } catch (e) {
-    return `open failed: ${reason(e)}`;
-  }
-  try {
-    return readFileSync(fd).toString("utf-8");
+    return new TextDecoder().decode(picked.read());
   } catch (e) {
     return `read failed: ${reason(e)}`;
-  } finally {
-    closeSync(fd);
   }
 }
 
-/** Write `text` through a handle and report what the file says
- * afterwards. FILE_MODE_WRITE truncates, on a picked file and on a save
- * destination alike — the destination only adds the create. */
 function writeBack(picked: kaya.PickedFile, text: string): string {
-  let fd: number;
+  // What the save dialog handed back opens EMPTY (docs/save-plan.md D1):
+  // the addon writes the bytes, then the read-back is the proof.
   try {
-    ({ fd } = picked.open(kaya.wire.FILE_MODE_WRITE));
-  } catch (e) {
-    // The failure docs/save-plan.md D1 exists to prevent reaches the
-    // label verbatim.
-    return `save failed: ${reason(e)}`;
-  }
-  try {
-    writeSync(fd, Buffer.from(text, "utf-8"));
+    picked.write(text);
   } catch (e) {
     return `write failed: ${reason(e)}`;
-  } finally {
-    // Closed BEFORE the reopen, so the bytes read back are the file's
-    // and not a buffer's.
-    closeSync(fd);
   }
   return readBack(picked);
 }

@@ -42,7 +42,8 @@ cbindgen excludes the symbol from kaya.h.
 
 The floor is the same call set runtime.py binds through ctypes:
 specHash, capabilities, run, submit, blobRegister, occurrenceBlob, the
-six asset calls, openPicked, startPump, exit. Bytes cross as
+six asset calls, openPicked, pickedRead, pickedWrite, startPump, exit
+(the two picked* calls are the addon's own — see §6). Bytes cross as
 `Uint8Array` copies both ways (V8's pointer compression forbids an
 external buffer over native memory, and the core's bytes are borrowed
 until the next call anyway). Handles and ids cross as JS numbers: they
@@ -56,8 +57,14 @@ load; the spec hash read back as the generated constant.
 
 `import "kaya-gui"` on the process main thread NEVER RETURNS. runtime.ts
 spawns a `worker_thread` on the same entry module (`process.argv[1]`,
-argv and execArgv passed through) and enters `kaya_run`, which becomes
-the platform loop; when it returns the process exits with its code. The
+argv and execArgv passed through), WAITS for the worker's `app.run()`
+on a shared flag — by then the module body has submitted the scene, so
+the scene is queued before the platform loop starts, exactly as every
+other binding's is (entering at once raced the worker's module
+evaluation: the Windows lane's harness clicked `button#0 of 0` at +3ms,
+2026-09-01; the wait is bounded at 60s with a sentence) — and enters
+`kaya_run`, which becomes the platform loop; when it returns the process
+exits with its code. The
 guest's own module body therefore runs only in the worker, which IS the
 kaya-app thread. The worker's stdout/stderr are re-pointed at the
 descriptors (a worker's stdio is a stream posted to the parent, whose
@@ -220,20 +227,46 @@ without a JS guest is red by construction.
 
 Portfolio and varied stay Python-only apps (hand-queued, not sweep
 scenes); editor stays Go. The iOS and Android lanes carry no JS legs —
-node does not run on the phones (ruled desktop-first). The Linux and
-Windows lanes are the breadth left after the mac lane: node in the
-docker image and on the VM.
+node does not run on the phones (ruled desktop-first). The Linux lane
+carries a js leg beside every python leg (node pinned into the docker
+image by sha256). THE WINDOWS LANE TOO, since 2026-09-01: node 24.19.0
+provisioned on the VM by version and by bytes through
+tools/guest/fetch-zip.ps1 (the nodejs.org SHASUMS256 hash recorded in
+tools/deploy-win.py beside the version; tools/check-pins.sh holds it),
+the binding staged as C:\kaya\kaya-gui behind a directory junction at
+C:\kaya\node_modules\kaya-gui — node's bare-specifier resolution looks
+there from a flat C:\kaya\<scene>.ts, and node REFUSES to strip types
+for a file whose real path is under node_modules
+(ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, measured on the first
+deploy), so the link resolves to a real path outside it exactly as the
+workspace symlink does on the other two desktops — and
+the guests shipped flat beside the python ones (deploy-win's
+SCENE_TSS). Thirty-eight js legs mirror the python ones leg for leg in
+tools/lib/lanes/win.py's ORDER (pooled where python is pooled, alone
+where python is alone), each with a checked-in generated launcher
+tools/guest/run_<scene>_js.cmd of one shape that tools/check-steps.sh
+holds (CRLF, the pinned node on PATH, KAYA_LIB, the flat guest, the
+leg's own out file); tools/check-staging.sh derives the shipped .ts
+from each launcher.
 
 ## §6 Open
 
-- Picked-file redemption on Windows: the core hands back a HANDLE and
-  node links its own CRT, so an fd from libkaya's `_open_osfhandle`
-  would belong to the wrong CRT. runtime.ts refuses by name until the
-  windows lane's JS legs exist; the local_path route works meanwhile.
-- `PickedFile.open` blocks the app thread: Python hands it to a thread
+- Picked-file redemption on Windows — CLOSED 2026-09-01. The core hands
+  back a HANDLE, and node.exe links its C runtime STATICALLY (the
+  default /MT build; every prebuilt addon depends on it), so no
+  descriptor minted by libkaya's CRT can cross into node's fs. The
+  redemption therefore happens INSIDE THE ADDON: `pickedRead(handle)`
+  and `pickedWrite(handle, bytes)` in node.rs open through
+  kaya_open_picked and read or write over the raw handle with
+  protocol.rs's own raw-handle arms (a File from the HANDLE on Windows,
+  from the fd on unix), and `PickedFile.read()` / `.write(bytes)` are
+  the guest spelling on all three desktops — filedialog, save and
+  clipboard use them. `PickedFile.open()` (a node descriptor for
+  streaming) stays as the unix-only extra and refuses on Windows naming
+  read/write.
+- `PickedFile.read` blocks the app thread: Python hands it to a thread
   and posts back; the worker has no thread to hand it to short of a
-  second Worker. The JS guests open in the handler and read through
-  node:fs; an `openAsync` over napi's async-work queue is the upgrade if
-  a cloud-provider open ever measures slow.
+  second Worker. A `readAsync` over napi's async-work queue is the
+  upgrade if a cloud-provider open ever measures slow.
 - Distribution (npm publish of kaya-gui with the platform dylibs) stays
   deferred with the packaging milestone (2026-08-28 ruling).

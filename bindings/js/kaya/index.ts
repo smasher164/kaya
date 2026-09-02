@@ -1519,8 +1519,23 @@ export class PickedFile {
     this.localPath = localPath;
   }
 
-  /** Redeem the handle: `{fd, seekable}` — a descriptor for node:fs, and
-   * whether it supports random access. BLOCKS, possibly for a long time. */
+  /** The whole file's bytes, read by the addon over the platform handle —
+   * the one spelling that works on all three desktops (Windows hands back
+   * a HANDLE that node's own C runtime cannot adopt; docs/js-plan.md §6).
+   * BLOCKS, possibly for a long time. */
+  read(): Uint8Array {
+    return runtime.readPicked(this.handle);
+  }
+
+  /** Replace the file's content — what a save dialog's answer opens as
+   * (docs/save-plan.md D1). A string is written as UTF-8. BLOCKS. */
+  write(bytes: Uint8Array | string): void {
+    runtime.writePicked(this.handle, typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes);
+  }
+
+  /** The streaming route: `{fd, seekable}` — a descriptor for node:fs, and
+   * whether it supports random access. Unix only (see read/write); close
+   * it with fs.closeSync. BLOCKS. */
   open(mode: number = wire.FILE_MODE_READ): { fd: number; seekable: boolean } {
     return runtime.openPicked(this.handle, mode);
   }
@@ -3422,6 +3437,8 @@ export class App {
    * the app thread. Returns a promise that settles when the core shuts
    * down; the exit code is the main thread's, which ends the process. */
   run(): Promise<void> {
+    // The scene is queued by now; the main thread may enter the loop.
+    runtime.signalReady();
     return new Promise((resolve) => {
       this._shutdown = resolve;
       runtime.startPump((occ) => {

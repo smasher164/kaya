@@ -7306,6 +7306,16 @@ tries with `read_timeouts=0` on all 105 reads sampled. The instruments
 self-diagnoses; the only thing this strike leaves unexplained is the
 original uninstrumented 2026-08-20 sighting, which no later evidence
 reproduces.
+SIGHTING 2026-09-01 22:00, the eleventh matrix of the day, still under
+this strike: filedialog-go's `choose picked.txt` read "no row named
+picked; the picker lists ['kaya-picked-33143']" — the picker still on
+the folder's row, the goto not yet inside it — on a host whose
+fifteen-minute load was 143 with 4.7 GB of swap in use and a browser
+at 120% CPU beside the five lanes; simdrive's own reads logged
+bridge_slow at 651, 503 and 935ms in the same leg, the starved-runloop
+face the instruments were left in to name. Every other iOS leg passed
+and the same leg is green in every quiet matrix; recorded, not rerun
+for its own sake.
 
 Three matrices in a row, a different leg each time, every one 100%
 green solo: save-go's Save tap dropped twice (the sheet stayed up and
@@ -9175,7 +9185,22 @@ apply logs the same gap when it lands inside that second, and
 expect_title's refusal carries the model's entries and top title
 plus the last click's age and depth — so the next sighting says
 whether the push reached the model late or the surface lagged it.
-Next sighting: read those lines, do not rerun.
+THIRD SIGHTING 2026-09-01 22:20 (the twelfth matrix of the day), WITH
+THE INSTRUMENT: `click button#1 145ms after the last pop; entries=0`,
+and five seconds later the refusal read `entries=0 top=""; last click
+button#1 5015ms ago at entries=0` — no push_entry line between them,
+so the push NEVER REACHED THE MODEL inside the step ceiling: not a
+surface lagging, a starved guest. The same leg's first push that run
+took ~4s from click to title (click +876ms, title +4994ms), the host's
+fifteen-minute load was 153-189 with a browser at 120% CPU and 4.7 GB
+of swap beside the five lanes, and the earlier cycle 87ms after its
+pop had gone through. The portfolio's push handler stamps a 15,000-row
+ledger, which is the work a starved app thread cannot finish in 5s.
+Two candidate remedies, neither taken yet: the scene's expect_title
+after the push could carry a longer ceiling for THIS app (the ceiling
+is per step, and the app is the heaviest in the tree), or the push
+could land before the ledger fills. Recorded; a quiet-host matrix is
+the next reading.
 
 
 ## HOLD — the windows guest-side command scripts convert to python, at some point (Akhil, 2026-08-31)
@@ -9311,6 +9336,25 @@ gallery), kaya_app_checks at 62 negatives (the implicit batch, the
 commit split, the parentless refusal, the handle's patch bytes equal to
 patch()'s, the typo refusal naming the fields, instanceof, exists, the
 scalar handle, the tag's create and recompute, the alert promise).
+THE WINDOWS LANE CARRIES THE JS LEGS (2026-09-01, the same evening):
+38 legs mirroring python's leg for leg in tools/lib/lanes/win.py,
+node 24.19.0 provisioned by version and bytes through
+tools/guest/fetch-zip.ps1, the binding staged at C:\kaya\kaya-gui
+behind a node_modules junction (node refuses to strip types under a
+real node_modules path), the guests flat beside the python ones, one
+generated launcher shape held by check-steps, the .ts derivation held
+by check-staging, the zip pins by check-pins. First full run ALL PASS,
+239 legs, suites 181s. The picked-file redemption closed with it:
+node.exe's C runtime is static, so the addon reads and writes over the
+raw handle (pickedRead/pickedWrite; PickedFile.read/write are the
+spelling on all three desktops). The startup handshake came out of the
+lane's first failure: the JS main thread now waits for app.run()
+before entering the loop, so the scene is queued before the platform
+loop starts as in every other binding. FOUND ON THE WAY: the Go 1.27
+pin on the VM had never installed — an inline `powershell -Command
+\"...\"` through ssh and cmd is a string PowerShell prints (docs/
+traps.md) — and the go legs had built with the system Go 1.26.5; the
+same script route provisions both now, and the lane ran green on 1.27.0.
 KEY: js binding, typescript, N-API, worker thread, BigInt, safe integer, 2^53, JSX, kaya-gui npm, event loop
 
 RULED 2026-08-31 (maintainer, design-only session — no code today):

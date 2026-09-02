@@ -397,6 +397,116 @@ if fetch_text:
           f"{refused}/{len(NEGATIVES)} watched negatives refused "
           f"(substitutions {'/'.join(counts)})", file=sys.stderr)
 
+# --- The zips the Windows VM fetches: go and node arrive by ------------
+# Invoke-WebRequest inside tools/guest/fetch-zip.ps1, called from
+# tools/deploy-win.py with a version and a sha256 recorded beside it.
+# The inline `powershell -Command` route is refused by name: through ssh
+# and cmd it arrives as one quoted string PowerShell PRINTS instead of
+# running — the go1.27.0 pin was echoed and never installed while the go
+# legs built with the VM's system Go (2026-09-01, docs/traps.md).
+DEPLOY_WIN = root / "tools/deploy-win.py"
+FETCH_ZIP = root / "tools/guest/fetch-zip.ps1"
+
+
+def scan_zip_pins(deploy_text, ps1_text):
+    bad = []
+    consts = dict(re.findall(r'^([A-Z0-9_]+_SHA256) = "([0-9a-f]{64})"$',
+                             deploy_text, re.M))
+    calls = re.findall(r'fetch_zip\(f"([^"]+)",\s*([A-Z0-9_]+),',
+                       deploy_text)
+    if len(calls) < 2:
+        bad.append(f"{DEPLOY_WIN}: read {len(calls)} fetch_zip call(s) — "
+                   "a census that reads almost nothing agrees with "
+                   "almost anything")
+    for url, name in calls:
+        if name not in consts:
+            bad.append(f"{DEPLOY_WIN}: fetch_zip for {url} names {name}, "
+                       f"which is not a 64-hex sha256 constant of this "
+                       f"file — a version names a release, not the bytes "
+                       f"that arrive")
+        if "{" not in url:
+            bad.append(f"{DEPLOY_WIN}: fetch_zip url {url} carries no "
+                       f"version constant")
+    versions = re.findall(r'^[A-Z0-9_]+_VERSION = "[0-9]+\.[0-9]+\.[0-9]+"$',
+                          deploy_text, re.M)
+    if len(versions) < 2:
+        bad.append(f"{DEPLOY_WIN}: fewer than two concrete *_VERSION "
+                   f"constants")
+    code = "\n".join(ln for ln in deploy_text.splitlines()
+                     if not ln.strip().startswith("#"))
+    # The inline shape is `powershell -Command \"...\"` NESTED in a
+    # `cmd /c "..."` string — the escaped quotes are the tell; a direct
+    # `ssh host 'powershell -Command "..."'` (verify_deployed's hash read)
+    # arrives as a command and is not this defect.
+    if 'powershell -Command \\\\"' in code:
+        bad.append(f"{DEPLOY_WIN}: an inline `powershell -Command "
+                   f"\\\"...\\\"` nested in a cmd /c string survives — "
+                   f"through ssh and cmd it is a string PowerShell prints, "
+                   f"not a command it runs")
+    if "Invoke-WebRequest" in code:
+        bad.append(f"{DEPLOY_WIN}: a download outside fetch-zip.ps1, "
+                   f"where no recorded hash is checked")
+    marks = [ps1_text.find("Get-FileHash -Algorithm SHA256"),
+             ps1_text.find("-ne $Sha256"), ps1_text.find("exit 1"),
+             ps1_text.find("Expand-Archive")]
+    if min(marks) < 0:
+        bad.append(f"{FETCH_ZIP}: lacks the hash, the compare, the "
+                   f"refusal or the expand")
+    elif not (marks[0] < marks[1] < marks[2] < marks[3]):
+        bad.append(f"{FETCH_ZIP}: expands before it refuses — the order "
+                   f"is hash, compare, exit 1, expand")
+    return bad
+
+
+ZIP_NEGATIVES = [
+    ("a sha256 constant shortened", "deploy",
+     '"8502f4a50b458d4cc38ed8f2001556c2cd239d464920f74017926ccb1e1c157f"',
+     '"8502f4a50b458d4cc38ed8f2001556c2cd239d464920f74017926ccb1e1c1"',
+     "not a 64-hex sha256 constant"),
+    ("an inline powershell download restored", "deploy",
+     "def fetch_zip(url, sha256, dest):",
+     'must_ssh(\'cmd /c "x || powershell -Command \\\\"Invoke-WebRequest '
+     '-Uri x\\\\""\')\n'
+     "def fetch_zip(url, sha256, dest):",
+     "PowerShell prints"),
+    ("the compare removed from the script", "ps1",
+     "if ($got -ne $Sha256.ToLower()) {", "if ($false) {",
+     "lacks the hash, the compare"),
+    ("the expand moved ahead of the refusal", "ps1",
+     "$got = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()",
+     "Expand-Archive -Path $zip -DestinationPath $Dest -Force\n"
+     "$got = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()",
+     "expands before it refuses"),
+]
+if DEPLOY_WIN.is_file() and FETCH_ZIP.is_file():
+    deploy_text = DEPLOY_WIN.read_text(encoding="utf-8")
+    ps1_text = FETCH_ZIP.read_text(encoding="utf-8")
+    out.extend(scan_zip_pins(deploy_text, ps1_text))
+    zcounts, zrefused = [], 0
+    for label, which, old, new, expect in ZIP_NEGATIVES:
+        src = deploy_text if which == "deploy" else ps1_text
+        sites = src.count(old)
+        zcounts.append(f"{min(sites, 1)}")
+        if sites != 1:
+            out.append(f"check-pins: watched negative '{label}' matches "
+                       f"{sites} sites — an unchanged file is a failed "
+                       "test")
+            continue
+        doctored = src.replace(old, new, 1)
+        got = (scan_zip_pins(doctored, ps1_text) if which == "deploy"
+               else scan_zip_pins(deploy_text, doctored))
+        if any(expect in g for g in got):
+            zrefused += 1
+        else:
+            out.append(f"check-pins: watched negative '{label}' was NOT "
+                       f"refused naming {expect!r} (findings: {got})")
+    print(f"check-pins: windows zips: {zrefused}/{len(ZIP_NEGATIVES)} "
+          f"watched negatives refused (substitutions "
+          f"{'/'.join(zcounts)})", file=sys.stderr)
+else:
+    out.append(f"{DEPLOY_WIN} or {FETCH_ZIP}: gone — the zip clause reads "
+               "them by name")
+
 status = 0
 if out:
     print("check-pins: dependencies that a server, not this repo, would "

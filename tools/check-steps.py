@@ -2410,6 +2410,80 @@ if launchers():
     status = 1
 
 
+# EVERY JS LAUNCHER HAS ONE SHAPE (2026-09-01): CRLF (cmd.exe reads a
+# lone LF as part of the command, docs/traps.md), the pinned node on
+# PATH by the version deploy-win.py records, KAYA_LIB naming the shipped
+# dll, KAYA_SELFTEST naming the scene (1 for the bare milestone2 leg),
+# the flat guest (split for listdetail) run into the leg's own out file.
+# Generated once and checked in; this is what keeps a hand edit from
+# drifting one of forty near-identical files.
+def js_launchers(files, node_version):
+    bad = []
+    if not files:
+        bad.append("tools/guest: no JS launcher read — the census "
+                   "compared nothing")
+    for name, raw in files:
+        leg = name[len("run_"):-len(".cmd")]
+        scene, _lang = win_lane.scene_lang(leg)
+        if b"\r\n" not in raw or b"\n" in raw.replace(b"\r\n", b""):
+            bad.append(f"tools/guest/{name}: not CRLF throughout — "
+                       f"cmd.exe reads a lone LF as part of the command")
+        text = raw.decode("ascii", "replace")
+        guest = ("milestone2" if leg == "js"
+                 else "split" if scene == "listdetail" else scene)
+        selftest = "1" if leg == "js" else scene
+        for want in (
+                "set KAYA_LIB=C:\\kaya\\kaya.dll",
+                f"node-v{node_version}-win-arm64",
+                f"set KAYA_SELFTEST={selftest}",
+                f"node C:\\kaya\\{guest}.ts > C:\\kaya\\out_{leg}.txt 2>&1",
+                f"echo EXIT=%ERRORLEVEL% >> C:\\kaya\\out_{leg}.txt"):
+            if want not in text:
+                bad.append(f"tools/guest/{name}: lacks `{want}`")
+    return bad
+
+
+_deploy_text = read_rel("tools/deploy-win.py")
+_node_version = re.search(r'^NODE_VERSION = "([0-9.]+)"$', _deploy_text, re.M)
+if _node_version is None:
+    print("check-steps: tools/deploy-win.py records no NODE_VERSION — the "
+          "JS launcher clause cannot know which node the lane pins",
+          file=sys.stderr)
+    status = 1
+    _node_version_s = "0.0.0"
+else:
+    _node_version_s = _node_version.group(1)
+_ok = ("@echo off\r\ncd /d C:\\kaya\r\nset PATH=C:\\kaya;C:\\kaya\\node24\\node-v"
+       + _node_version_s + "-win-arm64;%PATH%\r\nset KAYA_LIB=C:\\kaya\\kaya.dll\r\n"
+       "set KAYA_SELFTEST=todos\r\nnode C:\\kaya\\todos.ts > C:\\kaya\\out_todos_js.txt 2>&1\r\n"
+       "echo EXIT=%ERRORLEVEL% >> C:\\kaya\\out_todos_js.txt\r\n").encode()
+if js_launchers([("run_todos_js.cmd", _ok)], _node_version_s):
+    selftest_fail("a well-formed JS launcher was refused")
+if not js_launchers([("run_todos_js.cmd", _ok.replace(b"\r\n", b"\n"))], _node_version_s):
+    selftest_fail("an LF-ended JS launcher passed")
+if not js_launchers([("run_todos_js.cmd",
+                      _ok.replace(b"set KAYA_LIB=C:\\kaya\\kaya.dll\r\n", b""))],
+                    _node_version_s):
+    selftest_fail("a JS launcher with no KAYA_LIB passed")
+if not js_launchers([("run_todos_js.cmd",
+                      _ok.replace(b"node-v" + _node_version_s.encode(),
+                                  b"node-v0.0.1"))], _node_version_s):
+    selftest_fail("a JS launcher on a stale node passed")
+if not js_launchers([("run_todos_js.cmd", _ok.replace(b"todos.ts", b"feed.ts"))], _node_version_s):
+    selftest_fail("a JS launcher running another scene's guest passed")
+if not js_launchers([], _node_version_s):
+    selftest_fail("an EMPTY JS launcher census passed")
+out = js_launchers(
+    [(p.name, p.read_bytes()) for p in sorted((ROOT / "tools" / "guest").glob("run_*.cmd"))
+     if p.name.endswith("_js.cmd") or p.name == "run_js.cmd"],
+    _node_version_s)
+if out:
+    print("check-steps: a JS launcher strays from the one shape the lane "
+          "runs them in:", file=sys.stderr)
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+
+
 # The staged WinUI ruling (docs/traps.md), covering THREE scene
 # families that share one cause: the leg needs the DESKTOP to itself.
 #

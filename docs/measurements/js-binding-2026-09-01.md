@@ -369,3 +369,44 @@ lanes and 52 gates, 1,511 legs in 711s (mac 411s, linux 501s, windows
 496s, iOS 586s, android 237s), zero holders left, the portfolio leg
 green and its instrument quiet.
 
+## The Windows lane's JS legs
+
+Six runs to green, each a finding: (1) node's provisioning failed with
+no output and the Go line beside it ECHOED its own script — an inline
+`powershell -Command \"...\"` through ssh and cmd is a string
+PowerShell prints, so the Go 1.27 pin had never installed and the go
+legs had built with the VM's system Go 1.26.5 (docs/traps.md; a shipped
+tools/guest/fetch-zip.ps1 with a sha256 compare provisions both now,
+and check-pins holds it). (2) A second silent node failure that a hand
+run of the same script did not reproduce (verified and expanded in one
+go). (3) `if exist X rmdir X & mkdir Y` in cmd runs the mkdir inside
+the if, so the binding's directory was never made. (4) Every JS leg
+died in a second: node refuses to strip types under node_modules
+(ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) — the mac and linux
+workspace link is a symlink to a real path outside it — so the VM
+stages the binding at C:\kaya\kaya-gui behind a junction. (5) A bare
+rmdir on a leftover real directory. (6) 238 of 239: listdetail_js
+clicked `button#0 of 0` at +3ms — the JS main thread entered the loop
+at import, before the worker had queued the scene; the main thread
+waits for app.run() now. Then ALL PASS, 239 legs (201 + 38 JS), suites
+181s, the 38 JS legs 117s in sum and 6s at most, filedialog_js,
+clipboard_js, menus_js and commands_js among them — the picked-file
+redemption through the addon's read and write proven on the platform
+it was designed for.
+
+Under the matrix the JS legs' first two runs were on a host the
+maintainer was using — fifteen-minute load 143-189, 4.7 GB of swap, a
+browser and Finder beside the five lanes: the eleventh matrix green on
+every leg but iOS's filedialog-go (the struck starved-runloop class,
+its instruments reading bridge reads of 500-935ms) with three lanes a
+few seconds over their ceilings, the twelfth green on four lanes with
+windows at 498s under its 520 ceiling and red on mac's Python
+portfolio leg alone, where the new SwiftUI instrument read `click
+button#1 145ms after the last pop; entries=0` and, five seconds on,
+`entries=0 top=""` — the push never reached the model, the third
+sighting on that entry. THE THIRTEENTH, launched once the five-minute
+load had fallen under 8: ALL PASS on all five lanes and 52 gates,
+1,549 legs in 605s — mac 372s, linux 427s, windows 418s with its 239
+legs, iOS 526s, android 205s — the fastest matrix of the day and the
+first with the JS legs on every desktop lane.
+

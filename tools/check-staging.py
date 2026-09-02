@@ -144,6 +144,18 @@ def check(root):
                      f"(SCENES / PY_ONLY_SCENES with "
                      f"guests/python/{name}.py) — the deploy never stages "
                      f"it")
+        # The JS guests ship flat from SCENES alone (deploy-win's
+        # SCENE_TSS): a launcher naming any other .ts runs a file the
+        # deploy never put there.
+        for p in re.finditer(r"C:\\kaya\\([a-z0-9_]+)\.ts\b", body):
+            name = p.group(1)
+            if name not in set(win_lane.SCENES) or not (
+                root / "guests" / "js" / f"{name}.ts"
+            ).is_file():
+                fail(f"tools/guest/{win_lane.launcher(suite)} runs "
+                     f"{name}.ts but {name} is not a shipped JS guest "
+                     f"(SCENES with guests/js/{name}.ts) — the deploy "
+                     f"never stages it")
 
     # --- every runner: a wired scene has its .steps, a python leg its
     # file
@@ -293,6 +305,13 @@ negative(
     r"split\.exe", "ghostexe.exe",
     "ghostexe is in none of",
     "N2b (a launcher naming an exe the deploy never builds)")
+
+negative(
+    "N2c", "pointed a JS launcher at an unshipped guest",
+    "tools/guest/run_listdetail_js.cmd",
+    r"split\.ts", "ghostts.ts",
+    "ghostts is not a shipped JS guest",
+    "N2c (a JS launcher naming a .ts the deploy never stages)")
 
 negative(
     "N3", "pointed a leg at a missing guest", "tools/lib/lanes/mac.py",

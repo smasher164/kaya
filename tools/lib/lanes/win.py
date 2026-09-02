@@ -51,9 +51,11 @@ GO_ONLY_SCENES = ["editor"]
 # the .py ship and stamp, and no exe family.
 PY_ONLY_SCENES = ["portfolio", "varied"]
 
-# milestone2's five legs are the bare language names; their scene is
-# milestone2 and their launchers are run_rust.cmd and kin.
-MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java")
+# milestone2's six legs are the bare language names; their scene is
+# milestone2 and their launchers are run_rust.cmd and kin. The js legs
+# mirror the python ones leg for leg (2026-09-01): pooled where python
+# is pooled, alone where python is alone, absent where python is absent.
+MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
 
 # THE ROSTER AND ITS ORDER. A list of BLOCKS: each block's legs run
 # in the WIDTH-wide slot pool, and the pool DRAINS between blocks —
@@ -66,29 +68,29 @@ ORDER = [
     # chrome in any of these. milestone2's five legs are the bare
     # language names (their launchers are run_rust.cmd and kin).
     [
-     "rust", "python", "go", "csharp", "java",
-     "entry_rust", "entry_python", "entry_go", "entry_csharp", "entry_java",
-     "gallery_rust", "gallery_python", "gallery_go", "gallery_csharp", "gallery_java",
-     "todos_rust", "todos_python", "todos_go", "todos_csharp", "todos_java",
-     "reorder_rust", "reorder_python", "reorder_go", "reorder_csharp", "reorder_java",
-     "table_rust", "table_python", "table_go", "table_csharp", "table_java",
-     "feed_rust", "feed_python", "feed_go", "feed_csharp", "feed_java",
-     "grow_rust", "grow_python", "grow_go", "grow_csharp", "grow_java",
-     "align_rust", "align_python", "align_go", "align_csharp", "align_java",
-     "window_rust", "window_python", "window_go", "window_csharp", "window_java",
-     "panels_rust", "panels_python", "panels_go", "panels_csharp", "panels_java",
-     "stall_rust", "stall_python", "stall_go", "stall_csharp", "stall_java",
-     "confirm_rust", "confirm_python", "confirm_go", "confirm_csharp", "confirm_java",
-     "nav_rust", "nav_python", "nav_go", "nav_csharp", "nav_java",
-     "scroll_rust", "scroll_python", "scroll_go", "scroll_csharp", "scroll_java",
-     "progress_rust", "progress_python", "progress_go", "progress_csharp", "progress_java",
-     "a11y_rust", "a11y_python", "a11y_go", "a11y_csharp", "a11y_java",
-     "select_rust", "select_python", "select_go", "select_csharp", "select_java",
-     "radio_rust", "radio_python", "radio_go", "radio_csharp", "radio_java",
-     "grid_rust", "grid_python", "grid_go", "grid_csharp", "grid_java",
-     "textarea_rust", "textarea_python", "textarea_go", "textarea_csharp", "textarea_java",
-     "sections_rust", "sections_python", "sections_go", "sections_csharp", "sections_java",
-     "layout_rust", "layout_python", "layout_go", "layout_csharp", "layout_java",
+     "rust", "python", "js", "go", "csharp", "java",
+     "entry_rust", "entry_python", "entry_js", "entry_go", "entry_csharp", "entry_java",
+     "gallery_rust", "gallery_python", "gallery_js", "gallery_go", "gallery_csharp", "gallery_java",
+     "todos_rust", "todos_python", "todos_js", "todos_go", "todos_csharp", "todos_java",
+     "reorder_rust", "reorder_python", "reorder_js", "reorder_go", "reorder_csharp", "reorder_java",
+     "table_rust", "table_python", "table_js", "table_go", "table_csharp", "table_java",
+     "feed_rust", "feed_python", "feed_js", "feed_go", "feed_csharp", "feed_java",
+     "grow_rust", "grow_python", "grow_js", "grow_go", "grow_csharp", "grow_java",
+     "align_rust", "align_python", "align_js", "align_go", "align_csharp", "align_java",
+     "window_rust", "window_python", "window_js", "window_go", "window_csharp", "window_java",
+     "panels_rust", "panels_python", "panels_js", "panels_go", "panels_csharp", "panels_java",
+     "stall_rust", "stall_python", "stall_js", "stall_go", "stall_csharp", "stall_java",
+     "confirm_rust", "confirm_python", "confirm_js", "confirm_go", "confirm_csharp", "confirm_java",
+     "nav_rust", "nav_python", "nav_js", "nav_go", "nav_csharp", "nav_java",
+     "scroll_rust", "scroll_python", "scroll_js", "scroll_go", "scroll_csharp", "scroll_java",
+     "progress_rust", "progress_python", "progress_js", "progress_go", "progress_csharp", "progress_java",
+     "a11y_rust", "a11y_python", "a11y_js", "a11y_go", "a11y_csharp", "a11y_java",
+     "select_rust", "select_python", "select_js", "select_go", "select_csharp", "select_java",
+     "radio_rust", "radio_python", "radio_js", "radio_go", "radio_csharp", "radio_java",
+     "grid_rust", "grid_python", "grid_js", "grid_go", "grid_csharp", "grid_java",
+     "textarea_rust", "textarea_python", "textarea_js", "textarea_go", "textarea_csharp", "textarea_java",
+     "sections_rust", "sections_python", "sections_js", "sections_go", "sections_csharp", "sections_java",
+     "layout_rust", "layout_python", "layout_js", "layout_go", "layout_csharp", "layout_java",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from
@@ -109,12 +111,12 @@ ORDER = [
      "sizepolicy_rust",
      "portfolio_python",
      "varied_python",
-     "a11yrows_rust", "a11yrows_python", "a11yrows_go", "a11yrows_csharp", "a11yrows_java",
-     "styling_rust", "styling_python", "styling_go", "styling_csharp", "styling_java",
-     "typeface_rust", "typeface_python", "typeface_go", "typeface_csharp", "typeface_java",
-     "identity_rust", "identity_python", "identity_go", "identity_csharp", "identity_java",
-     "toolbar_rust", "toolbar_python", "toolbar_go", "toolbar_csharp", "toolbar_java",
-     "assets_rust", "assets_python", "assets_go", "assets_csharp", "assets_java",
+     "a11yrows_rust", "a11yrows_python", "a11yrows_js", "a11yrows_go", "a11yrows_csharp", "a11yrows_java",
+     "styling_rust", "styling_python", "styling_js", "styling_go", "styling_csharp", "styling_java",
+     "typeface_rust", "typeface_python", "typeface_js", "typeface_go", "typeface_csharp", "typeface_java",
+     "identity_rust", "identity_python", "identity_js", "identity_go", "identity_csharp", "identity_java",
+     "toolbar_rust", "toolbar_python", "toolbar_js", "toolbar_go", "toolbar_csharp", "toolbar_java",
+     "assets_rust", "assets_python", "assets_js", "assets_go", "assets_csharp", "assets_java",
     ],
     # ranges_rust ALONE: `type` injects OS-GLOBAL keystrokes and
     # `compose` starts a TSF composition in whatever document holds the
@@ -133,6 +135,9 @@ ORDER = [
     ],
     [
      "filedialog_python",
+    ],
+    [
+     "filedialog_js",
     ],
     [
      "filedialog_go",
@@ -159,22 +164,22 @@ ORDER = [
     # app thread deadlocks and TIMES OUT — the deadlock IS the gate
     # (docs/background-work-plan.md §5).
     [
-     "background_rust", "background_python", "background_go",
+     "background_rust", "background_python", "background_js", "background_go",
      "background_csharp", "background_java",
     ],
     # split/panes/adaptive/listdetail: each family drives resize_window
     # (the real size-class transition), drained between families.
     [
-     "split_rust", "split_python", "split_go", "split_csharp", "split_java",
+     "split_rust", "split_python", "split_js", "split_go", "split_csharp", "split_java",
     ],
     [
-     "panes_rust", "panes_python", "panes_go", "panes_csharp", "panes_java",
+     "panes_rust", "panes_python", "panes_js", "panes_go", "panes_csharp", "panes_java",
     ],
     [
-     "adaptive_rust", "adaptive_python", "adaptive_go", "adaptive_csharp", "adaptive_java",
+     "adaptive_rust", "adaptive_python", "adaptive_js", "adaptive_go", "adaptive_csharp", "adaptive_java",
     ],
     [
-     "listdetail_rust", "listdetail_python", "listdetail_go",
+     "listdetail_rust", "listdetail_python", "listdetail_js", "listdetail_go",
      "listdetail_csharp", "listdetail_java",
     ],
     # undo_rust ALONE, the menus reason exactly: its `type` verb puts
@@ -195,6 +200,9 @@ ORDER = [
      "menus_python",
     ],
     [
+     "menus_js",
+    ],
+    [
      "menus_go",
     ],
     [
@@ -208,6 +216,9 @@ ORDER = [
     ],
     [
      "commands_python",
+    ],
+    [
+     "commands_js",
     ],
     [
      "commands_go",
@@ -227,6 +238,9 @@ ORDER = [
     ],
     [
      "clipboard_python",
+    ],
+    [
+     "clipboard_js",
     ],
     [
      "clipboard_go",

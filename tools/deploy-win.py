@@ -9,7 +9,7 @@ dev_shell_or_die()
 
 # Deploy milestone-0 artifacts to the Windows VM and run the validations.
 #
-# Usage: tools/deploy-win.sh user@host [--provision] [rust|python|go|csharp|java|all]
+# Usage: tools/deploy-win.sh user@host [--provision] [<leg>|all]
 #        tools/deploy-win.sh user@host <scene>_<lang>  # ONE leg
 #        tools/deploy-win.sh user@host probe=<exe>     # aliveness probe
 #
@@ -319,6 +319,19 @@ PY_ONLY_SCENES = lane.PY_ONLY_SCENES
 SCENE_EXES = [TARGET / f"examples/{s}.exe" for s in SCENES + DEPTH_SCENES]
 SCENE_PYS = ([ROOT / f"guests/python/{s}.py" for s in SCENES]
              + [ROOT / f"guests/python/{s}.py" for s in PY_ONLY_SCENES])
+# The JS guests ship FLAT beside the python ones (C:\kaya\<scene>.ts) and
+# import the binding from C:\kaya\node_modules\kaya-gui, which is where
+# node's bare-specifier resolution looks from a flat file (docs/js-plan.md
+# §5). One node, pinned by version AND bytes below, the docker image's rule
+# on the VM.
+SCENE_TSS = [ROOT / f"guests/js/{s}.ts" for s in SCENES]
+NODE_VERSION = "24.19.0"
+NODE_WIN_ARM64_SHA256 = "8502f4a50b458d4cc38ed8f2001556c2cd239d464920f74017926ccb1e1c157f"
+NODE_DIR = f"C:\\kaya\\node24\\node-v{NODE_VERSION}-win-arm64"
+# The Go toolchain the go legs build with, the same rule: go.dev's
+# published sha256 for the windows-arm64 zip, verified before expansion.
+GO_VERSION = "1.27.0"
+GO_WIN_ARM64_SHA256 = "6e0156b9788209931dd340fadc04171ce15063c17b51c92e7b86b51109626e90"
 BUILD_EXAMPLES = []
 for _s in SCENES + DEPTH_SCENES:
     BUILD_EXAMPLES += ["--example", _s]
@@ -659,14 +672,31 @@ must_ssh("cmd /c java -version >nul 2>&1 && echo jdk present || winget "
 # prepend C:\kaya\go127\go\bin so it wins over any stable install — the
 # check is VERSION-KEYED, not exists-keyed: an exists check kept the VM
 # on rc2 through a pin bump forever, since the cached tree satisfied it.
+# GO AND NODE, BY VERSION AND BY BYTES, THROUGH A SHIPPED SCRIPT: an
+# inline `powershell -Command \"...\"` through ssh and cmd arrives as one
+# quoted string that PowerShell PRINTS instead of running — the go1.27.0
+# "install" echoed its own text and returned 0 for weeks while the go legs
+# built with the VM's system Go 1.26.5 (measured 2026-09-01, docs/traps.md).
+# tools/guest/fetch-zip.ps1 downloads, compares the sha256 recorded beside
+# the version here, and expands only on a match; tools/check-pins.sh holds
+# the shape. A present toolchain of the pinned version is left alone.
+if scp_to([ROOT / "tools/guest/fetch-zip.ps1"], "C:/kaya/") != 0:
+    die("deploy-win: could not ship fetch-zip.ps1")
+
+
+def fetch_zip(url, sha256, dest):
+    return ("powershell -NoProfile -ExecutionPolicy Bypass -File "
+            f"C:\\kaya\\fetch-zip.ps1 -Url {url} -Sha256 {sha256} -Dest {dest}")
+
+
 must_ssh('cmd /c "C:\\kaya\\go127\\go\\bin\\go.exe version 2>nul | findstr '
-         '/c:go1.27.0 >nul && echo go127 present || powershell -Command '
-         '\\"Remove-Item -Recurse -Force C:\\kaya\\go127 -ErrorAction '
-         "SilentlyContinue; Invoke-WebRequest -Uri "
-         "https://go.dev/dl/go1.27.0.windows-arm64.zip -OutFile "
-         "C:\\kaya\\go127.zip; Expand-Archive -Path C:\\kaya\\go127.zip "
-         "-DestinationPath C:\\kaya\\go127 -Force; Remove-Item "
-         'C:\\kaya\\go127.zip\\""')
+         f'/c:go{GO_VERSION} >nul && echo go{GO_VERSION} present || '
+         + fetch_zip(f"https://go.dev/dl/go{GO_VERSION}.windows-arm64.zip",
+                     GO_WIN_ARM64_SHA256, "C:\\kaya\\go127") + '"')
+must_ssh('cmd /c "' + NODE_DIR + '\\node.exe --version 2>nul | findstr '
+         f'/c:v{NODE_VERSION} >nul && echo node{NODE_VERSION} present || '
+         + fetch_zip(f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-win-arm64.zip",
+                     NODE_WIN_ARM64_SHA256, "C:\\kaya\\node24") + '"')
 
 
 # A hung or leftover guest keeps kaya.dll locked: the next deploy's copy
@@ -795,6 +825,7 @@ def deploy_artifacts():
     return (SCENE_EXES
             + [TARGET / "kaya.dll", BOOTSTRAP]
             + SCENE_PYS
+            + SCENE_TSS
             + [ROOT / "go.mod", ROOT / "crates/kaya/include/kaya.h"]
             + sorted((ROOT / "tools/guest").glob("*.cmd"))
             + sorted((ROOT / "tools/guest").glob("*.vbs"))
@@ -802,6 +833,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/shot-window.ps1",
                ROOT / "tools/guest/desk-warm.ps1",
                ROOT / "tools/guest/wait-exit.ps1",
+               ROOT / "tools/guest/fetch-zip.ps1",
                ROOT / "tools/guest/flightrec.ps1"])
 
 
@@ -824,7 +856,9 @@ def deploy_stamp():
                        .glob("*.java"))
               + [ROOT / "guests/java-desktop/dev/kaya/milestone2kt/Main.java"]
               + sorted(p for p in (ROOT / "bindings/python/kaya").rglob("*")
-                       if p.is_file()))
+                       if p.is_file())
+              + [ROOT / "bindings/js/package.json"]
+              + sorted((ROOT / "bindings/js/kaya").glob("*.ts")))
     h = hashlib.sha256()
     for p in inputs:
         body = p.read_bytes()
@@ -915,6 +949,35 @@ else:
     if scp_dir_to(ROOT / "bindings/python/kaya",
                   "C:/kaya/bindings/python/") != 0:
         die("deploy-win: could not ship the python binding")
+    # The JS binding as the package node resolves from C:\kaya\<scene>.ts:
+    # package.json (exports ./kaya/index.ts) plus the three sources, staged
+    # at C:\kaya\kaya-gui BEHIND A JUNCTION from node_modules — node
+    # refuses to strip types for a file whose real path is under
+    # node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, measured
+    # on the first deploy), and resolves a link to its target, which is
+    # how the workspace symlink works on the other two desktops.
+    # Separate commands, deliberately: in cmd an `if exist X rmdir X &
+    # mkdir Y` runs the mkdir INSIDE the if, so a directory that never
+    # existed is never created (the first JS deploy died on that too).
+    # The junction goes first and on its own (a bare rmdir unlinks a
+    # junction without touching its target; a leftover REAL directory
+    # from an older deploy makes that rmdir fail, which the exit /b 0
+    # tolerates and the /s below then removes).
+    must_ssh('cmd /c "if exist C:\\kaya\\node_modules\\kaya-gui rmdir '
+             'C:\\kaya\\node_modules\\kaya-gui 2>nul & exit /b 0"')
+    must_ssh('cmd /c "if exist C:\\kaya\\node_modules rmdir /s /q '
+             'C:\\kaya\\node_modules"')
+    must_ssh('cmd /c "if exist C:\\kaya\\kaya-gui rmdir /s /q '
+             'C:\\kaya\\kaya-gui"')
+    must_ssh('cmd /c "mkdir C:\\kaya\\kaya-gui"')
+    must_ssh('cmd /c "mkdir C:\\kaya\\node_modules"')
+    if scp_to([ROOT / "bindings/js/package.json"],
+              "C:/kaya/kaya-gui/") != 0:
+        die("deploy-win: could not ship the JS binding's package.json")
+    if scp_dir_to(ROOT / "bindings/js/kaya", "C:/kaya/kaya-gui/") != 0:
+        die("deploy-win: could not ship the JS binding")
+    must_ssh('cmd /c "mklink /J C:\\kaya\\node_modules\\kaya-gui '
+             'C:\\kaya\\kaya-gui >nul"')
     if scp_to(sorted((ROOT / "bindings/go").glob("*.go")),
               "C:/kaya/bindings/go/") != 0:
         die("deploy-win: could not ship the go binding")

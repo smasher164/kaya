@@ -22,7 +22,7 @@
 //
 // See guests/rust/filedialog.rs and tools/scenes/filedialog.steps.
 
-import { closeSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -67,12 +67,9 @@ function picked(files: kaya.PickedFile[]): void {
   const file = files[0]!;
   let text: string;
   try {
-    const { fd } = file.open(kaya.wire.FILE_MODE_READ);
-    try {
-      text = readFileSync(fd).toString("utf-8");
-    } finally {
-      closeSync(fd);
-    }
+    // The addon reads over the platform handle: the same spelling on
+    // every desktop, Windows included (docs/js-plan.md §6).
+    text = new TextDecoder().decode(file.read());
   } catch (e) {
     text = `open failed: ${e instanceof Error ? e.message : String(e)}`;
   }

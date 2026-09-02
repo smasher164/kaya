@@ -11,7 +11,7 @@
 // Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
 // contract in tools/scenes/clipboard.steps.
 
-import { closeSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -101,12 +101,8 @@ function answered(clip: kaya.Clip | null): void {
   const name = file.name;
   let text: string;
   try {
-    const { fd } = file.open(kaya.wire.FILE_MODE_READ);
-    try {
-      text = readFileSync(fd).toString("utf-8");
-    } finally {
-      closeSync(fd);
-    }
+    // The addon reads over the platform handle (docs/js-plan.md §6).
+    text = new TextDecoder().decode(file.read());
   } catch (e) {
     text = `open failed: ${e instanceof Error ? e.message : String(e)}`;
   }

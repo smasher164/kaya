@@ -6612,3 +6612,42 @@ ACTION ON A VIEWPORT IS AN ACTION ON A VIEWPORT THAT HAS LAID OUT; a
 verb that refuses on the tier's own registration must wait for the
 first layout the way every expect waits for its value.
 
+## An inline `powershell -Command \"...\"` through ssh and cmd is a string PowerShell PRINTS, and the Go 1.27 pin was never installed (measured 2026-09-01)
+
+tools/deploy-win.py provisioned Go as `cmd /c "go.exe version | findstr
+go1.27.0 && echo present || powershell -Command \"Remove-Item ...;
+Invoke-WebRequest ...; Expand-Archive ...\""`. Through ssh's quoting and
+cmd's, the escaped inner quotes deliver the whole script to PowerShell
+as ONE double-quoted string, and PowerShell evaluates a bare string
+expression by printing it: the lane's log carried the script's own text
+where "go127 present" should have been, the exit code was 0, and the go
+legs built with `C:\Program Files\Go` — go1.26.5 — behind a launcher
+PATH that named C:\kaya\go127 first, for as long as the pin had
+existed. Found the day node needed the same provisioning and its
+version of the command failed instead of echoing. Probed to be sure:
+`cmd /c "echo x | findstr /c:y >nul && echo matched || powershell
+-Command \"Write-Output probe-ran; exit 3\""` printed `Write-Output
+probe-ran; exit 3` and returned 0. The rule: A POWERSHELL SCRIPT SHIPPED
+TO THE VM RUNS AS A FILE (`-File C:\kaya\fetch-zip.ps1 -Url ... -Sha256
+... -Dest ...`), never as a nested -Command string; tools/check-pins.sh
+refuses the nested shape by name and holds every zip the VM fetches to
+a version and a sha256 recorded beside it, compared before expansion.
+The direct `ssh host 'powershell -Command "..."'` with no cmd in
+between (verify_deployed's hash read) arrives as a command and is not
+this defect.
+
+## Node will not strip types under node_modules, so the JS binding is staged behind a link everywhere (measured 2026-09-01)
+
+The first Windows deploy copied bindings/js INTO
+C:\kaya\node_modules\kaya-gui and every JS leg died in a second with
+`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` for
+node_modules/kaya-gui/kaya/index.ts. Node's type stripping deliberately
+refuses files whose real path is under node_modules (a package is
+expected to ship JavaScript), and it resolves links to their targets —
+which is why the mac and linux lanes never saw this: their
+guests/js/node_modules/kaya-gui is npm's workspace SYMLINK to
+bindings/js, a real path outside node_modules. The VM stages the binding
+at C:\kaya\kaya-gui with a directory junction from node_modules. The
+rule: A TYPESCRIPT PACKAGE CONSUMED WITHOUT A BUILD STEP LIVES OUTSIDE
+node_modules AND IS LINKED IN; a copy is what breaks.
+

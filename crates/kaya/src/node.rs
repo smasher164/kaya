@@ -106,11 +106,13 @@ unsafe fn host_symbol(name: &str) -> Result<*mut c_void, String> {
 unsafe fn host_symbol(name: &str) -> Result<*mut c_void, String> {
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        fn GetModuleHandleW(name: *const u16) -> *mut c_void;
-        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+        // The core's own spellings (winui/mod.rs), or the two extern
+        // blocks clash at compile time.
+        fn GetModuleHandleW(name: *const u16) -> isize;
+        fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
     }
     let cname = CString::new(name).expect("static symbol name");
-    let p = unsafe { GetProcAddress(GetModuleHandleW(ptr::null()), cname.as_ptr()) };
+    let p = unsafe { GetProcAddress(GetModuleHandleW(ptr::null()) as *mut c_void, cname.as_ptr() as *const u8) };
     if p.is_null() {
         return Err(format!(
             "kaya: the host process exports no {name} — process.dlopen on \
@@ -150,6 +152,8 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("assetRelease", asset_release),
         ("assetWhyNot", asset_why_not),
         ("openPicked", open_picked),
+        ("pickedRead", picked_read),
+        ("pickedWrite", picked_write),
         ("startPump", start_pump),
         ("exit", exit),
     ];
@@ -420,6 +424,54 @@ unsafe extern "C" fn open_picked(env: Env, info: CbInfo) -> Value {
         (api.napi_set_named_property)(env, out, c"seekable".as_ptr(), seek);
     }
     out
+}
+
+/// The picked file's bytes, read INSIDE THE ADDON over the raw handle the
+/// core hands back: on Windows that is a HANDLE, and node.exe links its C
+/// runtime statically, so a descriptor minted by this library's CRT is
+/// meaningless to node's fs (docs/js-plan.md §6); on unix it is an fd and
+/// the same path keeps one spelling for all three desktops. The redemption
+/// is consumed: the File closes when this returns.
+unsafe extern "C" fn picked_read(env: Env, info: CbInfo) -> Value {
+    let [h] = unsafe { args::<1>(env, info) };
+    let handle = try_or_throw!(env, unsafe { u64_arg(env, h, "pickedRead handle") });
+    let mut file = match unsafe { redeem(env, handle, crate::wire::FILE_MODE_READ) } {
+        Ok(file) => file,
+        Err(v) => return v,
+    };
+    let mut bytes = Vec::new();
+    if let Err(e) = std::io::Read::read_to_end(&mut file, &mut bytes) {
+        return unsafe { throw(env, &format!("kaya: reading the picked file failed: {e}")) };
+    }
+    unsafe { uint8array(env, &bytes) }
+}
+
+/// Replace the picked file's content — what a save dialog's answer opens
+/// as (docs/save-plan.md D1) — over the same raw handle.
+unsafe extern "C" fn picked_write(env: Env, info: CbInfo) -> Value {
+    let [h, b] = unsafe { args::<2>(env, info) };
+    let handle = try_or_throw!(env, unsafe { u64_arg(env, h, "pickedWrite handle") });
+    let bytes = try_or_throw!(env, unsafe { bytes_arg(env, b, "pickedWrite bytes") });
+    let mut file = match unsafe { redeem(env, handle, crate::wire::FILE_MODE_WRITE) } {
+        Ok(file) => file,
+        Err(v) => return v,
+    };
+    if let Err(e) = std::io::Write::write_all(&mut file, bytes).and_then(|()| std::io::Write::flush(&mut file)) {
+        return unsafe { throw(env, &format!("kaya: writing the picked file failed: {e}")) };
+    }
+    unsafe { undefined(env) }
+}
+
+/// One redemption as a File the addon owns (protocol.rs's raw-handle arms,
+/// which are the one place the platforms differ).
+unsafe fn redeem(env: Env, handle: u64, mode: u32) -> Result<std::fs::File, Value> {
+    let mut raw: i64 = 0;
+    let mut seekable: u32 = 0;
+    let rc = capi::kaya_open_picked(handle, mode, &mut raw, &mut seekable);
+    if rc != 0 {
+        return Err(unsafe { throw(env, &format!("kaya: opening the picked file failed (code {rc})")) });
+    }
+    Ok(unsafe { crate::protocol::file_from_raw(raw) })
 }
 
 /// From the worker, the way to end the PROCESS: `process.exit` there
