@@ -186,8 +186,6 @@ status=0
 # can match its PRIMARY window. Before that, a kaya app on Wayland
 # advertised kaya's own milestone-2 id to the whole desktop.
 #
-# The socket name is sway's to choose, unlike Weston's --socket, so it
-# is discovered after start rather than declared.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 cat >/tmp/sway.conf <<'SWAY'
@@ -206,39 +204,92 @@ SWAY
 # The container has no settings daemon, so the default IS 1.0; the
 # unsets keep an override from sneaking in through docker -e.
 unset GDK_DPI_SCALE GDK_SCALE
-WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1     sway -c /tmp/sway.conf &>/tmp/sway.log &
-COMPOSITOR_PID=$!
-KAYA_WAYLAND_SOCKET=""
-for _ in $(seq 1 40); do
-    for candidate in "$XDG_RUNTIME_DIR"/wayland-[0-9]; do
-        # -S and not -e: the lock file beside each socket matches the
-        # same glob and is not one.
-        if [ -S "$candidate" ]; then
-            KAYA_WAYLAND_SOCKET="$(basename "$candidate")"
+
+# Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for serial):
+# every leg claims a SESSION of its own from a booted-once pool — an
+# Xvfb on x11, a headless sway on wayland. Verdicts print in submission
+# order at drain; a FAIL prints its log.
+JOBS="${KAYA_JOBS:-8}"
+
+# THE WAYLAND SESSION POOL, one headless sway per pool slot, booted once
+# (2026-09-02; the x11 pool's shape, below). Until then every wayland
+# leg shared ONE compositor, and the sharing was a rule with teeth: one
+# clipboard for the pool, so the clipboard legs ran alone between
+# drains; one seat for the pool, so a virtual keyboard held for the
+# session made keyboard focus EXCLUSIVE and broke three unrelated legs'
+# expect_focused (measured 2026-08-03), which kept the undo, ranges and
+# editor legs alone as well. A session per leg dissolves both — one
+# window per seat, one clipboard per leg — at ~55ms of sway boot per
+# slot (docs/clipboard-plan.md §5b, "researched escapes"). And it is
+# what a POINTER needs: a drag is a grab on one seat's pointer, so real
+# input pools only when no two legs share a seat (docs/dnd-plan.md §2,
+# probe 4).
+#
+# A slot's runtime dir IS its record — the wayland socket's name, sway's
+# IPC socket and the pid live in it — because run_one reads them from
+# the pool's subshells. THE SEAT STAYS DEVICELESS: nothing holds a
+# keyboard or a pointer on it, and each injection (wtype's F24 tap, the
+# `type` verb, tools/linux/wlpointer) adds a transient device for
+# exactly the events it delivers.
+wayland_session_boot() { # slot
+    local dir="/tmp/xdg-wl-$1" old waited=0 candidate socket="" ipc=""
+    # A reboot waits the old compositor out first: its exit unlinks its
+    # sockets BY NAME, and a fresh sway in the same dir picks the same
+    # name.
+    old="$(cat "$dir/sway.pid" 2>/dev/null)"
+    if [ -n "$old" ]; then
+        kill "$old" 2>/dev/null
+        while kill -0 "$old" 2>/dev/null && [ "$waited" -lt 60 ]; do
+            waited=$((waited + 1))
+            sleep 0.05
+        done
+    fi
+    rm -rf "$dir"
+    mkdir -p "$dir" && chmod 700 "$dir"
+    XDG_RUNTIME_DIR="$dir" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
+        sway -c /tmp/sway.conf &>"/tmp/sway-$1.log" &
+    echo $! >"$dir/sway.pid"
+    # NOT a job (x11_display_boot's reason, below).
+    disown
+    # The socket name is sway's to choose, unlike Weston's --socket, so
+    # it is discovered after start rather than declared; -S and not -e,
+    # since the lock file beside each socket matches the same glob.
+    # swaymsg finds the IPC socket through SWAYSOCK, which only sway's
+    # own children inherit: it sits beside the wayland socket as
+    # sway-ipc.<uid>.<pid>.sock.
+    waited=0
+    while [ -z "$socket" ] || [ -z "$ipc" ]; do
+        for candidate in "$dir"/wayland-[0-9]; do
+            [ -S "$candidate" ] && socket="$(basename "$candidate")"
+        done
+        for candidate in "$dir"/sway-ipc.*.sock; do
+            [ -S "$candidate" ] && ipc="$candidate"
+        done
+        if [ -n "$socket" ] && [ -n "$ipc" ]; then
             break
         fi
+        waited=$((waited + 1))
+        if [ "$waited" -gt 160 ]; then
+            echo "run-suites: sway (wayland slot $1) never created its sockets" >&2
+            tail -5 "/tmp/sway-$1.log" >&2
+            return 1
+        fi
+        sleep 0.05
     done
-    [ -n "$KAYA_WAYLAND_SOCKET" ] && break
-    sleep 0.25
+    echo "$socket" >"$dir/socket"
+    echo "$ipc" >"$dir/ipc"
+}
+WAYLAND_POOL=()
+for kaya_slot in $(seq 0 $((JOBS - 1))); do
+    wayland_session_boot "$kaya_slot" || exit 1
+    WAYLAND_POOL+=("$kaya_slot")
 done
-if [ -z "${KAYA_WAYLAND_SOCKET:-}" ]; then
-    echo "run-suites: sway never created a socket" >&2
-    tail -5 /tmp/sway.log >&2
-    exit 1
-fi
-export KAYA_WAYLAND_SOCKET
 
 # THE SEAT IS THE REQUIREMENT, not the compositor's name, so the lane
 # checks for the seat: a compositor without one has no clipboard at all
 # and nothing else here would notice. Anyone who swaps this compositor
 # again meets this line instead of a mystery.
-# swaymsg finds the IPC socket through SWAYSOCK, which only sway's own
-# children inherit, so from here it has to be located: it sits beside
-# the wayland socket as sway-ipc.<uid>.<pid>.sock.
-for candidate in "$XDG_RUNTIME_DIR"/sway-ipc.*.sock; do
-    [ -S "$candidate" ] && export SWAYSOCK="$candidate" && break
-done
-if ! swaymsg -t get_seats 2>/dev/null | grep -q '"name"'; then
+if ! SWAYSOCK="$(cat /tmp/xdg-wl-0/ipc)" swaymsg -t get_seats 2>/dev/null | grep -q '"name"'; then
     echo "run-suites: the wayland compositor advertises NO SEAT." >&2
     echo "  A data device is obtained from a seat, so this session has no" >&2
     echo "  clipboard for any client, including kaya's own apps. Headless" >&2
@@ -253,28 +304,11 @@ if ! GTK_A11Y=none GDK_BACKEND=x11 timeout 15 \
     python3 /work/tools/linux/font-preflight.py; then
     exit 1
 fi
-if ! GTK_A11Y=none GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \
+if ! GTK_A11Y=none GDK_BACKEND=wayland XDG_RUNTIME_DIR=/tmp/xdg-wl-0 \
+    WAYLAND_DISPLAY="$(cat /tmp/xdg-wl-0/socket)" \
     timeout 15 python3 /work/tools/linux/font-preflight.py; then
     exit 1
 fi
-
-# AND THE SEAT MUST STAY KEYBOARDLESS WHILE THE POOL RUNS. The seat does
-# need key events for the clipboard legs — Wayland charges an
-# input-event serial for TAKING the selection, freshly per copy
-# (docs/clipboard-plan.md §5b finding 3) — but the fix is NOT a
-# session-held virtual keyboard: with a keyboard on the seat, keyboard
-# focus becomes EXCLUSIVE across the one session eight pooled legs
-# share, and adding a holder broke three unrelated legs' expect_focused
-# (measured 2026-08-03). So the keyboard exists only TRANSIENTLY, inside
-# the per-step wtype tap the GTK stage runs (gtk.rs,
-# freshen_wayland_serial), and only during clipboard legs, which the
-# drains below run ALONE.
-
-# Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for serial):
-# X11 legs claim a display from a booted-once POOL, and Wayland clients
-# share the one headless compositor. Verdicts print in submission order
-# at drain; a FAIL prints its log.
-JOBS="${KAYA_JOBS:-8}"
 LEGS_DIR="$(mktemp -d)"
 leg_names=()
 leg_pids=()
@@ -412,11 +446,10 @@ run_one() {
     fi
     case "$proto" in
         x11)
-            # A display from the POOL, claimed for the whole leg — the
-            # wayland ring's one-compositor shape, bounded to one leg
-            # per display so nothing in flight ever shares a screen,
-            # a pointer or an input focus (the PointerRoot trap lives
-            # one file over). Booting a fresh Xvfb per leg cost every
+            # A display from the POOL, claimed for the whole leg, bounded
+            # to one leg per display so nothing in flight ever shares a
+            # screen, a pointer or an input focus (the PointerRoot trap
+            # lives one file over). Booting a fresh Xvfb per leg cost every
             # x11 leg ~half a second of pure startup (2026-08-20);
             # recording mode keeps xvfb-run, since a film wants a
             # display of its own.
@@ -444,8 +477,29 @@ run_one() {
             return "$kaya_rc"
             ;;
         wayland)
-            KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \
+            # A session from the POOL, claimed for the whole leg, the
+            # x11 arm's shape: one seat and one clipboard per leg (the
+            # pool's comment above). A failed leg's session is rebooted
+            # under the claim, as an Xvfb is.
+            local kaya_slot
+            while :; do
+                for kaya_slot in "${WAYLAND_POOL[@]}"; do
+                    if mkdir "$LEGS_DIR/.wl-$kaya_slot" 2>/dev/null; then
+                        break 2
+                    fi
+                done
+                sleep 0.05
+            done
+            local kaya_wl="/tmp/xdg-wl-$kaya_slot"
+            XDG_RUNTIME_DIR="$kaya_wl" WAYLAND_DISPLAY="$(cat "$kaya_wl/socket")" \
+                SWAYSOCK="$(cat "$kaya_wl/ipc")" KAYA_SELFTEST=1 GDK_BACKEND=wayland \
                 KAYA_VERB_TRACE="$LEGS_DIR/$name-$proto.vtrace" timeout 180 "$@"
+            local kaya_rc=$?
+            if [ "$kaya_rc" -ne 0 ]; then
+                wayland_session_boot "$kaya_slot"
+            fi
+            rmdir "$LEGS_DIR/.wl-$kaya_slot" 2>/dev/null
+            return "$kaya_rc"
             ;;
     esac
 }
@@ -520,6 +574,23 @@ drain() {
 build_c() { make -C guests/c TARGET_DIR="$CARGO_TARGET_DIR/debug" OUT=/tmp/c-guests; }
 run_build c build_c
 
+# The wayland pointer injector (tools/linux/wlpointer/wlpointer.c),
+# scanner glue and all: C against the image's libwayland, built here
+# because the image is built before the tree is mounted.
+build_wlpointer() {
+    mkdir -p /tmp/wlpointer && cd /tmp/wlpointer \
+        && wayland-scanner client-header \
+            /work/tools/linux/wlpointer/wlr-virtual-pointer-unstable-v1.xml \
+            wlr-virtual-pointer-unstable-v1-client-protocol.h \
+        && wayland-scanner private-code \
+            /work/tools/linux/wlpointer/wlr-virtual-pointer-unstable-v1.xml \
+            wlr-virtual-pointer-unstable-v1-protocol.c \
+        && cc -O2 -Wall -I/tmp/wlpointer -o /tmp/wlpointer/wlpointer \
+            /work/tools/linux/wlpointer/wlpointer.c \
+            wlr-virtual-pointer-unstable-v1-protocol.c -lwayland-client
+}
+run_build wlpointer build_wlpointer
+
 # The OCaml guests: one dune build for the binding library and every
 # scene. Its own build dir: _build is shared with the host through the
 # repo mount and dune keys targets on source hashes, not platform, so
@@ -576,6 +647,32 @@ run_build go build_go
 # build (no libkaya link), the rest right after it.
 drain_builds
 timing guest-builds
+
+# THE POINTER ROUTES, PROVEN BEFORE THE FIRST LEG: a real drag through
+# each protocol's injector onto a GTK drop target (tools/linux/dragprobe.py
+# says what it proves and what it prints when it cannot). Every lane run
+# pays the ~3s, because nothing a scene asserts today drives a pointer,
+# and a route nobody exercises is the sway-IPC lesson waiting to repeat
+# (docs/traps.md). On wayland it runs on slot 0's own session; on x11 on
+# the pool's first display, or the skip is PRINTED under KAYA_RECORD,
+# which boots no x11 pool.
+pointer_proof() {
+    if ! XDG_RUNTIME_DIR=/tmp/xdg-wl-0 WAYLAND_DISPLAY="$(cat /tmp/xdg-wl-0/socket)" \
+        SWAYSOCK="$(cat /tmp/xdg-wl-0/ipc)" GTK_A11Y=none GDK_BACKEND=wayland \
+        timeout 60 python3 /work/tools/linux/dragprobe.py wayland /tmp/wlpointer/wlpointer; then
+        return 1
+    fi
+    if [ ${#X11_POOL[@]} -eq 0 ]; then
+        echo "run-suites: recording mode boots no x11 pool; the x11 pointer proof is SKIPPED"
+        return 0
+    fi
+    DISPLAY=":${X11_POOL[0]}" GTK_A11Y=none GDK_BACKEND=x11 \
+        timeout 60 python3 /work/tools/linux/dragprobe.py x11 xdotool
+}
+if ! pointer_proof; then
+    echo "run-suites: the pointer proof FAILED; no leg runs on a lane whose input route is broken" >&2
+    exit 1
+fi
 
 # THE IDENTITY LEGS' ASSET, VERIFIED RATHER THAN ASSUMED, and LOUD
 # BEFORE ANY LEG RUNS: without the mark an identity guest dies inside
@@ -1340,89 +1437,70 @@ for proto in x11 wayland; do
     run "$proto" layout-java env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The clipboard scene. Through a11y-leg.sh for its closing expect_ax.
-    # THE LEGS ARE MUTUALLY EXCLUSIVE, ONE DRAIN EACH
-    # (docs/clipboard-plan.md §0d): there is one system clipboard per
-    # session, and legs writing it concurrently are processes assigning one
-    # variable. The leading drain also empties the pool, so on wayland the
-    # serial primer's F24 tap lands on the clipboard leg's own window.
-    drain
+    # POOLED SINCE 2026-09-02 on both protocols: a leg owns its session
+    # — an Xvfb from the x11 pool, a headless sway from the wayland pool
+    # — so each has a clipboard and a seat of its own, and the mutual
+    # exclusion the one shared compositor forced (nine legs alone between
+    # drains, the serial primer's F24 tap needing the pool EMPTY to land
+    # on the right window) went with it (docs/clipboard-plan.md §5b,
+    # "researched escapes", taken; the wayland pool's comment above).
     run "$proto" clipboard-rust env KAYA_SELFTEST=clipboard \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/clipboard"
-    drain
     run "$proto" clipboard-python env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/clipboard.py
-    drain
     run "$proto" clipboard-js env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh node guests/js/clipboard.ts
-    drain
     run "$proto" clipboard-go env KAYA_SELFTEST=clipboard \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
-    drain
     run "$proto" clipboard-csharp env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
-    drain
     run "$proto" clipboard-ocaml env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/clipboard.exe
-    drain
     run "$proto" clipboard-haskell env KAYA_SELFTEST=clipboard \
         tools/linux/a11y-leg.sh "$(hs_bin clipboard)"
-    drain
     run "$proto" clipboard-java env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
-    drain
-    # The undo scene (docs/undo-plan.md §3), a DEPTH slice.
-    #
-    # ALONE BETWEEN DRAINS, and here that is CORRECTNESS: the `type` verb
-    # delivers REAL key events, and on wayland the injector is a transient
-    # virtual keyboard whose seat makes keyboard focus EXCLUSIVE across the
-    # compositor eight pooled legs share (measured 2026-08-03 — a
-    # session-held one broke three unrelated legs' expect_focused). On x11
-    # each leg already owns its Xvfb.
+    # The undo scene (docs/undo-plan.md §3), a DEPTH slice. POOLED for
+    # the same reason: the `type` verb's real key events ride a transient
+    # virtual keyboard on the leg's OWN seat, where its window is the
+    # only one. The exclusivity that held this leg alone (measured
+    # 2026-08-03, a session-held keyboard on the shared compositor) needs
+    # a neighbour to disturb, and a per-leg session has none.
     run "$proto" undo-rust env KAYA_SELFTEST=undo \
         "$CARGO_TARGET_DIR/debug/examples/undo"
-    drain
     # The text-ranges scene. Through a11y-leg.sh: all three reads go to
-    # the accessibility bus. ALONE BETWEEN DRAINS, the undo rule and for
-    # the same measured reason. Stays in DEPTH_SCENES even though every
-    # guest exists — graduating is one move across every runner at once.
+    # the accessibility bus. Pooled, the undo rule. Stays in DEPTH_SCENES
+    # even though every guest exists — graduating is one move across
+    # every runner at once.
     run "$proto" ranges-rust env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/ranges"
-    drain
     run "$proto" ranges-c env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh /tmp/c-guests/ranges
-    drain
     run "$proto" ranges-python env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/ranges.py
-    drain
     run "$proto" ranges-js env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh node guests/js/ranges.ts
-    drain
     run "$proto" ranges-go env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
-    drain
     run "$proto" ranges-csharp env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
-    drain
     run "$proto" ranges-ocaml env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/ranges.exe
-    drain
     run "$proto" ranges-haskell env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh "$(hs_bin ranges)"
-    drain
     run "$proto" ranges-java env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
-    drain
     # THE TEXT EDITOR (docs/editor-plan.md), the only script here that
     # drives an APP rather than a feature. GO ALONE by the plan's choice,
     # so there is no rust example and `editor` is in neither SCENES nor
     # DEPTH_SCENES (both derive a `cargo build --example`).
     #
     # THROUGH a11y-leg.sh: almost every read this script makes is an
-    # AT-SPI read here. ALONE BETWEEN DRAINS: `type` delivers REAL key
-    # events, and on wayland the injector is a virtual keyboard whose seat
-    # makes keyboard focus exclusive across the shared compositor.
+    # AT-SPI read here. Pooled: `type` lands on its own seat, the undo
+    # rule.
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    # The pool drains here for the portfolio's sake, below.
     drain
     # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by
     # design, the editor's arrangement one language over; pooled — no
@@ -1450,7 +1528,9 @@ done
 drain
 timing legs
 
-kill "$COMPOSITOR_PID" 2>/dev/null
+for kaya_slot in "${WAYLAND_POOL[@]}"; do
+    kill "$(cat "/tmp/xdg-wl-$kaya_slot/sway.pid" 2>/dev/null)" 2>/dev/null
+done
 
 xvfb-run -a bash -c "
     \"$CARGO_TARGET_DIR/debug/examples/milestone2\" &

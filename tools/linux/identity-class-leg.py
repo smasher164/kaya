@@ -44,8 +44,7 @@ import tomllib
 # zero, and zero is this reader refusing a verdict on a leg that was fine.
 # So it polls fast until it has what it needs and then backs off, which
 # keeps the cost off the tail of a 34s wayland leg: eight short-lived
-# processes per X11 sample, and the wayland ring shares one compositor
-# with seven other legs.
+# processes per X11 sample, and one sway IPC round trip per wayland one.
 INTERVAL_FAST = 0.2
 INTERVAL_SETTLED = 1.0
 
@@ -160,9 +159,11 @@ def matches_x11(words, name):
 # No Wayland client can read another client's app_id, so the read goes
 # through sway's IPC — the compositor's own grouping view.
 #
-# THE PID FILTER IS NOT OPTIONAL. The wayland ring shares ONE headless sway
-# across a pool of concurrent legs (KAYA_JOBS wide), so the tree holds other
-# legs' windows too. Filtering by class instead would be circular.
+# THE PID FILTER STAYS. The wayland pool gives every leg its own headless
+# sway (run-suites.sh, 2026-09-02), so the tree holds this leg's windows
+# alone; the filter was written against the one shared compositor, and a
+# reader satisfied by ANY window is the shape that lied then. Filtering by
+# class instead would be circular.
 def descendants(root):
     """Every live pid below `root`, inclusive, from /proc."""
     parents = {}

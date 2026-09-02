@@ -6759,3 +6759,29 @@ And the recorder's rule grew a third exit: the SwiftUI ring dumps from
 an `NSSetUncaughtExceptionHandler` as well, since this crash was the
 first mac failure with a recorder and it kept nothing.
 
+
+## sway's `seat cursor press` succeeds on a deviceless seat and delivers nothing (measured 2026-09-02)
+
+The lane's headless sway runs `WLR_LIBINPUT_NO_DEVICES=1`, and its seat
+reports `capabilities: 0, devices: []`. A GDK client of that seat never
+binds a `wl_pointer`, so `swaymsg seat - cursor set/press/move/release`
+— each answering `success: true` — moves a cursor no client is
+listening to: a GTK DragSource under it printed its geometry and
+nothing else until the probe timed out. The keyboard taught the same
+lesson in August (docs/clipboard-plan.md §5b finding 3: serial 0 was
+never given to the client), and the pointer is that rule one device
+over: INPUT MUST BE A DEVICE ON THE SEAT. `zwlr_virtual_pointer_v1`
+adds one — tools/linux/wlpointer, wtype's twin — and under it the same
+drag ran prepare, drag-begin, enter, drop 'alpha', drag-end on GTK
+4.18, on a transient device that leaves with the process.
+
+Two things follow. A pointer on a SHARED seat would have been the
+2026-08-03 keyboard regression again — focus and grabs are per seat —
+so the lane boots one sway per pool slot now (tools/linux/run-suites.sh,
+the wayland pool), and the clipboard, undo, ranges and editor legs
+pool with everything else. And the route is proven where nobody can
+skip it: tools/linux/dragprobe.py drives a real drag through each
+protocol's injector onto a GTK drop target before the first leg, and it
+was watched failing twice on the way — under `/bin/true` and under a
+stub that replays the gesture through sway's IPC — printing `NO DROP on
+wayland within 10s; saw nothing; injector … exit 0` both times.

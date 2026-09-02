@@ -922,7 +922,10 @@ runs, and the second one retired a piece of the first:
   is immune because the clipboard legs run ALONE between drains —
   there is no neighbor to disturb while it exists. The anomalous seat
   must STAY anomalous while the pool runs; the tap makes it real for
-  exactly the milliseconds a copy needs it.
+  exactly the milliseconds a copy needs it. SINCE 2026-09-02 THE SEAT IS
+  THE LEG'S OWN: the lane boots one sway per pool slot
+  (tools/linux/run-suites.sh, the wayland pool), the clipboard legs pool,
+  and the tap is unchanged — transient, on a seat with no neighbour.
 
 RESEARCHED ESCAPES (2026-08-03), so the constraint does not calcify
 into an impossibility nobody re-checks. If a future feature needs a
@@ -936,9 +939,14 @@ theoretical ones:
   xvfb-run already costs. One session per leg dissolves exclusivity
   (one window per seat), makes a session keyboard holder safe again,
   and gives each leg a PRIVATE clipboard — the wayland clipboard legs
-  could then unserialise exactly as the x11 ones could. This is the
-  path to take when the need arrives; it is stock sway, run
-  differently.
+  could then unserialise exactly as the x11 ones could. TAKEN
+  2026-09-02, for the drag-and-drop plan's pointer (docs/dnd-plan.md §5
+  step 0): tools/linux/run-suites.sh boots one headless sway per pool
+  slot, every wayland leg claims one, the clipboard, undo, ranges and
+  editor legs pool, and a vendored `zwlr_virtual_pointer_v1` client
+  (tools/linux/wlpointer) is the seat's pointer for the milliseconds a
+  drag needs it — proven by a real drag at every lane start
+  (tools/linux/dragprobe.py). Stock sway, run differently, as written.
 - **sway multi-seat** is real and demonstrably works (per-seat focus
   and per-seat selections since sway 1.0; blinry's multi-player
   writeup shows two seats driving two windows at once). Read to the
@@ -963,7 +971,8 @@ theoretical ones:
     g_object_ref (seat->clipboard)`), and every client of a session
     sees the same first seat. All legs converge on seat0's selection
     whatever seat focuses them, so the clipboard legs stay serialised
-    under multi-seat; only per-leg sessions can unserialise them.
+    under multi-seat; only per-leg sessions can unserialise them
+    (and did, 2026-09-02).
 - **libei/EIS** (the XTEST-for-Wayland standard, built for headless
   CI input) is implemented by Mutter and KWin, NOT by wlroots/sway
   (open since 2020; wlroots' position is that the existing virtual

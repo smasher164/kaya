@@ -1725,10 +1725,13 @@ supposed to stay red while half the work is outstanding.
    palette value was nudged — dark is stronger than light on six of
    seven contrast rows — and the eyeball reading that dark's gridlines
    vanish into the area fill is WRONG, which the pixels say (1.34
-   against light's 1.24; what differs is polarity). ONE QUESTION IS
+   against light's 1.24; what differs is polarity). ~~ONE QUESTION IS
    STILL OPEN: the plot ground is a raised white card in light and a
    RECESS in dark, at the weakest separation in the table, while the
-   tables beside the chart draw their card in the platform's own token.
+   tables beside the chart draw their card in the platform's own token.~~
+   RULED 2026-09-02 (maintainer): the dark well stands as drawn — a
+   recess in kaya's palette beside the tables' platform-token cards —
+   and no value moves.
    IT NO LONGER NEEDS A DARK MACHINE, which is what changed 2026-08-28.
    `KAYA_APPEARANCE=light|dark` makes ONE PROCESS adopt an appearance
    through each platform's own supported override — `NSApp.appearance`,

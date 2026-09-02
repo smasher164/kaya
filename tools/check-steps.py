@@ -2589,104 +2589,16 @@ if out:
     status = 1
 
 
-# THE CLIPBOARD LEGS ARE MUTUALLY EXCLUSIVE ON EVERY LANE
-# (docs/clipboard-plan.md §0d): one system clipboard per session, and
-# concurrent legs are processes assigning one variable. On wayland the
-# serial primer's F24 tap additionally needs the pool EMPTY (§5b
-# finding 3). Pinned structurally: every clipboard leg must have
-# `drain` as its nearest significant neighbor on BOTH sides.
-# Continuation lines are joined first, because a leg's command usually
-# wraps.
-# The family NAME is a parameter because this helper serves two
-# families with two different reasons, and a barrier gate whose
-# "nothing matched" message names the wrong scene cannot have measured
-# what it prints.
-def family_serial(text, leg_pattern, barrier, family, path):
-    raw = text.splitlines()
-    lines = []
-    buf = ""
-    for line in raw:
-        s = line.strip()
-        if buf:
-            s = buf + " " + s
-            buf = ""
-        if s.endswith("\\"):
-            buf = s[:-1].rstrip()
-            continue
-        lines.append(s)
-
-    def significant(seq):
-        return [line for line in seq
-                if line and not line.startswith("#")]
-
-    bad = []
-    seen = 0
-    for n, line in enumerate(lines):
-        if not re.match(leg_pattern, line):
-            continue
-        seen += 1
-        before = significant(lines[:n])
-        after = significant(lines[n + 1:])
-        if not before or before[-1] != barrier or not after \
-                or after[0] != barrier:
-            bad.append(f"{path}:{n + 1}: {line[:60]} lacks the "
-                       f"{barrier}/run/{barrier} barrier")
-    if seen == 0:
-        bad.append(f"{path}: no {family} leg found (the scene must "
-                   f"stay wired)")
-    return bad
-
-
-# Each runner spells its pool differently, so the rule is checked in
-# each runner's own vocabulary; the win lane's vocabulary is the
-# module's block structure, one clause down.
-MAC_LEG = r"run .*clipboard-[a-z]"
-
-# The guard guards itself: two clipboard legs sharing the pool must
-# fail...
-if not family_serial("drain\nrun clipboard-rust-swiftui env X\n"
-                     "run clipboard-python-swiftui env X\ndrain\n",
-                     MAC_LEG, "drain", "clipboard", "-"):
-    selftest_fail("pooled clipboard legs passed")
-# ...a clipboard leg entering a pool that still holds another scene's
-# leg (on wayland the primer would tap that leg's window)...
-if not family_serial("run layout-java env X\nrun clipboard-rust env "
-                     "X\ndrain\n", MAC_LEG, "drain", "clipboard", "-"):
-    selftest_fail("undrained-before clipboard leg passed")
-
-# THE LINUX ALONE-FAMILIES, one clause each: clipboard (one system
-# clipboard per session), and undo and ranges (real keystrokes through
-# a virtual keyboard whose seat is EXCLUSIVE across the pooled legs —
-# run-suites.sh's own comment at the undo block). The ranges pair was
-# the measured miss: the ninth binding's leg was inserted inside the
-# python leg's bracket, both wayland legs typed into each other's
-# window, and only clipboard was held here (2026-09-01,
-# docs/measurements/js-binding-2026-09-01.md).
-# (The clipboard rule is docs/clipboard-plan.md §0d; cited here rather
-# than in the message, since a path in a string literal reads as an
-# input to check-keyed.)
-LINUX_ALONE = (
-    ("clipboard", MAC_LEG, "one system clipboard per session"),
-    ("undo", r"run .*undo-[a-z]", "the type verb's virtual keyboard seat "
-                                  "is exclusive across the pool"),
-    ("ranges", r"run .*ranges-[a-z]", "the undo rule: the type verb's "
-                                      "seat is exclusive across the pool"),
-)
-# The guard guards itself against the measured shape: a second
-# language's leg sharing the first's bracket.
-if not family_serial("drain\nrun ranges-python env X\nrun ranges-js env "
-                     "X\ndrain\n", r"run .*ranges-[a-z]", "drain",
-                     "ranges", "-"):
-    selftest_fail("a ranges leg inside another's bracket passed")
-for family, leg, why in LINUX_ALONE:
-    runner = "tools/linux/run-suites.sh"
-    out = family_serial(read_rel(runner), leg, "drain", family, runner)
-    if out:
-        print(f"check-steps: {runner} {family} legs must run ALONE "
-              f"between drains ({why}):", file=sys.stderr)
-        print("\n".join(out), file=sys.stderr)
-        status = 1
-
+# THE LINUX RUNNER POOLS ITS CLIPBOARD, UNDO AND RANGES LEGS since
+# 2026-09-02, so the alone-between-drains clauses this file held for
+# tools/linux/run-suites.sh — one system clipboard per session; a virtual
+# keyboard whose seat was exclusive across the pooled legs (the
+# 2026-09-01 ranges-js miss, docs/measurements/js-binding-2026-09-01.md)
+# — are retired with their reason: every linux leg owns its session
+# now, an Xvfb or a headless sway claimed from a pool, so there is no
+# neighbour for a tap or a copy to reach (the runner's wayland-pool
+# comment). The mac and win lanes keep theirs below, since each shares
+# one desktop across its pool.
 
 # The mac lane's serial families, in the module's own vocabulary since
 # the runner conversion: a block of its own per leg, read from the

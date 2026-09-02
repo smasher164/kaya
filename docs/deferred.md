@@ -898,8 +898,27 @@ list, in rough priority order; chat / todo / media stay unpicked.
   KEY: entry ranges, entry-widget deferral, highlight_ranges,
   select_range, reveal_range, weak sibling
 
-- **DEFERRED — wayland lane session architecture (researched
-  2026-08-03, no trigger yet).** The GTK clipboard work pinned two
+- ~~**DEFERRED — wayland lane session architecture (researched
+  2026-08-03, no trigger yet).**~~ — COMPLETE 2026-09-02: the trigger was
+  the drag-and-drop plan's pointer (docs/dnd-plan.md §5 step 0, the
+  maintainer's infrastructure-first ruling), and the exit below is
+  TAKEN. tools/linux/run-suites.sh boots one headless sway per pool
+  slot; every wayland leg claims a session of its own, rebooted after
+  a FAIL as an Xvfb is; the clipboard, undo, ranges and editor legs
+  POOL on both protocols (check-steps' linux alone-families clause
+  retired with them); and the seat's pointer is a vendored
+  `zwlr_virtual_pointer_v1` client (tools/linux/wlpointer), proven by a
+  real drag onto a GTK drop target on both protocols before the first
+  leg (tools/linux/dragprobe.py — watched failing under two dead
+  injectors first). Measured on the way: sway's own `seat - cursor
+  press` succeeds on the deviceless seat and delivers nothing
+  (docs/traps.md). The nine clipboard legs per protocol, once alone
+  between drains, run 16 in 11s wall now, and the lane's legs phase
+  measured 152s standalone (the two linux runs before it, under their
+  matrices, 376s and 382s).
+  KEY: per-leg sway, session holder, multi-seat, wayland pool,
+  wlpointer, dragprobe, alone between drains
+  The GTK clipboard work pinned two
   session-level constraints and researched their exits
   (docs/clipboard-plan.md §5b, "researched escapes", has the detail
   and the source-level citations):
@@ -1742,6 +1761,16 @@ list, in rough priority order; chat / todo / media stay unpicked.
   the four platform models are close; **drag and drop** — the most
   divergent, and it interacts with window management on both mac and
   Windows. **Printing** sits behind all four and is not editor-forced.
+  DRAG AND DROP PICKED 2026-09-02 (maintainer: "drag and drop makes
+  sense to work on"), and its design pass is docs/dnd-plan.md — five
+  platforms researched the same morning, the decisions with their
+  rulings marked, five probes before any arm, and the build order.
+  ITS §5 STEP 0 IS HALF BUILT 2026-09-02: the wayland lane's per-leg
+  sway and pointer injector (the session-architecture entry above,
+  struck), probe 4 measured with it; the resident iOS XCUITest driver
+  is the other half.
+  KEY: drag and drop, dropped, drag_ended, drop_target, draggable,
+  reorderable, dnd-plan, DataPackage, GtkDropTargetAsync, input draganddrop
 - **Standard commands LANDED 2026-07-24** (the follow-up milestone to
   menus): a chord rides any window-anchored LEAF command rather than
   plain actions alone, the key floor admits eight named punctuation
@@ -3078,8 +3107,13 @@ reach.
   that is what makes the VERDICT byte-identical across platforms — it
   makes the dark half REACHABLE, as the `canvasdark-*` leg on all five
   lanes, instead of only on a machine somebody had set to dark.
-- **The portfolio chart's well reads RAISED in light and RECESSED in
-  dark, and nobody has ruled on it** (measured 2026-08-27,
+- ~~**The portfolio chart's well reads RAISED in light and RECESSED in
+  dark, and nobody has ruled on it**~~ — ACCEPTED 2026-09-02 (maintainer,
+  on the current captures: "the chart looks fine on dark mode right
+  now"): the dark well stands as drawn, recessed in kaya's own palette
+  beside the tables' platform-token cards, and no value moves. The
+  measurement below is kept as the record of what was accepted.
+  (measured 2026-08-27,
   docs/measurements/canvas-palette-look-2026-08-27.txt §3). In light the
   plot ground is WHITE on a EEF1F2 window — a raised card, matching the
   tables beside it. In dark the plot ground 16181C is DARKER than any
@@ -10004,13 +10038,18 @@ container layout recorded". TWO consequences, one fixed and one held:
      changed track arithmetic wherever the leftover legitimately reaches
      zero and cost 16 sizepolicy legs on the mac lane.
      KEY: txnrow, grown ledger no track, track -32dp, four falsified
-  2. AT 320dp THE ACCOUNT TABLES OVERFLOW: columns resolve to 263dp in a
+  2. ~~AT 320dp THE ACCOUNT TABLES OVERFLOW: columns resolve to 263dp in a
      256dp track. The pool device's 320dp width is deliberate (the
      lane's compact-class coverage), and kaya has no ruling on what a
      table does when its columns do not fit — today it clamps on Compose
      and clips on iOS. That is a design question, not a bug to fix here,
      and D4's keyed arms (docs/adaptive-layout-plan.md) have their first
-     real use case in it.
+     real use case in it.~~ RULED THE NEXT DAY, 2026-08-29, and this line
+     stayed stale until a survey re-read it (2026-09-02): a table whose
+     columns do not fit SCROLLS THEM HORIZONTALLY — docs/tables-plan.md's
+     "Overflow: what a table does when its columns do not fit", landed on
+     all five backends with `expect_overflow`, `scroll_end` and
+     `expect_at_end` as its verbs. Not a keyed-arms use case after all.
 
   AND ONE TRAP THIS COST A SESSION TO FIND: an interrupted extraction
   leaves the pyhost PERMANENTLY broken. MainActivity.extractPython walks
