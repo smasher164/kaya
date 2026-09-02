@@ -3909,6 +3909,12 @@ so the next sighting says whether the push never reached the model or
 the surfaces lagged it. Next sighting: read those, do not rerun.
 Quiet with the instrument in on the 2026-09-01 evening three-lane run
 (android 123 green at host load 120).
+THE GUEST MOVED 2026-09-01 23:00: the mac portfolio entry's third
+sighting read the same shape with its instrument (the push never
+reached the model inside the step ceiling on a starved host — the
+15,003-row fill rode the push's own transaction), and portfolio.py now
+posts the fill as the transaction after the push. This leg runs that
+same guest, so its next sighting is read against the split shape.
 KEY: android portfolio title, wanted Transactions, title propagation
 
 ## MAYBE: read Windows accessibility client-side, like the other platforms
@@ -9201,6 +9207,15 @@ after the push could carry a longer ceiling for THIS app (the ceiling
 is per step, and the app is the heaviest in the tree), or the push
 could land before the ledger fills. Recorded; a quiet-host matrix is
 the next reading.
+THE SECOND REMEDY TAKEN 2026-09-01 23:00 (guests/python/portfolio.py):
+open_transactions declares the screen and its two empty tables in the
+push's own transaction and posts refresh() — the 15,003 inserts — as
+the next one, so the title is one small batch away from the click and
+a starved host delays the count label, not the push. Measured on the
+mac: click at +532ms, title at +599ms, where the fill-inside-the-push
+shape had taken seconds under load and 67ms is what the push costs.
+The android portfolio leg is the same guest, so its WATCH's premise
+moves with this too.
 
 
 ## HOLD — the windows guest-side command scripts convert to python, at some point (Akhil, 2026-08-31)

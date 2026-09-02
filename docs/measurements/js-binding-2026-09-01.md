@@ -114,11 +114,12 @@ npm offline link in the container's build phase. Two runs paid:
 
 ## Left open on the day
 
-The linux lane is green with the JS legs; the windows lane carries no js legs (node on the VM, the .cmd launchers,
-and the win32 picked-file redemption are docs/js-plan.md §6's open
-items); tools/guest-floor.py has no .ts rules yet (the census agent's
-finding), so the JS guests outside entry and milestone2 are unswept for
-floor spellings.
+The linux lane is green with the JS legs; the windows lane carried no
+js legs at the time (closed later the same day, below), and
+tools/guest-floor.py had no .ts rules (closed 2026-09-01 23:00: three
+rules — a wire record packed by hand, a submit around the sugar, a
+minted Widget — with the workspace link skipped, and the record-packing
+rule watched firing on a doctored todos.ts).
 
 ## The first matrix (red, three causes, two fixed)
 
@@ -409,4 +410,14 @@ load had fallen under 8: ALL PASS on all five lanes and 52 gates,
 1,549 legs in 605s — mac 372s, linux 427s, windows 418s with its 239
 legs, iOS 526s, android 205s — the fastest matrix of the day and the
 first with the JS legs on every desktop lane.
+
+## The portfolio's push, split from its ledger
+
+The remedy both title WATCHes named: the Transactions screen and its
+empty tables ride the push's own transaction and the 15,003 inserts are
+posted as the next one. On the mac, click at +532ms and title at +599ms
+where the old shape had taken seconds under load; android and linux
+green standalone; the fourteenth matrix ALL PASS on all five lanes and
+52 gates, 1,549 legs in 615s (mac 370s, linux 432s, windows 488s, iOS
+523s, android 194s). tools/guest-floor.py sweeps the JS guests now.
 

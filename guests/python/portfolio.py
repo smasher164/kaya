@@ -527,7 +527,15 @@ def open_transactions():
         screen.update(count=count_line, first=first_line, last=last_line,
                       net=net_signal, recent=recent, ledger=ledger,
                       in_recent=[], in_ledger=[])
-        refresh()
+    # THE PUSH LANDS BEFORE THE LEDGER FILLS (2026-09-01, the two title
+    # WATCHes' remedy): the screen and its empty tables are this
+    # handler's transaction, and the 15,003 inserts are the next one,
+    # posted — so the title is on screen at the cost of one batch, and
+    # a starved host stamping the rows late delays the count, not the
+    # push. Measured the other way: with the fill inside the push, the
+    # click-to-title round trip ran past the harness's 5s step ceiling
+    # under a fifteen-minute load of 150-190 on two platforms.
+    app.post(refresh)
 
 
 app = kaya.App()
