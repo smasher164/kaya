@@ -632,6 +632,7 @@ def rec_finish(name, out):
 _sb_pids = {}
 _seed_holders = {}
 _holders_lock = threading.Lock()
+_seed_serial = 0
 
 
 def clip_decode(b64):
@@ -704,18 +705,25 @@ def clip_seed(udid, kind, b64, legs_dir):
     else:
         return None, f"clipboard_seed cannot write {kind} from outside " \
                      f"the app"
-    seed_log = legs_dir / f"seed-{udid}.out"
+    # The previous seed's writer leaves before the next one writes: two
+    # living writers would be two claims on one board.
+    clip_release_holder(udid)
+    global _seed_serial
     with _holders_lock:
-        old = _seed_holders.pop(udid, None)
-    if old is not None:
-        old.kill()
+        _seed_serial += 1
+        serial = _seed_serial
+    seed_log = legs_dir / f"seed-{udid}-{serial}.out"
+    # THE RELEASE FILE: the writer polls for it and exits when it appears
+    # (clipctl's hold). Under this run's own directory, so the census at
+    # the verdict can name this run's holders and no other's.
+    release = legs_dir / f"release-{udid}-{serial}"
     lf = open(seed_log, "w", encoding="utf-8")
     holder = subprocess.Popen(
         ["timeout", "600", "xcrun", "simctl", "spawn", udid, CLIPCTL,
-         "write", kind, payload, "hold"],
+         "write", kind, payload, "hold", str(release)],
         stdout=lf, stderr=subprocess.DEVNULL)
     with _holders_lock:
-        _seed_holders[udid] = holder
+        _seed_holders[udid] = (holder, release, seed_log)
     # The W line is the writer saying the board is written; the hold
     # begins after it. No line inside the bound is a failed write.
     for _ in range(100):
@@ -727,20 +735,61 @@ def clip_seed(udid, kind, b64, legs_dir):
                  f"{udid}"
 
 
-# THE HOLDER IS NOT KILLED FOR REAL, AND THAT IS MEASURED, NOT
-# FORGOTTEN: `holder.kill()` reaches `timeout` alone and leaves xcrun,
-# simctl and the writer inside the simulator alive — 192 of them on the
-# host after two days (2026-09-01). Killing the whole process group
-# instead wedged the simulator's pasteboard daemon mid-serve (it fetches
-# item data from the setter) and SpringBoard denied every launch after
-# (docs/traps.md). The retirement belongs in tools/ios/clipctl itself —
-# exit when the change count moves or after a bounded hold — which is
-# docs/deferred.md's open item for this leak.
-def clip_kill_holder(udid):
+# THE HOLDER IS RELEASED, NEVER KILLED, AND THAT IS MEASURED: a kill
+# reaches `timeout` alone and leaves xcrun, simctl and the writer inside
+# the simulator alive — 192 of them on the host after two days
+# (2026-09-01) — and a process-group kill wedged the simulator's
+# pasteboard daemon mid-serve, SpringBoard denying every launch after
+# (docs/traps.md). So the writer retires ITSELF: this touches the release
+# file it polls, and the whole chain leaves through its own exit. A
+# holder still here ten seconds later is counted, and the census at the
+# verdict (clip_holder_census) turns any survivor into the lane's red.
+_holders_late = []
+
+
+def clip_release_holder(udid):
     with _holders_lock:
-        holder = _seed_holders.pop(udid, None)
-    if holder is not None:
-        holder.kill()
+        held = _seed_holders.pop(udid, None)
+    if held is None:
+        return
+    holder, release, seed_log = held
+    release.touch()
+    try:
+        holder.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        _holders_late.append(udid)
+        print(f"run-sim: the clipboard seed holder on {udid} did not leave "
+              f"within 10s of its release", file=sys.stderr)
+        return
+    # An unreadable or empty seed log is the "left saying ''" finding
+    # below, not a pass.
+    last = ""
+    if seed_log.is_file():
+        lines = seed_log.read_text(encoding="utf-8",
+                                   errors="replace").strip().splitlines()
+        if lines:
+            last = lines[-1]
+    if not last.startswith("H released"):
+        print(f"run-sim: the clipboard seed holder on {udid} left saying "
+              f"{last!r}, not that it was released", file=sys.stderr)
+
+
+def clip_holder_census():
+    """Every holder this run started, by the release directory on its
+    command line, must be gone at the verdict — the wall on the leak
+    that put 192 of them on the host (docs/traps.md)."""
+    got = subprocess.run(["pgrep", "-fl", f"hold {LEGS_DIR}/release-"],
+                         stdout=subprocess.PIPE, check=False, **TEXT)
+    survivors = [ln for ln in got.stdout.splitlines() if ln.strip()]
+    late = len(_holders_late)
+    print(f"run-sim: clipboard seed holders outliving this run: "
+          f"{len(survivors)} (late at release: {late})", flush=True)
+    if survivors:
+        print("run-sim: seed holders still alive at the verdict — the "
+              "release channel failed (tools/ios/clipctl's hold):\n"
+              + "\n".join(survivors), file=sys.stderr)
+        return False
+    return not late
 
 
 def clip_read(udid, kind_b64, legs_dir):
@@ -1403,9 +1452,9 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     if watcher is not None:
         watcher_stop.set()
         watcher.join()
-    # The last seed's held writer dies with the leg (clip_seed's holder
-    # discipline; the next leg's own copy replaces the board).
-    clip_kill_holder(udid)
+    # The last seed's held writer leaves with the leg (clip_seed's
+    # release discipline; the next leg's own copy replaces the board).
+    clip_release_holder(udid)
     print(out, file=log)
     rec_finish(name, out)
     # (NO PER-LEG SCREENSHOT: `--console-pty` returns only when the
@@ -1992,6 +2041,8 @@ if SUITE == "all" and not os.environ.get("KAYA_RECORD"):
 if not rec_suite_stop():
     status = 1
 timing("stills-extraction")
+if not clip_holder_census():
+    status = 1
 # The one-line verdict (run-suites.sh's rule): suites accumulate
 # failures rather than abort, so a truncated log must still end with
 # the answer — a killed lane or a lost pipe otherwise reads exactly

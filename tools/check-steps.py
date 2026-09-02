@@ -2786,6 +2786,42 @@ def clipboard_ios(text, path, mod):
         bad.append(f"{path}: no clipboard leg found (the scene must "
                    f"stay wired)")
 
+    # THE SEED HOLDER RETIRES ITSELF (docs/traps.md, 2026-09-01): a kill
+    # reaches its timeout wrapper alone and a group kill wedges the
+    # pasteboard daemon, so the writer polls a RELEASE FILE the runner
+    # touches, the runner waits for it to leave, and the verdict is
+    # gated on a census of this run's survivors. Measured both ways by
+    # hand: the census saw all four processes of a live holder, and
+    # half a second after the release file appeared it saw none.
+    seed = " ".join(py_function_body(text, "clip_seed", path, bad).split())
+    if '"hold", str(release)]' not in seed \
+            or "clip_release_holder(udid)" not in seed:
+        bad.append(f"{path}: clip_seed does not release the previous "
+                   f"holder and hand the new one its release file")
+    release = py_function_body(text, "clip_release_holder", path, bad)
+    if "release.touch()" not in release \
+            or "holder.wait(timeout=" not in release \
+            or "_holders_late.append" not in release:
+        bad.append(f"{path}: clip_release_holder does not touch the "
+                   f"release file, wait for the holder to leave and "
+                   f"count one that does not")
+    census = " ".join(py_function_body(text, "clip_holder_census", path,
+                                       bad).split())
+    if 'f"hold {LEGS_DIR}/release-"' not in census \
+            or "return not late" not in census:
+        bad.append(f"{path}: clip_holder_census does not count this "
+                   f"run's holders by their release directory and "
+                   f"refuse on a late one")
+    if re.search(r"(?m)^if not clip_holder_census\(\):\n    status = 1\n",
+                 text) is None:
+        bad.append(f"{path}: the seed-holder census does not gate the "
+                   f"lane's verdict")
+    if re.search(r"holder\.kill\(\)|killpg\(", text):
+        bad.append(f"{path}: a seed holder is killed rather than "
+                   f"released — a kill reaches the timeout wrapper "
+                   f"alone, and a group kill wedges the pasteboard "
+                   f"daemon (docs/traps.md)")
+
     # NOT ON THE PAD: kaya-sim-pad is a single LOCKLESS device, so legs
     # on it would share one pasteboard; the phone pool slot lock IS
     # this lane's clipboard exclusion (§8 finding 5).
@@ -3350,6 +3386,28 @@ doc, hits = sub_count(
 ios_applied(hits, "the late-prepare insertion half")
 picker_selftest(doc, "not prepared once per phone pool UDID",
                 "a runner that admits LocalStorage too late")
+
+# The holder's retirement, three ways: the census no longer gating the
+# verdict, a release that never touches its file, and a seed whose
+# holder gets no release file at all.
+doc, hits = sub_count(
+    r"(?m)^if not clip_holder_census\(\):\n    status = 1\n", "", RUN_SIM)
+ios_applied(hits, "the holder-census removal")
+ios_selftest(doc, "does not gate the lane's verdict",
+             "a lane whose verdict ignores surviving seed holders")
+doc, hits = sub_count(r"(?m)^    release\.touch\(\)\n", "", RUN_SIM)
+ios_applied(hits, "the release-touch removal")
+ios_selftest(doc, "does not touch the release file",
+             "a release that leaves the holder holding")
+doc, hits = sub_count(r'"hold", str\(release\)\]', '"hold"]', RUN_SIM)
+ios_applied(hits, "the release-file argument removal")
+ios_selftest(doc, "hand the new one its release file",
+             "a seed whose holder can only expire")
+doc, hits = sub_count(r"(?m)^    release\.touch\(\)\n",
+                      "    holder.kill()\n", RUN_SIM)
+ios_applied(hits, "the kill-instead-of-release replacement")
+ios_selftest(doc, "killed rather than released",
+             "a holder killed the measured-wrong way")
 
 # The accept direction is the real check itself, immediately below: a
 # rule that refused everything would fail here rather than pass

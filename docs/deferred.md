@@ -3844,7 +3844,7 @@ three lanes then ran concurrently at load 120 and all passed (683,
 five lanes and 52 gates, 1,511 legs, both legs green under it.
 KEY: portfolio wayland fold, column#9 folded, surface width premise
 
-## The iOS clipboard seed holder never retires, and killing it for real wedges the pasteboard (2026-09-01)
+## ~~The iOS clipboard seed holder never retires, and killing it for real wedges the pasteboard (2026-09-01)~~ (CLOSED 2026-09-01: the hold polls a release file the runner touches and exits on its own, bounded at 600s; the lane's verdict is gated on a census of this run's survivors, measured seeing four and then none)
 KEY: clipctl hold, seed holder, simctl spawn leak, pasteboard daemon
 
 tools/ios/run-sim.py seeds the device clipboard through `simctl spawn
@@ -3862,6 +3862,17 @@ change count moves past its own write, and after a bounded hold either
 way, so no host process outlives the leg it served. Until then
 `pkill -f "simctl spawn"` between lane runs is the hygiene, and
 tools/probe-env.sh could count them.
+DONE THE SAME EVENING, on a channel that needs no change count (which
+the spawned CLI was never measured to see): the runner names a
+RELEASE FILE under its own run directory on the hold's command line,
+clipctl polls for it every 200ms and exits with `H released` when it
+appears, or after 600s with `H expired`; run-sim's
+clip_release_holder touches the file at the next seed and at the leg's
+end and waits ten seconds for the chain to leave; clip_holder_census
+counts survivors by that directory at the verdict and reddens the lane
+on any. Proven both ways by hand (four processes seen, none 0.5s after
+the touch) and by the go suite's clipboard leg (green, zero survivors),
+held by check-steps with four watched negatives.
 
 ## WATCH — the android portfolio leg reads the pre-navigation title
 

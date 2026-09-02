@@ -6493,12 +6493,20 @@ rc=1 ms=10334`) and SpringBoard deny every launch after it
 (`FBSOpenApplicationServiceErrorDomain … denied by service delegate
 (SBMainWorkspace)`, 17 legs at 0s) — the pasteboard daemon fetches item
 data from the setter, and a setter killed mid-serve wedges it. The
-leak was load-bearing by accident. The retirement belongs in
-tools/ios/clipctl itself (exit when the change count moves, and after
-a bounded hold), which is docs/deferred.md's open item; until then the
-holders accumulate and a `pkill -f "simctl spawn"` between lane runs is
-the hygiene. When a lane goes quiet, `lsof -p <runner>` for a PIPE and
-`lsof | grep <that pipe>` names the holder in two commands.
+leak was load-bearing by accident. RETIRED THE SAME DAY, in
+tools/ios/clipctl itself: the runner hands the hold a RELEASE FILE
+under its own run directory, the writer polls for it and exits when it
+appears (or after a 600s bound whatever became of the runner), the
+runner touches it at the next seed and at the leg's end and waits for
+the chain to leave, and the lane's verdict is gated on a census of this
+run's survivors by that directory. Measured both ways: the census saw
+all four processes of a live holder, half a second after the touch it
+saw none with `H released` in the seed log, and the go suite ran its
+clipboard leg green with zero survivors. The rule: A PROCESS THE HOST
+CANNOT KILL SAFELY MUST BE ABLE TO LEAVE ON ITS OWN, and the channel
+that tells it to is a file both sides can see. When a lane goes quiet,
+`lsof -p <runner>` for a PIPE and `lsof | grep <that pipe>` names the
+holder in two commands.
 
 ## A Node host's exit tears the worker down under a native thread still inside Node-API (measured 2026-09-01)
 

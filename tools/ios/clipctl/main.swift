@@ -64,15 +64,33 @@ if verb == "write" {
     pb.items = [item]
     print("W types=\(pb.types)")
     fflush(stdout)
-    // HOLD: stay alive until killed. The pasteboard daemon serves an
+    // HOLD: stay alive until RELEASED. The pasteboard daemon serves an
     // item's DATA by fetching it from the process that set it, so a
     // writer that exits right away intermittently leaves a reader an
     // empty answer — measured 1-in-5 SOLO for a 77-byte png, worse under
     // the matrix (§8 finding 6's coda). There is no API that says
     // "materialized"; a living writer is the only shape with no window at
-    // all. The host kills this at the next seed or the leg's end.
+    // all. AND IT LEAVES ON ITS OWN: the host cannot kill this chain —
+    // `kill` reaches its timeout wrapper alone, and a process-group kill
+    // wedged the pasteboard daemon mid-serve (docs/traps.md, 2026-09-01)
+    // — so the host names a RELEASE FILE and this exits when that file
+    // appears (the next seed, or the leg's end), or after a bounded hold
+    // whatever happened to the host. The two H lines are the census's
+    // evidence in the seed log.
     if arguments.count > 4, arguments[4] == "hold" {
-        while true { sleep(60) }
+        let release = arguments.count > 5 ? arguments[5] : ""
+        let bound: TimeInterval = 600
+        let started = Date()
+        while Date().timeIntervalSince(started) < bound {
+            if !release.isEmpty, FileManager.default.fileExists(atPath: release) {
+                print("H released")
+                fflush(stdout)
+                exit(0)
+            }
+            usleep(200_000)
+        }
+        print("H expired after \(Int(bound))s with no release")
+        fflush(stdout)
     }
     exit(0)
 }

@@ -333,3 +333,18 @@ legs through the hard exit, the varied leg through the waiting verb,
 the mac lane without its second sweep, the iOS lane under its re-set
 ceiling with the admission timed.
 
+## The clipboard seed holder retired
+
+The 192-process leak (and the 24 per lane run since) ends in
+tools/ios/clipctl: the hold polls a release file the runner names and
+exits `H released` when it appears, or `H expired` after 600s. By hand
+on a booted phone: the census pattern (`hold <run dir>/release-`) saw
+the four processes of a live holder; the file was touched; half a
+second later it saw none and the seed log ended `H released`. The go
+suite then ran clipboard-go green in 77s with `clipboard seed holders
+outliving this run: 0 (late at release: 0)` at its verdict and zero
+holders on the host afterwards. The verdict is gated on that census.
+Under the eighth matrix (ALL PASS, five lanes and 52 gates, 1,511 legs
+in 647s): the iOS lane's verdict line read "" across its
+five clipboard legs, and the host carried zero holders afterwards.
+
