@@ -66,11 +66,11 @@ function onChange(text: string): void {
   draft = text;
 }
 
-/** A note typed into a ROW's field: the stamped key arrives first, then
- * the text. */
-function onNote(key: kaya.Key, text: string): void {
-  if (text) rowNotes.set(key, text);
-  else rowNotes.delete(key);
+/** A note typed into a ROW's field: the stamped row arrives first, as a
+ * handle, then the text. */
+function onNote(row: kaya.RowHandle<unknown>, text: string): void {
+  if (text) rowNotes.set(row.key, text);
+  else rowNotes.delete(row.key);
   // NOT a step: an uncontrolled field's typing is banked by the ledger,
   // never by the app.
   notes.set(noteList());

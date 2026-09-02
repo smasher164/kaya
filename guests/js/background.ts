@@ -30,15 +30,15 @@ function start(): void {
     // Parks until the scene clicks release; work on the app thread
     // would leave that click unprocessed and deadlock the scene.
     await released;
-    // Three posts, in order: the accumulator makes this a test of
-    // ORDER, not of which one ran last.
+    // Three transactions, in order: the accumulator makes this a test
+    // of ORDER, not of which one ran last. The continuation's writes
+    // are the implicit transaction and app.commit() ends each before
+    // the next (docs/js-plan.md §4) — three batches, as three posts
+    // would be.
     for (const step of ["1", "2", "3"]) {
-      function land(): void {
-        posted.push(step);
-        status.set(posted.join(""));
-      }
-
-      app.post(land);
+      posted.push(step);
+      status.set(posted.join(""));
+      await app.commit();
     }
   }
 

@@ -17,7 +17,9 @@ const TEST_PNG = new Uint8Array([
 ]);
 
 function onToggle(checked: boolean): void {
-  status.set(`urgent: ${checked ? "true" : "false"}`);
+  // The label is a formatted signal over this one (kaya.fmt); the
+  // toggle writes the fact and the text follows.
+  urgent.set(checked);
 }
 
 function onVolume(value: number): void {
@@ -31,12 +33,14 @@ function onQuarter(): void {
   pos.set(0.25);
 }
 
+let urgent!: kaya.Signal<boolean>;
 let status!: kaya.Signal<string>;
 let volume!: kaya.Signal<string>;
 let pos!: kaya.Signal<number>;
 
 app.window(() => {
-  status = kaya.signal("urgent: false");
+  urgent = kaya.signal(false);
+  status = kaya.fmt`urgent: ${urgent}`;
   volume = kaya.signal("volume: 50%");
   pos = kaya.signal(0.5);
 

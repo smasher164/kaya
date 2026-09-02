@@ -37,17 +37,18 @@ function answered(choice: number): void {
   }
 }
 
-function closeAsked(): void {
+async function closeAsked(): Promise<void> {
   // Nothing has closed yet: the veto class says so. The handler rides
   // the window construct at its declaration, so it can only ever mean
-  // this surface's close.
-  kaya.showAlert({
-    title: "unsaved changes",
-    message: "the document has unsaved changes",
-    actions: ["Discard"],
-    cancel: "Keep Editing",
-    onResult: answered,
-  });
+  // this surface's close. The answer arrives as the promise's value.
+  answered(
+    await kaya.showAlert({
+      title: "unsaved changes",
+      message: "the document has unsaved changes",
+      actions: ["Discard"],
+      cancel: "Keep Editing",
+    }),
+  );
 }
 
 let doc!: kaya.Signal<string>;

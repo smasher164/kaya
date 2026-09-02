@@ -350,3 +350,22 @@ over five clipboard legs is zero survivors and zero late by
 construction, and the host census afterwards read zero holders — the
 first matrix since the leak was found to leave none behind.
 
+## The ninth matrix (the sugar rulings' tree)
+
+Four lanes green with the four JS-only shapes in: linux PASS 683 in
+482s, windows PASS 201 in 460s, iOS PASS 113 in 578s, android PASS 123
+in 240s, the sweep 52/52 in 444s, zero clipboard holders left. mac
+FAIL, 390 of 391: portfolio-python-swiftui, a PYTHON leg, read `title
+"portfolio", wanted "Transactions"` on a click 130ms after a pop, with
+the later `back` finding the entry that had been pushed late — the
+android title WATCH's shape on the mac, second sighting of that leg's
+entry. The SwiftUI harness now carries the android instrument's twin
+(click-after-pop gap, push-after-pop gap, the model's view on the
+refusal). The standalone mac lane on the same tree minutes earlier was
+ALL PASS, 391 legs, 41 of them JS, with the 52-gate sweep green ahead
+of it.
+The tenth matrix, with the SwiftUI instrument in: ALL PASS on all five
+lanes and 52 gates, 1,511 legs in 711s (mac 411s, linux 501s, windows
+496s, iOS 586s, android 237s), zero holders left, the portfolio leg
+green and its instrument quiet.
+

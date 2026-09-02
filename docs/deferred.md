@@ -9160,6 +9160,22 @@ at its chokepoint, never rerun into the noise. The record-matrix
 rerun that followed the sighting was ALL PASS (mac 349, all lanes
 under their ceilings), so the sighting stands at ONE, under
 contention, watched.
+SECOND SIGHTING 2026-09-01 evening (the ninth matrix of the day, the
+JS sugar tree, this Python leg): `title "portfolio", wanted
+"Transactions"` — the click at +14285ms landed 130ms after the pop's
+`expect_entries 0` at +14155ms, the title never moved in 5s, and the
+`back` at +19841ms then found an entry to pop, so the push landed
+LATE rather than never: the android portfolio title WATCH's shape on
+the mac, the click inside the popped-to screen's transition. The
+mac lane had passed this leg standalone minutes before and in the
+two matrices before that. THE INSTRUMENT IS IN (KayaSwiftUI.swift,
+the android one's twin): the click verb logs a click within a second
+of the last pop with the gap and the stack depth it saw, the push
+apply logs the same gap when it lands inside that second, and
+expect_title's refusal carries the model's entries and top title
+plus the last click's age and depth — so the next sighting says
+whether the push reached the model late or the surface lagged it.
+Next sighting: read those lines, do not rerun.
 
 
 ## HOLD — the windows guest-side command scripts convert to python, at some point (Akhil, 2026-08-31)
@@ -9276,6 +9292,25 @@ those scenes' frozen widths move with the slice.
 
 
 ## DESIGN — THE NINTH BINDING: JS/TS (Akhil, 2026-08-31; every day-one ruling recorded, integer contract included — BUILD READY)
+RULED 2026-09-01 (the maintainer, after the sugar review — docs/js-plan.md
+§4 has the mechanisms and the rejected candidates): four JS-only shapes
+join the ported surface. The IMPLICIT TRANSACTION (a mutation on the app
+thread with no transaction open opens one, the microtask commits it,
+`await app.commit()` splits; declarations never ride it; the residue —
+writes before a continuation's throw stand — is stated); PROMISE
+DIALOGS (showAlert, pickFile(s), saveFile, readClipboard answer a
+promise with no onResult); ROW HANDLES (a stamped handler receives the
+row as a PROXY — chosen over accessors because a misspelled field is
+refused by name — with `todo.done = checked` the patch, `instanceof`
+narrowing a sum's row, `exists` false once it left); the kaya.fmt TAG
+(a derived string over any signals). Dynamic setters chain. Decorators,
+`using` blocks, `.value` and chaining-instead-of-options were considered
+and refused with reasons. Ten guests re-spelled (todos, feed, undo,
+clipboard, filedialog, save, confirm, dirty, background, milestone2,
+gallery), kaya_app_checks at 62 negatives (the implicit batch, the
+commit split, the parentless refusal, the handle's patch bytes equal to
+patch()'s, the typo refusal naming the fields, instanceof, exists, the
+scalar handle, the tag's create and recompute, the alert promise).
 KEY: js binding, typescript, N-API, worker thread, BigInt, safe integer, 2^53, JSX, kaya-gui npm, event loop
 
 RULED 2026-08-31 (maintainer, design-only session — no code today):

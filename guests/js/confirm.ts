@@ -9,34 +9,28 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-function deleteAnswered(choice: number): void {
+// The alert is a promise of the choice; the write after the await is
+// its own transaction (docs/js-plan.md §4).
+async function askDelete(): Promise<void> {
+  const choice = await kaya.showAlert({
+    title: "delete item?",
+    message: "this cannot be undone",
+    actions: ["Delete", "Archive"],
+    cancel: "Keep",
+  });
   if (choice === kaya.CANCEL) status.set("kept");
   else if (choice === 1) status.set("archived");
   else status.set("deleted");
 }
 
-function ejectAnswered(choice: number): void {
-  status.set(choice === kaya.CANCEL ? "held" : "ejected");
-}
-
-function askDelete(): void {
-  kaya.showAlert({
-    title: "delete item?",
-    message: "this cannot be undone",
-    actions: ["Delete", "Archive"],
-    cancel: "Keep",
-    onResult: deleteAnswered,
-  });
-}
-
-function askEject(): void {
-  kaya.showAlert({
+async function askEject(): Promise<void> {
+  const choice = await kaya.showAlert({
     title: "eject disk?",
     message: "it is still mounted",
     actions: ["Eject"],
     cancel: "Hold",
-    onResult: ejectAnswered,
   });
+  status.set(choice === kaya.CANCEL ? "held" : "ejected");
 }
 
 let status!: kaya.Signal<string>;

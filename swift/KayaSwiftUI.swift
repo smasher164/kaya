@@ -799,6 +799,13 @@ let kayaTraceOn = ProcessInfo.processInfo.environment["KAYA_LAYOUT_TRACE"] != ni
     if kayaTraceOn { kayaDiag("TRACE " + msg()) }
 }
 
+/// THE TITLE WATCH'S INSTRUMENT (docs/deferred.md, the mac portfolio
+/// entry; the android one carries the same): the last pop's time, and
+/// the last click with the stack depth it saw, so a title that did not
+/// move says whether the push reached the model or the surface lagged.
+nonisolated(unsafe) var kayaLastPopAt: Double = 0
+nonisolated(unsafe) var kayaLastClick: (target: String, at: Double, entries: Int)? = nil
+
 func kayaDiag(_ msg: String) {
     let line = String(format: "KAYA_DIAG %.3f %@\n", Date().timeIntervalSince1970, msg)
     FileHandle.standardError.write(line.data(using: .utf8)!)
@@ -4105,6 +4112,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 } else {
                     kayaScene.windows[wid]!.entries.append(entry)
                 }
+                let pushedAt = Date().timeIntervalSince1970
+                if kayaLastPopAt > 0, pushedAt - kayaLastPopAt < 1.0 {
+                    kayaDiag("push_entry \(eid) on \(wid) \(Int((pushedAt - kayaLastPopAt) * 1000))ms after the last pop; entries=\(kayaStackEntries(wid).count)")
+                }
             case applyPopEntry:
                 // Programmatic pop: the core already reconciled its stack;
                 // drop the top model and let the derived path animate the NET
@@ -4115,6 +4126,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     ?? kayaScene.windows[wid]!.entries.removeLast()
                 kayaScene.navEntries.removeValue(forKey: entry.id)
                 kayaScene.entryWindow.removeValue(forKey: entry.id)
+                kayaLastPopAt = Date().timeIntervalSince1970
             case applySetEntryProp:
                 let eid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
@@ -5710,6 +5722,12 @@ private func kayaRunScript(_ script: String) {
                     guard let node = kayaTarget(parts[1], "button", kayaScene.buttons) else {
                         return false
                     }
+                    let now = Date().timeIntervalSince1970
+                    let entries = kayaStackEntries(0).count
+                    kayaLastClick = (String(parts[1]), now, entries)
+                    if kayaLastPopAt > 0, now - kayaLastPopAt < 1.0 {
+                        kayaDiag("click \(parts[1]) \(Int((now - kayaLastPopAt) * 1000))ms after the last pop; entries=\(entries)")
+                    }
                     KayaHost.emit(node.tag)
                     return true
                 }
@@ -6299,7 +6317,19 @@ private func kayaRunScript(_ script: String) {
                 if kayaBytesEqual(got, want) {
                     observed.append("\(prefix)title \"\(want)\"")
                 } else {
-                    failures.append("\(prefix)title \"\(got)\", wanted \"\(want)\"")
+                    // The model's own view rides the refusal (the title
+                    // WATCH's instrument): the stack depth, the top entry's
+                    // title, and how long ago the last click was and at
+                    // what depth — a push that never reached the model
+                    // apart from a surface that has not caught up to it.
+                    let model = DispatchQueue.main.sync { () -> String in
+                        let entries = kayaStackEntries(wid)
+                        return "entries=\(entries.count) top=\"\(entries.last?.title ?? "")\""
+                    }
+                    let click = kayaLastClick.map { c in
+                        "last click \(c.target) \(Int((Date().timeIntervalSince1970 - c.at) * 1000))ms ago at entries=\(c.entries)"
+                    } ?? "no click yet"
+                    failures.append("\(prefix)title \"\(got)\", wanted \"\(want)\" (\(model); \(click))")
                 }
             case "expect_window_size":
                 // The surface's REAL content extent against the advisory
@@ -12818,6 +12848,7 @@ func kayaUserPops(_ sid: UInt64, to depth: Int) {
         }
         kayaScene.navEntries.removeValue(forKey: top.id)
         kayaScene.entryWindow.removeValue(forKey: top.id)
+        kayaLastPopAt = Date().timeIntervalSince1970
         KayaHost.emitEntryPopped(top.id)
     }
 }

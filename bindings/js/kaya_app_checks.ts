@@ -174,7 +174,122 @@ if (isMainThread) {
   }, /case arms/));
 
   // ----------------------------------------------------------- liveness
-  check("no ambient transaction names app.post and the await", throws(() => kaya.label("x"), /app\.post.*first await|first await.*app\.post/s));
+  // THE IMPLICIT TRANSACTION (docs/js-plan.md §4): a declaration outside
+  // every scope is refused naming the scope; a mutation outside every
+  // handler opens a transaction that the microtask commits, one
+  // continuation one batch; app.commit() ends one early.
+  check("a widget declared outside every scope is refused naming the scope", throws(() => kaya.label("x"), /scene scope.*container/s));
+  shipped.length = 0;
+  count.set(5);
+  count.set(6);
+  check("a mutation outside a handler ships nothing until the continuation ends", shipped.length === 0);
+  await Promise.resolve();
+  check("one continuation is one batch", shipped.length === 1 && shipped[0]!.length === 2);
+  shipped.length = 0;
+  count.set(7);
+  await app.commit();
+  count.set(8);
+  await Promise.resolve();
+  check("await app.commit() ends the batch and the rest is the next one", shipped.length === 2 && shipped[0]!.length === 1 && shipped[1]!.length === 1);
+  count.set(9);
+  check("a widget cannot ride the implicit transaction", throws(() => kaya.label("x"), /scene scope.*container/s));
+  await Promise.resolve();
+  shipped.length = 0;
+  count.set(10);
+  app.build(() => count.set(11));
+  check("a scope opened over a pending implicit transaction commits it first", shipped.length === 2 && shipped[0]!.length === 1);
+  await Promise.resolve();
+
+  // ------------------------------------------------------- row handles
+  // A stamped handler receives the ROW, whose assignment is the patch
+  // (docs/js-plan.md §4). The occurrence is packed by hand: the click tag
+  // family is ident, path_len, the keys, then the payload.
+  function packStamped(kind: number, ident: number, keys: K.Key[], payload: W.WireValue | null): Uint8Array {
+    const parts: Uint8Array[] = keys.map((k) => valueBytes(keyOf(k)));
+    if (payload !== null) parts.push(valueBytes(payload));
+    const body = parts.reduce((n, b) => n + b.length, 0);
+    const out = new Uint8Array(24 + body + ((8 - ((24 + body) % 8)) % 8));
+    const ov = new DataView(out.buffer);
+    ov.setUint32(0, out.length, true);
+    ov.setUint16(4, kind, true);
+    ov.setBigUint64(8, BigInt(ident), true);
+    ov.setUint32(16, keys.length, true);
+    let at = 24;
+    for (const b of parts) {
+      out.set(b, at);
+      at += b.length;
+    }
+    return out;
+  }
+  const fire = (app as unknown as { _onOccurrence: (o: W.Occurrence) => void })._onOccurrence.bind(app);
+  // Declared without initializers: an initializer would narrow them to
+  // null for the rest of the flow, since the assignments are in closures.
+  let seen: K.RowHandle<TodoFields> | undefined;
+  let box!: K.Widget;
+  let seenItem: K.RowHandle<string> | undefined;
+  let itemButton!: K.Widget;
+  // A template is record time only, so the second For sites live in a
+  // scene scope of their own.
+  app.window(() => {
+    items.insert("z", "zed");
+    kaya.column(() => {
+      for (const todo of todos) {
+        kaya.row(() => {
+          box = kaya.checkbox({ checked: todo.done, onToggle: (row: K.RowHandle<TodoFields>, checked: boolean) => { seen = row; row.done = checked; } });
+        });
+      }
+      for (const item of items) {
+        itemButton = kaya.button({ bind: item, onClick: (row: K.RowHandle<string>) => { seenItem = row; } });
+      }
+    });
+  });
+  shipped.length = 0;
+  fire(wire.parse_occurrence(packStamped(wire.OCC_TOGGLED, box.id, [2], false)));
+  const viaHandle = shipped.pop()!;
+  app.build(() => todos.patch(2, { done: false }));
+  const viaPatch = shipped.pop()!;
+  check("a stamped handler receives the row, and assigning a field IS the patch", seen !== undefined && seen.key === 2 && viaHandle.length === 1 && JSON.stringify([...viaHandle[0]!]) === JSON.stringify([...viaPatch[0]!]));
+  check("the row handle reads the model's copy", seen!.title === todos.get(2)!.title && seen!.exists === true && seen!.path.length === 0);
+  check("the row handle is an instance of its record type", (seen as unknown) instanceof Todo && !((seen as unknown) instanceof Note));
+  check("a misspelled field on a row handle is refused naming the fields", throws(() => { (seen as unknown as Record<string, unknown>)["donee"] = true; }, /no field donee.*title, done/s));
+  check("the row handle enumerates its fields", JSON.stringify(Object.keys(seen!)) === JSON.stringify(["title", "done"]) && "done" in seen!);
+  app.build(() => todos.remove(2));
+  check("a row that left the collection reads undefined and exists false", seen!.exists === false && seen!.done === undefined);
+  fire(wire.parse_occurrence(packStamped(wire.OCC_BUTTON_CLICKED, itemButton.id, ["z"], null)));
+  check("a scalar row's handle carries value and key", seenItem !== undefined && seenItem.key === "z" && seenItem.value === "zed");
+  shipped.length = 0;
+  app.build(() => { seenItem!.value = "zee"; });
+  check("assigning a scalar row's value is the update", items.get("z") === "zee" && shipped.length === 1);
+
+  // ------------------------------------------------------------ the tag
+  let formatted!: K.Signal<string>;
+  shipped.length = 0;
+  app.build(() => { formatted = kaya.fmt`n=${count} of ${"k"}`; });
+  const created = shipped.pop()!;
+  check("kaya.fmt makes a derived string signal over its signals", (formatted as unknown as { _mirror: string })._mirror === "n=11 of k" && created.length === 1);
+  app.build(() => count.set(12));
+  const wrote = shipped.pop()!;
+  check("a formatted signal recomputes when an interpolated signal moves", (formatted as unknown as { _mirror: string })._mirror === "n=12 of k" && wrote.length === 2);
+  check("fmt refuses a plain call", throws(() => (kaya.fmt as unknown as (s: string) => unknown)("x"), /template tag/));
+  check("fmt refuses a row's field", throws(() => app.window(() => { kaya.column(() => { for (const todo of todos) { kaya.fmt`${todo.title}`; } }); }), /bound with/));
+
+  // ----------------------------------------------------- promise dialogs
+  let promised: Promise<number> | null = null;
+  app.build(() => { promised = kaya.showAlert({ title: "t", message: "m", actions: ["A"], cancel: "C" }); });
+  const alertId = (app as unknown as { _counters: { alert: number } })._counters.alert;
+  const alertBytes = new Uint8Array(24);
+  const av = new DataView(alertBytes.buffer);
+  av.setUint32(0, 24, true);
+  av.setUint16(4, wire.OCC_ALERT_RESULT, true);
+  av.setBigUint64(8, BigInt(alertId), true);
+  av.setUint32(16, 1, true);
+  shipped.length = 0;
+  fire(wire.parse_occurrence(alertBytes));
+  const choice = await promised!;
+  count.set(choice + 100);
+  await Promise.resolve();
+  // Two records: the write, and the formatted signal above recomputing.
+  check("showAlert without onResult is a promise of the choice, and its continuation is a transaction", choice === 1 && shipped.length === 1 && shipped[0]!.length === 2);
 
   // ------------------------------------------------------------ the sum
   app.build(() => {

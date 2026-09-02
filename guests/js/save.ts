@@ -114,8 +114,8 @@ function saved(file: kaya.PickedFile | null): void {
   work(() => `saved ${writeBack(file, "third draft")}`);
 }
 
-function openFile(): void {
-  kaya.pickFile({ onResult: picked });
+async function openFile(): Promise<void> {
+  picked(await kaya.pickFile());
 }
 
 function saveBack(): void {
@@ -133,12 +133,12 @@ function saveBack(): void {
   work(() => `saved ${writeBack(file, "second draft")}`);
 }
 
-function saveAs(): void {
+async function saveAs(): Promise<void> {
   // The suggested name the dialog OPENS with; the harness types over it.
   // NO FILTER here either, and that one matters: with allowed content
   // types set, NSSavePanel appends the first allowed extension to an
   // extension-less name (docs/deferred.md).
-  kaya.saveFile("copy", { onResult: saved });
+  saved(await kaya.saveFile("copy"));
 }
 
 function reopen(): void {

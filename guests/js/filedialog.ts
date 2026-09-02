@@ -89,14 +89,16 @@ function release(): void {
   deliver();
 }
 
-function ask(): void {
+// The dialog is a promise of the files; `picked` runs in the
+// continuation, which is its own transaction (docs/js-plan.md §4).
+async function ask(): Promise<void> {
   // Filters are ADVISORY on every platform — a default view, never a
   // guarantee — so the guest still validates what it got.
-  kaya.pickFiles({ filters: [["Text", "txt"]], onResult: picked });
+  picked(await kaya.pickFiles({ filters: [["Text", "txt"]] }));
 }
 
-function askOne(): void {
-  kaya.pickFile({ filters: [["Text", "txt"]], onResult: picked });
+async function askOne(): Promise<void> {
+  picked(await kaya.pickFile({ filters: [["Text", "txt"]] }));
 }
 
 let status!: kaya.Signal<string>;

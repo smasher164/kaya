@@ -683,6 +683,19 @@ rules so far:
   native pump hands occurrences over one at a time so a wedged handler
   stalls the app thread the way every other binding's does.
   The spelling varies by idiom; the observable semantics never do.
+  THE IMPLICIT TRANSACTION IS ITS ONE
+  SEMANTICS EXTENSION (ruled 2026-09-01): on the single app thread a
+  mutation with no transaction open opens one and the microtask commits
+  it when the continuation ends, so an `await` inside a handler is a
+  transaction boundary rather than a refusal; the uniform rule it keeps
+  is that every write belongs to exactly one transaction, atomic per
+  handler or per continuation, and the residue (a continuation's writes
+  before a throw stand) is stated in docs/js-plan.md §4. Stamped
+  handlers receive the row as a Proxy handle whose assignment is the
+  patch, dialogs answer promises when no handler is given, and
+  kaya.fmt`...` is a derived string over any signals — spellings, not
+  semantics, each measured against what Node 24 runs with no build
+  step (decorators do not).
 - A canonical method vocabulary for derived signals: `eq`, `ne`, `lt`,
   `fmt`, and so on, method-shaped in every language (`count.eq(0)`,
   `count.Eq(0)`). Documentation leads with the methods so that tutorials

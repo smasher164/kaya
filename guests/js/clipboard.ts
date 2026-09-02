@@ -114,20 +114,22 @@ function answered(clip: kaya.Clip | null): void {
   status.set("reading");
 }
 
-function readCustom(): void {
-  kaya.readClipboard([NOTE_ID], { onResult: answered });
+// Each read is a promise of the clip; the continuation after the await
+// is its own transaction (docs/js-plan.md §4).
+async function readCustom(): Promise<void> {
+  answered(await kaya.readClipboard([NOTE_ID]));
 }
 
-function readText(): void {
-  kaya.readClipboard([kaya.ACCEPT_TEXT], { onResult: answered });
+async function readText(): Promise<void> {
+  answered(await kaya.readClipboard([kaya.ACCEPT_TEXT]));
 }
 
-function readImage(): void {
-  kaya.readClipboard([kaya.ACCEPT_IMAGE], { onResult: answered });
+async function readImage(): Promise<void> {
+  answered(await kaya.readClipboard([kaya.ACCEPT_IMAGE]));
 }
 
-function readFiles(): void {
-  kaya.readClipboard([kaya.ACCEPT_FILES], { onResult: answered });
+async function readFiles(): Promise<void> {
+  answered(await kaya.readClipboard([kaya.ACCEPT_FILES]));
 }
 
 function pasted(clip: kaya.Clip | null): void {
@@ -135,11 +137,12 @@ function pasted(clip: kaya.Clip | null): void {
   else status.set(`pasted ${String(clip)}`);
 }
 
-function rowPasted(key: kaya.Key, clip: kaya.Clip | null): void {
-  // The copy's own key rides in front of the payload; printing it is
-  // what proves the paste dispatched as an INSTANCE occurrence.
-  if (clip instanceof kaya.Representation.Text) rowStatus.set(`row ${key} pasted ${clip.text}`);
-  else rowStatus.set(`row ${key} pasted ${String(clip)}`);
+function rowPasted(row: kaya.RowHandle<string>, clip: kaya.Clip | null): void {
+  // The copy's own row rides in front of the payload, as a handle;
+  // printing its key is what proves the paste dispatched as an INSTANCE
+  // occurrence.
+  if (clip instanceof kaya.Representation.Text) rowStatus.set(`row ${row.key} pasted ${clip.text}`);
+  else rowStatus.set(`row ${row.key} pasted ${String(clip)}`);
 }
 
 let status!: kaya.Signal<string>;

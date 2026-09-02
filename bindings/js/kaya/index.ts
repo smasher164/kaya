@@ -110,6 +110,7 @@ function pendingRoot(): Handle | null {
 }
 let _recording = false;
 let _journal: Map<unknown, () => void> | null = null;
+let _implicit = false; // the open _tx was opened by a mutation, not a scope
 
 /** The JS spelling of the rule the other bindings get from types: a
  * transaction belongs to the app thread. Every worker gets its OWN copy
@@ -126,14 +127,35 @@ function requireAppThread(): void {
 }
 
 function records(): Uint8Array[] {
-  if (_tx === null) {
-    throw new Error(
-      "kaya: no ambient transaction — declare inside app.window(opts, () => ...) or mutate " +
-        "inside a handler (or app.build(() => ...)). An async handler's transaction ends at " +
-        "its first await: continue with app.post(fn), which runs fn as a transaction.",
-    );
-  }
-  return _tx;
+  if (_tx === null) openImplicit();
+  return _tx!;
+}
+
+/** THE IMPLICIT TRANSACTION (ruled 2026-09-01, docs/js-plan.md §4): the
+ * app thread is one thread, so a mutation with no transaction open opens
+ * one, and a microtask commits it when the current continuation runs out
+ * — one continuation, one atomic batch, the guarantee app.post gives by
+ * hand and the thing that makes `await` inside a handler just work.
+ * Declarations never open one (allocWidgetOrNode refuses a parentless
+ * widget), and a top-level scope opened while one is pending commits it
+ * first. THE RESIDUE, stated: nothing sees a continuation throw, so the
+ * writes before the throw stand; a handler's own transaction still rolls
+ * back, and app.post(fn) still runs fn with that guarantee. */
+function openImplicit(): void {
+  requireAppThread();
+  _tx = [];
+  _journal = new Map();
+  _implicit = true;
+  queueMicrotask(commitImplicit);
+}
+
+function commitImplicit(): void {
+  if (_tx === null || !_implicit) return;
+  const recs = _tx;
+  _tx = null;
+  _journal = null;
+  _implicit = false;
+  if (recs.length > 0) runtime.submit(recs);
 }
 
 function journalOnce(key: unknown, restore: () => void): void {
@@ -332,6 +354,63 @@ class Derived<T, U> extends Signal<U> {
 
 /** Binding-maintained from a collection: recomputed after every mutation
  * of the live-zone instance, batched into the same transaction. */
+/** A derived string over ANY number of signals, from a template literal:
+ * kaya.fmt`${count} items left` (ruled 2026-09-01, docs/js-plan.md §4).
+ * Constants interpolate as themselves; a signal interpolates as its
+ * current value and the string is recomputed binding-side, from the
+ * mirrors, whenever any of them moves — Signal.fmt(fn) is the one-source
+ * function form of the same derivation. */
+export function fmt(strings: TemplateStringsArray, ...parts: readonly unknown[]): Signal<string> {
+  if (!Array.isArray(strings) || !("raw" in strings)) {
+    throw new TypeError("kaya: fmt is a template tag — kaya.fmt`${signal} text`; Signal.fmt((v) => ...) is the function form");
+  }
+  const sources: Signal<unknown>[] = [];
+  for (const part of parts) {
+    if (part instanceof Signal) sources.push(part);
+    else if (part instanceof Element || part instanceof FieldRef || part instanceof CaseElement) {
+      throw new TypeError("kaya: fmt interpolates signals and constants; a row's field is bound with { bind: field }, not formatted");
+    }
+  }
+  const compute = (): string => {
+    let out = strings[0] ?? "";
+    parts.forEach((part, i) => {
+      out += String(part instanceof Signal ? part._mirror : part) + (strings[i + 1] ?? "");
+    });
+    return out;
+  };
+  const derived = new TemplateDerived(app()._next("signal"), sources, compute);
+  app()._signals.set(derived.id, derived as Signal<unknown>);
+  records().push(wire.tx_create_signal(derived.id, signalValue("a formatted signal", derived._mirror)));
+  for (const source of sources) source._dependents.push(derived as unknown as Derived<unknown, unknown>);
+  return derived;
+}
+
+class TemplateDerived extends Signal<string> {
+  private readonly _compute: () => string;
+
+  constructor(id: number, _sources: readonly Signal<unknown>[], compute: () => string) {
+    super(id, compute());
+    this._compute = compute;
+  }
+
+  override set(_value: string): void {
+    throw new Error("kaya: a formatted signal is written by the signals it interpolates");
+  }
+
+  _recompute(): void {
+    const next = this._compute();
+    if (next !== this._mirror) {
+      const old = this._mirror;
+      journalOnce(this, () => {
+        this._mirror = old;
+      });
+      records().push(wire.tx_write_signal(this.id, signalValue("a formatted signal", next)));
+      this._mirror = next;
+      for (const derived of this._dependents) derived._recompute();
+    }
+  }
+}
+
 class CollectionDerived<E, U> extends Signal<U> {
   private readonly _coll: BoundCollection<E, unknown>;
   private readonly _compute: (entries: Map<Key, E>) => U;
@@ -522,7 +601,7 @@ export class Widget extends Handle {
    * search the bytes, `Buffer.indexOf`, and the offsets are kaya's by
    * construction), replacing whatever was declared before; an empty set
    * is the clear. */
-  highlightRanges(ranges: readonly (readonly [number, number])[]): void {
+  highlightRanges(ranges: readonly (readonly [number, number])[]): this {
     this._live("highlightRanges()");
     const flat: wire.WireValue[] = [];
     for (const span of ranges) {
@@ -530,57 +609,65 @@ export class Widget extends Handle {
       flat.push(new I64(start), new I64(stop));
     }
     records().push(wire.tx_highlight_ranges(this.id, flat.length / 2, flat));
+    return this;
   }
 
   /** Put this textarea's selection at one range (an empty range is a
    * caret). Refused while the user is composing, in every backend. */
-  selectRange(span: readonly [number, number]): void {
+  selectRange(span: readonly [number, number]): this {
     this._live("selectRange()");
     const [start, stop] = textRange("selectRange", span);
     records().push(wire.tx_select_range(this.id, start, stop));
+    return this;
   }
 
   /** Scroll this textarea so a range is inside the viewport. */
-  revealRange(span: readonly [number, number]): void {
+  revealRange(span: readonly [number, number]): this {
     this._live("revealRange()");
     const [start, stop] = textRange("revealRange", span);
     records().push(wire.tx_reveal_range(this.id, start, stop));
+    return this;
   }
 
   /** This widget's flex weight within its row/column (the dynamic path;
    * the constructor's `grow` is the declarative one). */
-  grow(weight: number): void {
+  grow(weight: number): this {
     this._live("grow()");
     records().push(wire.tx_set_grow(this.id, Number(weight)));
+    return this;
   }
 
   /** This container's cross-axis child placement (kaya.Align or its
    * name). Containers only; baseline is rows-only. */
-  align(mode: AlignValue | AlignName): void {
+  align(mode: AlignValue | AlignName): this {
     this._live("align()");
     records().push(wire.tx_set_align(this.id, alignValue(mode)));
+    return this;
   }
 
   /** This container's arrangement direction (kaya.Axis or its name) —
    * the user-driven orientation toggle (docs/adaptive-layout-plan.md
    * D2). Row/column only. */
-  axis(mode: AxisValue | AxisName): void {
+  axis(mode: AxisValue | AxisName): this {
     this._live("axis()");
     records().push(wire.tx_set_axis(this.id, axisValue(mode)));
+    return this;
   }
 
   /** This container's inter-child gap (main axis, DIP; default 8). */
-  spacing(gap: number): void {
+  spacing(gap: number): this {
     this._live("spacing()");
     records().push(wire.tx_set_spacing(this.id, Number(gap)));
+    return this;
   }
 
   /** This container's own padding, uniform on all four sides. Live-only:
    * a blueprint is declared once, and a template's inset is the
    * constructor option. */
-  inset(pad: number): void {
+  inset(pad: number): this {
     this._live("inset()");
     records().push(wire.tx_set_inset(this.id, Number(pad)));
+    return this;
   }
 
   /** The context anchor. LIVE: the body declares the same command
@@ -588,20 +675,22 @@ export class Widget extends Handle {
    * attach a live-zone-built context catalog — every stamped copy shows
    * the same catalog, each activation carrying that copy's key path, and
    * an item takes exactly ONE anchor. */
-  contextMenu(bodyOrCatalog: (() => void) | ContextCatalog): void {
+  contextMenu(bodyOrCatalog: (() => void) | ContextCatalog): this {
     if (bodyOrCatalog instanceof ContextCatalog) {
       if (!this.isNode) {
         throw new TypeError("kaya: a live widget's context menu is declared in place — widget.contextMenu(() => {...}); a catalog attaches to a template node");
       }
       if (bodyOrCatalog._attached) throw new Error("kaya: a context catalog takes exactly one anchor");
       bodyOrCatalog._attached = true;
+      bodyOrCatalog._owner = _forCollections[_forCollections.length - 1] ?? null;
       for (const root of bodyOrCatalog._roots) records().push(wire.tx_context_attach_node(this.id, root));
-      return;
+      return this;
     }
     if (this.isNode) {
       throw new TypeError("kaya: a template node's context menu is a catalog built in the live zone (kaya.contextCatalog) and attached with node.contextMenu(catalog)");
     }
     new MenuScope(["widget", this.id], false).run(bodyOrCatalog);
+    return this;
   }
 }
 
@@ -1313,6 +1402,15 @@ class ColumnsTrace implements Iterable<unknown> {
 }
 
 function allocWidgetOrNode(): Widget {
+  // A declaration never rides the implicit transaction: with no scope and
+  // no container it would be an orphan the core refuses at apply. Inside
+  // a scope (a scene body, a handler, app.build) it is what it always was.
+  if (_tx === null || (_implicit && !_recording && _parents.length === 0)) {
+    throw new Error(
+      "kaya: a widget is declared inside a scene scope — app.window(opts, () => ...), " +
+        "pushEntry or addSection — or inside a container's body; here it would have no parent",
+    );
+  }
   // One counter for both (DESIGN.md, Binding conventions).
   return new Widget(app()._next("widget"), _tplDepth > 0);
 }
@@ -1376,17 +1474,32 @@ export type AlertOptions = {
  * plus the REQUIRED cancel label. onResult(choice) fires exactly once —
  * 0 or 1 for actions, kaya.CANCEL for every native dismissal. One alert
  * may be live per process. */
-export function showAlert(opts: AlertOptions): number {
+/** With `onResult`, the handler receives the choice and the call answers
+ * the alert's id; WITHOUT it, the call answers a promise of the choice —
+ * `const choice = await kaya.showAlert({...})` — and the continuation is
+ * its own transaction (the implicit one; ruled 2026-09-01). */
+export function showAlert(opts: AlertOptions & { onResult: (choice: number) => void }): number;
+export function showAlert(opts: AlertOptions): Promise<number>;
+export function showAlert(opts: AlertOptions): number | Promise<number> {
   const actions = [...(opts.actions ?? [])];
   if (actions.length > 2) throw new RangeError("an alert carries at most 2 actions (the platform floor)");
   if (!opts.cancel) throw new Error("the cancel slot always exists and needs a name — pass cancel:");
   const a = app();
   const alertId = a._next("alert");
-  if (opts.onResult !== undefined) a._alertHandlers.set(alertId, opts.onResult);
-  records().push(
-    wire.tx_show_alert(opts.window ?? 0, alertId, actions.length, opts.title ?? "", opts.message ?? "", actions[0] ?? "", actions[1] ?? "", opts.cancel),
-  );
-  return alertId;
+  const show = (): void => {
+    records().push(
+      wire.tx_show_alert(opts.window ?? 0, alertId, actions.length, opts.title ?? "", opts.message ?? "", actions[0] ?? "", actions[1] ?? "", opts.cancel),
+    );
+  };
+  if (opts.onResult !== undefined) {
+    a._alertHandlers.set(alertId, opts.onResult);
+    show();
+    return alertId;
+  }
+  return new Promise<number>((resolve) => {
+    a._alertHandlers.set(alertId, resolve);
+    show();
+  });
 }
 
 // ---------------------------------------------------------------- files
@@ -1418,12 +1531,17 @@ export type PickOptions = { filters?: readonly Filter[]; onResult?: (files: Pick
 
 /** Ask the platform for files. THE PICK, NOT THE OPEN. Cancel is the
  * empty list; one dialog may be live per process. */
-export function pickFiles(opts: PickOptions = {}): number {
+export function pickFiles(opts: PickOptions & { onResult: (files: PickedFile[]) => void }): number;
+export function pickFiles(opts?: PickOptions): Promise<PickedFile[]>;
+export function pickFiles(opts: PickOptions = {}): number | Promise<PickedFile[]> {
   return pick(true, opts);
 }
 
-/** The single-file spelling: the handler receives zero or one file. */
-export function pickFile(opts: PickOptions = {}): number {
+/** The single-file spelling: the handler (or the promise) receives zero
+ * or one file. */
+export function pickFile(opts: PickOptions & { onResult: (files: PickedFile[]) => void }): number;
+export function pickFile(opts?: PickOptions): Promise<PickedFile[]>;
+export function pickFile(opts: PickOptions = {}): number | Promise<PickedFile[]> {
   return pick(false, opts);
 }
 
@@ -1432,12 +1550,23 @@ export type SaveOptions = { filters?: readonly Filter[]; onResult?: (file: Picke
 /** Ask the platform WHERE TO SAVE. `suggestedName` is the name the
  * dialog opens with; READ THE NAME YOU GOT. Cancel is null. What you get
  * back opens empty (docs/save-plan.md D1). */
-export function saveFile(suggestedName: string, opts: SaveOptions = {}): number {
+export function saveFile(suggestedName: string, opts: SaveOptions & { onResult: (file: PickedFile | null) => void }): number;
+export function saveFile(suggestedName: string, opts?: SaveOptions): Promise<PickedFile | null>;
+export function saveFile(suggestedName: string, opts: SaveOptions = {}): number | Promise<PickedFile | null> {
   const a = app();
   const dialogId = a._next("file_dialog");
   const onResult = opts.onResult;
-  if (onResult !== undefined) a._fileDialogHandlers.set(dialogId, (files) => onResult(files[0] ?? null));
-  records().push(wire.tx_show_save_dialog(opts.window ?? 0, dialogId, String(suggestedName), filters(opts.filters ?? [])));
+  const show = (): void => {
+    records().push(wire.tx_show_save_dialog(opts.window ?? 0, dialogId, String(suggestedName), filters(opts.filters ?? [])));
+  };
+  if (onResult === undefined) {
+    return new Promise<PickedFile | null>((resolve) => {
+      a._fileDialogHandlers.set(dialogId, (files) => resolve(files[0] ?? null));
+      show();
+    });
+  }
+  a._fileDialogHandlers.set(dialogId, (files) => onResult(files[0] ?? null));
+  show();
   return dialogId;
 }
 
@@ -1452,12 +1581,21 @@ function filters(list: readonly Filter[]): string[] {
   return flat;
 }
 
-function pick(multiple: boolean, opts: PickOptions): number {
+function pick(multiple: boolean, opts: PickOptions): number | Promise<PickedFile[]> {
   const a = app();
   const dialogId = a._next("file_dialog");
-  if (opts.onResult !== undefined) a._fileDialogHandlers.set(dialogId, opts.onResult);
-  records().push(wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, filters(opts.filters ?? [])));
-  return dialogId;
+  const show = (): void => {
+    records().push(wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, filters(opts.filters ?? [])));
+  };
+  if (opts.onResult !== undefined) {
+    a._fileDialogHandlers.set(dialogId, opts.onResult);
+    show();
+    return dialogId;
+  }
+  return new Promise<PickedFile[]>((resolve) => {
+    a._fileDialogHandlers.set(dialogId, resolve);
+    show();
+  });
 }
 
 // ------------------------------------------------------------ clipboard
@@ -1583,12 +1721,23 @@ export function copy(opts: CopyOptions): void {
 
 /** Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE.
  * onResult(clip) fires exactly once with the sum or null. */
-export function readClipboard(accepting: readonly string[], opts: { onResult?: (clip: Clip | null) => void } = {}): number {
+export function readClipboard(accepting: readonly string[], opts: { onResult: (clip: Clip | null) => void }): number;
+export function readClipboard(accepting: readonly string[]): Promise<Clip | null>;
+export function readClipboard(accepting: readonly string[], opts: { onResult?: (clip: Clip | null) => void } = {}): number | Promise<Clip | null> {
   const a = app();
   const request = a._next("clipboard");
-  if (opts.onResult !== undefined) a._clipboardHandlers.set(request, opts.onResult);
-  records().push(wire.tx_read_clipboard(request, acceptList(accepting)));
-  return request;
+  const show = (): void => {
+    records().push(wire.tx_read_clipboard(request, acceptList(accepting)));
+  };
+  if (opts.onResult !== undefined) {
+    a._clipboardHandlers.set(request, opts.onResult);
+    show();
+    return request;
+  }
+  return new Promise<Clip | null>((resolve) => {
+    a._clipboardHandlers.set(request, resolve);
+    show();
+  });
 }
 
 // ---------------------------------------------------------------- menus
@@ -1656,6 +1805,7 @@ export class MenuItem {
 export class ContextCatalog {
   /** @internal */ readonly _roots: number[] = [];
   /** @internal */ _attached = false;
+  /** @internal */ _owner: Collection<unknown, unknown> | null = null;
 }
 
 type Seat = ["item", number] | ["widget", number] | ["free", ContextCatalog];
@@ -2143,6 +2293,93 @@ export function collection(type?: RecordType | readonly RecordType[]): Collectio
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type InstanceOfAny<T extends readonly RecordType<any>[]> = { [K in keyof T]: T[K] extends RecordType<infer S> ? Fields<S> : never }[number];
+
+/** THE ROW A STAMPED HANDLER IS ABOUT (ruled 2026-09-01, docs/js-plan.md
+ * §4): where the other bindings hand a handler the key, this hands it the
+ * row — its fields read the model's copy and ASSIGN AS A PATCH
+ * (`todo.done = checked`), and the row's own moves and removal sit
+ * beside them. A PROXY, deliberately: a misspelled field on assignment
+ * is refused by name, which per-field accessors cannot do — they would
+ * grow a plain property and patch nothing, and a plain-JS guest has no
+ * tsc to say so. `instanceof` narrows a sum's row because the proxy's
+ * prototype is the variant's. A row that has left the collection reads
+ * undefined, says `exists === false`, and matches no variant. */
+export type RowHandle<E> = (E extends object ? E : { value: E }) & {
+  readonly key: Key;
+  readonly path: readonly Key[];
+  readonly exists: boolean;
+  remove(): void;
+  update(value: E): void;
+  patch(fields: Partial<E>): void;
+  moveBefore(anchor: Key): void;
+  moveAfter(anchor: Key): void;
+  moveToEnd(): void;
+  moveToFront(): void;
+};
+
+function rowHandle(owner: Collection<unknown, unknown>, keys: readonly Key[]): unknown {
+  const path = keys.slice(0, -1);
+  const key = keys[keys.length - 1]!;
+  const bound: BoundCollection<unknown, unknown> = path.length === 0 ? owner : owner.at(...path);
+  const current = (): unknown => bound.get(key);
+  const value = current();
+  const variant = value === undefined ? (owner._variants.length === 1 ? owner._variants[0]! : null) : owner._variantFor(value)[1];
+  const scalar = variant !== null && variant.ctor === null;
+  const fields = new Set<string>(scalar ? ["value"] : variant === null ? [] : variant.names);
+  const named = variant?.ctor?.name ?? (scalar ? "a scalar row" : "a row that has left its collection");
+  const methods: Record<string, unknown> = {
+    key,
+    path,
+    get exists(): boolean {
+      return current() !== undefined;
+    },
+    remove: () => bound.remove(key),
+    update: (v: unknown) => bound.update(key, v),
+    patch: (f: Record<string, unknown>) => bound.patch(key, f),
+    moveBefore: (anchor: Key) => bound.moveBefore(key, anchor),
+    moveAfter: (anchor: Key) => bound.moveAfter(key, anchor),
+    moveToEnd: () => bound.moveToEnd(key),
+    moveToFront: () => bound.moveToFront(key),
+  };
+  const read = (prop: string): unknown => {
+    const now = current();
+    if (now === undefined) return undefined;
+    return scalar ? now : (now as Record<string, unknown>)[prop];
+  };
+  const target = Object.create(variant?.ctor?.prototype ?? Object.prototype) as object;
+  return new Proxy(target, {
+    get(receiver, prop) {
+      if (typeof prop === "string") {
+        if (fields.has(prop)) return read(prop);
+        if (prop in methods) return methods[prop];
+        if (prop === "toJSON") return current;
+      }
+      if (prop === Symbol.for("nodejs.util.inspect.custom")) return () => `RowHandle(${String(key)}) ${JSON.stringify(current())}`;
+      return Reflect.get(receiver, prop);
+    },
+    set(_receiver, prop, v) {
+      if (typeof prop === "string" && fields.has(prop)) {
+        if (scalar) bound.update(key, v);
+        else bound.patch(key, { [prop]: v });
+        return true;
+      }
+      throw new TypeError(
+        `kaya: ${named} has no field ${String(prop)} — the fields are ${[...fields].join(", ") || "none"}; ` +
+          "a row handle patches fields and moves or removes its row, nothing else",
+      );
+    },
+    has(receiver, prop) {
+      return (typeof prop === "string" && (fields.has(prop) || prop in methods)) || Reflect.has(receiver, prop);
+    },
+    ownKeys() {
+      return [...fields];
+    },
+    getOwnPropertyDescriptor(_receiver, prop) {
+      if (typeof prop === "string" && fields.has(prop)) return { enumerable: true, configurable: true, writable: true, value: read(prop) };
+      return undefined;
+    },
+  });
+}
 
 // ----------------------------------------------------------- vocabularies
 
@@ -2754,6 +2991,7 @@ function runScope(
     }
     return;
   }
+  if (_tx !== null && _implicit) commitImplicit();
   if (_tx !== null) throw new Error("kaya: transactions do not nest");
   _tx = [];
   _journal = new Map();
@@ -2804,6 +3042,8 @@ export class App {
   private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0 };
   /** @internal */ readonly _widgetHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
+  /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
+  /** @internal */ readonly _itemCatalogs = new Map<number, ContextCatalog>();
   /** @internal */ readonly _alertHandlers = new Map<number, (choice: number) => void>();
   /** @internal */ readonly _fileDialogHandlers = new Map<number, (files: PickedFile[]) => void>();
   /** @internal */ readonly _clipboardHandlers = new Map<number, (clip: Clip | null) => void>();
@@ -2836,7 +3076,25 @@ export class App {
 
   /** @internal */
   _register(handle: Handle, kind: number, fn: Handler): void {
+    // THE ROW HANDLE'S OWNER: the innermost For open at registration is
+    // the collection whose row a stamped occurrence names; a catalog item
+    // registered in the live zone learns its owner when the catalog is
+    // attached (contextMenu).
+    const owner = _forCollections[_forCollections.length - 1];
+    if (owner !== undefined) this._nodeOwners.set(handle.id, owner);
+    else if (handle instanceof MenuItem) {
+      const scope = _menuScopes[_menuScopes.length - 1];
+      if (scope !== undefined && scope._seat[0] === "free") this._itemCatalogs.set(handle.id, scope._seat[1]);
+    }
     (handle instanceof Widget && handle.isNode ? this._nodeHandlers : this._widgetHandlers).set(menuKey(kind, handle.id), fn);
+  }
+
+  /** @internal The row a stamped occurrence names, as a handle — or the
+   * bare keys when no collection owns the registration. */
+  _rowArgs(ident: number, keys: readonly Key[]): unknown[] {
+    const owner = this._nodeOwners.get(ident) ?? this._itemCatalogs.get(ident)?._owner ?? null;
+    if (owner === null || keys.length === 0) return [...keys];
+    return [rowHandle(owner, keys)];
   }
 
   /** @internal The registration half of `canvas({onDraw})`/`({onTick})`.
@@ -2985,7 +3243,10 @@ export class App {
       if (result !== null && typeof result === "object" && typeof (result as { then?: unknown }).then === "function") {
         (result as Promise<unknown>).then(undefined, (err: unknown) => {
           console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-          console.error("kaya: an async handler rejected after its transaction had already committed");
+          console.error(
+            "kaya: an async handler rejected — its transaction committed at its first await, and " +
+              "the continuation's writes before the throw stand (docs/js-plan.md §4)",
+          );
         });
       }
     } catch (err) {
@@ -3001,6 +3262,15 @@ export class App {
    *     const data = await fetch(url).then((r) => r.text());
    *     app.post(() => content.set(data));
    */
+  /** Commit what this continuation has written and go on in a new
+   * transaction: `await app.commit()`. Inside a handler the handler's own
+   * transaction commits when its synchronous part returns, before any
+   * continuation runs, so this only has to flush an implicit one. */
+  commit(): Promise<void> {
+    commitImplicit();
+    return Promise.resolve();
+  }
+
   post(fn: Handler, ...args: unknown[]): void {
     this._posted.push([fn, args]);
     if (!this._drainScheduled) {
@@ -3134,7 +3404,7 @@ export class App {
     if (kind === wire.OCC_MENU_ACTIVATED || kind === wire.OCC_MENU_TOGGLED || kind === wire.OCC_MENU_VALUE_CHANGED) {
       const handler = this._menuHandlers.get(menuKey(kind, ident));
       if (handler === undefined) return;
-      const args: unknown[] = [...keys];
+      const args: unknown[] = this._rowArgs(ident, keys as Key[]);
       if (kind === wire.OCC_MENU_TOGGLED) args.push(payload);
       else if (kind === wire.OCC_MENU_VALUE_CHANGED) args.push(Math.trunc(payload as number));
       this._dispatch(handler, ...args);
@@ -3142,7 +3412,7 @@ export class App {
     }
     const handler = keys.length > 0 ? this._nodeHandlers.get(menuKey(kind, ident)) : this._widgetHandlers.get(menuKey(kind, ident));
     if (handler === undefined) return;
-    const args: unknown[] = [...keys];
+    const args: unknown[] = this._rowArgs(ident, keys as Key[]);
     if (kind === wire.OCC_PASTED) args.push(representation(payload as wire.ClipPayload));
     else if (payload !== null) args.push(payload);
     this._dispatch(handler, ...args);

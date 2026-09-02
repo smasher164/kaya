@@ -30,33 +30,30 @@ function onChange(text: string): void {
   draft = text;
 }
 
-function onAdd(): void {
+async function onAdd(): Promise<void> {
   if (!draft) return;
   // The ambient tier names the step from INSIDE the handler — the
   // binding opened this transaction, not the app — and the marker still
   // leads the batch wherever the call sits in the body.
   kaya.undoable(`add ${draft}`);
   // The binding mints the key (docs/fresh-key-plan.md); the toggle
-  // handler below receives that same minted key.
+  // handler below receives that row as a handle.
   todos.insertFresh(Todo({ title: draft, done: false }));
   // Finishing the form is a SECOND transaction: `clear` inside an
   // undoable group is refused at apply (docs/undo-plan.md D4), and
   // undoing the add must not put "buy milk" back beside a todo that is
-  // gone. A handler IS one transaction here, so this one is posted.
-  app.post(finishForm);
-}
-
-function finishForm(): void {
-  // The add's second transaction, on the app thread. CLEAR BEFORE
-  // FOCUS, so focus is the last word.
+  // gone. The handler's transaction commits at this await, and the
+  // continuation is the next one (docs/js-plan.md §4, the implicit
+  // transaction). CLEAR BEFORE FOCUS, so focus is the last word.
+  await app.commit();
   field.clear();
   field.focus();
 }
 
-function onToggle(key: kaya.Key, checked: boolean): void {
-  // One field's delta: the title never travels; the derived signal
-  // updates itself.
-  todos.patch(key, { done: checked });
+function onToggle(todo: kaya.RowHandle<kaya.Fields<typeof Todo.schema>>, checked: boolean): void {
+  // One field's delta: the assignment IS the patch, the title never
+  // travels, and the derived signal updates itself.
+  todo.done = checked;
 }
 
 let field!: kaya.Widget;

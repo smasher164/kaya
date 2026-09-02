@@ -105,8 +105,74 @@ Plain JS, options objects, bodies last:
     count.fmt((n) => `${n} items`)                      // fmt takes a function
 
 The reference ports are guests/js/todos.ts, gallery.ts, feed.ts and
-menus.ts; every other guest under guests/js is a line-for-line port of
-its Python twin, so the two directories read as the spelling table.
+menus.ts; every other guest under guests/js is a port of its Python
+twin, so the two directories read as the spelling table — except where
+one of the four JS-only shapes below applies, which the guest then uses
+(examples use the sugar; invariant 5).
+
+THE JS-ONLY SHAPES (ruled by the maintainer 2026-09-01, after a review
+of what modern JS could buy against the ported surface; the mechanism of
+each is what made it admissible, and the three rejected candidates are
+recorded beside them):
+
+1. THE IMPLICIT TRANSACTION. The app thread is one thread, so a mutation
+   with no transaction open opens one, and a microtask commits it when
+   the current continuation runs out: ONE CONTINUATION IS ONE ATOMIC
+   BATCH, the guarantee `app.post` gives by hand, and the thing that
+   makes `await` inside a handler just work. `await app.commit()` ends
+   the current batch early and goes on in the next. Declarations never
+   open one — a widget with no scope and no container is refused naming
+   the scope, since the core would refuse the orphan at apply — and a
+   top-level scope opened over a pending implicit batch commits it
+   first. THE RESIDUE: nothing sees a continuation throw, so the writes
+   before the throw stand (a handler's own transaction still rolls
+   back, and `app.post(fn)` still runs fn with that guarantee). This is
+   a semantics extension stated as the uniform rule reads: every write
+   belongs to exactly one transaction, atomic per handler or per
+   continuation; Python cannot spell the second half because its
+   continuations are threads.
+2. PROMISE-RETURNING DIALOGS. `showAlert`, `pickFile`, `pickFiles`,
+   `saveFile` and `readClipboard` answer a promise when no `onResult` is
+   given — `const file = await kaya.saveFile("notes.txt")` — the same
+   occurrence, resolved instead of called back, and the continuation is
+   its own transaction by rule 1. With `onResult` they answer the id as
+   before.
+3. ROW HANDLES. A stamped handler receives the ROW, not the key:
+   `onToggle: (todo, checked) => (todo.done = checked)`. Fields read the
+   model's copy and ASSIGN AS A PATCH; `key`, `path`, `exists`,
+   `remove()`, `update()`, `patch()` and the four moves sit beside them;
+   a scalar collection's row carries `value`. A PROXY, deliberately: a
+   misspelled field on assignment is refused by name with the record's
+   fields in the sentence, which per-field accessors cannot do (they
+   would grow a plain property and patch nothing, and a plain-JS guest
+   has no tsc to say so); `instanceof` narrows a sum's row because the
+   proxy's prototype is the variant's; a row that has left reads
+   undefined, says `exists === false` and matches no variant. The owner
+   is the innermost For open at the handler's registration, or the For
+   a context catalog was attached inside; a registration with no owner
+   still receives the bare keys.
+4. THE fmt TAG. kaya.fmt`${count} items left` is a derived string over
+   any number of signals, recomputed binding-side from the mirrors when
+   any of them moves; constants interpolate as themselves; a row's field
+   is refused (bind it). `Signal.fmt(fn)` remains the one-source function
+   form.
+
+Beside them the dynamic setters return the handle, so `field.grow(1)`
+chains like `setText` already did, and named imports work because the
+constructors are free functions (`import { column, row } from
+"kaya-gui"`).
+
+CONSIDERED AND NOT TAKEN, with the reason: DECORATORS — V8 has not
+implemented the stage 3 proposal, node's type stripping deliberately
+transforms nothing that needs code generation, and a decorator syntax
+would need the build step the ruling removed (the same envelope rules
+out enums and namespaces with values; `erasableSyntaxOnly` is that rule
+at compile time). `using` BLOCKS for containers — native in node 24
+(V8 13.6), but a discarded binding for scope is a smell and body-last
+closures are what every JS UI library reads as. `count.value = 5` —
+Vue and Preact make `.value` read and write, kaya forbids reads, and a
+write-only `.value` would break `count.value++` in a surprising way.
+CHAINING instead of options objects — the ruled spelling stands.
 
 ONE HANDLE CLASS FOR BOTH ZONES. Python returns `Widget` or `Node` from
 one constructor set by zone; JS returns one `Widget` with `isNode`, and

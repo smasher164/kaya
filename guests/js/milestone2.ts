@@ -32,10 +32,12 @@ function onStep(): void {
   status.set(`step ${n}`);
 }
 
-function onRemove(group: kaya.Key, itemKey: kaya.Key): void {
-  const todos = items.at(group);
-  todos.remove(itemKey);
-  status.set(`removed ${group}/${itemKey}, ${todos.size} left`);
+function onRemove(item: kaya.RowHandle<string>): void {
+  // The innermost row's handle: its path is the group it sits in, its
+  // key the item, and removing it is its own verb.
+  const group = item.path[0]!;
+  item.remove();
+  status.set(`removed ${group}/${item.key}, ${items.at(group).size} left`);
 }
 
 let steps!: kaya.Signal<number>;

@@ -33,10 +33,10 @@ function onPromote(): void {
   }
 }
 
-function onToggle(key: kaya.Key, checked: boolean): void {
-  // The instanceof as a guard: a stale occurrence lands in the else and
-  // folds into nothing.
-  if (feed.get(key) instanceof Todo) feed.patch(key, { done: checked });
+function onToggle(post: kaya.RowHandle<Post>, checked: boolean): void {
+  // The instanceof as a guard: a row that has left the collection
+  // matches no variant, so a stale occurrence folds into nothing.
+  if (post instanceof Todo) post.done = checked;
 }
 
 let feed!: kaya.Collection<Post, kaya.Cases>;
