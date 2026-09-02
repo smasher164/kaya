@@ -539,7 +539,7 @@ surface `simctl` uses — expose both halves from the HOST:
 
 That is the iOS analogue of Android's accessibility service: a
 validation-only capability that reaches outside the app, never shipped
-to a user. It lives in tools/ios/simdrive, whose three verbs — `state`,
+to a user. It lives in tools/ios/xcuidrive since 2026-09-02 (the resident XCUITest driver; tools/ios/simdrive (gone) before it), whose three verbs — `state`,
 `choose <name>`, `cancel` — are proved against a throwaway app
 (tools/ios/pickerprobe): the rows read out of DocumentsUI's process, and
 both drives answered the picker for real.

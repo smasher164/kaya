@@ -99,11 +99,6 @@ PASSES+=("swift/KayaSwiftUI.swift + swift/KayaSwiftUIEntry.swift: macOS SDK, -wa
 
 # AND THE HOST-SIDE iOS DRIVER, which no other mac-side gate compiles:
 # without this pass the iOS lane is the first compiler to see an edit.
-if ! kaya_swiftc -typecheck tools/ios/simdrive/main.swift; then
-    echo "swift-typecheck: FAIL (tools/ios/simdrive, the iOS lane's driver)"
-    exit 1
-fi
-PASSES+=("tools/ios/simdrive/main.swift: macOS SDK (it runs on the host)")
 
 # AND FOR iOS. One file serves both Apple platforms behind
 # `#if os(macOS)` / `#else`, and a host-target typecheck compiles only
@@ -127,13 +122,20 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
     fi
     PASSES+=("swift/KayaSwiftUI.swift + swift/KayaSwiftUIEntry.swift: iphonesimulator SDK, arm64-apple-ios17.0-simulator (no -warnings-as-errors, unlike the macOS pass)")
     # The lane's foreign clipboard reader: nothing else compiles it.
+    # The iOS lane's resident driver is an XCTest bundle: the framework
+    # and its Swift overlay live in the simulator PLATFORM, not the SDK
+    # (tools/ios/run-sim.py's xcuidrive_build builds it the same way).
+    ios_platform="$(ios_xcrun -sdk iphonesimulator --show-sdk-platform-path)/Developer"
     if ! ios_xcrun -sdk iphonesimulator swiftc -typecheck \
-        -target arm64-apple-ios17.0-simulator \
-        tools/ios/clipctl/main.swift; then
-        echo "swift-typecheck: FAIL (tools/ios/clipctl, the iOS lane's foreign clipboard process)"
+        -target arm64-apple-ios17.0-simulator -parse-as-library \
+        -F "$ios_platform/Library/Frameworks" \
+        -F "$ios_platform/Library/PrivateFrameworks" \
+        -I "$ios_platform/usr/lib" \
+        tools/ios/xcuidrive/KayaDrive.swift tools/ios/xcuidrive/Target.swift; then
+        echo "swift-typecheck: FAIL (tools/ios/xcuidrive, the iOS lane's resident driver)"
         exit 1
     fi
-    PASSES+=("tools/ios/clipctl/main.swift: iphonesimulator SDK, arm64-apple-ios17.0-simulator")
+    PASSES+=("tools/ios/xcuidrive/KayaDrive.swift + Target.swift: iphonesimulator SDK + platform XCTest, arm64-apple-ios17.0-simulator")
 
     # AND THE GUESTS FOR iOS: the macOS loop at the top compiles ONE side
     # of every `#if os(...)` a guest carries.
@@ -230,7 +232,7 @@ PY
     PASSES+=("guests/swift: $ios_guests of ${#GUESTS[@]} files (the ios lane module's SWIFT_ENTRIES; the rest are desktop-only), iphonesimulator SDK, arm64-apple-ios$ios_min-simulator")
 else
     echo "swift-typecheck: note — no iphonesimulator SDK; the iOS half went unchecked" >&2
-    PASSES+=("SKIPPED: everything iOS — the interpreter, tools/ios/clipctl and the lane's guests (no iphonesimulator SDK)")
+    PASSES+=("SKIPPED: everything iOS — the interpreter, tools/ios/xcuidrive and the lane's guests (no iphonesimulator SDK)")
 fi
 
 for pass in "${PASSES[@]}"; do

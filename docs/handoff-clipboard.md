@@ -186,7 +186,7 @@ Each needed: the copy arm, the read arm answering exactly once, the
   out-of-process overlay driven by simdrive's new `press` verb;
   reads go on a background queue (the read parks only its own
   thread); the unsatisfiable read decides from `types`, prompt-free.
-  BOTH foreign directions are one spawned process, tools/ios/clipctl
+  BOTH foreign directions are one spawned process, tools/ios/clipctl (gone)
   (`read` gated by the system's own prompt with correct attribution;
   `write` synchronous and cross-process visible before the spawn
   exits) — no stock tool crosses: pbpaste reads union clips empty,

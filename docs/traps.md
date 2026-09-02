@@ -2964,7 +2964,7 @@ at a time, so it would force the lane serial even if it worked.
 
 WHAT DOES WORK is the simulator's own frameworks, from the host — the
 same private surface `simctl` talks to, shipped inside Xcode.
-tools/ios/simdrive owns it: read through
+tools/ios/simdrive (gone) owns it: read through
 `-[SimDevice sendAccessibilityRequestAsync:completionQueue:completionHandler:]`
 with an `AXPTranslator` bridge delegate, drive through
 `SimulatorKit.SimDeviceLegacyHIDClient` with an Indigo digitizer message.
@@ -4529,7 +4529,7 @@ clip and look for it.
 
 kaya does exactly that. `kayaClipMarkerType` (`dev.kaya/staged`,
 swift/KayaSwiftUI.swift) rides on every clip a kaya-controlled writer
-composes — the app's own `items =`, and tools/ios/clipctl/main.swift for
+composes — the app's own `items =`, and tools/ios/clipctl/main.swift (gone) for
 a seed — and `kayaClipDrifted` compares the MARKER on iOS and the COUNT
 on macOS. Its honest limits, in the comment at the check: it sees the
 staged clip being REPLACED, never a stranger carrying kaya's own marker
@@ -4859,7 +4859,7 @@ verify in every perturb loop that rebuilds anything.
 
 ## A cache self-test outside its own key can still invalidate Cargo (2026-08-23)
 
-`check-keyed` used `crates/.keyed-probe` (gone) to prove that changing a path outside
+`check-keyed` used `crates/.keyed-probe (gone)` to prove that changing a path outside
 the fixture gate's input set leaves its key stable. Creating and removing that
 one file left the tree byte-clean but advanced the top-level `crates/` directory
 mtime. The core build script declares that whole directory with
@@ -6494,7 +6494,7 @@ rc=1 ms=10334`) and SpringBoard deny every launch after it
 (SBMainWorkspace)`, 17 legs at 0s) — the pasteboard daemon fetches item
 data from the setter, and a setter killed mid-serve wedges it. The
 leak was load-bearing by accident. RETIRED THE SAME DAY, in
-tools/ios/clipctl itself: the runner hands the hold a RELEASE FILE
+tools/ios/clipctl (gone) itself: the runner hands the hold a RELEASE FILE
 under its own run directory, the writer polls for it and exits when it
 appears (or after a 600s bound whatever became of the runner), the
 runner touches it at the next seed and at the leg's end and waits for
@@ -6842,3 +6842,25 @@ now while the test thread pumps `RunLoop.current.run(until:)` and taps
 `Allow Paste` on SpringBoard when it appears; a foreign clip then reads
 back with `prompt=pressed`, an own clip with `prompt=none`
 (docs/xcuidrive-plan.md §1).
+
+## The document picker's `Other` labelled Cancel opens the More menu, and a menu takes the whole picker out of an XCUITest snapshot (measured 2026-09-02)
+
+Kaya's picker at depth offers a back button labelled with the
+PRESENTING APP'S NAME, the `<dir>, Actions Menu` title and `More`; no
+Cancel button — but an `Other` element labelled `Cancel`, not hittable,
+sits exactly under `More`. Tapping its centre opens the More menu (New
+Folder, Icons, List, sort), and while that menu is up `debugDescription`
+shows the menu and the keyboard and NOT the picker: the navigation bar
+and the `File View` collection view both answer "absent". A cancel that
+tapped there and then asked once whether the picker was gone answered
+ok with the sheet still up, and the leg failed two steps later on the
+guest's label and then on "file dialog 2 is already live". So the
+driver (tools/ios/xcuidrive) cancels as simdrive did — a hittable Cancel
+BUTTON, else WALK BACK through the bar's leftmost button until one
+appears — and "gone" is THREE consecutive absent reads of bar, file view
+and name field. Two more measured on the way: a pull-down drag from the
+list's centre dismissed the export PROBE's sheet with the delegate's
+cancel, but not kaya's own picker, so it stays the last resort; and a
+row is a `Cell` whose identifier splits the extension with a comma
+(`picked, txt`) while its stem is the cell's static text — the driver
+joins them back with a dot.

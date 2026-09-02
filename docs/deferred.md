@@ -4054,7 +4054,7 @@ done here: attaching any UIA client makes the shell's DirectUI raise
 automation events during message dispatch, which raises a NONCONTINUABLE
 COM exception inside the guest that HotSpot reports as fatal
 (docs/traps.md). It would have to run out of process, in the shape
-iOS's tools/ios/simdrive uses, and it would have to be guaranteed not to
+iOS's tools/ios/simdrive (gone) uses, and it would have to be guaranteed not to
 be attached while a file dialog is up. That is a lot of machinery for a
 read that currently works.
 
@@ -4861,7 +4861,7 @@ swift-typecheck's declared input set.
 The original entry is kept below for the record.
 
 tools/swift-typecheck.sh's iOS pass covers swift/KayaSwiftUI.swift,
-swift/KayaSwiftUIEntry.swift and tools/ios/clipctl. Nothing in the gate
+swift/KayaSwiftUIEntry.swift and tools/ios/clipctl (gone). Nothing in the gate
 set compiles anything under guests/swift/ against an iOS SDK, so the
 first compiler to see an `#if os(iOS)` mistake in a Swift guest is the
 simulator, minutes into a run.
@@ -4981,7 +4981,7 @@ KEY: UIPasteboard changedNotification, changeCount focus bumps, iOS witness, mar
 WITNESS LANDED 2026-08-18, on a private marker type rather than the
 count. Every clip a kaya-controlled writer composes on iOS carries
 `dev.kaya/staged` (swift/KayaSwiftUI.swift's `kayaClipMarkerType`, and
-tools/ios/clipctl/main.swift for a seed), and the same consumption sites
+tools/ios/clipctl/main.swift (gone) for a seed), and the same consumption sites
 the mac witness guards check its PRESENCE where mac checks the count.
 Watched failing both ways: a foreign write between stage and consumption
 fails the leg naming the marker, and deleting the marker from the seed's
@@ -9884,7 +9884,7 @@ reporter records — so one run shows the sequence instead of one probe per
 build. The Compose side has the same channel, gated the same way.
 
 A MAC-SIDE PROBE WAS BUILT AND THEN REMOVED, deliberately, and the
-reasoning is worth keeping: `tools/checks/swiftui-stacked-grow.swift` (gone)
+reasoning is worth keeping: `tools/checks/swiftui-stacked-grow.swift (gone)`
 rendered the phone's synthesized tier on a Mac in seconds, which needed a
 door through `KayaTableSurface`'s tier switch, which in turn needed
 check-table-tier's one-caller census to sanction a second construction
@@ -10199,7 +10199,7 @@ container layout recorded". TWO consequences, one fixed and one held:
   windows leg wired (deploy-win's resize block, five languages).
   KEY: adaptive winui, axis-state pass, reindex vertical, depth stub adaptive
 
-## PROPOSED — XCUITest as the iOS lane's one driver, subsuming simdrive and clipctl (asked 2026-09-02)
+## ~~PROPOSED — XCUITest as the iOS lane's one driver, subsuming simdrive and clipctl (asked 2026-09-02)~~ COMPLETE 2026-09-02, the maintainer's go the same day: one resident driver per pool device serves every picker, prompt and pasteboard verb over the guest's unchanged protocol; simdrive and clipctl are deleted; the swift suite ALL PASS through it
 KEY: xcuidrive, simdrive, clipctl, simdrive_watch, KayaSimdrive.ask, savename, savepress, clip_seed, clip_press, Allow Paste, xcuidrive-plan
 
 The maintainer asked whether XCUITest can end up subsuming simdrive.
@@ -10215,8 +10215,10 @@ the design (one resident driver per device, the SAME file protocol the
 guest speaks, `simdrive_watch` routing to it) and the six-step
 conversion order. Not yet measured: the OPEN picker's rows and confirm,
 the `type` verb on kaya's own fields, and latency under the matrix.
-Awaits the maintainer's go; the opt-in driver is the checkpoint it
-builds on.
+BUILT the same day on the maintainer's go ("I want the ios test infra to
+be fully featured and robust before we build out more features"): §5
+of the plan records each step; the picker findings on the way are in
+docs/traps.md.
 
 ## CHORE — SYNTHESIZING A PAN INTO THE iOS SIMULATOR (2026-08-30) — the guaranteed path is BUILT and PROVEN STANDALONE 2026-09-02 (a resident XCUITest driver, tools/ios/xcuidrive: a real tap changed kaya's model, a real drag scrolled a system app), wired opt-in behind KAYA_IOS_XCUIDRIVE and its in-lane selfcheck green (the swift suite ALL PASS with it, 2026-09-02); kaya's SwiftUI ScrollView ignores a synthetic pan (docs/traps.md); stays open for the subsumption slice the entry above proposes
 KEY: simulator input, simdrive swipe, IndigoHIDMessageForScrollEvent, XCUITest driver, idb-companion, xcuidrive, resident driver
@@ -10261,9 +10263,9 @@ runner left behind); the default matrix path is unchanged. THE PAN THIS
 CHORE CHASED IS STILL NOT REACHABLE by synthesis — a synthetic pan does
 not move kaya's own SwiftUI ScrollView (docs/traps.md), the SimulatorKit
 finding one route over — so the driver's value is the TAP and, for the
-drag arm, a real touch into a drop interaction, not a scroll. The way
-out of the conflict is not sequencing but SUBSUMPTION — one driver for
-the whole lane, the PROPOSED entry above (docs/xcuidrive-plan.md).
+drag arm, a real touch into a drop interaction, not a scroll. The conflict
+ended the same day by SUBSUMPTION — the one driver serves the whole
+lane now (the struck entry above, docs/xcuidrive-plan.md).
 
 ## WATCH — AN iOS GUEST'S PANIC MESSAGE DIES WITH ITS PTY (2026-08-30)
 KEY: pyhost panic message, kaya_run abort, ips crash report, panic hook file

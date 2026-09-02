@@ -122,16 +122,6 @@ XCUIDRIVE_BUILD = ROOT / "target/ios-xcuidrive"
 # and refuses any that remains, and the driver is installed by xcodebuild
 # while that runs (measured 2026-09-02, the first run of this driver).
 XCUIDRIVE_RUNNER_ID = "dev.kayalane.drive.runner"
-# OPT-IN. An XCUITest session and simdrive both drive the simulator's
-# accessibility, and they conflict: a driver bootstrapping during
-# admission broke simdrive's reads on every phone (measured
-# 2026-09-02, docs/traps.md). So the driver runs only under this flag,
-# and then in ISOLATION — after admission, before any pooled
-# simdrive leg — proving itself and stopping. The default matrix path
-# is byte-identical to before. The iOS drag arm that needs the driver
-# live during legs must sequence those legs away from simdrive ones
-# (docs/dnd-plan.md §5).
-XCUIDRIVE = bool(os.environ.get("KAYA_IOS_XCUIDRIVE"))
 IOS_MIN = "16.0"
 os.chdir(ROOT)
 
@@ -153,14 +143,13 @@ def built_tool(rel):
     return path
 
 
-# The host-side picker driver, built ONCE per run and before any leg,
-# so a break in it fails at the top rather than inside one leg's
-# watcher. The admission probe exercises the LocalStorage export path
-# itself (docs/traps.md records why a live FileProvider pid is not
-# enough); clipctl runs INSIDE the simulator under `simctl spawn`.
-SIMDRIVE = built_tool("tools/ios/simdrive/build.sh")
+# The admission probe's app, built ONCE per run and before any leg. It
+# exercises the LocalStorage export path itself (docs/traps.md records
+# why a live FileProvider pid is not enough); the hands that drive its
+# sheet are the resident xcui driver's (xcuidrive_build, below), which
+# replaced the host-side simdrive walker and the spawned clipctl
+# process on 2026-09-02 (docs/xcuidrive-plan.md).
 EXPORT_PROBE_APP = built_tool("tools/ios/exportprobe/build.sh")
-CLIPCTL = built_tool("tools/ios/clipctl/build.sh")
 EXPORT_PROBE_BUNDLE = "dev.kaya.exportpreflight"
 KAYA_BUNDLE_PREFIX = "dev.kaya."
 
@@ -650,10 +639,6 @@ def rec_finish(name, out):
 # pasteboard is never in the path — every rule here was measured
 # (docs/clipboard-plan.md §8).
 
-_sb_pids = {}
-_seed_holders = {}
-_holders_lock = threading.Lock()
-_seed_serial = 0
 
 
 def clip_decode(b64):
@@ -664,61 +649,40 @@ def clip_encode(data):
     return base64.b64encode(data).decode()
 
 
-def clip_sb_pid(udid):
-    """The process that HOSTS the paste alert (SpringBoard), cached per
-    device: SpringBoard's own tree is the one place the alert is ALWAYS
-    readable — the hit-test route goes blind exactly when the alert was
-    raised by the foreground app's own blocked read."""
-    if udid in _sb_pids:
-        return _sb_pids[udid]
-    got = out_of(["xcrun", "simctl", "spawn", udid, "launchctl", "list"])
-    pid = "0"
-    for line in got.splitlines():
-        if "com.apple.SpringBoard" in line:
-            pid = line.split("\t")[0] or "0"
-            break
-    _sb_pids[udid] = pid
-    return pid
-
-
 def clip_press(udid):
     """Answer the per-clip paste prompt, or report there was none — an
     own-content read never raises one, so "none" is an answer. Pressed
     until the press verb FAILS (nothing carries the label), because the
     alert leaving the screen is the only proof a tap landed. None means
-    the alert never left; the caller carries the sentence to the guest."""
-    sb = clip_sb_pid(udid)
+    the alert never left; the caller carries the sentence to the guest.
+    The press is the driver's, on SpringBoard's tree — the one that is
+    always readable while the app's own blocked read holds the alert
+    (docs/clipboard-plan.md §8 finding 2)."""
     did = False
     for _ in range(6):
-        rc = run(["timeout", "60", SIMDRIVE, udid, sb, "press", "Allow",
-                  "Paste"], stdout=subprocess.DEVNULL,
-                 stderr=subprocess.DEVNULL).returncode
-        if rc != 0:
+        ok, _body = xcuidrive(udid, "press Allow Paste", timeout=20)
+        if not ok:
             return "pressed" if did else "none"
         did = True
     return None
 
 
 def clip_seed(udid, kind, b64, legs_dir):
-    """Put content on the device clipboard FROM OUTSIDE the guest. THE
-    WRITER IS HELD ALIVE: the pasteboard daemon serves item DATA by
-    fetching it from the setter, and a writer that exits at once
-    intermittently leaves a reader empty (measured 1-in-5 solo; §8
-    finding 6). Each seed kills the previous holder."""
+    """Put content on the device clipboard FROM OUTSIDE the guest: the
+    resident driver writes it, as another principal. THE WRITER IS
+    ALIVE FOR THE WHOLE LANE by construction — the pasteboard daemon
+    serves item DATA by fetching it from the setter, and a writer that
+    exits at once left a reader empty 1-in-5 (docs/clipboard-plan.md
+    §8 finding 6); the spawned holder processes, their release files
+    and their census that this replaced are gone with the need."""
     if kind in ("text", "html"):
         payload = b64
     elif kind == "image":
-        # The watcher reads the container file (a real host path) and
-        # hands clipctl the BYTES: the write must not depend on the
-        # spawned process's own sandbox seeing the path.
         path = pathlib.Path(clip_decode(b64).decode("utf-8", "replace"))
         if not path.is_file():
             return None, f"the image seed's file is missing: {path}"
         payload = clip_encode(path.read_bytes())
     elif kind == "files":
-        # The PATH itself is the payload: the container path is the
-        # same string on the host and inside the simulator, and the
-        # file-url item must carry the url, not the bytes.
         path = pathlib.Path(clip_decode(b64).decode("utf-8", "replace"))
         if not path.is_file():
             return None, f"the files seed's file is missing: {path}"
@@ -726,133 +690,34 @@ def clip_seed(udid, kind, b64, legs_dir):
     else:
         return None, f"clipboard_seed cannot write {kind} from outside " \
                      f"the app"
-    # The previous seed's writer leaves before the next one writes: two
-    # living writers would be two claims on one board.
-    clip_release_holder(udid)
-    global _seed_serial
-    with _holders_lock:
-        _seed_serial += 1
-        serial = _seed_serial
-    seed_log = legs_dir / f"seed-{udid}-{serial}.out"
-    # THE RELEASE FILE: the writer polls for it and exits when it appears
-    # (clipctl's hold). Under this run's own directory, so the census at
-    # the verdict can name this run's holders and no other's.
-    release = legs_dir / f"release-{udid}-{serial}"
-    lf = open(seed_log, "w", encoding="utf-8")
-    holder = subprocess.Popen(
-        ["timeout", "600", "xcrun", "simctl", "spawn", udid, CLIPCTL,
-         "write", kind, payload, "hold", str(release)],
-        stdout=lf, stderr=subprocess.DEVNULL)
-    with _holders_lock:
-        _seed_holders[udid] = (holder, release, seed_log)
-    # The W line is the writer saying the board is written; the hold
-    # begins after it. No line inside the bound is a failed write.
-    for _ in range(100):
-        if "W types=" in seed_log.read_text(encoding="utf-8",
-                                            errors="replace"):
-            return "ok", ""
-        time.sleep(0.1)
-    return None, f"the spawned {kind} seed never reported its write on " \
-                 f"{udid}"
-
-
-# THE HOLDER IS RELEASED, NEVER KILLED, AND THAT IS MEASURED: a kill
-# reaches `timeout` alone and leaves xcrun, simctl and the writer inside
-# the simulator alive — 192 of them on the host after two days
-# (2026-09-01) — and a process-group kill wedged the simulator's
-# pasteboard daemon mid-serve, SpringBoard denying every launch after
-# (docs/traps.md). So the writer retires ITSELF: this touches the release
-# file it polls, and the whole chain leaves through its own exit. A
-# holder still here ten seconds later is counted, and the census at the
-# verdict (clip_holder_census) turns any survivor into the lane's red.
-_holders_late = []
-
-
-def clip_release_holder(udid):
-    with _holders_lock:
-        held = _seed_holders.pop(udid, None)
-    if held is None:
-        return
-    holder, release, seed_log = held
-    release.touch()
-    try:
-        holder.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        _holders_late.append(udid)
-        print(f"run-sim: the clipboard seed holder on {udid} did not leave "
-              f"within 10s of its release", file=sys.stderr)
-        return
-    # An unreadable or empty seed log is the "left saying ''" finding
-    # below, not a pass.
-    last = ""
-    if seed_log.is_file():
-        lines = seed_log.read_text(encoding="utf-8",
-                                   errors="replace").strip().splitlines()
-        if lines:
-            last = lines[-1]
-    if not last.startswith("H released"):
-        print(f"run-sim: the clipboard seed holder on {udid} left saying "
-              f"{last!r}, not that it was released", file=sys.stderr)
-
-
-def clip_holder_census():
-    """Every holder this run started, by the release directory on its
-    command line, must be gone at the verdict — the wall on the leak
-    that put 192 of them on the host (docs/traps.md)."""
-    got = subprocess.run(["pgrep", "-fl", f"hold {LEGS_DIR}/release-"],
-                         stdout=subprocess.PIPE, check=False, **TEXT)
-    survivors = [ln for ln in got.stdout.splitlines() if ln.strip()]
-    late = len(_holders_late)
-    print(f"run-sim: clipboard seed holders outliving this run: "
-          f"{len(survivors)} (late at release: {late})", flush=True)
-    if survivors:
-        print("run-sim: seed holders still alive at the verdict — the "
-              "release channel failed (tools/ios/clipctl's hold):\n"
-              + "\n".join(survivors), file=sys.stderr)
-        return False
-    return not late
+    ok, body = xcuidrive(udid, f"pb_write {kind} {payload}")
+    if not ok:
+        return None, f"the driver refused the {kind} seed on {udid}: {body}"
+    if "types=" not in body:
+        return None, f"the {kind} seed never reported its write on {udid}"
+    return "ok", ""
 
 
 def clip_read(udid, kind_b64, legs_dir):
     """Read the device clipboard back FROM OUTSIDE the guest, in one
-    representation, answering what expect_clipboard compares. THE READ
-    RUNS IN THE BACKGROUND because it does not return until the prompt
-    is answered, and the thing that answers it is the press — a
-    foreground read would deadlock against its own remedy."""
+    representation, answering what expect_clipboard compares. The
+    driver reads it off its own test thread and presses the paste
+    prompt itself (a foreign clip prompts per clip, §8 finding 2), so
+    the read and its remedy no longer race across two processes."""
     kind = clip_decode(kind_b64).decode("utf-8", "replace")
     if not kind:
         return None, "clip_read needs a kind"
-    log = legs_dir / f"clipread-{udid}.out"
-    with open(log, "w", encoding="utf-8") as lf:
-        reader = subprocess.Popen(
-            ["timeout", "25", "xcrun", "simctl", "spawn", udid, CLIPCTL,
-             "read", kind],
-            stdout=lf, stderr=subprocess.DEVNULL)
-        tries = 0
-        # 0.3s between press rounds, not 1s (2026-08-20): the reader
-        # returns the moment the Allow lands, so the sleep's only job
-        # is pacing the next press attempt.
-        while reader.poll() is None and tries < 20:
-            clip_press(udid)
-            tries += 1
-            time.sleep(0.3)
-        reader.wait()
-    text = log.read_text(encoding="utf-8", errors="replace")
-    if not re.search(r"^S ", text, re.M):
-        head = "\n".join(text.splitlines()[:3])
-        return None, f"the spawned reader answered nothing at all: {head}"
+    ok, body = xcuidrive(udid, f"pb_read {kind}", timeout=40)
+    if not ok:
+        return None, body
     # THE MISSING LINE IS THE DIAGNOSIS: a kind the board does not
     # carry still prints an EMPTY `S b64=`; no line at all means the
     # read never returned — an unanswered prompt, not an empty board.
-    m = re.search(r"^S b64=(.*)$", text, re.M)
+    m = re.search(r"^S b64=(.*)$", body, re.M)
     if m is None:
-        types = ""
-        tm = re.search(r"^S types=.*$", text, re.M)
-        if tm:
-            types = tm.group(0)
-        return None, (f"the {kind} read never returned after {tries} "
-                      f"presses — the paste prompt went unanswered; the "
-                      f"board offered {types}")
+        tm = re.search(r"^S types=.*$", body, re.M)
+        return None, (f"the {kind} read returned no data line; the "
+                      f"board offered {tm.group(0) if tm else ''}")
     b64 = m.group(1)
     if kind == "image":
         # TWO OF APPLE'S TOOLS, the mac arm's own answer: sips reports
@@ -891,24 +756,18 @@ def clip_relay_check(a, b):
     out of every booted simulator (measured 2026-08-03: a host-side
     copy replaced a booted device's clip in 260ms). So MEASURE isolation
     before any leg: two devices, two different clips, each keeping its
-    own — types only, which is prompt-free (§8 finding 2)."""
-    run(["timeout", "60", "xcrun", "simctl", "spawn", a, CLIPCTL, "write",
-         "html", clip_encode(b"<b>kaya relay check</b>")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    run(["timeout", "60", "xcrun", "simctl", "spawn", b, CLIPCTL, "write",
-         "text", clip_encode(b"kaya relay check")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    own — types only, which is prompt-free (§8 finding 2). Through the
+    two devices' drivers, which are up before this runs."""
+    xcuidrive(a, f"pb_write html {clip_encode(b'<b>kaya relay check</b>')}")
+    xcuidrive(b, f"pb_write text {clip_encode(b'kaya relay check')}")
     seen_a = seen_b = ""
     for _ in range(3):
         time.sleep(1)
-        seen_a = next((ln for ln in out_of(
-            ["timeout", "60", "xcrun", "simctl", "spawn", a, CLIPCTL]
-        ).splitlines() if ln.startswith("S types=")), "")
-        seen_b = next((ln for ln in out_of(
-            ["timeout", "60", "xcrun", "simctl", "spawn", b, CLIPCTL]
-        ).splitlines() if ln.startswith("S types=")), "")
-        if not seen_a or not seen_b:
-            # A device that did not answer is not a verdict either way.
+        ok_a, seen_a = xcuidrive(a, "pb_types")
+        ok_b, seen_b = xcuidrive(b, "pb_types")
+        if not ok_a or not ok_b:
+            seen_a = seen_a if ok_a else ""
+            seen_b = seen_b if ok_b else ""
             continue
         shared = ("public.html" not in seen_a) or ("public.html" in seen_b)
         if not shared:
@@ -939,7 +798,6 @@ def clip_relay_check(a, b):
               file=sys.stderr)
         return False
     return True
-
 
 # --------------------------------------------------------------- picker
 # THE FIRST PICKER A DEVICE SHOWS AFTER A BOOT OPENS IN THE WRONG
@@ -1101,22 +959,16 @@ def picker_export_probe(udid):
              EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
         return 76
-    denv = dict(os.environ,
-                KAYA_SIMDRIVE_LOG=str(PREP_DIR /
-                                      f"export-{udid}-simdrive.log"))
-    drive = subprocess.run(
-        ["timeout", "90", SIMDRIVE, udid, pid, "savename", probe_name],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=denv,
-        check=False, **TEXT)
-    drive_rc = drive.returncode
-    drive_out = drive.stdout
-    if drive_rc == 0:
-        drive = subprocess.run(
-            ["timeout", "90", SIMDRIVE, udid, pid, "savepress"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=denv,
-            check=False, **TEXT)
-        drive_rc = drive.returncode
-        drive_out = drive.stdout
+    # THE SHEET IS DRIVEN BY THE RESIDENT DRIVER, attached to the probe
+    # app: the name typed and read back, Save pressed and the sheet
+    # required gone — the verbs the legs use, so admission is the
+    # driver's first proof on every run.
+    ok, drive_out = xcuidrive(udid, f"attach {EXPORT_PROBE_BUNDLE}")
+    if ok:
+        ok, drive_out = xcuidrive(udid, f"savename {probe_name}", timeout=90)
+    if ok:
+        ok, drive_out = xcuidrive(udid, "savepress", timeout=90)
+    drive_rc = 0 if ok else 1
     result = ""
     # A drive that failed cannot finish the flow: a short grace for a
     # late result, not the full minute — two slow phones held the
@@ -1176,6 +1028,7 @@ def picker_export_probe(udid):
 
 
 def picker_reseed(udid):
+    xcuidrive_stop(udid)
     run(["timeout", "60", "xcrun", "simctl", "shutdown", udid],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for argv, t in ((["xcrun", "simctl", "erase", udid], "180"),
@@ -1185,7 +1038,9 @@ def picker_reseed(udid):
         if run(["timeout", t, *argv], stdout=subprocess.DEVNULL,
                stderr=subprocess.DEVNULL).returncode != 0:
             return False
-    return True
+    # The device is new; so is its driver.
+    xcuidrive_start(udid)
+    return _drive_results.get(udid, "").startswith("ready in")
 
 
 def picker_prepare(udid):
@@ -1262,7 +1117,7 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
     docs.mkdir(parents=True, exist_ok=True)
     request.unlink(missing_ok=True)
     response.unlink(missing_ok=True)
-    denv = dict(os.environ, KAYA_SIMDRIVE_LOG=str(log_path))
+    attached = False
     with open(log_path, "a", encoding="utf-8") as lg:
         lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch ev=watch_start "
                  f"clock=epochrealtime app={bundle_id}\n")
@@ -1278,19 +1133,22 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
                 if parts and parts[0].startswith("clip_"):
                     rc, body = clip_verb(udid, parts)
                 else:
+                    # THE PICKER VERBS GO TO THE DEVICE'S DRIVER, attached
+                    # to this leg's app on the first ask (the app is
+                    # launched after this watcher starts); re-attached if
+                    # a verb finds no app, since a leg's app is one bundle.
                     pid_started = now_ms()
-                    got = out_of(["xcrun", "simctl", "spawn", udid,
-                                  "launchctl", "list"])
-                    for line in got.splitlines():
-                        if bundle_id in line:
-                            pid = line.split("\t")[0]
-                            break
+                    ok = attached
+                    if not ok:
+                        ok, body = xcuidrive(udid, f"attach {bundle_id}")
+                        attached = ok
+                        pid = "attached" if ok else "unattached"
                     pid_ms = str(now_ms() - pid_started)
-                    drove = subprocess.run(
-                        [SIMDRIVE, udid, pid or "0", *parts],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        env=denv, check=False, **TEXT)
-                    rc, body = drove.returncode, drove.stdout.rstrip("\n")
+                    if attached:
+                        ok, body = xcuidrive(udid, verb, timeout=90)
+                        if not ok and "no app attached" in body:
+                            attached = False
+                    rc = 0 if ok else 1
                 lg.write(f"KAYA_SIMDRIVE: at={now_ms()} src=watch "
                          f"ev=request verb={parts[0] if parts else ''} "
                          f"rc={rc} ms={now_ms() - started} "
@@ -1482,9 +1340,6 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     if watcher is not None:
         watcher_stop.set()
         watcher.join()
-    # The last seed's held writer leaves with the leg (clip_seed's
-    # release discipline; the next leg's own copy replaces the board).
-    clip_release_holder(udid)
     print(out, file=log)
     rec_finish(name, out)
     # (NO PER-LEG SCREENSHOT: `--console-pty` returns only when the
@@ -1547,6 +1402,9 @@ def pull_container_files(udid, bundle_id, name, log):
 _drive_procs = {}
 _drive_threads = []
 _drive_results = {}
+_drive_dirs = {}
+_drive_serial = {}
+_drive_lock = threading.Lock()
 
 
 def _plist_write(path, value):
@@ -1652,10 +1510,15 @@ def xcuidrive_start(udid):
     xctestrun, one xcodebuild. Ready when the test's loop has written
     `ready`; a driver that never gets there fails the LANE at prep_join,
     since a lane whose hands are missing must not run legs that assume
-    them."""
-    d = DRIVE_DIR / udid
+    them. Restartable: a reseeded device calls this again and gets a
+    fresh directory and result bundle."""
+    with _drive_lock:
+        _drive_serial[udid] = _drive_serial.get(udid, 0) + 1
+        serial = _drive_serial[udid]
+    d = DRIVE_DIR / f"{udid}-{serial}"
     d.mkdir(parents=True, exist_ok=True)
-    testrun = XCUIDRIVE_BUILD / f"kayadrive-{udid}.xctestrun"
+    _drive_dirs[udid] = d
+    testrun = XCUIDRIVE_BUILD / f"kayadrive-{udid}-{serial}.xctestrun"
     _plist_write(testrun, {"KayaDrive": {
         "TestBundlePath": "__TESTHOST__/PlugIns/KayaDrive.xctest",
         "TestHostPath": "__TESTROOT__/KayaDrive-Runner.app",
@@ -1695,38 +1558,82 @@ def xcuidrive_start(udid):
     _drive_results[udid] = f"ready in {int(time.monotonic() - started)}s"
 
 
-def xcuidrive_selfcheck(app, bundle_id):
-    """Build the driver, start ONE on UDIDS[0], prove it with a real tap
-    on kaya's `step` button, and stop it — all SERIAL and in isolation,
-    with no pooled leg in flight, so its XCUITest session never overlaps
-    a simdrive one. Runs only under KAYA_IOS_XCUIDRIVE; a failure fails
-    the lane, since a driver that cannot serve is worth nothing to the
-    arm that will use it."""
+def xcuidrive_launch_all():
+    """Build once, then one driver per pool device (the pad included),
+    each in its own thread; _prep waits for its device's, prep_join for
+    all. Started right after the boot, BEFORE admission, since admission
+    is the first thing that needs hands (picker_export_probe)."""
     err = xcuidrive_build()
     if err:
         die(f"run-sim: {err}")
-    udid = UDIDS[0]
-    xcuidrive_start(udid)
+    for udid in (*UDIDS, PAD_UDID):
+        th = threading.Thread(target=xcuidrive_start, args=(udid,))
+        th.start()
+        _drive_threads.append(th)
+
+
+def xcuidrive_wait(udid):
+    """Block until this device's driver is ready, or die with what
+    xcodebuild said: a lane whose hands are missing must not run a leg
+    that assumes them."""
+    for _ in range(900):
+        got = _drive_results.get(udid, "")
+        if got:
+            break
+        time.sleep(0.2)
     got = _drive_results.get(udid, "never started")
-    print(f"run-sim: xcui driver selfcheck on {udid}: {got}",
+    print(f"run-sim: xcui driver on {udid}: {got.splitlines()[0]}",
           file=sys.stderr, flush=True)
-    ok = got.startswith("ready in")
-    if ok:
-        with open(LEGS_DIR / "xcuidrive-proof.log", "w", encoding="utf-8",
-                  buffering=1) as log:
-            ok = xcuidrive_proof(udid, log, app, bundle_id)
-            print((LEGS_DIR / "xcuidrive-proof.log").read_text(
-                encoding="utf-8", errors="replace"), file=sys.stderr,
-                flush=True)
-    xcuidrive_stop_all()
-    if not ok:
-        die("run-sim: the xcui driver selfcheck FAILED (KAYA_IOS_XCUIDRIVE)")
-    print("run-sim: xcui driver selfcheck PASSED", file=sys.stderr, flush=True)
+    if not got.startswith("ready in"):
+        die(f"run-sim: the xcui driver on {udid} is not serving:\n{got}")
+
+
+def xcuidrive_join():
+    for th in _drive_threads:
+        th.join()
+    _drive_threads.clear()
+    for udid in (*UDIDS, PAD_UDID):
+        xcuidrive_wait(udid)
+
+
+def xcuidrive_stop(udid):
+    """One device's driver told to quit, then killed if it lingers."""
+    proc = _drive_procs.pop(udid, None)
+    if proc is None:
+        return
+    if proc.poll() is None:
+        xcuidrive(udid, "quit", timeout=5)
+    deadline = time.monotonic() + 20
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+    run(["xcrun", "simctl", "terminate", udid, XCUIDRIVE_RUNNER_ID],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _drive_results.pop(udid, None)
+
+
+def xcuidrive_census():
+    """At the verdict: every pool device's driver is still serving. A
+    driver that died mid-run left its later legs without hands, and
+    their failures would read as backend bugs."""
+    dead = [udid for udid, proc in _drive_procs.items()
+            if proc.poll() is not None]
+    print(f"run-sim: xcui drivers at the verdict: {len(_drive_procs)} "
+          f"started, {len(dead)} dead", flush=True)
+    for udid in dead:
+        print(f"run-sim: the xcui driver on {udid} exited "
+              f"{_drive_procs[udid].returncode} before the verdict",
+              file=sys.stderr)
+    return not dead
 
 
 def xcuidrive(udid, verb, timeout=30):
     """One verb to the device's driver: (ok, body)."""
-    d = DRIVE_DIR / udid
+    d = _drive_dirs.get(udid)
+    if d is None:
+        return False, f"no driver was ever started on {udid}"
     resp = d / "response"
     resp.unlink(missing_ok=True)
     part = d / "request.part"
@@ -1832,22 +1739,13 @@ def xcuidrive_stop_all():
     into the next run."""
     if not _drive_procs:
         return
-    for udid, proc in _drive_procs.items():
-        if proc.poll() is None:
-            xcuidrive(udid, "quit", timeout=5)
-    deadline = time.monotonic() + 20
-    for udid, proc in _drive_procs.items():
-        while proc.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-        run(["xcrun", "simctl", "terminate", udid, XCUIDRIVE_RUNNER_ID],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    count = len(_drive_procs)
+    for udid in list(_drive_procs):
+        xcuidrive_stop(udid)
     left = subprocess.run(["pgrep", "-fl", "KayaDrive-Runner"],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           check=False, **TEXT).stdout.strip()
-    print(f"run-sim: xcui drivers stopped ({len(_drive_procs)}); runner "
+    print(f"run-sim: xcui drivers stopped ({count}); runner "
           f"processes left: {left or 'none'}", file=sys.stderr, flush=True)
     _drive_procs.clear()
 
@@ -1881,8 +1779,7 @@ status = 0
 
 
 def cleanup():
-    if XCUIDRIVE:
-        xcuidrive_stop_all()
+    xcuidrive_stop_all()
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
     shutil.rmtree(PREP_DIR, ignore_errors=True)
@@ -1924,6 +1821,7 @@ def prep_join():
         if rc != 0:
             die(f"run-sim: device preparation failed (picker-{udid} "
                 f"rc={rc})")
+    xcuidrive_join()
     if not clip_relay_check(UDIDS[0], PAD_UDID):
         sys.exit(1)
 
@@ -1950,6 +1848,33 @@ def _leg_worker(name, args, kwargs, pad):
                                                encoding="utf-8")
         (LEGS_DIR / f"{name}.verdict").write_text(
             f"{'PASS' if ok else 'FAIL'}\n", encoding="utf-8")
+
+
+def _proof_worker(name, app, bundle_id):
+    with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
+              errors="replace", buffering=1) as log:
+        slot = _claim_device()
+        t0 = time.monotonic()
+        try:
+            ok = xcuidrive_proof(UDIDS[slot], log, app, bundle_id)
+        finally:
+            _release_device(slot)
+        secs = int(time.monotonic() - t0)
+        (LEGS_DIR / f"{name}.secs").write_text(f"{secs}\n",
+                                               encoding="utf-8")
+        (LEGS_DIR / f"{name}.verdict").write_text(
+            f"{'PASS' if ok else 'FAIL'}\n", encoding="utf-8")
+
+
+def queue_xcuidrive_proof(app, bundle_id):
+    """The driver's app-widget proof rides the pool like a leg and
+    reports like one (admission is its dialog proof)."""
+    prep_join()
+    name = "xcuidrive-proof"
+    _leg_names.append(name)
+    th = threading.Thread(target=_proof_worker, args=(name, app, bundle_id))
+    th.start()
+    _leg_threads.append(th)
 
 
 def queue_leg(name, *args, pad=False, **kwargs):
@@ -2030,6 +1955,7 @@ def timing(phase):
 if os.environ.get("KAYA_RECORD"):
     os.environ["SIMCTL_CHILD_KAYA_RECORD"] = "1"
 boot_pool()
+xcuidrive_launch_all()
 # BEFORE ANY LEG, and on every run: can each phone export and reopen a
 # file through LocalStorage? BACKGROUNDED here and JOINED IN queue_leg
 # (prep_join): this needs only booted devices, while the build phase
@@ -2040,6 +1966,7 @@ for _udid in UDIDS:
         # while it finishes under the swift build it overlaps, and a
         # slow-flow re-probe (76) costs a minute — the 551s iOS lane of
         # 2026-09-01's fourth matrix carried two of them.
+        xcuidrive_wait(u)
         _prep_started = time.monotonic()
         _prep_results[u] = picker_prepare(u)
         print(f"run-sim: LocalStorage admission on {u} took "
@@ -2207,12 +2134,7 @@ if SUITE in ("swift", "all"):
                                      BUNDLES / f"{guest}swift-bin",
                                      ident))
         if guest == "milestone2":
-            if XCUIDRIVE:
-                # SERIAL and isolated: join admission, drain any queued
-                # leg, run the selfcheck alone, then resume queueing.
-                prep_join()
-                drain()
-                xcuidrive_selfcheck(app, "dev.kaya.milestone2swift")
+            queue_xcuidrive_proof(app, "dev.kaya.milestone2swift")
             queue_scene_leg("swift", guest, "swift", app,
                             "dev.kaya.milestone2swift", "1", "milestone2")
         elif guest == "canvas":
@@ -2237,9 +2159,6 @@ if SUITE in ("swift", "all"):
 # NARROWER, and nothing enforces this: check-steps' wired() keys on
 # scene x runner and never on language, so any future divergence has to
 # be written down in the module.
-if XCUIDRIVE and SUITE not in ("swift", "all"):
-    print("run-sim: KAYA_IOS_XCUIDRIVE selfcheck rides the swift suite's "
-          "milestone2 bundle; this suite runs without it", file=sys.stderr)
 if SUITE in ("go", "all"):
     cargo_ios(["build", "--locked", "--target", "aarch64-apple-ios-sim",
                "--lib"])
@@ -2412,7 +2331,7 @@ if SUITE == "all" and not os.environ.get("KAYA_RECORD"):
 if not rec_suite_stop():
     status = 1
 timing("stills-extraction")
-if not clip_holder_census():
+if not xcuidrive_census():
     status = 1
 # The one-line verdict (run-suites.sh's rule): suites accumulate
 # failures rather than abort, so a truncated log must still end with

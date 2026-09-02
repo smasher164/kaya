@@ -2819,41 +2819,45 @@ def clipboard_ios(text, path, mod):
         bad.append(f"{path}: no clipboard leg found (the scene must "
                    f"stay wired)")
 
-    # THE SEED HOLDER RETIRES ITSELF (docs/traps.md, 2026-09-01): a kill
-    # reaches its timeout wrapper alone and a group kill wedges the
-    # pasteboard daemon, so the writer polls a RELEASE FILE the runner
-    # touches, the runner waits for it to leave, and the verdict is
-    # gated on a census of this run's survivors. Measured both ways by
-    # hand: the census saw all four processes of a live holder, and
-    # half a second after the release file appeared it saw none.
+    # THE WRITER IS THE RESIDENT DRIVER (docs/xcuidrive-plan.md,
+    # 2026-09-02), which replaced the spawned holder processes, their
+    # release files and their census: the pasteboard daemon serves an
+    # item's DATA by fetching it from the setter, and a setter that has
+    # exited leaves a reader empty (docs/traps.md, 2026-09-01), so the
+    # writer must outlive every read — a process that never exits is the
+    # only shape with no window. Four things follow. The seed goes
+    # THROUGH the driver; the verdict is gated on a census of drivers
+    # still serving; a driver is told to QUIT before anything kills it,
+    # and never by process group (a group kill wedged the pasteboard
+    # daemon mid-serve); and the driver writes kaya's stage marker
+    # beside every seed, since the app's witness asks for it by name.
     seed = " ".join(py_function_body(text, "clip_seed", path, bad).split())
-    if '"hold", str(release)]' not in seed \
-            or "clip_release_holder(udid)" not in seed:
-        bad.append(f"{path}: clip_seed does not release the previous "
-                   f"holder and hand the new one its release file")
-    release = py_function_body(text, "clip_release_holder", path, bad)
-    if "release.touch()" not in release \
-            or "holder.wait(timeout=" not in release \
-            or "_holders_late.append" not in release:
-        bad.append(f"{path}: clip_release_holder does not touch the "
-                   f"release file, wait for the holder to leave and "
-                   f"count one that does not")
-    census = " ".join(py_function_body(text, "clip_holder_census", path,
+    if 'xcuidrive(udid, f"pb_write {kind} {payload}")' not in seed:
+        bad.append(f"{path}: clip_seed does not seed through the resident "
+                   f"driver (the held writer)")
+    census = " ".join(py_function_body(text, "xcuidrive_census", path,
                                        bad).split())
-    if 'f"hold {LEGS_DIR}/release-"' not in census \
-            or "return not late" not in census:
-        bad.append(f"{path}: clip_holder_census does not count this "
-                   f"run's holders by their release directory and "
-                   f"refuse on a late one")
-    if re.search(r"(?m)^if not clip_holder_census\(\):\n    status = 1\n",
+    if "proc.poll() is not None" not in census \
+            or "return not dead" not in census:
+        bad.append(f"{path}: xcuidrive_census does not count the drivers "
+                   f"that died before the verdict and refuse on one")
+    if re.search(r"(?m)^if not xcuidrive_census\(\):\n    status = 1\n",
                  text) is None:
-        bad.append(f"{path}: the seed-holder census does not gate the "
+        bad.append(f"{path}: the driver census does not gate the "
                    f"lane's verdict")
-    if re.search(r"holder\.kill\(\)|killpg\(", text):
-        bad.append(f"{path}: a seed holder is killed rather than "
-                   f"released — a kill reaches the timeout wrapper "
-                   f"alone, and a group kill wedges the pasteboard "
-                   f"daemon (docs/traps.md)")
+    stop = py_function_body(text, "xcuidrive_stop", path, bad)
+    flat_stop = " ".join(stop.split())
+    if 'xcuidrive(udid, "quit", timeout=5)' not in flat_stop \
+            or flat_stop.find('"quit"') > flat_stop.find("proc.kill()"):
+        bad.append(f"{path}: xcuidrive_stop kills a driver before telling "
+                   f"it to quit — the writer leaves mid-serve")
+    if re.search(r"killpg\(", text):
+        bad.append(f"{path}: a process group is killed — a group kill "
+                   f"wedged the pasteboard daemon (docs/traps.md)")
+    driver = read_rel("tools/ios/xcuidrive/KayaDrive.swift")
+    if 'item["dev.kaya/staged"] = "staged"' not in driver:
+        bad.append("tools/ios/xcuidrive/KayaDrive.swift: pb_write no longer "
+                   "sets kaya's stage marker beside the seed")
 
     # NOT ON THE PAD: kaya-sim-pad is a single LOCKLESS device, so legs
     # on it would share one pasteboard; the phone pool slot lock IS
@@ -2938,7 +2942,8 @@ def clipboard_ios(text, path, mod):
                        f"lane that dies in five seconds does not")
 
     # NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH: the
-    # ratified shape is a spawned on-device write (tools/ios/clipctl),
+    # ratified shape is an on-device write by another principal (the
+    # resident driver, tools/ios/xcuidrive; clipctl before 2026-09-02),
     # so the pasteboard tools may appear here only in comments
     # explaining exactly this (§8 finding 6).
     for n, raw in enumerate(text.splitlines(), 1):
@@ -3081,8 +3086,8 @@ def picker_ios(text, path, probe_text, probe_path):
     flat_export = " ".join(export.split())
     export_parts = [
         '"install", udid, EXPORT_PROBE_APP]',
-        '"savename", probe_name]',
-        '"savepress"]',
+        'f"savename {probe_name}"',
+        '"savepress", timeout=90)',
         'if result == "ok": return 0',
         '"FP -1005" in haystack',
         '"Index out of sync" in haystack',
@@ -3091,8 +3096,8 @@ def picker_ios(text, path, probe_text, probe_path):
         "return 75",
     ]
     if not all(part in flat_export for part in export_parts) \
-            or flat_export.find('"savename", probe_name]') \
-            > flat_export.find('"savepress"]'):
+            or flat_export.find('f"savename {probe_name}"') \
+            > flat_export.find('"savepress", timeout=90)'):
         bad.append(f"{path}: picker_export_probe no longer drives and "
                    f"classifies the real export result before "
                    f"admitting a device")
@@ -3344,7 +3349,7 @@ picker_selftest(doc, "exactly $udid",
 
 # The host must drive the name field before Save; picker disappearance
 # alone cannot prove the intended destination was materialized.
-doc, hits = sub_count(r'"savename", probe_name\],', '"savepress"],',
+doc, hits = sub_count(r'f"savename \{probe_name\}"', '"savepress"',
                       RUN_SIM)
 ios_applied(hits, "the export-name drive removal")
 picker_selftest(doc, "no longer drives and classifies",
@@ -3420,27 +3425,29 @@ ios_applied(hits, "the late-prepare insertion half")
 picker_selftest(doc, "not prepared once per phone pool UDID",
                 "a runner that admits LocalStorage too late")
 
-# The holder's retirement, three ways: the census no longer gating the
-# verdict, a release that never touches its file, and a seed whose
-# holder gets no release file at all.
+# The driver's discipline, four ways: the census no longer gating the
+# verdict, a seed that bypasses the driver, a stop that kills before it
+# asks, and a group kill anywhere.
 doc, hits = sub_count(
-    r"(?m)^if not clip_holder_census\(\):\n    status = 1\n", "", RUN_SIM)
-ios_applied(hits, "the holder-census removal")
+    r"(?m)^if not xcuidrive_census\(\):\n    status = 1\n", "", RUN_SIM)
+ios_applied(hits, "the driver-census removal")
 ios_selftest(doc, "does not gate the lane's verdict",
-             "a lane whose verdict ignores surviving seed holders")
-doc, hits = sub_count(r"(?m)^    release\.touch\(\)\n", "", RUN_SIM)
-ios_applied(hits, "the release-touch removal")
-ios_selftest(doc, "does not touch the release file",
-             "a release that leaves the holder holding")
-doc, hits = sub_count(r'"hold", str\(release\)\]', '"hold"]', RUN_SIM)
-ios_applied(hits, "the release-file argument removal")
-ios_selftest(doc, "hand the new one its release file",
-             "a seed whose holder can only expire")
-doc, hits = sub_count(r"(?m)^    release\.touch\(\)\n",
-                      "    holder.kill()\n", RUN_SIM)
-ios_applied(hits, "the kill-instead-of-release replacement")
-ios_selftest(doc, "killed rather than released",
-             "a holder killed the measured-wrong way")
+             "a lane whose verdict ignores dead drivers")
+doc, hits = sub_count(r'xcuidrive\(udid, f"pb_write \{kind\} \{payload\}"\)',
+                      'xcuidrive(udid, f"pb_types")', RUN_SIM)
+ios_applied(hits, "the seed-through-driver removal")
+ios_selftest(doc, "does not seed through the resident driver",
+             "a seed that bypasses the held writer")
+doc, hits = sub_count(r'(?m)^        xcuidrive\(udid, "quit", timeout=5\)\n',
+                      "", RUN_SIM)
+ios_applied(hits, "the quit-before-kill removal")
+ios_selftest(doc, "before telling it to quit",
+             "a driver killed without being asked")
+doc, hits = sub_count(r"(?m)^        proc\.kill\(\)\n",
+                      "        os.killpg(proc.pid, signal.SIGKILL)\n", RUN_SIM)
+ios_applied(hits, "the group-kill insertion")
+ios_selftest(doc, "process group is killed",
+             "a driver killed the measured-wrong way")
 
 # The accept direction is the real check itself, immediately below: a
 # rule that refused everything would fail here rather than pass
@@ -3756,20 +3763,20 @@ if out:
 # out of crates/kaya/src/spec.rs rather than hard-coding them.)
 def ios_picker():
     bad = []
-    # 1. THE ACCESSIBILITY TOKEN MUST BE RETIRED. Every response from
-    #    sendAccessibilityRequestAsync: goes back through
-    #    _resetBridgeTokensForResponse:. Drop it and NOTHING looks
-    #    wrong: the reads keep working and the next TAP is silently
-    #    ignored, so the call that proves the transport works is the
-    #    one that hides the bug. Measured 2026-07-31 (docs/traps.md).
-    simdrive = read_rel("tools/ios/simdrive/main.swift")
-    if "sendAccessibilityRequestAsync" in simdrive \
-            and "_resetBridgeTokensForResponse" not in simdrive:
-        bad.append("tools/ios/simdrive/main.swift reads accessibility "
-                   "but never retires the token "
-                   "(_resetBridgeTokensForResponse:) — the reads would "
-                   "keep working and every tap would be silently "
-                   "ignored")
+    # 1. THE DRIVER NAMES THE PICKER BY THE TWO IDENTIFIERS ITS CONTRACT
+    #    RESTS ON (tools/ios/xcuidrive, which replaced simdrive's private
+    #    accessibility bridge on 2026-09-02): the picker's navigation bar
+    #    and the save sheet's filename field, both measured on iOS 26.5
+    #    (docs/xcuidrive-plan.md §1). Lose either and every picker verb
+    #    answers "no picker" for a picker that is on screen — a failure
+    #    that reads as the guest never presenting it.
+    driver = read_rel("tools/ios/xcuidrive/KayaDrive.swift")
+    for ident in ("FullDocumentManagerViewControllerNavigationBar",
+                  "DOCPicker.filenameTextField", "File View"):
+        if ident not in driver:
+            bad.append(f"tools/ios/xcuidrive/KayaDrive.swift no longer "
+                       f"names {ident!r}, the identifier its picker "
+                       f"verbs find the sheet by")
     # 2. THE BUNDLE MUST PUBLISH ITS DOCUMENTS. Without both keys the
     #    document picker cannot see the app own files at all, and a
     #    picker aimed at them opens somewhere else with no error

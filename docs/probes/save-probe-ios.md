@@ -99,7 +99,7 @@ MEASURED (source): iOS's picker is a REMOTE view controller, publishes zero
 accessibility elements in-process, and iOS has no installable accessibility
 service. So the harness's eyes live on the HOST:
 
-- `tools/ios/simdrive/main.swift` — reads the picker's tree through
+- `tools/ios/simdrive/main.swift (gone)` — reads the picker's tree through
   CoreSimulator + AccessibilityPlatformTranslation, taps through
   SimulatorKit's HID client. CLI: `simdrive <udid> <app-pid> <verb>`,
   verbs `state|choose <name>|cancel|describe|navstrip|press <label>`

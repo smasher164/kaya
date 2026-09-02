@@ -140,14 +140,21 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   `dev.kaya.` bundle ids, uninstalls that finite list through `simctl`,
   then warms and probes LocalStorage before any leg. Do not keep an
   unrelated `dev.kaya.*` app on those UDIDs.
-  A resident XCUITest driver (tools/ios/xcuidrive) starts on each pool
-  device after its preparation and serves `attach`/`find`/`tap`/`drag`
-  over two files, simdrive's protocol; its `dev.kayalane.*` ids sit
-  outside the `dev.kaya.` sweep on purpose. A real tap on kaya's `step`
-  button proves it before the first leg (xcuidrive_proof). iOS admission
-  and the driver are load-sensitive: a busy host (a leftover emulator,
-  a parallel matrix) fails the LocalStorage probe with "no size" —
-  a slow host, not a verdict.
+  THE LANE'S HANDS AND EYES ARE ONE RESIDENT XCUITEST DRIVER PER DEVICE
+  (tools/ios/xcuidrive, docs/xcuidrive-plan.md), started at boot before
+  admission and stopped at exit with the process list shown empty. It
+  serves the picker verbs (`state`/`choose`/`cancel`/`savestate`/
+  `savename`/`savepress`/`savecancel`), the paste prompt and the device
+  pasteboard over two files, the protocol the interpreter already spoke
+  to simdrive; simdrive and clipctl are gone (2026-09-02). Its
+  `dev.kayalane.*` ids sit outside the `dev.kaya.` sweep on purpose.
+  Admission drives the export probe's sheet through it on every run, and
+  a real tap on kaya's `step` button (the `xcuidrive-proof` leg) proves
+  the app-widget route. By hand: `KAYA_DRIVE_DIR` names a directory,
+  write `<verb>` to `request` (part-then-rename), read `response`.
+  iOS admission is load-sensitive: a busy host fails the LocalStorage
+  probe with "no size" — a slow host, not a verdict; never erase the
+  pool to chase it.
 - Android: `tools/android/run-emulator.sh` (env via intent extras;
   scripts fold newlines to `;` for transport — comments are stripped
   first; verdicts read from logcat; on FAIL the runner dumps

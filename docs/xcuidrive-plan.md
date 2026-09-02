@@ -2,12 +2,12 @@
 
 Asked by the maintainer 2026-09-02 ("consider if XCUITest can end up
 subsuming simdrive"). This is the measured answer and the conversion
-plan. Nothing here is built beyond the driver and the probes; the
-conversion is a slice of its own, sequenced in §5.
+plan. The conversion is BUILT (2026-09-02, the same day): §5 records each
+step's state; §1 is what was measured before it.
 
 ## §0 — What the lane has today, and why it is two tools
 
-- **tools/ios/simdrive** (Swift, host-side, one process per verb): reads
+- **tools/ios/simdrive (gone)** (Swift, host-side, one process per verb): reads
   the simulator's accessibility tree and delivers HID taps through
   SimulatorKit's PRIVATE frameworks (`SimDeviceLegacyHIDClient`, Indigo
   messages hand-packed from idb's header). It exists because the
@@ -21,7 +21,7 @@ conversion is a slice of its own, sequenced in §5.
   and reads it back because a set that routes nowhere is silent; a
   private class "may have moved again in this Xcode"; and no pan reaches
   the content at all (the 2026-08-30 chore).
-- **tools/ios/clipctl** (Swift, run INSIDE the simulator by `simctl
+- **tools/ios/clipctl (gone)** (Swift, run INSIDE the simulator by `simctl
   spawn`): the foreign clipboard principal — writes seeds, reads the
   board, and is HELD ALIVE after a write because the pasteboard daemon
   fetches item data from the setter lazily (a writer that exits leaves a
@@ -65,10 +65,13 @@ existence check or `find` 20–50ms; a `tap` ~1.1s and a `drag` ~1.5s
 ~1.5s; simdrive's is ~100ms when a tap lands and ~18–48s when it spends
 its six rounds.
 
-NOT measured yet: the OPEN picker (`state`/`choose`/`cancel` — rows as
-cells, `Open`/`Done` in the strip; the same mechanism as Save, but the
-filedialog legs must show it), the `type` verb's iOS route for kaya's
-own fields, and those latencies under a five-lane matrix.
+Measured since, by the conversion itself: the OPEN picker's `state`/
+`choose`/`cancel` (the filedialog legs, all four suites, green; the rows
+and the cancel are in docs/traps.md), and the lane under a five-lane
+matrix — 365s for 114 legs (matrix 25) against 416s and 431s for 113
+with simdrive and clipctl (matrices 24 and 23), admission 11–14s a
+phone and each cancel 3–6s. Still unmeasured: the `type` verb's iOS
+route for kaya's own fields.
 
 ## §2 — The design
 
@@ -125,19 +128,28 @@ processes and their census.
 
 ## §5 — Conversion order, each step validated by its legs then a matrix
 
-0. Commit the opt-in driver as it stands (the checkpoint this plan
-   builds on).
-1. Resident from boot, one per device, started BEFORE admission; the
-   export probe's `savename`/`savepress` through the driver. Admission
-   is then the first consumer and the coexistence flag goes.
-2. The save legs: `savestate`/`savename`/`savepress`/`savecancel`
-   routed by `simdrive_watch` to the driver.
-3. The filedialog legs: `state`/`choose`/`cancel` — the open picker's
-   rows and confirm, measured first on one filedialog leg.
-4. The clipboard: `clip_press` → `sb_tap`; then `clip_seed`/`clip_read`/
-   `types` → `pb_write`/`pb_read`; retire the holder machinery and its
-   census.
-5. Delete simdrive and clipctl, their build steps and `built_tool`
-   entries; sweep the docs (`KEY:` on the ledger entry) and the gates'
-   censuses; the `swipe` verb goes with them.
-6. The drag arm (docs/dnd-plan.md §5) uses `drag` on the one driver.
+0. DONE 657d5ae: the opt-in driver, the checkpoint this plan built on.
+1. DONE 2026-09-02: resident from boot, one per device (the pad too),
+   started before admission and waited on by each device's
+   preparation; the export probe's sheet driven by `attach`/`savename`/
+   `savepress`; the opt-in flag gone.
+2. DONE: the save legs' four verbs routed by `simdrive_watch` (the name
+   kept, since the guest's protocol is unchanged) to the driver.
+3. DONE: `state`/`choose`/`cancel`. Measured on the way (docs/traps.md):
+   a row is a Cell whose identifier splits the extension with a comma;
+   kaya's picker at depth offers no Cancel and the `Other` labelled
+   Cancel under More opens a MENU that takes the whole picker out of
+   the snapshot, so cancel walks back to a Cancel as simdrive did and
+   "gone" is three consecutive absent reads.
+4. DONE: `clip_press` → the driver's `press Allow Paste` on SpringBoard;
+   `clip_seed`/`clip_read`/`types` → `pb_write`/`pb_read`/`pb_types`;
+   the holder processes, release files and census retired — the
+   driver is the held writer; check-steps' clause now holds the
+   driver's discipline (seed through the driver, census gates the
+   verdict, quit before kill, no group kill, the stage marker).
+5. DONE: tools/ios/simdrive (gone) and tools/ios/clipctl (gone)
+   deleted with their build steps; swift-typecheck compiles the driver
+   against the platform's XCTest instead; the docs swept.
+6. NEXT: the drag arm (docs/dnd-plan.md §5) uses `drag` on the one
+   driver, and a device reseed restarts its driver (picker_reseed) —
+   built, not yet exercised by a reseed.

@@ -110,7 +110,7 @@ def tree_ids(root):
 def append(path, record):
     """One record, one line, ONE write: O_APPEND plus a single write keeps a
     line whole against the concurrent leg pools both runners use (the
-    simdrive log's rule, tools/ios/simdrive/main.swift)."""
+    iOS watcher log's rule, tools/ios/run-sim.py's simdrive_watch)."""
     line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
     data = line.encode("utf-8")
     fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)

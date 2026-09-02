@@ -285,7 +285,7 @@ arm had already been written. These are the four unknowns:
 2. **iOS and the paste prompt.** Does content seeded by
    `xcrun simctl pbcopy` count as "another app" and trigger the iOS 16
    prompt? If it does, the iOS paste leg needs the prompt driven, which
-   means tools/ios/simdrive again.
+   means tools/ios/simdrive (gone) again.
 3. **Android reads.** There is no clean shell command to read the
    clipboard, which is the same shape as the DocumentsUI problem. The
    accessibility service already built for that lane may be the answer.
@@ -402,7 +402,7 @@ THE PLAN'S TWO ASSUMPTIONS BOTH HELD:
 
 CONSEQUENCES FOR THE LEGS: a copy-then-read scene needs no prompt
 driving at all. A scene that proves kaya accepts content from ANOTHER
-app must drive the alert, which means tools/ios/simdrive again, exactly
+app must drive the alert, which means tools/ios/simdrive (gone) again, exactly
 as the document picker did. Its shape is known: a two-button alert
 whose second button is "Allow Paste".
 
@@ -1496,7 +1496,7 @@ answering "empty". Two defects stacked:
   type (both prompt-free).
 
 The durable fix removes the transit entirely: `clipboard_seed` is a
-spawned WRITER on the device (tools/ios/clipctl `write`), which is
+spawned WRITER on the device (tools/ios/clipctl (gone) `write`), which is
 synchronous and visible to other processes before the spawn exits
 (measured, 246ms), keeps every leg on its own board — and keeps the
 ONE macOS pasteboard out of a lane that runs beside validate-mac's

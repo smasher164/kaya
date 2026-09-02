@@ -337,7 +337,7 @@ ceiling with the admission timed.
 ## The clipboard seed holder retired
 
 The 192-process leak (and the 24 per lane run since) ends in
-tools/ios/clipctl: the hold polls a release file the runner names and
+tools/ios/clipctl (gone): the hold polls a release file the runner names and
 exits `H released` when it appears, or `H expired` after 600s. By hand
 on a booted phone: the census pattern (`hold <run dir>/release-`) saw
 the four processes of a live holder; the file was touched; half a
