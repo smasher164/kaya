@@ -345,6 +345,8 @@ suite then ran clipboard-go green in 77s with `clipboard seed holders
 outliving this run: 0 (late at release: 0)` at its verdict and zero
 holders on the host afterwards. The verdict is gated on that census.
 Under the eighth matrix (ALL PASS, five lanes and 52 gates, 1,511 legs
-in 647s): the iOS lane's verdict line read "" across its
-five clipboard legs, and the host carried zero holders afterwards.
+in 647s): the iOS lane's verdict is gated on the census, so its PASS
+over five clipboard legs is zero survivors and zero late by
+construction, and the host census afterwards read zero holders — the
+first matrix since the leak was found to leave none behind.
 
