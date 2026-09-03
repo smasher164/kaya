@@ -24,7 +24,7 @@ measured/documented/assumed): docs/probes/mobilepkg-contract.md,
   six languages. Each mobile platform HAD already hosted a second guest
   language — evidence that the rest is tooling, not architecture.
   THIS MILESTONE CLOSED IT FOR GO: both phone lanes carry Go legs now
-  (tools/ios/run-sim.py, and android/milestone2go on the emulator), so
+  (tools/ios/run-sim.py, and android/gohost on the emulator), so
   Go is the second language to run on all five.
 - **Threading is not the blocker for any candidate.** The guest has
   never run on the UI thread on any platform: it runs on its own

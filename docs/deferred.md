@@ -2720,7 +2720,7 @@ reach.
   example needs its own build+bundle+queue_leg block; Android has one
   apk PER GUEST TIER, each a scene selector keyed on KAYA_SELFTEST —
   milestone2 (the Rust guest: a new scene needs a `mod` + match arm
-  in guests/rust/milestone2_android.rs) and milestone2kt (the JVM
+  in guests/rust/rusthost.rs) and javahost (the JVM
   guest: its MainActivity needs the matching arm) — plus a run_apk
   leg per tier; on Windows the name in deploy-win's SCENES derives
   the cross-build, the scp of exe/python/go sources, and the taskkill
@@ -3151,7 +3151,7 @@ reach.
       wm_on_destroy_called performDestroy
       E kaya log_panics: 'kaya: widget id … already exists' scene.rs:1419
       wm_on_create_called  performCreate            <- mount #2
-      ActivityManager: Process dev.kaya.milestone2 has died
+      ActivityManager: Process dev.kaya.rusthost has died
 
   The buffers this came out of were
   `target/validate-failures/android-canvasdark-compose-buffers.log (gone)`
@@ -6079,7 +6079,7 @@ Same four byte shapes, same two positions, run for real:
   image shifted every later cell up a slot and recorded every later
   cell's origin against its neighbour. FIXED with the present-and-empty
   Box. NOT RUN AS A RUNTIME CELL: the APK's scene selector lives in
-  guests/rust/milestone2_android.rs, which a concurrent agent owned for
+  guests/rust/rusthost.rs, which a concurrent agent owned for
   the whole of this session, so no scratch scene could be added there.
   BitmapFactory's leniency on the two half-valid shapes is therefore
   still unmeasured — the one open thread this entry leaves, and it is a
@@ -6965,7 +6965,7 @@ failure in any verdict — so the save panels really closed.
 SIXTH AND SEVENTH SIGHTINGS THE SAME DAY (the ghost now fires most
 contended matrices — today's speed work raised peak contention, and
 peak contention raises it), and the seventh carried both instruments:
-KAYA_ACTIVITY_RESULT (an onActivityResult override in milestone2kt's
+KAYA_ACTIVITY_RESULT (an onActivityResult override in javahost's
 shell, logging every result the ACTIVITY receives) beside the
 registry callbacks. Dialogs 1 and 2 logged both lines 1ms apart;
 dialog 3 logged NEITHER. kaya's registry, callbacks and threading are
@@ -9221,7 +9221,7 @@ WHY IT SURVIVED EVERY LANE: nothing in the tree ever built a big record.
 The longest line in any shared scene is 359 characters, so no scene, no
 example and no doc ever promised — or exercised — long text through Java.
 The user-visible face was real all the same:
-guests/java/dev/kaya/milestone2kt/FileDialog.java reads a picked file
+guests/java/dev/kaya/guests/FileDialog.java reads a picked file
 whole and writes it into a signal, so a Java guest opening any file over
 ~4 KB threw on the app thread. The scene picks a small fixture, so it
 never did.

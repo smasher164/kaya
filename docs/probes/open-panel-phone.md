@@ -11,7 +11,7 @@ its bytes:
 Source: `24aa5ebf-.../subagents/workflows/wf_cebfca56-011/agent-a5c32ffcc28163df6.jsonl`,
 2026-08-10T06:15:50Z, the save-probe Android arm. It is a `uiautomator`
 accessibility dump of the DocumentsUI **open** panel, taken 3s after launching
-`dev.kaya.milestone2` with the `save` scene; `save-panel-phone.xml` is the same
+`dev.kaya.rusthost` with the `save` scene; `save-panel-phone.xml` is the same
 dump 15s later, after the panel had switched to save.
 
 ## The measurement it was taken for (from the transcript, verbatim output)

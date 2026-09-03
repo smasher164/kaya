@@ -261,7 +261,7 @@ run "$proto" typeface-rust env KAYA_SELFTEST=typeface \
 
 ```
 check-stubs: crates/kaya/src/protocol.rs:400 declares a depth stub on "typeface", but that file is not one of the backends this gate reads
-check-stubs: android/milestone2kt/.../MainActivity.kt:96 declares a depth stub on "typeface", …
+check-stubs: android/javahost/.../MainActivity.kt:96 declares a depth stub on "typeface", …
 ```
 
 Both hits are COMMENTS — protocol.rs's `family_for` doc ("the two
@@ -293,7 +293,7 @@ reading rather than a forecast — snapshot taken at the end of this arm:
 | `guests/rust/typeface.rs` | `(Platform::Linux, "DejaVu Serif")` | DONE — this arm added it |
 | `guests/python/typeface.py` | `kaya.Platform.LINUX: "DejaVu Serif"` | already there |
 | `guests/haskell/typeface.hs` | `TFor PlatformLinux "DejaVu Serif"` | already there |
-| `guests/java/dev/kaya/milestone2kt/Typeface.java` | `KayaApp.Platform.LINUX, "DejaVu Serif"` | already there |
+| `guests/java/dev/kaya/guests/Typeface.java` | `KayaApp.Platform.LINUX, "DejaVu Serif"` | already there |
 | `guests/go/typeface/typeface.go` | none — `tx.BrandTypeface("Georgia")` | **NEEDS THE ROW** |
 | `guests/swift/typeface.swift` | none — `tx.brandTypeface("Georgia")` | **NEEDS THE ROW** |
 | `guests/csharp/TypefaceScene.cs` | none — `tx.BrandTypeface("Georgia")` | **NEEDS THE ROW** |

@@ -363,7 +363,7 @@ does carry. The undo-specific claims were measured directly instead
 | `tools/check-steps.py` | 1 | **ZERO android findings.** One finding, `tools/linux/run-suites.sh` — the GTK sibling's half of the same IFF |
 | `tools/check-compose.py` | 0 | the Kotlin COMPILES — and proven non-vacuous twice (§4.2) |
 | `tools/check-detekt.py` | 0 | no dead Kotlin (the reason `kayaRouteCode` was deleted rather than parked) |
-| `tools/check-targets.py` | 0 | native / ios / android / windows ALL OK, both feature configs — covers the guest arm added to `milestone2_android.rs` |
+| `tools/check-targets.py` | 0 | native / ios / android / windows ALL OK, both feature configs — covers the guest arm added to `rusthost.rs` |
 | `tools/check-universal-props.py` | 0 | the a11y modifier still reaches both text kinds through the new composable |
 | `tools/check-shell.py` | 0 | — |
 | `tools/check-keyed.py` | 0 | OK (18 gates keyed) |
@@ -447,7 +447,7 @@ file, `kayaWriteText` and the KayaTextField observer.
    longer see a native undo that moved the widget and not yet the mirror.
    Behavior change, deliberate, and every text leg passes on it.
 7. **One file outside KayaCompose.kt was touched:
-   `guests/rust/milestone2_android.rs`, +10 lines** — `mod undo;` and
+   `guests/rust/rusthost.rs`, +10 lines** — `mod undo;` and
    `Ok("undo") => undo::app(ctx)`. I read this as the other half of "run-
    emulator leg wiring": that file's own comment records that a leg wired
    without its arm here "cost a debugging round", because the runner then
@@ -519,7 +519,7 @@ file, `kayaWriteText` and the KayaTextField observer.
 - **Rebuilt in place, not created** — the lane's own artifacts,
   rebuilt every run, not mine to delete:
   ```
-  android/milestone2/build
+  android/rusthost/build
   android/kaya/build
   target/aarch64-linux-android
   ```
@@ -537,7 +537,7 @@ file, `kayaWriteText` and the KayaTextField observer.
 
 - `/Users/akhilindurti/Projects/kaya/android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt`
   — the arm (+749 / −68).
-- `/Users/akhilindurti/Projects/kaya/guests/rust/milestone2_android.rs`
+- `/Users/akhilindurti/Projects/kaya/guests/rust/rusthost.rs`
   — the undo scene's arm in the one-APK selector (+10), see deviation 7.
 - `/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/undo-compose-jni-handoff.md (gone)`
   — the five JNI entries, the five one-line bodies, and the two leg

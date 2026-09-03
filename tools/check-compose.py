@@ -30,13 +30,13 @@ STEPS = [
     ([":kaya:testDebugUnitTest"],
      "check-compose: FAIL (the kaya module's host-JVM tests fail — the "
      "scheme wall is KayaColorSchemesTest)"),
-    ([":milestone2:compileDebugKotlin", ":milestone2kt:compileDebugKotlin",
-      ":milestone2go:compileDebugKotlin"],
+    ([":rusthost:compileDebugKotlin", ":javahost:compileDebugKotlin",
+      ":gohost:compileDebugKotlin"],
      "check-compose: FAIL (an Android app module does not compile)"),
-    # :milestone2go is absent here and only here: its guest is Go, in a
+    # :gohost is absent here and only here: its guest is Go, in a
     # .so, and it carries no Java of its own for javac to see.
-    ([":milestone2:compileDebugJavaWithJavac",
-      ":milestone2kt:compileDebugJavaWithJavac"],
+    ([":rusthost:compileDebugJavaWithJavac",
+      ":javahost:compileDebugJavaWithJavac"],
      "check-compose: FAIL (a Java guest does not compile for Android)"),
 ]
 

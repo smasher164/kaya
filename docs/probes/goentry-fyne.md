@@ -430,7 +430,7 @@ Confirmed:
 - Android backend is Jetpack Compose in Kotlin, hosted by a Kotlin
   `ComponentActivity`:
   `/Users/akhilindurti/Projects/kaya/android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt`,
-  `/Users/akhilindurti/Projects/kaya/android/milestone2go/src/main/kotlin/dev/kaya/milestone2go/MainActivity.kt:24`
+  `/Users/akhilindurti/Projects/kaya/android/gohost/src/main/kotlin/dev/kaya/gohost/MainActivity.kt:24`
   (`class MainActivity : ComponentActivity()`).
 - The guest never runs on the UI thread on any platform:
   `/Users/akhilindurti/Projects/kaya/DESIGN.md:2332-2334`.

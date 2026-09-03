@@ -457,6 +457,6 @@ path = "../../guests/rust/sizepolicy.rs"
 # Activity is the way in), so the Android packaging of milestone 0 is a
 # cdylib exporting the JNI entry rather than a bin.
 [[example]]
-name = "milestone2_android"
-path = "../../guests/rust/milestone2_android.rs"
+name = "rusthost"
+path = "../../guests/rust/rusthost.rs"
 crate-type = ["cdylib"]

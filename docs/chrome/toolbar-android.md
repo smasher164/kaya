@@ -16,8 +16,8 @@ All **[MEASURED]** from the tree and this machine's gradle cache.
 
 | thing | pinned value | where |
 |---|---|---|
-| compileSdk | **35** | `android/kaya/build.gradle.kts:9`, `android/milestone2/build.gradle.kts:9` |
-| targetSdk (the apps) | **35** | `android/milestone2/build.gradle.kts:15` |
+| compileSdk | **35** | `android/kaya/build.gradle.kts:9`, `android/rusthost/build.gradle.kts:9` |
+| targetSdk (the apps) | **35** | `android/rusthost/build.gradle.kts:15` |
 | minSdk | **26** | `android/kaya/build.gradle.kts:19` |
 | Compose BOM | **2024.10.01** | `android/kaya/build.gradle.kts:53` |
 | → material3 resolved | **1.3.1** | `~/.gradle/caches/modules-2/files-2.1/androidx.compose.material3/material3-android/1.3.1/` |
@@ -320,7 +320,7 @@ what kaya draws today.
 
 ### The edge-to-edge interplay, on the exact level the tree pins
 
-`targetSdk = 35` **[MEASURED: android/milestone2/build.gradle.kts:15]**
+`targetSdk = 35` **[MEASURED: android/rusthost/build.gradle.kts:15]**
 running on `system-images;android-35` **[MEASURED:
 tools/android/run-emulator.py:114]** is precisely the enforcement
 combination: *"Apps are edge-to-edge by default on devices running

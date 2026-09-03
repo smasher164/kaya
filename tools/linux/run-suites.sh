@@ -95,8 +95,7 @@ build_java() {
     javac -encoding UTF-8 -d /tmp/java-guests \
         bindings/java-desktop/dev/kaya/KayaRing.java \
         bindings/java/dev/kaya/*.java \
-        guests/java/dev/kaya/milestone2kt/*.java \
-        guests/java-desktop/dev/kaya/milestone2kt/Main.java
+        guests/java/dev/kaya/guests/*.java
 }
     # dotnet writes obj/bin next to the csproj; build in a scratch copy so
     # the host's in-tree dotnet artifacts (different RID) are untouched.
@@ -708,7 +707,7 @@ for proto in x11 wayland; do
     run "$proto" ocaml env KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/milestone2.exe
     run "$proto" haskell "$(hs_bin milestone2)"
     run "$proto" java env KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The entry scene: the inner env overrides run()'s KAYA_SELFTEST=1.
     run "$proto" entry-rust env KAYA_SELFTEST=entry "$CARGO_TARGET_DIR/debug/examples/entry"
     run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/c-guests/entry
@@ -722,7 +721,7 @@ for proto in x11 wayland; do
     run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/entry.exe
     run "$proto" entry-haskell env KAYA_SELFTEST=entry "$(hs_bin entry)"
     run "$proto" entry-java env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" gallery-rust env KAYA_SELFTEST=gallery "$CARGO_TARGET_DIR/debug/examples/gallery"
     run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/c-guests/gallery
     run "$proto" gallery-python env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
@@ -735,7 +734,7 @@ for proto in x11 wayland; do
     run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/gallery.exe
     run "$proto" gallery-haskell env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
     run "$proto" gallery-java env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" todos-rust env KAYA_SELFTEST=todos "$CARGO_TARGET_DIR/debug/examples/todos"
     run "$proto" todos-c env KAYA_SELFTEST=todos /tmp/c-guests/todos
     run "$proto" todos-python env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
@@ -748,7 +747,7 @@ for proto in x11 wayland; do
     run "$proto" todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/todos.exe
     run "$proto" todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
     run "$proto" todos-java env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" reorder-rust env KAYA_SELFTEST=reorder "$CARGO_TARGET_DIR/debug/examples/reorder"
     run "$proto" reorder-c env KAYA_SELFTEST=reorder /tmp/c-guests/reorder
     run "$proto" reorder-python env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
@@ -761,7 +760,7 @@ for proto in x11 wayland; do
     run "$proto" reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/reorder.exe
     run "$proto" reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
     run "$proto" reorder-java env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" feed-rust env KAYA_SELFTEST=feed "$CARGO_TARGET_DIR/debug/examples/feed"
     run "$proto" feed-c env KAYA_SELFTEST=feed /tmp/c-guests/feed
     run "$proto" feed-python env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
@@ -774,7 +773,7 @@ for proto in x11 wayland; do
     run "$proto" feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/feed.exe
     run "$proto" feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
     run "$proto" feed-java env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The grow scene, every sugar-tier language. The C floor stays out on
     # purpose — its scenes document the explicit wire (see the ledger).
     run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
@@ -788,7 +787,7 @@ for proto in x11 wayland; do
     run "$proto" grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grow.exe
     run "$proto" grow-haskell env KAYA_SELFTEST=grow "$(hs_bin grow)"
     run "$proto" grow-java env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" align-rust env KAYA_SELFTEST=align "$CARGO_TARGET_DIR/debug/examples/align"
     run "$proto" align-python env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
         python3 guests/python/align.py
@@ -800,7 +799,7 @@ for proto in x11 wayland; do
     run "$proto" align-ocaml env KAYA_SELFTEST=align KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/align.exe
     run "$proto" align-haskell env KAYA_SELFTEST=align "$(hs_bin align)"
     run "$proto" align-java env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The window scene: the advisory 640x400 is honored on X11; a Wayland
     # compositor keeps the last word, which is the request semantics.
     run "$proto" window-rust env KAYA_SELFTEST=window "$CARGO_TARGET_DIR/debug/examples/window"
@@ -814,7 +813,7 @@ for proto in x11 wayland; do
     run "$proto" window-ocaml env KAYA_SELFTEST=window KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/window.exe
     run "$proto" window-haskell env KAYA_SELFTEST=window "$(hs_bin window)"
     run "$proto" window-java env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The panels scene: the auxiliary-window grammar (rust depth).
     run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
     run "$proto" panels-python env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
@@ -827,7 +826,7 @@ for proto in x11 wayland; do
     run "$proto" panels-ocaml env KAYA_SELFTEST=panels KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/panels.exe
     run "$proto" panels-haskell env KAYA_SELFTEST=panels "$(hs_bin panels)"
     run "$proto" panels-java env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The dirty scene (docs/dirty-plan.md). GTK4 has no window-level edited
     # affordance at any layer, so kaya draws the living GNOME convention — a
     # bullet LABEL beside the header-bar title — with the window's title
@@ -855,7 +854,7 @@ for proto in x11 wayland; do
     run "$proto" dirty-haskell env KAYA_SELFTEST=dirty \
         tools/linux/a11y-leg.sh "$(hs_bin dirty)"
     run "$proto" dirty-java env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The C floor's dirty guest, which does not wait on the sugar sweep:
     # the floor takes no sugar at all.
     run "$proto" dirty-c env KAYA_SELFTEST=dirty \
@@ -880,7 +879,7 @@ for proto in x11 wayland; do
     run "$proto" a11yrows-haskell env KAYA_SELFTEST=a11yrows \
         tools/linux/a11y-leg.sh "$(hs_bin a11yrows)"
     run "$proto" a11yrows-java env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" a11yrows-c env KAYA_SELFTEST=a11yrows \
         tools/linux/a11y-leg.sh /tmp/c-guests/a11yrows
     # THE STYLING SCENE (docs/styling-plan.md slice 1). On this backend the
@@ -902,7 +901,7 @@ for proto in x11 wayland; do
     run "$proto" styling-haskell env KAYA_SELFTEST=styling \
         tools/linux/a11y-leg.sh "$(hs_bin styling)"
     run "$proto" styling-java env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" styling-c env KAYA_SELFTEST=styling \
         tools/linux/a11y-leg.sh /tmp/c-guests/styling
     # THE TYPEFACE SCENE (docs/styling-plan.md slice 2b): the brand
@@ -932,7 +931,7 @@ for proto in x11 wayland; do
     run "$proto" typeface-haskell env KAYA_SELFTEST=typeface \
         tools/linux/a11y-leg.sh "$(hs_bin typeface)"
     run "$proto" typeface-java env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # AND NO C LEG, unlike styling's roster one block up: the floor has no
     # typeface guest, so there is no binary to run. check-steps' C-floor
     # sweep reads the BINARY PATH out of this file, COMMENTS INCLUDED, so
@@ -952,7 +951,7 @@ for proto in x11 wayland; do
     run "$proto" assets-haskell env KAYA_SELFTEST=assets \
         tools/linux/a11y-leg.sh "$(hs_bin assets)"
     run "$proto" assets-java env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # AND THE C FLOOR: guests/c/assets.c writes kaya_asset_open,
     # kaya_asset_blob and kaya_asset_why_not longhand, and this is one of
     # the two lanes that run it.
@@ -985,7 +984,7 @@ for proto in x11 wayland; do
     run "$proto" toolbar-haskell env KAYA_SELFTEST=toolbar \
         tools/linux/a11y-leg.sh "$(hs_bin toolbar)"
     run "$proto" toolbar-java env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE IDENTITY SCENE (docs/app-identity-plan.md). The read is of the X
     # SERVER'S OWN COPY — `xprop -id <xid> _NET_WM_ICON`, decoded to the
     # four quadrant centres — because there is no read-back for an icon
@@ -1047,7 +1046,7 @@ for proto in x11 wayland; do
                 tools/linux/a11y-leg.sh "$(hs_bin identity)"
             run "$proto" identity-java env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
                 tools/linux/identity-class-leg.py \
-                tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+                tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
             ;;
         wayland)
         # The class reader is OUTERMOST, and the nesting is load-bearing: the
@@ -1074,7 +1073,7 @@ for proto in x11 wayland; do
     run "$proto" stall-ocaml env KAYA_SELFTEST=stall KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/stall.exe
     run "$proto" stall-haskell env KAYA_SELFTEST=stall "$(hs_bin stall)"
     run "$proto" stall-java env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" confirm-rust env KAYA_SELFTEST=confirm "$CARGO_TARGET_DIR/debug/examples/confirm"
     run "$proto" confirm-python env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         python3 guests/python/confirm.py
@@ -1086,7 +1085,7 @@ for proto in x11 wayland; do
     run "$proto" confirm-ocaml env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/confirm.exe
     run "$proto" confirm-haskell env KAYA_SELFTEST=confirm "$(hs_bin confirm)"
     run "$proto" confirm-java env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" nav-rust env KAYA_SELFTEST=nav "$CARGO_TARGET_DIR/debug/examples/nav"
     # The background scene. DEPTH TIER — rust only until the sweep. Its
     # worker parks until a click releases it, so a binding that ran
@@ -1117,7 +1116,7 @@ for proto in x11 wayland; do
     run "$proto" filedialog-haskell env KAYA_SELFTEST=filedialog \
         tools/linux/a11y-leg.sh "$(hs_bin filedialog)"
     run "$proto" filedialog-java env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The save scene (docs/save-plan.md D5). Through a11y-leg.sh: GTK's
     # save panel publishes no accessible ids at all, so EVERY observation
     # here is a bus read — the directory is the path bar's pressed toggle
@@ -1145,7 +1144,7 @@ for proto in x11 wayland; do
     run "$proto" background-haskell env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh "$(hs_bin background)"
     run "$proto" background-java env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The C floor, where queue-plus-wake is WRITTEN OUT rather than hidden
     # in a binding — and the only tier that spells each queued item's
     # DESTINATION, since it queues data where the others queue closures.
@@ -1169,7 +1168,7 @@ for proto in x11 wayland; do
     run "$proto" split-haskell env KAYA_SELFTEST=split \
         tools/linux/a11y-leg.sh "$(hs_bin split)"
     run "$proto" split-java env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The listdetail scene: THE SAME GUESTS, asserting the bare invariant
     # at whatever width this lane's window manager hands them — a scene
     # selects a SCRIPT, never an app. Through a11y-leg.sh: its one
@@ -1192,7 +1191,7 @@ for proto in x11 wayland; do
     run "$proto" panes-haskell env KAYA_SELFTEST=panes \
         tools/linux/a11y-leg.sh "$(hs_bin panes)"
     run "$proto" panes-java env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" listdetail-rust env KAYA_SELFTEST=listdetail \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" listdetail-python env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
@@ -1208,7 +1207,7 @@ for proto in x11 wayland; do
     run "$proto" listdetail-haskell env KAYA_SELFTEST=listdetail \
         tools/linux/a11y-leg.sh "$(hs_bin split)"
     run "$proto" listdetail-java env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
     run "$proto" nav-js env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
@@ -1219,7 +1218,7 @@ for proto in x11 wayland; do
     run "$proto" nav-ocaml env KAYA_SELFTEST=nav KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/nav.exe
     run "$proto" nav-haskell env KAYA_SELFTEST=nav "$(hs_bin nav)"
     run "$proto" nav-java env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The table scene: column headers + click-to-sort on the For
     # vocabulary (docs/tables-plan.md), every language this lane runs.
     # The C floor stays out with the other sugar-tier scenes — its
@@ -1235,7 +1234,7 @@ for proto in x11 wayland; do
     run "$proto" table-ocaml env KAYA_SELFTEST=table KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/table.exe
     run "$proto" table-haskell env KAYA_SELFTEST=table "$(hs_bin table)"
     run "$proto" table-java env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # ROW WINDOWING'S CONFORMANCE SCENE (docs/virtualization-plan.md
     # §6.3): 400 uniform rows behind a band this tier narrows, scrolled
     # by row identity. RUST ALONE, and compiled, because it is the one
@@ -1258,7 +1257,7 @@ for proto in x11 wayland; do
         _build-linux/default/guests/ocaml/adaptive.exe
     run "$proto" adaptive-haskell env KAYA_SELFTEST=adaptive "$(hs_bin adaptive)"
     run "$proto" adaptive-java env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
     # this backend blits a GdkMemoryTexture. The hash is the SAME frozen
     # string every other lane asserts — the raster comes out of this
@@ -1298,7 +1297,7 @@ for proto in x11 wayland; do
     run "$proto" scroll-ocaml env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/scroll.exe
     run "$proto" scroll-haskell env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
     run "$proto" scroll-java env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The a11y scene, read off the AT-SPI bus as a real assistive client
     # reads it — the only honest route on GTK, which has no getter for
     # accessible properties. The bus is per-leg (a11y-leg.sh).
@@ -1319,7 +1318,7 @@ for proto in x11 wayland; do
     run "$proto" a11y-haskell env KAYA_SELFTEST=a11y \
         tools/linux/a11y-leg.sh "$(hs_bin a11y)"
     run "$proto" a11y-java env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" progress-rust env KAYA_SELFTEST=progress "$CARGO_TARGET_DIR/debug/examples/progress"
     run "$proto" progress-python env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
         python3 guests/python/progress.py
@@ -1331,7 +1330,7 @@ for proto in x11 wayland; do
     run "$proto" progress-ocaml env KAYA_SELFTEST=progress KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/progress.exe
     run "$proto" progress-haskell env KAYA_SELFTEST=progress "$(hs_bin progress)"
     run "$proto" progress-java env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" select-rust env KAYA_SELFTEST=select "$CARGO_TARGET_DIR/debug/examples/select"
     run "$proto" select-python env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
         python3 guests/python/select.py
@@ -1343,7 +1342,7 @@ for proto in x11 wayland; do
     run "$proto" select-ocaml env KAYA_SELFTEST=select KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/select.exe
     run "$proto" select-haskell env KAYA_SELFTEST=select "$(hs_bin select)"
     run "$proto" select-java env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" radio-rust env KAYA_SELFTEST=radio "$CARGO_TARGET_DIR/debug/examples/radio"
     run "$proto" radio-python env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
         python3 guests/python/radio.py
@@ -1355,7 +1354,7 @@ for proto in x11 wayland; do
     run "$proto" radio-ocaml env KAYA_SELFTEST=radio KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/radio.exe
     run "$proto" radio-haskell env KAYA_SELFTEST=radio "$(hs_bin radio)"
     run "$proto" radio-java env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" grid-rust env KAYA_SELFTEST=grid "$CARGO_TARGET_DIR/debug/examples/grid"
     run "$proto" grid-python env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
         python3 guests/python/grid.py
@@ -1367,7 +1366,7 @@ for proto in x11 wayland; do
     run "$proto" grid-ocaml env KAYA_SELFTEST=grid KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grid.exe
     run "$proto" grid-haskell env KAYA_SELFTEST=grid "$(hs_bin grid)"
     run "$proto" grid-java env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" textarea-rust env KAYA_SELFTEST=textarea "$CARGO_TARGET_DIR/debug/examples/textarea"
     run "$proto" textarea-python env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
         python3 guests/python/textarea.py
@@ -1379,7 +1378,7 @@ for proto in x11 wayland; do
     run "$proto" textarea-ocaml env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/textarea.exe
     run "$proto" textarea-haskell env KAYA_SELFTEST=textarea "$(hs_bin textarea)"
     run "$proto" textarea-java env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" sections-rust env KAYA_SELFTEST=sections "$CARGO_TARGET_DIR/debug/examples/sections"
     run "$proto" sections-python env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         python3 guests/python/sections.py
@@ -1391,7 +1390,7 @@ for proto in x11 wayland; do
     run "$proto" sections-ocaml env KAYA_SELFTEST=sections KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/sections.exe
     run "$proto" sections-haskell env KAYA_SELFTEST=sections "$(hs_bin sections)"
     run "$proto" sections-java env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The menus scene: all eight languages plus the C floor.
     run "$proto" menus-rust env KAYA_SELFTEST=menus "$CARGO_TARGET_DIR/debug/examples/menus"
     run "$proto" menus-c env KAYA_SELFTEST=menus /tmp/c-guests/menus
@@ -1405,7 +1404,7 @@ for proto in x11 wayland; do
     run "$proto" menus-ocaml env KAYA_SELFTEST=menus KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/menus.exe
     run "$proto" menus-haskell env KAYA_SELFTEST=menus "$(hs_bin menus)"
     run "$proto" menus-java env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The commands scene, the DEPTH slice (rust only until the sweep).
     run "$proto" commands-rust env KAYA_SELFTEST=commands \
         "$CARGO_TARGET_DIR/debug/examples/commands"
@@ -1421,7 +1420,7 @@ for proto in x11 wayland; do
         _build-linux/default/guests/ocaml/commands.exe
     run "$proto" commands-haskell env KAYA_SELFTEST=commands "$(hs_bin commands)"
     run "$proto" commands-java env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it is a recorded leg here too.
     run "$proto" layout-rust env KAYA_SELFTEST=layout "$CARGO_TARGET_DIR/debug/examples/layout"
@@ -1435,7 +1434,7 @@ for proto in x11 wayland; do
     run "$proto" layout-ocaml env KAYA_SELFTEST=layout KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/layout.exe
     run "$proto" layout-haskell env KAYA_SELFTEST=layout "$(hs_bin layout)"
     run "$proto" layout-java env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     # The clipboard scene. Through a11y-leg.sh for its closing expect_ax.
     # POOLED SINCE 2026-09-02 on both protocols: a leg owns its session
     # — an Xvfb from the x11 pool, a headless sway from the wayland pool
@@ -1459,7 +1458,7 @@ for proto in x11 wayland; do
     run "$proto" clipboard-haskell env KAYA_SELFTEST=clipboard \
         tools/linux/a11y-leg.sh "$(hs_bin clipboard)"
     run "$proto" clipboard-java env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The undo scene (docs/undo-plan.md §3), a DEPTH slice. POOLED for
     # the same reason: the `type` verb's real key events ride a transient
     # virtual keyboard on the leg's OWN seat, where its window is the
@@ -1489,7 +1488,7 @@ for proto in x11 wayland; do
     run "$proto" ranges-haskell env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh "$(hs_bin ranges)"
     run "$proto" ranges-java env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE TEXT EDITOR (docs/editor-plan.md), the only script here that
     # drives an APP rather than a feature. GO ALONE by the plan's choice,
     # so there is no rust example and `editor` is in neither SCENES nor

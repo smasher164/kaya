@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "dev.kaya.pyhost"
-        // THE NDK API LEVEL FOLLOWS THIS NUMBER (milestone2go's rule):
+        // THE NDK API LEVEL FOLLOWS THIS NUMBER (gohost's rule):
         // tools/android/run-emulator.py reads minSdk out of this file
         // and picks aarch64-linux-android<minSdk>-clang for the shim.
         minSdk = 26

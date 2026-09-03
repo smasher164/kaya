@@ -180,7 +180,7 @@ entry; start the core from an Activity via kaya::android_main!"
 ### 2.2 What the APK contains — MEASURED
 
    ```
-`unzip -l android/milestone2/build/outputs/apk/debug/milestone2-debug.apk`
+`unzip -l android/rusthost/build/outputs/apk/debug/rusthost-debug.apk`
    ```
 (built 2026-08-07 11:00 by a previous run; not rebuilt here):
 
@@ -200,18 +200,18 @@ entry points**. `[M]` So the guest `.so` *is* libkaya (statically linked as an
 rlib) plus the guest's JNI entry — there is no separate `libkaya.so` in that
 APK.
 
-The JVM-guest APK is the mirror image: `milestone2kt` ships
+The JVM-guest APK is the mirror image: `javahost` ships
 `jniLibs/arm64-v8a/libkaya.so` (30,430,336 bytes, `[M]`) — kaya's own cdylib —
 and the guest is Java/Kotlin classes in the dex.
 
 ### 2.3 Who calls whom at startup
 
-**Rust guest (`compose` suite)** — `android/milestone2/src/main/kotlin/dev/kaya/milestone2/MainActivity.kt`:
+**Rust guest (`compose` suite)** — `android/rusthost/src/main/kotlin/dev/kaya/rusthost/MainActivity.kt`:
 
 | Step | Code |
 |---|---|
 | 1. `KAYA_*` intent extras → env vars via `android.system.Os.setenv` | `MainActivity.kt:18-25` |
-| 2. `System.loadLibrary("milestone2_android")` | `MainActivity.kt:27` |
+| 2. `System.loadLibrary("rusthost")` | `MainActivity.kt:27` |
 | 3. `Kaya.attach(this)` → JNI `Java_dev_kaya_Kaya_attach` | `MainActivity.kt:30`; `Kaya.kt:26-27`; macro `android.rs:848-859` |
 | 4. …which runs `android::attach`: init logging, make the occurrence channel, **spawn the `kaya-app` thread running `app_main(ctx)`**, `set_presentation_sink`, `register_present_natives`, return `PRESENT_GUEST` (=1) | `android.rs:78-95` |
 | 5. `KayaCompose.mount(this)` on the UI thread | `MainActivity.kt:31` |
@@ -220,10 +220,10 @@ and the guest is Java/Kotlin classes in the dex.
 | 8. `dispatchKeyShortcutEvent` forwarded to `KayaCompose` | `MainActivity.kt:39-40` |
 
 Which scene runs is chosen **inside the guest** from `KAYA_SELFTEST`
-(`guests/rust/milestone2_android.rs:87-163`), and an unknown name **panics**
+(`guests/rust/rusthost.rs:87-163`), and an unknown name **panics**
 rather than silently running milestone2 (`:158-161`).
 
-**Kotlin/JVM guest (`jvm` suite)** — `android/milestone2kt/…/MainActivity.kt`:
+**Kotlin/JVM guest (`jvm` suite)** — `android/javahost/…/MainActivity.kt`:
 
 | Step | Code |
 |---|---|
@@ -395,8 +395,8 @@ Exactly four things, and only the first is per-language work:
    empty window and every assertion measures nothing — the interpreter has a
    dedicated diagnosis for it (`KayaSwiftUI.swift:6171-6197`).
 3. **On Android only: select the scene from `KAYA_SELFTEST`**, and panic on an
-   unknown name (`guests/rust/milestone2_android.rs:88-162`;
-   `milestone2kt/MainActivity.kt:36-89`). On iOS each scene is its own bundle,
+   unknown name (`guests/rust/rusthost.rs:88-162`;
+   `javahost/MainActivity.kt:36-89`). On iOS each scene is its own bundle,
    so this is unnecessary — the runner still sets `KAYA_SELFTEST` because the
    *interpreter* gates on its presence (`KayaSwiftUI.swift:3336`).
 4. **Do not read `KAYA_SELFTEST_SCRIPT`, do not print the verdict, do not
@@ -465,8 +465,8 @@ see the app's own files), and `UILaunchScreen`.
 
 The gradle side is `android/` in the repo root: `android/kaya` (the
 `com.android.library` module holding the Compose interpreter + generated
-`bindings/java` sources), `android/milestone2` (Rust-guest app),
-`android/milestone2kt` (JVM-guest app). `android/kaya/build.gradle.kts:31-35`
+`bindings/java` sources), `android/rusthost` (Rust-guest app),
+`android/javahost` (JVM-guest app). `android/kaya/build.gradle.kts:31-35`
 shows the out-of-tree source dirs: `../../bindings/java` and `generated`.
 
 ### 5.3 Where a new language's artifact slots in
@@ -493,7 +493,7 @@ shows the out-of-tree source dirs: `../../bindings/java` and `generated`.
 - *JVM-guest shape* (Kotlin's): `cp target/aarch64-linux-android/debug/libkaya.so`
   into jniLibs, add the guest's sources to the app module's `srcDirs`, and let
   the Activity call `KayaRing.attach` + start the guest thread
-  (`run-emulator.py:1043-1052`; `milestone2kt/build.gradle.kts:31-40`).
+  (`run-emulator.py:1043-1052`; `javahost/build.gradle.kts:31-40`).
 - either way a **new gradle module** (`android/<name>/build.gradle.kts` +
   `AndroidManifest.xml` + a `MainActivity`) is required, registered in
   `android/settings.gradle.kts`.
@@ -556,7 +556,7 @@ line. Grouped so a candidate arm can score it.
 |---|---|---|
 | D1 | An **entry the Activity can call**: either a `Java_…_attach`-shaped JNI export (Rust's `android_main!` shape) or JVM code invoked after `KayaRing.attach`. **No C-ABI Android attach exists.** | `android.rs:848-859, 105-118`; `capi.rs:815-818` |
 | D2 | Can read the process environment (`System.getenv`/`getenv`) — the runner delivers `KAYA_SELFTEST` as an intent extra converted by `Os.setenv`. | `MainActivity.kt:18-25` |
-| D3 | **One APK hosts every scene**, so the guest must contain a scene switch keyed on `KAYA_SELFTEST` that **panics on an unknown name**. | `milestone2_android.rs:88-162`; `milestone2kt/MainActivity.kt:36-89` |
+| D3 | **One APK hosts every scene**, so the guest must contain a scene switch keyed on `KAYA_SELFTEST` that **panics on an unknown name**. | `rusthost.rs:88-162`; `javahost/MainActivity.kt:36-89` |
 | D4 | Ships as a gradle module with an `AndroidManifest.xml`, a `MainActivity` doing the 4-line dance (env → loadLibrary → attach → `KayaCompose.mount`), and an entry in `android/settings.gradle.kts`. | `milestone2/MainActivity.kt:11-31` |
 | D5 | Tolerates `minSdk 26`, `compileSdk 35`, `buildToolsVersion 37.0.0`, JVM target 17. | `android/kaya/build.gradle.kts:9-45` |
 

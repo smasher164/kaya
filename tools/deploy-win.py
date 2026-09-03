@@ -863,9 +863,8 @@ def deploy_stamp():
               + sorted((ROOT / "bindings/csharp").glob("*.cs"))
               + sorted((ROOT / "bindings/java/dev/kaya").glob("*.java"))
               + [ROOT / "bindings/java-desktop/dev/kaya/KayaRing.java"]
-              + sorted((ROOT / "guests/java/dev/kaya/milestone2kt")
+              + sorted((ROOT / "guests/java/dev/kaya/guests")
                        .glob("*.java"))
-              + [ROOT / "guests/java-desktop/dev/kaya/milestone2kt/Main.java"]
               + sorted(p for p in (ROOT / "bindings/python/kaya").rglob("*")
                        if p.is_file())
               + [ROOT / "bindings/js/package.json"]
@@ -1025,10 +1024,8 @@ else:
     must_ssh("cmd /c mkdir C:\\kaya\\java\\src")
     if scp_to(sorted((ROOT / "bindings/java/dev/kaya").glob("*.java"))
               + [ROOT / "bindings/java-desktop/dev/kaya/KayaRing.java"]
-              + sorted((ROOT / "guests/java/dev/kaya/milestone2kt")
-                       .glob("*.java"))
-              + [ROOT / "guests/java-desktop/dev/kaya/milestone2kt/"
-                        "Main.java"],
+              + sorted((ROOT / "guests/java/dev/kaya/guests")
+                       .glob("*.java")),
               "C:/kaya/java/src/") != 0:
         die("deploy-win: could not ship the java sources")
     if run_ssh("cmd /c javac -encoding UTF-8 -d C:\\kaya\\java\\classes "

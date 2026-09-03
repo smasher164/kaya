@@ -17,9 +17,9 @@ Device: emulator-5554 ONLY. Boot nothing, kill nothing.
 
 - Leg name `editor-go`, lines 1748-1752. APK
    ```
-  `android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk`,
+  `android/gohost/build/outputs/apk/debug/gohost-debug.apk`,
    ```
-  component `dev.kaya.milestone2go/.MainActivity`, `KAYA_SELFTEST editor`.
+  component `dev.kaya.gohost/.MainActivity`, `KAYA_SELFTEST editor`.
 - The steps variant is **not** the whole `tools/scenes/editor.steps`: it is
   `scene_script_cut editor close_window expect_dirty` — everything ABOVE the
   first `close_window` step, folded into `;` (intent extras carry no
@@ -75,11 +75,11 @@ leg runs — no more, no less — plus the trailing settle.
 
     tools/build-id.py --verify --component compose \
    ```
-      android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk   rc=0
+      android/gohost/build/outputs/apk/debug/gohost-debug.apk   rc=0
    ```
     tools/build-id.py --verify \
    ```
-      android/milestone2go/src/main/jniLibs/arm64-v8a/libkaya.so            rc=0
+      android/gohost/src/main/jniLibs/arm64-v8a/libkaya.so            rc=0
    ```
 
 Both carry the id of the CURRENT sources (tree clean at 0254879), so no
@@ -204,8 +204,8 @@ steps pass green while the bar on screen is stale.
 
 ## 10. Cleanup, proven
 
-    $ adb -s emulator-5554 shell am force-stop dev.kaya.milestone2go
-    $ adb -s emulator-5554 shell "ps -A | grep milestone2go"      -> rc=1, no output
+    $ adb -s emulator-5554 shell am force-stop dev.kaya.gohost
+    $ adb -s emulator-5554 shell "ps -A | grep gohost"      -> rc=1, no output
     $ adb -s emulator-5554 shell "ps -A | grep screenrecord"      -> rc=1, no output
     $ ps -Ao pid,etime,pcpu,command | grep screenrecord           -> rc=1, none on host
     $ adb -s emulator-5554 shell rm -f /data/local/tmp/kaya-editor-film.mp4

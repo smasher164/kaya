@@ -311,7 +311,7 @@ def leg_argv(scene, lang, hs_bin):
         return [f"target/swift-guests/{stem}"]
     if lang == "java":
         return ["java", "-XstartOnFirstThread", "-cp",
-                "target/java-guests", "dev.kaya.milestone2kt.Main"]
+                "target/java-guests", "dev.kaya.guests.Main"]
     if lang == "c":
         return [f"target/c-guests/{stem}"]
     raise ValueError(lang)

@@ -135,7 +135,7 @@ code-only WinUI app must be composed with IXamlMetadataProvider
 delegating to XamlControlsXamlMetaDataProvider — see KayaApplication
 in winui/mod.rs — and ship an exe-adjacent resources.pri), and
 Compose (TextField). On Android there is one APK per guest tier —
-milestone2 (the Rust guest) and milestone2kt (the JVM guest) — and
+rusthost (the Rust guest) and javahost (the JVM guest) — and
 each is a scene selector: the selftest script doubles as the scene
 key.
 

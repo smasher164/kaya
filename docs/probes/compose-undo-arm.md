@@ -131,8 +131,8 @@ spelling and a future slice must not invent a sentence.
 
 `undo-compose` (rust guest) at the end of the compose block, `undo-jvm`
 (Java guest) at the end of the jvm block. Both guest selector arms
-already existed (`guests/rust/milestone2_android.rs:125`,
-`android/milestone2kt/.../MainActivity.kt:75 (gone)`), each with a comment
+already existed (`guests/rust/rusthost.rs:125`,
+`android/javahost/.../MainActivity.kt:75 (gone)`), each with a comment
 saying it was registered ahead of the arm on purpose.
 
 **THE HOLD-OPEN GOING GREEN, watched in both directions:**
@@ -444,7 +444,7 @@ tools/android/run-emulator.py  undo-compose undo-jvm
 Guest languages: no binding surface moved, so no per-language verdict is
 owed. What DID move is coverage — this lane runs the undo scene through
 the RUST binding (milestone2's `undo::app`) and the JAVA binding
-(milestone2kt's `Undo::app`), so two of the eight now exercise
+(javahost's `Undo::app`), so two of the eight now exercise
 `undoable` + the undone/redone absorb on a fifth backend.
 
 Transport sweep, which is the part with a real question in it:
@@ -547,8 +547,8 @@ runs of the shipped source, comment-only change or not.
   AFTER the removals; §4.4's pair is the final word.
 - **Untracked files in the repo: NONE** (`git status --porcelain | grep
   '^??'` empty). Nothing of mine leaked into the tree.
-- **Rebuilt in place, not created:** `android/{kaya,milestone2,
-  milestone2kt}/build` (8.7M / 356M / 190M) and
+- **Rebuilt in place, not created:** `android/{kaya,rusthost,
+  javahost}/build` (8.7M / 356M / 190M) and
   `target/aarch64-linux-android` (970M) — the lane's own artifacts,
   rebuilt by every run of the runner, pre-existing, not mine to delete.
 - **Scratchpad: 128 KB kept, everything else deleted.** Deleted after

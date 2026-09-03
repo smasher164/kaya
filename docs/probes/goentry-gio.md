@@ -450,7 +450,7 @@ So the change is mechanical: add an `//go:build android` file to
    under `//go:build !android` (Gio's precedent: a package `init()` at
    `app/os_macos.go:342-347`). On Android it must NOT be in an `init()`
    — inits run while `System.loadLibrary` is executing, on a thread Go
-   made (`android/milestone2go/.../MainActivity.kt:47-51 (gone)`) — it stays
+   made (`android/gohost/.../MainActivity.kt:47-51 (gone)`) — it stays
    inside the spawned goroutine as it already is. That tagged/untagged
    pair is invisible to every compiler, which is exactly the shape
    invariant 3 asks for a guard around.
@@ -490,7 +490,7 @@ So the change is mechanical: add an `//go:build android` file to
    thread.
 
 **The one thing that stays no matter what:** the Kotlin shell. Five lines
-in `onCreate` (`android/milestone2go/.../MainActivity.kt:46-55 (gone)`). The
+in `onCreate` (`android/gohost/.../MainActivity.kt:46-55 (gone)`). The
 linkname removes the *guest's* second entry point, not the *host's*
 first one. Gio has the identical five-lines-in-Java and hides them in
 a shipped `GioActivity`.
@@ -542,7 +542,7 @@ This removes MORE author-visible Android code than M3 does, and touches
 no Go. Note it is a **sweep-all-bindings** change by invariant 2: a
 `KayaActivity` that hardcodes a Go guest's shape is wrong; it has to
 serve the Rust, JVM and Go shells (which today differ in exactly one
-line each — `milestone2go/.../MainActivity.kt:11-17`).
+line each — `gohost/.../MainActivity.kt:11-17`).
 
 **Cost of doing nothing (M0).** MEASURED: `main_desktop.go` is 25 lines,
 **11 of them code**; `main_android.go` is 170 lines, **88 of them code**

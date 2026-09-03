@@ -232,7 +232,7 @@ precedent for simulator-only proof).
 2. Android: the JNI shim + gradle asset split, the same leg green on
    the emulator lane.
    LANDED 2026-08-28, same session, with two findings the first mount
-   earned. The build: android/pyhost (the APK, milestone2go's shell
+   earned. The build: android/pyhost (the APK, gohost's shell
    with the guest tier swapped), dev.kaya.KayaPy resolved BY NAME out
    of the shim tools/android/pyhost-jni.c (kaya_py_build's nm refusal
    is the wall, kaya_go_build's), assets staged by the runner behind a

@@ -1549,7 +1549,7 @@ selected option until that relation is reset.
 
 2026-07-25, second occurrence (first: textarea matrix, 2026-07-22). The
 windows lane stalled ~20 minutes with ZERO verdicts. Two guests —
-`go.exe` running `reorder`, `java.exe` running `milestone2kt` — sat in a
+`go.exe` running `reorder`, `java.exe` running `javahost` — sat in a
 state where `tasklist` LISTS them but `taskkill /F` answers:
 
     ERROR: The process ... could not be terminated.
@@ -6133,7 +6133,7 @@ with everything.
 Two full matrices ran concurrently over the same working tree for seven
 minutes, and the symptom was three java legs on the MAC lane failing with
 
-    Error: Could not find or load main class dev.kaya.milestone2kt.Main
+    Error: Could not find or load main class dev.kaya.guests.Main
 
 while thirty-seven java legs on the same lane passed — the three sitting
 CONSECUTIVELY in the middle, with java legs green before and after. That

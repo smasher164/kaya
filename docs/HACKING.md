@@ -234,8 +234,8 @@ touching layout code:
   # run-emulator's scene_script: comments stripped, newlines folded to
   # `;`, since intent extras cannot carry a newline.)
   SCRIPT=$(grep -v '^#' tools/scenes/grow.steps | tr '\n' ';')
-  adb -s $S shell am force-stop dev.kaya.milestone2
-  adb -s $S shell "am start -n dev.kaya.milestone2/.MainActivity \
+  adb -s $S shell am force-stop dev.kaya.rusthost
+  adb -s $S shell "am start -n dev.kaya.rusthost/.MainActivity \
       --es KAYA_SELFTEST grow --es KAYA_SELFTEST_SCRIPT \"'$SCRIPT'\" \
       && sleep 0.3 && uiautomator dump /sdcard/kaya-dump.xml"
   adb -s $S pull /sdcard/kaya-dump.xml
@@ -337,7 +337,7 @@ interface it compiles against:
     tools/build-id.py swiftui                    # swift/ + kaya.h
     tools/build-id.py compose                    # android/kaya/src + bindings/java
     tools/build-id.py --verify --component swiftui target/swiftui/libkaya_swiftui.dylib
-    tools/build-id.py --verify --component compose  …/milestone2-debug.apk
+    tools/build-id.py --verify --component compose  …/rusthost-debug.apk
 
 `--component` defaults to `core`. The prefix is the same for all three
 on purpose: a file carrying the WRONG component's marker then reads as

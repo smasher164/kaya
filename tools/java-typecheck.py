@@ -88,7 +88,7 @@ atexit.register(lambda: [p.unlink() for p in ROOT.glob("javac.*.args")])
 // IN THE GUESTS' PACKAGE so the generated record surface is in reach:
 // the emitted <Rec>Kaya classes are package-private, and the nested
 // overload is what this file exists to compile.
-package dev.kaya.milestone2kt;
+package dev.kaya.guests;
 
 import dev.kaya.KayaApp;
 import dev.kaya.KayaRecords;
@@ -187,9 +187,8 @@ main_sources = (
                        / "kaya").glob("*.java"))
     + sorted(str(p.relative_to(ROOT))
              for p in (ROOT / "guests" / "java" / "dev" / "kaya"
-                       / "milestone2kt").glob("*.java"))
-    + ["guests/java-desktop/dev/kaya/milestone2kt/Main.java",
-       str(TMP / "probe" / "NestedTableCheck.java")]
+                       / "guests").glob("*.java"))
+    + [str(TMP / "probe" / "NestedTableCheck.java")]
 )
 if run_javac("-encoding", "UTF-8", "-Xlint:unchecked", "-Werror", "-d",
              TMP / "classes", *main_sources) != 0:

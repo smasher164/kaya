@@ -776,9 +776,8 @@ def build_java():
                     for p in (ROOT / "bindings/java/dev/kaya"
                               ).glob("*.java")),
             *sorted(str(p.relative_to(ROOT))
-                    for p in (ROOT / "guests/java/dev/kaya/milestone2kt"
-                              ).glob("*.java")),
-            "guests/java-desktop/dev/kaya/milestone2kt/Main.java"]
+                    for p in (ROOT / "guests/java/dev/kaya/guests"
+                              ).glob("*.java"))]
     return run(["javac", "-encoding", "UTF-8", "-d",
                 "target/java-guests", *srcs],
                stdout=_blog("java"), stderr=subprocess.STDOUT)

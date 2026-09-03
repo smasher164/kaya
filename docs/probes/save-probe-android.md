@@ -252,7 +252,7 @@ landed §6a-§6e.
   (uninstall drops its URI grants with it).
 - `/sdcard/Documents/kaya-saveprobe/` removed from the device.
 - `settings secure enabled_accessibility_services` restored to
-  `dev.kaya.milestone2go/dev.kaya.KayaHarnessAccessibility`,
+  `dev.kaya.gohost/dev.kaya.KayaHarnessAccessibility`,
   `accessibility_enabled` restored to `1` (saved before the run in
   `scratchpad/a11y-before-5554.txt (gone)`).
 - No emulator was booted, deleted or rebooted; all four standing

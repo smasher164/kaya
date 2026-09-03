@@ -106,7 +106,7 @@ Two kinds of hit, and the second was not part of the original question.
 undo scene's per-row note entry, in all seven handle bindings
 (guests/{go/undo/undo.go:224, rust/undo.rs:135, swift/undo.swift:209,
 ocaml/undo.ml:170, haskell/undo.hs:169, csharp/UndoScene.cs:151,
-java/dev/kaya/milestone2kt/Undo.java:164}) plus the editor's find bar
+java/dev/kaya/guests/Undo.java:164}) plus the editor's find bar
 (guests/go/editor/editor.go:568). Python already spells it with sugar.
 
 **Live-zone floor calls that already have sugar available** — fixable

@@ -179,7 +179,7 @@ attributed:
   verbatim, or name the file in the three helper tables. I did not edit
   it — it is core, and two agents are in it.
   (The second line this gate had, in
-  android/milestone2kt/src/main/kotlin/dev/kaya/milestone2kt/MainActivity.kt, WAS about my arm — it said
+  android/javahost/src/main/kotlin/dev/kaya/javahost/MainActivity.kt, WAS about my arm — it said
   APPLY_SET_TYPEFACE "still calls depthStub" — so I corrected it, and
   that half is now green.)
 - **check-build-id** — `a freshly built libkaya does not carry this
@@ -252,11 +252,11 @@ second choice if the demo wants the change unmissable.
   family are one decision (§6) and the file is shared with four other
   in-flight arms.
 - The probe guest (`guests/rust/typefaceprobe.rs (gone)`) and its dispatch arm
-  in `guests/rust/milestone2_android.rs` are DELETED; the restore is
-  proven by sha256 (`milestone2_android.rs: OK` against the pre-probe
+  in `guests/rust/rusthost.rs` are DELETED; the restore is
+  proven by sha256 (`rusthost.rs: OK` against the pre-probe
   hash), and `git status` shows no residue.
 - Files changed: `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt`
-  (the arm), `android/milestone2kt/src/main/kotlin/dev/kaya/milestone2kt/
+  (the arm), `android/javahost/src/main/kotlin/dev/kaya/javahost/
   MainActivity.kt` (a comment about my arm that my arm made false), and
   `docs/deferred.md` (the compose stub entry struck through, with what
   is still open). NO COMMITS.
@@ -270,7 +270,7 @@ second choice if the demo wants the change unmissable.
   started by me, not stopped by me. No device SETTING was changed
   (nothing here needs font_scale or night mode).
 - **Device state.** The one file my legs created —
-  `/data/user/0/dev.kaya.milestone2/files/kaya-brand-font`, the blob
+  `/data/user/0/dev.kaya.rusthost/files/kaya-brand-font`, the blob
   route's staging file on emulator-5554 — is deleted, and `ls files/`
   now shows only `profileInstalled` on all four devices.
 - **Disk.** My own scratch is ~1.5 MB of logs plus this report; the

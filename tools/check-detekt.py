@@ -22,9 +22,9 @@ CONFIG = ROOT / "tools/detekt.yml"
 # directories, where generated sources would decide this gate's verdict.
 SOURCES = [
     "android/kaya/src/main/kotlin",
-    "android/milestone2/src/main/kotlin",
-    "android/milestone2kt/src/main/kotlin",
-    "android/milestone2go/src/main/kotlin",
+    "android/rusthost/src/main/kotlin",
+    "android/javahost/src/main/kotlin",
+    "android/gohost/src/main/kotlin",
 ]
 
 for src in SOURCES:

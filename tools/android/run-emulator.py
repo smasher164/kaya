@@ -1653,7 +1653,7 @@ def kaya_go_build(lib, jnilibs):
     build before this. guests/go/cmd IS THE WHOLE GUEST:
     `-buildmode=c-shared` allows exactly one main package per
     library."""
-    module = ROOT / "android/milestone2go/build.gradle.kts"
+    module = ROOT / "android/gohost/build.gradle.kts"
     api = module_min_sdk(module, "the Go guest")
     ndkbin, clang = ndk_clang(api, module)
     (ROOT / "target/go-android").mkdir(parents=True, exist_ok=True)
@@ -1765,6 +1765,16 @@ def stage_python_assets():
           f"stamp {h.hexdigest()[:12]}")
 
 
+def fresh_jnilibs(path):
+    """Only what this run builds ships: AGP packs every .so in jniLibs,
+    so a leftover from a renamed library rode inside the APK for weeks
+    (docs/probes/mobilepkg-contract.md §5.4) and a stale one failed the
+    lane's own verify after the 2026-09-02 module rename."""
+    path.mkdir(parents=True, exist_ok=True)
+    for old in path.glob("*.so"):
+        old.unlink()
+
+
 def gradle_assemble(module):
     return run(["gradle", "--console=plain", "-q",
                 f":{module}:assembleDebug"],
@@ -1783,23 +1793,22 @@ def build_suite(suite):
     apk_rel, package, _activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
     if suite == "compose":
-        jnilibs = ROOT / "android/milestone2/src/main/jniLibs/arm64-v8a"
-        jnilibs.mkdir(parents=True, exist_ok=True)
+        jnilibs = ROOT / "android/rusthost/src/main/jniLibs/arm64-v8a"
+        fresh_jnilibs(jnilibs)
         if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                "--example", "milestone2_android"]).returncode != 0:
+                "--example", "rusthost"]).returncode != 0:
             return False
         shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
-                            "examples/libmilestone2_android.so", jnilibs)
+                            "examples/librusthost.so", jnilibs)
         if run([str(ROOT / "tools/build-id.py"), "--verify",
-                str(jnilibs /
-                    "libmilestone2_android.so")]).returncode != 0:
+                str(jnilibs / "librusthost.so")]).returncode != 0:
             return False
         kaya_write_compose_marker()
-        if not gradle_assemble("milestone2"):
+        if not gradle_assemble("rusthost"):
             return False
     elif suite == "jvm":
-        jnilibs = ROOT / "android/milestone2kt/src/main/jniLibs/arm64-v8a"
-        jnilibs.mkdir(parents=True, exist_ok=True)
+        jnilibs = ROOT / "android/javahost/src/main/jniLibs/arm64-v8a"
+        fresh_jnilibs(jnilibs)
         if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
                 "--lib"]).returncode != 0:
             return False
@@ -1809,11 +1818,11 @@ def build_suite(suite):
                 str(jnilibs / "libkaya.so")]).returncode != 0:
             return False
         kaya_write_compose_marker()
-        if not gradle_assemble("milestone2kt"):
+        if not gradle_assemble("javahost"):
             return False
     elif suite == "go":
-        jnilibs = ROOT / "android/milestone2go/src/main/jniLibs/arm64-v8a"
-        jnilibs.mkdir(parents=True, exist_ok=True)
+        jnilibs = ROOT / "android/gohost/src/main/jniLibs/arm64-v8a"
+        fresh_jnilibs(jnilibs)
         # The same libkaya.so the JVM suite ships: the Go guest NEEDs
         # it by SONAME and the app's linker resolves it out of this
         # directory.
@@ -1829,10 +1838,10 @@ def build_suite(suite):
         # and here libkaya is a SHARED library the guest merely names,
         # so the guest carries no marker. (On iOS the same Go sources
         # DO carry it — there kaya is a static archive linked in.)
-        if not kaya_go_build("milestone2go", jnilibs):
+        if not kaya_go_build("gohost", jnilibs):
             return False
         kaya_write_compose_marker()
-        if not gradle_assemble("milestone2go"):
+        if not gradle_assemble("gohost"):
             return False
     elif suite == "python":
         cpy = os.environ.get("KAYA_CPYTHON_ANDROID_AARCH64", "")
@@ -1844,7 +1853,7 @@ def build_suite(suite):
             print("  re-enter nix develop", file=sys.stderr)
             return False
         jnilibs = ROOT / "android/pyhost/src/main/jniLibs/arm64-v8a"
-        jnilibs.mkdir(parents=True, exist_ok=True)
+        fresh_jnilibs(jnilibs)
         if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
                 "--lib"]).returncode != 0:
             return False

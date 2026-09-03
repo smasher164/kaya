@@ -21,14 +21,14 @@ shell body.
 # Per-suite artifact, package and activity — the app every leg of the
 # suite installs once (the staging barrier) and starts per leg.
 SUITE_APPS = {
-    "compose": ("android/milestone2/build/outputs/apk/debug/"
-                "milestone2-debug.apk", "dev.kaya.milestone2",
+    "compose": ("android/rusthost/build/outputs/apk/debug/"
+                "rusthost-debug.apk", "dev.kaya.rusthost",
                 ".MainActivity"),
-    "jvm": ("android/milestone2kt/build/outputs/apk/debug/"
-            "milestone2kt-debug.apk", "dev.kaya.milestone2kt",
+    "jvm": ("android/javahost/build/outputs/apk/debug/"
+            "javahost-debug.apk", "dev.kaya.javahost",
             ".MainActivity"),
-    "go": ("android/milestone2go/build/outputs/apk/debug/"
-           "milestone2go-debug.apk", "dev.kaya.milestone2go",
+    "go": ("android/gohost/build/outputs/apk/debug/"
+           "gohost-debug.apk", "dev.kaya.gohost",
            ".MainActivity"),
     "python": ("android/pyhost/build/outputs/apk/debug/pyhost-debug.apk",
                "dev.kaya.pyhost", ".MainActivity"),

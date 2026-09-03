@@ -2,7 +2,7 @@ ANDROID / COMPOSE — non-virtualized For row-count choke baseline
 ================================================================
 Measured 2026-08-24. Repo NOT edited: the guest was built from a copy of
 the tracked tree under this scratchpad and installed under its own
-applicationId (dev.kaya.choke), so the lane's dev.kaya.milestone2 was
+applicationId (dev.kaya.choke), so the lane's dev.kaya.rusthost was
 never touched.
 
 SETUP

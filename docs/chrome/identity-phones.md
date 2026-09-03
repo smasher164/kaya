@@ -15,27 +15,27 @@ repo was not modified (see the two notes at the end).
 
 Four gradle modules under `/Users/akhilindurti/Projects/kaya/android/`:
 `kaya` (the library / AAR), and three validation apps `milestone2`
-(Rust guest), `milestone2kt` (JVM ring guest), `milestone2go` (Go guest).
+(Rust guest), `javahost` (JVM ring guest), `gohost` (Go guest).
 
 Pins, read from the module build files:
 
 | module | applicationId | compileSdk | minSdk | targetSdk |
 |---|---|---|---|---|
 | `kaya` (library) | — | 35 | 26 | — |
-| `milestone2` | `dev.kaya.milestone2` | 35 | 26 | 35 |
-| `milestone2kt` | `dev.kaya.milestone2kt` | 35 | 26 | 35 |
-| `milestone2go` | `dev.kaya.milestone2go` | 35 | 26 | 35 |
+| `milestone2` | `dev.kaya.rusthost` | 35 | 26 | 35 |
+| `javahost` | `dev.kaya.javahost` | 35 | 26 | 35 |
+| `gohost` | `dev.kaya.gohost` | 35 | 26 | 35 |
 
 - `/Users/akhilindurti/Projects/kaya/android/build.gradle.kts`: AGP
   `8.7.3`, Kotlin `2.0.21`. `buildToolsVersion = "37.0.0"` (pinned to
   what the nix SDK provides).
 - **NAME**: each app manifest carries a hard-coded `android:label` on
   `<application>` and nothing else:
-  - `android/milestone2/src/main/AndroidManifest.xml:25` —
+  - `android/rusthost/src/main/AndroidManifest.xml:25` —
     `android:label="kaya milestone 0"`
-  - `android/milestone2kt/src/main/AndroidManifest.xml:11` —
+  - `android/javahost/src/main/AndroidManifest.xml:11` —
     `android:label="kaya milestone 0 (jvm ring)"`
-  - `android/milestone2go/src/main/AndroidManifest.xml:4` —
+  - `android/gohost/src/main/AndroidManifest.xml:4` —
     `android:label="kaya milestone 0 (go)"`
   These are literal strings, not `@string/…` resources. There is no
   `app_name` string resource anywhere in the tree.
@@ -55,7 +55,7 @@ Pins, read from the module build files:
   deliberately (its comment explains the app-vs-library split for the
   a11y service).
 - The Activity is a bare `ComponentActivity`
-  (`android/milestone2/src/main/kotlin/dev/kaya/milestone2/MainActivity.kt`)
+  (`android/rusthost/src/main/kotlin/dev/kaya/rusthost/MainActivity.kt`)
   that maps `KAYA_*` intent extras to env, loads the guest .so, and
   calls `Kaya.attach(this)` + `KayaCompose.mount(this)`. It touches no
   identity API.

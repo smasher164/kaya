@@ -2166,7 +2166,7 @@ def sweep_guests():
     # as a missing file.
     SELECTORS = [
         ("java",
-         "guests/java-desktop/dev/kaya/milestone2kt/Main.java"),
+         "guests/java/dev/kaya/guests/Main.java"),
         ("csharp", "guests/csharp/Program.cs"),
     ]
     def desktop_scene_lists():
@@ -3574,8 +3574,8 @@ if not android_scenes(
 out = android_scenes(
     android_selected(android_lane, "compose"),
     "tools/lib/lanes/android.py",
-    read_rel("guests/rust/milestone2_android.rs"),
-    "guests/rust/milestone2_android.rs", r'Ok\("([a-z0-9]+)"\)')
+    read_rel("guests/rust/rusthost.rs"),
+    "guests/rust/rusthost.rs", r'Ok\("([a-z0-9]+)"\)')
 if out:
     print("check-steps: an android leg selects a scene the APK's guest "
           "cannot run:", file=sys.stderr)
@@ -3588,9 +3588,9 @@ if out:
 out = android_scenes(
     android_selected(android_lane, "jvm"),
     "tools/lib/lanes/android.py",
-    read_rel("android/milestone2kt/src/main/kotlin/dev/kaya/"
-             "milestone2kt/MainActivity.kt"),
-    "android/milestone2kt/src/main/kotlin/dev/kaya/milestone2kt/"
+    read_rel("android/javahost/src/main/kotlin/dev/kaya/"
+             "javahost/MainActivity.kt"),
+    "android/javahost/src/main/kotlin/dev/kaya/javahost/"
     "MainActivity.kt", r'"([a-z0-9]+)" ->', exempt=("1",))
 if out:
     print("check-steps: an android JVM leg selects a scene "

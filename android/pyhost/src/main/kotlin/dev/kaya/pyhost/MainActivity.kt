@@ -10,7 +10,7 @@ import dev.kaya.KayaRing
 import java.io.File
 
 /**
- * The PYTHON guests' shell — milestone2go's five lines with the guest
+ * The PYTHON guests' shell — gohost's five lines with the guest
  * tier swapped: python consumes the occurrence ring directly through
  * ctypes over the C ABI, so [KayaRing.attach] and never `Kaya.attach`
  * (the Go shell's reasoning, verbatim). One bundle carries every

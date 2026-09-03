@@ -139,8 +139,7 @@ GATES = {
     # is gated by gen-header, which IS keyed on all of crates/.
     "swift-typecheck": ["crates/kaya/include", "bindings/swift",
                         "guests/swift", "swift"],
-    "java-typecheck": ["bindings/java", "bindings/java-desktop",
-                       "guests/java", "guests/java-desktop"],
+    "java-typecheck": ["bindings/java", "bindings/java-desktop", "guests/java"],
     "js-typecheck": ["bindings/js", "guests/js"],
     # The five ARTIFACT gates (see ARTIFACT_GATES): sources here, the
     # built bytes below, both in the key.
