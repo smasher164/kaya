@@ -7954,3 +7954,42 @@ of two worlds depending on how it was signed, with nothing to say which —
 `JSGlobalContextRef` exposes no "is the JIT on" query — so the honest
 assertion is a timing canary, never a flag read.
 docs/probes/js-jit-aot-2026-09-02.md §1.8.
+
+## A GStreamer pipeline missing its codec reaches EOS with status 0, and a fakesink EOS proves nothing (measured 2026-09-03)
+
+Probing the linux lane's container for the video kind
+(docs/probes/video-probe-linux-2026-09-03.md): with the H.264 decoder
+absent, `playbin3` posts a bus Warning and a `missing-plugin` element
+message, then runs to EOS and exits 0 — a green run that decoded nothing.
+The Linux arm must treat a missing-plugin message as the failure it is,
+never the exit status or EOS. Beside it: EOS from a `fakesink` pipeline
+arrives in 3 ms on a 2-second clip (no clock, nothing rendered), while
+`gtk4paintablesink` takes the clip's honest 2.00 s, so a timing assertion
+belongs on the real sink. Two GTK-side traps from the same probe: GTK's
+media file reports `is_prepared()` TRUE while its "GTK could not find a
+media module" error is set (the error is set at construction, before
+`play()`, and is the thing to read); and `GTK_MEDIA=bogus` warns once and
+then silently falls back to the packaged backend and plays, so an
+unrecognised value is not the refusal `GTK_MEDIA=none` is.
+
+## A SurfaceView video reads as a transparent hole through the window PixelCopy, an external texture reads the frame, and the emulator's software GPU presents almost none (measured 2026-09-03)
+
+The Android probe for the video kind (docs/probes/video-probe-android-2026-09-03.md,
+app under tools/android/videoprobe): kaya's own read,
+`PixelCopy.request(activity.window, …)`, returned the clip's bytes
+(2D3B50 at alpha 255 against a host decode of 2C3B4F) off a
+Compose-composited external texture — `AndroidEmbeddedExternalSurface`
+and a hand-spelled `AndroidView` + `TextureView` alike — and returned
+000000 at alpha 0, the punched hole, 159 of 159 times off a
+SurfaceView-hosted player while a SurfaceFlinger `screencap` at the same
+instant showed the clip. That settles the research's §1.0d disagreement:
+the window overload sees the window's own surface and nothing composited
+under it. The second finding is the lane's: under `-gpu
+swiftshader_indirect` a frame was actually presented in 5 of 318 samples
+(~1.7 frames a second, `HWUI: Unknown dataspace 0` in the log), one early
+run read 7 of 7 and no later run beat 3 of 7, and by the end of the
+session the pool presented the clip on no route — so a per-run ink
+assertion over video on the emulator lane is a flake by construction, and
+the read is a `-gpu host` or physical-device measurement. Decode itself was
+never the problem: `c2.goldfish.h264.decoder` and the VP9 path both ran
+every loop with no error, 247–450 ms from launch to the first frame.

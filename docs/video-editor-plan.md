@@ -62,7 +62,7 @@ The headless player per backend, and the surface it hands over:
 |---|---|---|
 | macOS, iOS (SwiftUI) | `AVPlayer` + `AVPlayerItemVideoOutput` (additive: the player keeps its clock while frames are pulled) | `CVPixelBuffer` / `IOSurface` |
 | Android (Compose) | media3 `ExoPlayer` rendering to a `Surface` kaya owns (`SurfaceTexture` / `AHardwareBuffer`) | the external texture |
-| Linux (GTK4) | `gstreamer-rs` driving `playbin3` (rate, accurate seek, EOS/error on the bus) | `gtk4paintablesink`'s `gdk::Paintable`, or `appsink` + dmabuf |
+| Linux (GTK4) | `gstreamer-rs` driving `playbin3` (rate, accurate seek, EOS/error on the bus; a rate-2.0 FLUSH\|ACCURATE seek measured accepted) | `gtk4paintablesink`'s `gdk::Paintable` (Debian trixie packages it as `gstreamer1.0-gtk4`; its rank is none, so `video-sink` is set explicitly) |
 | Windows (WinUI 3) | `MediaPlayer` in frame-server mode (`IsVideoFrameServerEnabled`: exclusive by design — the player renders nothing itself, which is what we want) | `IDirect3DSurface` |
 
 The wire contract (one semantics, four spellings; RULING 2 fixes it):
@@ -126,7 +126,15 @@ backend may take the video out of kaya's clip. On Android that means a
 `SurfaceTexture`-backed external texture (composited by Compose), NOT a
 `SurfaceView` (a hole punched by SurfaceFlinger); the research's §1.0d
 disagreement about reading a SurfaceView's pixels becomes moot by
-construction, and the probe in §6 confirms the texture route reads.
+construction. The probe in §6 confirmed both halves on 2026-09-03: the
+window `PixelCopy` reads the clip's own bytes off a Compose-composited
+external texture (2D3B50 against a host decode of 2C3B4F, inside the ink
+tolerance) and reads a transparent hole (000000, alpha 0, 159 of 159
+samples) off a SurfaceView while a SurfaceFlinger screencap shows the clip
+— but under the emulator pool's software GPU a frame was actually up in 5
+of 318 samples (~1.7 presented frames per second, `HWUI: Unknown
+dataspace 0`), so a per-run ink assertion on that lane would be a flake by
+construction. RULING 5 is amended accordingly.
 
 ## §4 Sliders: the contract that does not exist yet
 
@@ -176,18 +184,38 @@ RULING 8.
 Two ten-minute probes before any arm is written (the research's D9,
 amended for the §3 shape):
 
-1. Android: an `ExoPlayer` rendering a solid-colour clip into a
-   `SurfaceTexture`-backed external texture inside Compose, and kaya's
-   own `kayaCanvasInk` path reading the colour back. This decides
-   whether the Android video leg can assert a pixel at all; the answer
-   goes to docs/traps.md whichever way it falls.
-2. Linux: the lane's container (tools/linux/Dockerfile) installs
-   `libgtk-4-dev` and `ffmpeg` and no GStreamer at all. A scratch image
-   with `gstreamer1.0-plugins-base`, `-good`, `libgstreamer-plugins-base1.0-dev`
-   and the H.264 decoder (`gstreamer1.0-libav`), `playbin3` against the
-   test clip, and `GTK_MEDIA=none` too — GTK's failure is an assertable
-   sentence ("GTK could not find a media module"), so it becomes a watched
-   branch.
+1. Android — RUN 2026-09-03 (docs/probes/video-probe-android-2026-09-03.md;
+   the probe app is tools/android/videoprobe). An `ExoPlayer` rendering
+   a flat-colour clip into a Compose-composited external texture, read
+   back through kaya's own window `PixelCopy`: the clip's bytes when a
+   frame is up; the SurfaceView control reads the punched hole every
+   time. H.264 decoded on every run (`c2.goldfish.h264.decoder`; the VP9
+   twin too; no analogue of the HEVC decoder's death), launch to first
+   decoded frame 247–450 ms. What the emulator cannot do is PRESENT: under
+   `-gpu swiftshader_indirect` about 1.7 frames a second reached the
+   window, and by the session's end the pool presented the clip on no
+   route at all. So the Android lane asserts geometry, state and timing;
+   the flat-colour ink read is a `-gpu host` or physical-device measurement
+   before it is a promise (docs/traps.md, "A SurfaceView video reads as a
+   transparent hole").
+2. Linux — RUN 2026-09-03 (docs/probes/video-probe-linux-2026-09-03.md).
+   The lane's container (tools/linux/Dockerfile) installs `libgtk-4-dev`
+   and `ffmpeg` and no GStreamer. The set that plays both an H.264/MP4
+   and a VP9/WebM clip to EOS under the lane's own Xvfb, through
+   `playbin3` -> `gtk4paintablesink` and through `GtkMediaFile`, is
+   `gstreamer1.0-plugins-base`, `-good`, `gstreamer1.0-libav`,
+   `gstreamer1.0-gtk4` and the two `-dev` packages: 60.3 MB on the 1.9 GB
+   image; `-bad`, `-gl` and `-x` are unnecessary and cost 149 MB more.
+   The missing-module sentence is "GTK could not find a media module.
+   Check your installation." (g-io-error-quark 15), set AT CONSTRUCTION
+   before `play()` and byte-identical for no packages and for
+   `GTK_MEDIA=none`, so it is a watched branch. Three traps the arm must
+   hold (docs/traps.md, "A GStreamer pipeline missing its codec reaches EOS
+   with status 0"): a missing CODEC is a bus warning plus a missing-plugin
+   message and then a clean EOS; `is_prepared()` is TRUE while the
+   missing-module error is set; `GTK_MEDIA=bogus` warns and silently
+   plays. And the frame-arrival observable that needs no pixel read: the
+   sink's paintable goes 0x0 -> 320x240 on the first frame.
 
 Then the ladder this tree always walks: the image widget's high-rate
 path and the `video` kind on macOS (SwiftUI) with the Rust binding and
@@ -207,8 +235,11 @@ scripts shared verbatim. The matrix before anything is called landed.
    `title`/`artist`) in v1, or dropped from v1 and recorded as a gap.
 4. The codec floor: state H.264/MP4/AAC as the floor AND ship a
    capability query, or the floor alone.
-5. What a video scene may assert: geometry, state and timing plus one
-   flat-colour ink read per lane (recommended), or geometry and state only.
+5. What a video scene may assert: geometry, state and timing on every
+   lane, plus one flat-colour ink read on the lanes whose host presents
+   frames reliably (mac, iOS, linux, windows) and a frame-arrival
+   observable instead on Android (recommended, after probe 1), or
+   geometry and state only everywhere.
 6. The range slider: a separate `range` kind (recommended) or a mode of
    `slider`.
 7. Filmstrips: a row of `image` widgets (works today) or a new canvas
