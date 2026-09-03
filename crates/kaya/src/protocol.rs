@@ -534,6 +534,33 @@ pub enum Occurrence {
         path: Path,
         clip: Representation,
     },
+    /// Content dropped on a widget (docs/dnd-plan.md D1): the paste's
+    /// payload with a point in the destination's own coordinates, the
+    /// operation the core settled on, and — for a reorder — the anchor
+    /// row's key path and whether the drop landed before it.
+    Dropped {
+        id: WidgetId,
+        point: (f64, f64),
+        operation: u32,
+        anchor: Path,
+        before: bool,
+        clip: Representation,
+    },
+    /// A drop onto a stamped copy of a template widget.
+    InstanceDropped {
+        node: TemplateNodeId,
+        path: Path,
+        point: (f64, f64),
+        operation: u32,
+        anchor: Path,
+        before: bool,
+        clip: Representation,
+    },
+    /// A drag that began on this widget ended, with what the destination
+    /// did: a drag_op, `none` for cancelled or refused.
+    DragEnded { id: WidgetId, operation: u32 },
+    /// The same for a stamped copy.
+    InstanceDragEnded { node: TemplateNodeId, path: Path, operation: u32 },
     /// kaya routed an undo, and this is what the CORE put back
     /// (docs/undo-plan.md D5). `label` is the group's authored name, or
     /// EMPTY for a typing episode. Applying an inverse emits nothing
@@ -1448,6 +1475,18 @@ pub enum TxOp {
         path: Vec<Value>,
         titles: Vec<String>,
     },
+    /// DECLARE that a widget can be dragged and what it hands over
+    /// (docs/dnd-plan.md D1): a clip plus a mask over the drag_op enum. An
+    /// empty clip withdraws it. `path` keys address a stamped copy; the
+    /// template zone is refused until the bindings sweep lands it.
+    SetDragSource { widget: WidgetId, clip: Clip, operations: u32, path: Vec<Value> },
+    /// DECLARE that a widget receives drops with the given operation mask
+    /// (what it accepts is its `accepts` prop). Zero withdraws it.
+    SetDropTarget { widget: WidgetId, operations: u32, path: Vec<Value> },
+    /// Make a live For's rows draggable within their own collection
+    /// (docs/dnd-plan.md D8); the drop reports an anchor and the app
+    /// confirms with collection_move.
+    SetReorderable { container: WidgetId, enabled: u32 },
     /// DECLARE the whole drawing on a canvas, replacing the previous
     /// declaration (docs/canvas-plan.md §3.1). `viewbox` is the coordinate
     /// system the ops are written in AND the canvas's natural size in points;
@@ -1583,6 +1622,17 @@ pub enum ApplyOp {
     /// do not. Header clicks hand `tag` to kaya_emit_sort_requested verbatim
     /// with the column index. Nothing here reorders (docs/tables-plan.md).
     SetColumnHeaders { id: WidgetId, sorted: u32, direction: u32, titles: Vec<String>, tag: Vec<u8> },
+    /// Install the platform's drag source over this payload on a live
+    /// widget; `tag` goes back verbatim through kaya_emit_drag_ended.
+    SetDragSource { id: WidgetId, clip: ClipOut, operations: u32, tag: Vec<u8> },
+    /// Register a live widget as a platform drop destination; the backend
+    /// asks kaya_drag_verdict at every hover and drop, and hands `tag` to
+    /// kaya_emit_dropped verbatim.
+    SetDropTarget { id: WidgetId, operations: u32, tag: Vec<u8> },
+    /// Rows of this live For reorder within their collection in the
+    /// platform's own idiom; a landing reports through kaya_emit_dropped
+    /// with the row's tag and the anchor row's tag.
+    SetReorderable { id: WidgetId, enabled: u32 },
     /// THE RASTER a canvas's declaration produced (docs/canvas-plan.md
     /// §1.1): `width` x `height` PREMULTIPLIED RGBA8 device pixels at
     /// `scale`, so the logical size is width/scale by height/scale. The
@@ -1648,6 +1698,24 @@ impl OccSink {
                 Occurrence::InstancePasted { node, path, clip } => {
                     let tag = crate::wire::click_tag(node.0, &path);
                     ring.push_record(crate::ring::REC_PASTED, &crate::wire::pasted_body(&tag, &clip));
+                }
+                Occurrence::Dropped { id, point, operation, anchor, before, clip } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::dropped_body(&tag, point, operation, &anchor, before, &clip);
+                    ring.push_record(crate::ring::REC_DROPPED, &body);
+                }
+                Occurrence::InstanceDropped { node, path, point, operation, anchor, before, clip } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::dropped_body(&tag, point, operation, &anchor, before, &clip);
+                    ring.push_record(crate::ring::REC_DROPPED, &body);
+                }
+                Occurrence::DragEnded { id, operation } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(crate::ring::REC_DRAG_ENDED, &crate::wire::drag_ended_body(&tag, operation));
+                }
+                Occurrence::InstanceDragEnded { node, path, operation } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(crate::ring::REC_DRAG_ENDED, &crate::wire::drag_ended_body(&tag, operation));
                 }
                 Occurrence::ButtonClicked { id } => {
                     let tag = crate::wire::click_tag(id.0, &[]);

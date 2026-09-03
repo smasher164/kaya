@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x2d485dd5237b14c3n;
+export const SPEC_HASH = 0x2f008874cf6b2370n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -19,6 +19,9 @@ export const CLIP_HTML = 2;
 export const CLIP_IMAGE = 4;
 export const CLIP_FILES = 8;
 export const CLIP_CUSTOM = 16;
+export const DRAG_OP_NONE = 0;
+export const DRAG_OP_COPY = 1;
+export const DRAG_OP_MOVE = 2;
 export const KIND_COLUMN = 1;
 export const KIND_BUTTON = 2;
 export const KIND_LABEL = 3;
@@ -212,6 +215,9 @@ export const TX_SET_COLUMN_HEADERS = 45;
 export const TX_SET_DRAWING = 46;
 export const TX_SET_SIZE_POLICY = 47;
 export const TX_CREATE_BREAKPOINT = 48;
+export const TX_SET_DRAG_SOURCE = 49;
+export const TX_SET_DROP_TARGET = 50;
+export const TX_SET_REORDERABLE = 51;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -249,6 +255,9 @@ export const APPLY_SET_APP_IDENTITY = 34;
 export const APPLY_SET_COLUMN_HEADERS = 35;
 export const APPLY_SET_DRAWING = 36;
 export const APPLY_FOLD = 37;
+export const APPLY_SET_DRAG_SOURCE = 38;
+export const APPLY_SET_DROP_TARGET = 39;
+export const APPLY_SET_REORDERABLE = 40;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -270,6 +279,8 @@ export const OCC_REDONE = 18;
 export const OCC_SORT_REQUESTED = 19;
 export const OCC_DRAW_REQUESTED = 20;
 export const OCC_TICK = 21;
+export const OCC_DROPPED = 22;
+export const OCC_DRAG_ENDED = 23;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -613,6 +624,21 @@ export function tx_set_size_policy(widget_id: number, policy: number): Uint8Arra
 /** A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name. */
 export function tx_create_breakpoint(window: number, size_class: WireValue, count: number, setters: readonly WireValue[]): Uint8Array {
   return record(TX_CREATE_BREAKPOINT, cat(u64(window), enc.value(size_class), u32(count), u32(0), enc.values(setters)));
+}
+
+/** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. */
+export function tx_set_drag_source(widget: number, present: number, file_count: number, custom_count: number, operations: number, path_len: number, reps: readonly WireValue[]): Uint8Array {
+  return record(TX_SET_DRAG_SOURCE, cat(u64(widget), u32(present), u32(file_count), u32(custom_count), u32(operations), u32(path_len), u32(0), enc.values(reps)));
+}
+
+/** DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. */
+export function tx_set_drop_target(widget: number, operations: number, path_len: number, keys: readonly WireValue[]): Uint8Array {
+  return record(TX_SET_DROP_TARGET, cat(u64(widget), u32(operations), u32(path_len), enc.values(keys)));
+}
+
+/** Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it. */
+export function tx_set_reorderable(container: number, enabled: number): Uint8Array {
+  return record(TX_SET_REORDERABLE, cat(u64(container), u32(enabled), u32(0)));
 }
 
 /** set_property with a constant text value. */
@@ -1184,7 +1210,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };

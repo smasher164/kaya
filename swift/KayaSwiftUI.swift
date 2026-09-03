@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x2d485dd5237b14c3
+let kayaSpecHash: UInt64 = 0x2f008874cf6b2370
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -45,6 +45,14 @@ private let applySetDrawing: UInt16 = 36
 /// table } — the child renders inside the grown table's viewport above
 /// row 0; table 0 restores it.
 private let applyFold: UInt16 = 37
+/// The drag declarations (docs/dnd-plan.md D1, D8); the arms are a depth slice.
+private let applySetDragSource: UInt16 = 38
+private let applySetDropTarget: UInt16 = 39
+private let applySetReorderable: UInt16 = 40
+/// What a drop settles on (the wire's drag_op).
+let kayaDragOpNone: UInt32 = 0
+let kayaDragOpCopy: UInt32 = 1
+let kayaDragOpMove: UInt32 = 2
 /// `tableSorted`'s no-column sentinel (the wire's SORT_NONE).
 let kayaSortNone: UInt32 = 0xFFFF_FFFF
 private let applyPushEntry: UInt16 = 12
@@ -3695,6 +3703,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 if parentKind == kindSelect || parentKind == kindRadio {
                     kayaScene.labels.removeAll { $0.id == child }
                 }
+            case applySetDragSource, applySetDropTarget, applySetReorderable:
+                #if os(macOS)
+                    kayaDepthStub("dnd", on: "macos")
+                #else
+                    kayaDepthStub("dnd", on: "ios")
+                #endif
             case applyFold:
                 // The stacked fold (D7). Order is the core's emission
                 // order — the row's declaration order — so append holds

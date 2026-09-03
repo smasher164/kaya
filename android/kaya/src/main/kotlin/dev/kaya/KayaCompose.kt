@@ -976,7 +976,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x2d485dd5237b14c3uL
+    private const val SPEC_HASH: ULong = 0x2f008874cf6b2370uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1027,6 +1027,14 @@ object KayaCompose {
      * parent.
      */
     private const val APPLY_FOLD = 37
+    /** The drag declarations (docs/dnd-plan.md D1, D8); the arms are a depth slice. */
+    private const val APPLY_SET_DRAG_SOURCE = 38
+    private const val APPLY_SET_DROP_TARGET = 39
+    private const val APPLY_SET_REORDERABLE = 40
+    /** What a drop settles on (the wire's drag_op). */
+    internal const val DRAG_OP_NONE = 0
+    internal const val DRAG_OP_COPY = 1
+    internal const val DRAG_OP_MOVE = 2
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -2141,6 +2149,8 @@ object KayaCompose {
                         KayaSceneModel.labels.removeAll { it.id == child }
                     }
                 }
+                APPLY_SET_DRAG_SOURCE, APPLY_SET_DROP_TARGET, APPLY_SET_REORDERABLE ->
+                    depthStub("dnd")
                 APPLY_FOLD -> {
                     // The stacked fold (D7). Order is the core's
                     // emission order — the row's declaration order — so
@@ -11285,3 +11295,7 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaSceneModel.alertId = null
     KayaPresent.emitAlertResult(alert, choice)
 }
+
+/** A depth stub is a CALL, never a sentence — tools/check-stubs.py reads it. */
+private fun depthStub(scene: String): Nothing =
+    error("kaya: the $scene scene is not yet materialized on android — a depth slice; see CLAUDE.md's sequencing")

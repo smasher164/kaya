@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x2d485dd5237b14c3
+let kayaSpecHash: UInt64 = 0x2f008874cf6b2370
 
 struct KayaTx {
     var bytes = Data()
@@ -522,6 +522,39 @@ struct KayaTx {
         self.u32(count)
         self.u32(0)
         self.values(setters)
+        self.end(kayaAt)
+    }
+
+    /// DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
+    mutating func setDragSource(_ widget: UInt64, _ present: UInt32, _ fileCount: UInt32, _ customCount: UInt32, _ operations: UInt32, _ pathLen: UInt32, _ reps: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DRAG_SOURCE))
+        self.u64(widget)
+        self.u32(present)
+        self.u32(fileCount)
+        self.u32(customCount)
+        self.u32(operations)
+        self.u32(pathLen)
+        self.u32(0)
+        self.values(reps)
+        self.end(kayaAt)
+    }
+
+    /// DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source.
+    mutating func setDropTarget(_ widget: UInt64, _ operations: UInt32, _ pathLen: UInt32, _ keys: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DROP_TARGET))
+        self.u64(widget)
+        self.u32(operations)
+        self.u32(pathLen)
+        self.values(keys)
+        self.end(kayaAt)
+    }
+
+    /// Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it.
+    mutating func setReorderable(_ container: UInt64, _ enabled: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_REORDERABLE))
+        self.u64(container)
+        self.u32(enabled)
+        self.u32(0)
         self.end(kayaAt)
     }
 
@@ -1635,6 +1668,8 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_SORT_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_DRAW_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_TICK)
+            || kind == UInt16(KAYA_OCCURRENCE_DROPPED)
+            || kind == UInt16(KAYA_OCCURRENCE_DRAG_ENDED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {

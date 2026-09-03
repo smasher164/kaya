@@ -99,6 +99,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::ClipboardResult { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
+            | Occurrence::Dropped { .. }
+            | Occurrence::InstanceDropped { .. }
+            | Occurrence::DragEnded { .. }
+            | Occurrence::InstanceDragEnded { .. }
             | Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. } => {}
             Occurrence::Toggled { .. } | Occurrence::InstanceToggled { .. } => {}
             Occurrence::ValueChanged { .. } | Occurrence::InstanceValueChanged { .. } => {}

@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x2d485dd5237b14c3ULL
+#define KAYA_SPEC_HASH 0x2f008874cf6b2370ULL
 
 
 /* Create a signal holding `initial`. */
@@ -630,6 +630,39 @@ static inline void kaya_tx_create_breakpoint(KayaTx *tx, uint64_t window, KayaVa
     kaya_wire_u32(tx, count);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, setters, setters_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. */
+static inline void kaya_tx_set_drag_source(KayaTx *tx, uint64_t widget, uint32_t present, uint32_t file_count, uint32_t custom_count, uint32_t operations, uint32_t path_len, const KayaVal *reps, uint32_t reps_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_DRAG_SOURCE);
+    kaya_wire_u64(tx, widget);
+    kaya_wire_u32(tx, present);
+    kaya_wire_u32(tx, file_count);
+    kaya_wire_u32(tx, custom_count);
+    kaya_wire_u32(tx, operations);
+    kaya_wire_u32(tx, path_len);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, reps, reps_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. */
+static inline void kaya_tx_set_drop_target(KayaTx *tx, uint64_t widget, uint32_t operations, uint32_t path_len, const KayaVal *keys, uint32_t keys_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_DROP_TARGET);
+    kaya_wire_u64(tx, widget);
+    kaya_wire_u32(tx, operations);
+    kaya_wire_u32(tx, path_len);
+    kaya_wire_values(tx, keys, keys_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it. */
+static inline void kaya_tx_set_reorderable(KayaTx *tx, uint64_t container, uint32_t enabled) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_REORDERABLE);
+    kaya_wire_u64(tx, container);
+    kaya_wire_u32(tx, enabled);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, kaya_at);
 }
 

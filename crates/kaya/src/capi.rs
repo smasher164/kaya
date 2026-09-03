@@ -83,6 +83,10 @@ pub const KAYA_OCCURRENCE_SORT_REQUESTED: u16 = 19;
 /// for a tick. Identity as in button_clicked.
 pub const KAYA_OCCURRENCE_DRAW_REQUESTED: u16 = 20;
 pub const KAYA_OCCURRENCE_TICK: u16 = 21;
+/// Content dropped on a widget, and the end of a drag that began on one
+/// (docs/dnd-plan.md D1).
+pub const KAYA_OCCURRENCE_DROPPED: u16 = 22;
+pub const KAYA_OCCURRENCE_DRAG_ENDED: u16 = 23;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -106,6 +110,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_SORT_REQUESTED == ring::REC_SORT_REQUESTED
         && KAYA_OCCURRENCE_DRAW_REQUESTED == ring::REC_DRAW_REQUESTED
         && KAYA_OCCURRENCE_TICK == ring::REC_TICK
+        && KAYA_OCCURRENCE_DROPPED == ring::REC_DROPPED
+        && KAYA_OCCURRENCE_DRAG_ENDED == ring::REC_DRAG_ENDED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -258,6 +264,13 @@ const _: () = assert!(KAYA_TX_SET_SIZE_POLICY == wire::TX_SET_SIZE_POLICY);
 /// — count triples flat, widgets then props then values, thirds by position.
 pub const KAYA_TX_CREATE_BREAKPOINT: u16 = 48;
 const _: () = assert!(KAYA_TX_CREATE_BREAKPOINT == wire::TX_CREATE_BREAKPOINT);
+/// The drag declarations (docs/dnd-plan.md D1, D8).
+pub const KAYA_TX_SET_DRAG_SOURCE: u16 = 49;
+pub const KAYA_TX_SET_DROP_TARGET: u16 = 50;
+pub const KAYA_TX_SET_REORDERABLE: u16 = 51;
+const _: () = assert!(KAYA_TX_SET_DRAG_SOURCE == wire::TX_SET_DRAG_SOURCE);
+const _: () = assert!(KAYA_TX_SET_DROP_TARGET == wire::TX_SET_DROP_TARGET);
+const _: () = assert!(KAYA_TX_SET_REORDERABLE == wire::TX_SET_REORDERABLE);
 /// The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
 /// `size_class` value and kaya_window_metrics' `size_class` argument
 /// speak. COMPACT is the only class a breakpoint may name today; NONE is
@@ -526,6 +539,16 @@ pub const KAYA_APPLY_SET_DRAWING: u16 = 36;
 /// its parent, its id and its addressing.
 pub const KAYA_APPLY_FOLD: u16 = 37;
 const _: () = assert!(KAYA_APPLY_FOLD == wire::APPLY_FOLD);
+pub const KAYA_APPLY_SET_DRAG_SOURCE: u16 = 38;
+pub const KAYA_APPLY_SET_DROP_TARGET: u16 = 39;
+pub const KAYA_APPLY_SET_REORDERABLE: u16 = 40;
+const _: () = assert!(KAYA_APPLY_SET_DRAG_SOURCE == wire::APPLY_SET_DRAG_SOURCE);
+const _: () = assert!(KAYA_APPLY_SET_DROP_TARGET == wire::APPLY_SET_DROP_TARGET);
+const _: () = assert!(KAYA_APPLY_SET_REORDERABLE == wire::APPLY_SET_REORDERABLE);
+/// What a drop settles on (spec enum "drag_op").
+pub const KAYA_DRAG_OP_NONE: u32 = 0;
+pub const KAYA_DRAG_OP_COPY: u32 = 1;
+pub const KAYA_DRAG_OP_MOVE: u32 = 2;
 const _: () = assert!(KAYA_APPLY_SET_DRAWING == wire::APPLY_SET_DRAWING);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
@@ -817,7 +840,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 21,
+    crate::spec::SPEC.occurrence.len() == 23,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -2487,6 +2510,171 @@ pub unsafe extern "C" fn kaya_emit_clipboard_result(
     }
 }
 
+/// Presentation side: content DROPPED on a widget (docs/dnd-plan.md D1).
+/// `tag` is the destination's stored tag; `anchor`/`anchor_len` the anchor
+/// row's tag for a reorder (null and 0 otherwise); `operation` the verdict
+/// kaya_drag_verdict answered for this drop; `rep` the one representation
+/// that arrived, never null.
+///
+/// # Safety
+/// `tag` and `anchor` point to their stated byte counts and `rep` to a
+/// valid `KayaRepresentation`, all outliving the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_dropped(
+    tag: *const u8,
+    tag_len: usize,
+    x: f64,
+    y: f64,
+    operation: u32,
+    anchor: *const u8,
+    anchor_len: usize,
+    before: u32,
+    rep: *const KayaRepresentation,
+) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let clip = unsafe { representation(rep) }.expect(
+            "kaya: kaya_emit_dropped was handed no representation — a drop that \
+             delivered nothing is not an occurrence",
+        );
+        let bytes = if tag.is_null() || tag_len == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(tag, tag_len) }
+        };
+        let anchor_path = if anchor.is_null() || anchor_len == 0 {
+            Vec::new()
+        } else {
+            let anchor_bytes = unsafe { std::slice::from_raw_parts(anchor, anchor_len) };
+            match crate::wire::decode_click_tag(anchor_bytes) {
+                crate::protocol::Occurrence::InstanceButtonClicked { path, .. } => path,
+                crate::protocol::Occurrence::ButtonClicked { .. } => Vec::new(),
+                other => unreachable!("kaya: an anchor tag decoded to {other:?}"),
+            }
+        };
+        let point = (x, y);
+        let before = before != 0;
+        let occurrence = match crate::wire::decode_click_tag(bytes) {
+            crate::protocol::Occurrence::ButtonClicked { id } => crate::protocol::Occurrence::Dropped {
+                id,
+                point,
+                operation,
+                anchor: anchor_path,
+                before,
+                clip,
+            },
+            crate::protocol::Occurrence::InstanceButtonClicked { node, path } => {
+                crate::protocol::Occurrence::InstanceDropped {
+                    node,
+                    path,
+                    point,
+                    operation,
+                    anchor: anchor_path,
+                    before,
+                    clip,
+                }
+            }
+            other => unreachable!("kaya: a click tag decoded to {other:?}"),
+        };
+        if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+            sink.send(occurrence);
+            return;
+        }
+        let (anchor_path, clip) = match &occurrence {
+            crate::protocol::Occurrence::Dropped { anchor, clip, .. }
+            | crate::protocol::Occurrence::InstanceDropped { anchor, clip, .. } => (anchor, clip),
+            _ => unreachable!(),
+        };
+        state().ring.push_record(
+            ring::REC_DROPPED,
+            &crate::wire::dropped_body(bytes, point, operation, anchor_path, before, clip),
+        );
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (tag, tag_len, x, y, operation, anchor, anchor_len, before, rep);
+        panic!(
+            "kaya: kaya_emit_dropped is the interpreter platforms' entry — \
+             this host's backend emits on its own sink"
+        );
+    }
+}
+
+/// Presentation side: a drag that began on the tagged widget ended, with
+/// the outcome a drag_op (docs/dnd-plan.md D1).
+///
+/// # Safety
+/// `tag` must point to `tag_len` valid bytes outliving the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_drag_ended(tag: *const u8, tag_len: usize, operation: u32) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let bytes = if tag.is_null() || tag_len == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(tag, tag_len) }
+        };
+        let occurrence = match crate::wire::decode_click_tag(bytes) {
+            crate::protocol::Occurrence::ButtonClicked { id } => {
+                crate::protocol::Occurrence::DragEnded { id, operation }
+            }
+            crate::protocol::Occurrence::InstanceButtonClicked { node, path } => {
+                crate::protocol::Occurrence::InstanceDragEnded { node, path, operation }
+            }
+            other => unreachable!("kaya: a click tag decoded to {other:?}"),
+        };
+        if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+            sink.send(occurrence);
+            return;
+        }
+        state()
+            .ring
+            .push_record(ring::REC_DRAG_ENDED, &crate::wire::drag_ended_body(bytes, operation));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (tag, tag_len, operation);
+        panic!(
+            "kaya: kaya_emit_drag_ended is the interpreter platforms' entry — \
+             this host's backend emits on its own sink"
+        );
+    }
+}
+
+/// THE HOVER AND DROP VERDICT, a pure function of the two declarations
+/// (docs/dnd-plan.md D2), callable from any thread because it reads no
+/// state: the backend holds the destination's accept list and operation
+/// mask (it applied both) and the platform tells it what a source offers.
+/// `accepts` is the destination's accept list as declared; `offered` the
+/// source's clip mask and `offered_custom` a space-separated list of its
+/// custom ids (null for none); `local` non-zero when the source is this
+/// process. Answers a drag_op: copy or move, or none.
+///
+/// # Safety
+/// `accepts` and `offered_custom` are NUL-terminated or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_drag_verdict(
+    accepts: *const std::os::raw::c_char,
+    target_ops: u32,
+    offered: u32,
+    offered_custom: *const std::os::raw::c_char,
+    source_ops: u32,
+    local: u32,
+) -> u32 {
+    let list = if accepts.is_null() {
+        ""
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(accepts) }.to_str().unwrap_or("")
+    };
+    let custom_list = if offered_custom.is_null() {
+        ""
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(offered_custom) }.to_str().unwrap_or("")
+    };
+    let custom: Vec<&str> = custom_list.split_whitespace().collect();
+    crate::wire::drop_verdict(list, target_ops, offered, &custom, source_ops, local != 0)
+}
+
 /// Presentation side: content arriving at a widget because the user pasted.
 /// `tag` is the widget's stored click tag, so a stamped row's paste needs no
 /// second entry. A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE: `rep`
@@ -3682,6 +3870,9 @@ mod tests {
             ("set_drawing", KAYA_TX_SET_DRAWING),
             ("set_size_policy", KAYA_TX_SET_SIZE_POLICY),
             ("create_breakpoint", KAYA_TX_CREATE_BREAKPOINT),
+            ("set_drag_source", KAYA_TX_SET_DRAG_SOURCE),
+            ("set_drop_target", KAYA_TX_SET_DROP_TARGET),
+            ("set_reorderable", KAYA_TX_SET_REORDERABLE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -3721,6 +3912,9 @@ mod tests {
             ("set_column_headers", KAYA_APPLY_SET_COLUMN_HEADERS),
             ("set_drawing", KAYA_APPLY_SET_DRAWING),
             ("fold", KAYA_APPLY_FOLD),
+            ("set_drag_source", KAYA_APPLY_SET_DRAG_SOURCE),
+            ("set_drop_target", KAYA_APPLY_SET_DROP_TARGET),
+            ("set_reorderable", KAYA_APPLY_SET_REORDERABLE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

@@ -10610,6 +10610,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // stamped once for the whole batch (winui/order.rs).
             core.child_order.append(parent, child);
         }
+        ApplyOp::SetDragSource { .. } | ApplyOp::SetDropTarget { .. } | ApplyOp::SetReorderable { .. } => {
+            depth_stub("dnd")
+        }
         ApplyOp::Fold { child, table } => {
             // The stacked fold (D7): the element moves into the table's
             // wrap and scrolls away with the rows under the pinned header.
@@ -16771,4 +16774,9 @@ mod tests {
             );
         }
     }
+}
+
+/// A depth stub is a CALL, never a sentence — tools/check-stubs.py reads it.
+fn depth_stub(scene: &str) -> ! {
+    panic!("kaya: the {scene} scene is not yet materialized on winui — a depth slice; see CLAUDE.md's sequencing")
 }

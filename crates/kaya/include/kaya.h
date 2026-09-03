@@ -98,6 +98,14 @@
 #define KAYA_OCCURRENCE_TICK 21
 
 /**
+ * Content dropped on a widget, and the end of a drag that began on one
+ * (docs/dnd-plan.md D1).
+ */
+#define KAYA_OCCURRENCE_DROPPED 22
+
+#define KAYA_OCCURRENCE_DRAG_ENDED 23
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -303,6 +311,15 @@
  * — count triples flat, widgets then props then values, thirds by position.
  */
 #define KAYA_TX_CREATE_BREAKPOINT 48
+
+/**
+ * The drag declarations (docs/dnd-plan.md D1, D8).
+ */
+#define KAYA_TX_SET_DRAG_SOURCE 49
+
+#define KAYA_TX_SET_DROP_TARGET 50
+
+#define KAYA_TX_SET_REORDERABLE 51
 
 /**
  * The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
@@ -536,6 +553,21 @@
  * its parent, its id and its addressing.
  */
 #define KAYA_APPLY_FOLD 37
+
+#define KAYA_APPLY_SET_DRAG_SOURCE 38
+
+#define KAYA_APPLY_SET_DROP_TARGET 39
+
+#define KAYA_APPLY_SET_REORDERABLE 40
+
+/**
+ * What a drop settles on (spec enum "drag_op").
+ */
+#define KAYA_DRAG_OP_NONE 0
+
+#define KAYA_DRAG_OP_COPY 1
+
+#define KAYA_DRAG_OP_MOVE 2
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -1503,6 +1535,56 @@ void kaya_emit_save_dialog_result(uint64_t dialog, const char *locator, const ch
  * `rep` must be NULL or a valid `KayaRepresentation` outliving the call.
  */
 void kaya_emit_clipboard_result(uint64_t request, const struct KayaRepresentation *rep);
+
+/**
+ * Presentation side: content DROPPED on a widget (docs/dnd-plan.md D1).
+ * `tag` is the destination's stored tag; `anchor`/`anchor_len` the anchor
+ * row's tag for a reorder (null and 0 otherwise); `operation` the verdict
+ * kaya_drag_verdict answered for this drop; `rep` the one representation
+ * that arrived, never null.
+ *
+ * # Safety
+ * `tag` and `anchor` point to their stated byte counts and `rep` to a
+ * valid `KayaRepresentation`, all outliving the call.
+ */
+void kaya_emit_dropped(const uint8_t *tag,
+                       uintptr_t tag_len,
+                       double x,
+                       double y,
+                       uint32_t operation,
+                       const uint8_t *anchor,
+                       uintptr_t anchor_len,
+                       uint32_t before,
+                       const struct KayaRepresentation *rep);
+
+/**
+ * Presentation side: a drag that began on the tagged widget ended, with
+ * the outcome a drag_op (docs/dnd-plan.md D1).
+ *
+ * # Safety
+ * `tag` must point to `tag_len` valid bytes outliving the call.
+ */
+void kaya_emit_drag_ended(const uint8_t *tag, uintptr_t tag_len, uint32_t operation);
+
+/**
+ * THE HOVER AND DROP VERDICT, a pure function of the two declarations
+ * (docs/dnd-plan.md D2), callable from any thread because it reads no
+ * state: the backend holds the destination's accept list and operation
+ * mask (it applied both) and the platform tells it what a source offers.
+ * `accepts` is the destination's accept list as declared; `offered` the
+ * source's clip mask and `offered_custom` a space-separated list of its
+ * custom ids (null for none); `local` non-zero when the source is this
+ * process. Answers a drag_op: copy or move, or none.
+ *
+ * # Safety
+ * `accepts` and `offered_custom` are NUL-terminated or null.
+ */
+uint32_t kaya_drag_verdict(const char *accepts,
+                           uint32_t target_ops,
+                           uint32_t offered,
+                           const char *offered_custom,
+                           uint32_t source_ops,
+                           uint32_t local);
 
 /**
  * Presentation side: content arriving at a widget because the user pasted.

@@ -10339,3 +10339,51 @@ whole factor, every guest's handler gets cheaper, and nothing about the
 binding's surface moves. Close it by rewriting the encoder against the
 probe's output bytes as the oracle, with bindings/js/kaya_app_checks.ts's
 byte-equality negatives held, and record the new batch time here.
+
+## DRAG AND DROP — the depth slice is under way (2026-09-03): spec and core landed, every backend arm a depth stub
+KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md
+
+The design pass is docs/dnd-plan.md; the maintainer ruled it first among
+the video editor's features (2026-09-03). LANDED: the three transaction
+records and their apply twins, the two occurrences, the drag_op enum,
+the core's live-widget declarations with the hover verdict as one pure
+function (`wire::drop_verdict`, exposed as `kaya_drag_verdict` so every
+backend answers a hover from the declarations it already holds), the
+emit entries, and the regenerated bindings. The template zone is refused
+by name until the bindings sweep lands it (docs/dnd-plan.md §4). What
+survives, each a stub the runner reads (tools/check-stubs.py):
+  - **DEPTH STUB: dnd on swiftui/macos** — the AppKit-floor destination
+    and source in the SwiftUI interpreter, the in-process `drag` verb
+    and the gate that drives the real AppKit arms (docs/dnd-plan.md D7,
+    D10, §5 step 3). Probe 3 (docs/probes/dnd-probe-mac-2026-09-03.md)
+    decides the pasteboard route: a MIME-shaped custom id is not a UTI,
+    so the arm writes the drag pasteboard at board level.
+  - **DEPTH STUB: dnd on swiftui/ios** — the UIDropInteraction route with
+    a session double (D10), after the mac arm; probe 5's answer on the
+    paste prompt lands here.
+  - **DEPTH STUB: dnd on compose** — the two modifiers and the `input
+    draganddrop` verb (D10), in the breadth phase (§5 step 5).
+  - **DEPTH STUB: dnd on gtk** — GtkDropTargetAsync for every target and
+    the X11 verb through xdotool (D10), in the breadth phase (§5 step 5).
+  - **DEPTH STUB: dnd on winui** — DataPackage or the OLE route, decided
+    by probes 1 and 2, and the SendInput verb (D10), in the breadth phase.
+
+## WATCH — iOS varied-python: `scroll_to_row r100` landed the band at 98 (first sighting 2026-09-03)
+KEY: varied-python, scroll_to_row, expect_window, first visible, synthesized tier, variable row heights, "98 300"
+
+On the drag-and-drop core's second matrix (10:05, the pool free, every
+other lane green) the iOS varied leg read `column@varied windows "98 300"`
+15 ms after `scroll_to_row column@varied r100` and held it for the whole
+retry window; the three hops before it (r200, r000, r150) landed exactly,
+and the same leg passed every earlier matrix and passed again on the
+standalone iOS rerun that followed. varied's rows are VARIABLE HEIGHT
+("300 rows, 845 lines"), so the premise to pin is the synthesized
+tier's landing arithmetic when the rows just above the target were never
+measured: an estimate-based offset for r100 that leaves rows 98–99 inside
+the viewport reads as "98". ON SIGHTING 2: instrument `scroll_to_row`'s
+own answer with the offset it settled at and the measured-versus-estimated
+heights of the six rows above the target, so the reading names the cause
+(docs/traps.md, "scroll_to_row before the synthesized tier's first
+placement", is the neighbouring class and not this one). The verb trace
+of the sighting is in the flight recorder: run 20260903T170647Z-004640,
+bundle ios-varied-python (verb-trace.txt, 621 records).

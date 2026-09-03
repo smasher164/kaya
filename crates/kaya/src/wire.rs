@@ -89,6 +89,9 @@ pub(crate) const TX_SET_DRAWING: u16 = 46;
 /// (docs/canvas-plan.md §3.2.1).
 pub(crate) const TX_SET_SIZE_POLICY: u16 = 47;
 pub(crate) const TX_CREATE_BREAKPOINT: u16 = 48;
+pub(crate) const TX_SET_DRAG_SOURCE: u16 = 49;
+pub(crate) const TX_SET_DROP_TARGET: u16 = 50;
+pub(crate) const TX_SET_REORDERABLE: u16 = 51;
 /// The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
 /// docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
 /// width. `compact` is the only class a binding can spell today.
@@ -169,6 +172,9 @@ pub(crate) const APPLY_SET_DRAWING: u16 = 36;
 /// scroll-away content above row 0; table 0 restores it. Core-derived
 /// from a stack_when row's own shape; no guest record spells it.
 pub(crate) const APPLY_FOLD: u16 = 37;
+pub(crate) const APPLY_SET_DRAG_SOURCE: u16 = 38;
+pub(crate) const APPLY_SET_DROP_TARGET: u16 = 39;
+pub(crate) const APPLY_SET_REORDERABLE: u16 = 40;
 
 // Value types.
 pub(crate) const VALUE_BOOL: u32 = 1;
@@ -324,6 +330,13 @@ pub(crate) const CLIP_HTML: u32 = 2;
 pub(crate) const CLIP_IMAGE: u32 = 4;
 pub(crate) const CLIP_FILES: u32 = 8;
 pub(crate) const CLIP_CUSTOM: u32 = 16;
+
+/// What a drop settles on (spec enum "drag_op"; docs/dnd-plan.md D3).
+/// A source's and a destination's `operations` are MASKS over copy and
+/// move; an outcome is one of the three.
+pub(crate) const DRAG_OP_NONE: u32 = 0;
+pub(crate) const DRAG_OP_COPY: u32 = 1;
+pub(crate) const DRAG_OP_MOVE: u32 = 2;
 
 /// Window property ids (spec::WINDOW_PROPS) — their own namespace;
 /// windows are not widgets.
@@ -1278,6 +1291,42 @@ pub fn decode_transaction_with_blobs(
                     .collect();
                 TxOp::SetColumnHeaders { widget, sorted, direction, path: flat, titles }
             }
+            TX_SET_DRAG_SOURCE => {
+                let widget = WidgetId(r.u64());
+                let present = r.u32();
+                let file_count = r.u32() as usize;
+                let custom_count = r.u32() as usize;
+                let operations = r.u32();
+                let path_len = r.u32() as usize;
+                let _reserved = r.u32();
+                let mut flat = r.record();
+                assert!(
+                    flat.len() >= path_len,
+                    "kaya: set_drag_source declares {path_len} keys but carries {} values",
+                    flat.len()
+                );
+                let reps = flat.split_off(path_len);
+                let clip = clip_from_values(present, file_count, custom_count, reps, "set_drag_source");
+                TxOp::SetDragSource { widget, clip, operations, path: flat }
+            }
+            TX_SET_DROP_TARGET => {
+                let widget = WidgetId(r.u64());
+                let operations = r.u32();
+                let path_len = r.u32() as usize;
+                let path = r.record();
+                assert!(
+                    path.len() == path_len,
+                    "kaya: set_drop_target declares {path_len} keys but carries {}",
+                    path.len()
+                );
+                TxOp::SetDropTarget { widget, operations, path }
+            }
+            TX_SET_REORDERABLE => {
+                let container = WidgetId(r.u64());
+                let enabled = r.u32();
+                let _reserved = r.u32();
+                TxOp::SetReorderable { container, enabled }
+            }
             TX_SET_DRAWING => {
                 let widget = WidgetId(r.u64());
                 let vb_w = match r.value() {
@@ -1745,6 +1794,41 @@ pub(crate) fn pasted_body(tag: &[u8], clip: &crate::protocol::Representation) ->
     b
 }
 
+/// The dropped occurrence: the tag verbatim, the four words, the point as
+/// two F64 values, the anchor's keys, then the representation in pasted's
+/// own layout (docs/dnd-plan.md D1).
+pub(crate) fn dropped_body(
+    tag: &[u8],
+    point: (f64, f64),
+    operation: u32,
+    anchor: &[Value],
+    before: bool,
+    clip: &crate::protocol::Representation,
+) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 64);
+    b.extend_from_slice(tag);
+    b.extend_from_slice(&operation.to_le_bytes());
+    b.extend_from_slice(&u32::from(before).to_le_bytes());
+    b.extend_from_slice(&(anchor.len() as u32).to_le_bytes());
+    b.extend_from_slice(&representation_kind(Some(clip)).to_le_bytes());
+    write_occurrence_value(&mut b, &Value::F64(point.0));
+    write_occurrence_value(&mut b, &Value::F64(point.1));
+    for key in anchor {
+        write_occurrence_value(&mut b, key);
+    }
+    write_representation(&mut b, Some(clip));
+    b
+}
+
+/// The drag_ended occurrence: the tag verbatim plus the outcome.
+pub(crate) fn drag_ended_body(tag: &[u8], operation: u32) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 8);
+    b.extend_from_slice(tag);
+    b.extend_from_slice(&operation.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    b
+}
+
 /// The four closed kinds, by the names an accept list spells them —
 /// the same names the `clip` enum uses, so there is one vocabulary and
 /// not a wire spelling beside a guest spelling.
@@ -1769,6 +1853,42 @@ pub fn parse_accept_list(list: &str) -> (u32, Vec<&str>) {
         }
     }
     (kinds, custom)
+}
+
+/// THE HOVER AND DROP VERDICT (docs/dnd-plan.md D2): the operation a
+/// drop settles on, from the destination's accept list and operation
+/// mask and the source's offer — no state, so the core, the four
+/// backends and kaya_drag_verdict all call this one function. A foreign
+/// source is answered copy whenever the destination takes the type, so
+/// no other app deletes on kaya's behalf; a local one gets move where
+/// both sides allow it, else copy where both allow it, else none.
+pub fn drop_verdict(
+    accepts: &str,
+    target_ops: u32,
+    offered: u32,
+    offered_custom: &[&str],
+    source_ops: u32,
+    local: bool,
+) -> u32 {
+    if target_ops == 0 {
+        return DRAG_OP_NONE;
+    }
+    let (kinds, custom) = parse_accept_list(accepts);
+    let takes = kinds & offered != 0 || offered_custom.iter().any(|id| custom.contains(id));
+    if !takes {
+        return DRAG_OP_NONE;
+    }
+    if !local {
+        return DRAG_OP_COPY;
+    }
+    let both = target_ops & source_ops;
+    if both & DRAG_OP_MOVE != 0 {
+        DRAG_OP_MOVE
+    } else if both & DRAG_OP_COPY != 0 {
+        DRAG_OP_COPY
+    } else {
+        DRAG_OP_NONE
+    }
 }
 
 /// An accept list names at least one representation and names none
@@ -2329,6 +2449,42 @@ impl Writer {
                     }
                 })
             }
+            ApplyOp::SetDragSource { id, clip, operations, tag } => {
+                self.record(APPLY_SET_DRAG_SOURCE, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    let mut body = Vec::new();
+                    write_clip_out(&mut body, clip, blobs);
+                    b.extend_from_slice(&body[..12]);
+                    b.extend_from_slice(&operations.to_le_bytes());
+                    b.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&body[16..]);
+                    // The identity tag after the values, 8-aligned
+                    // (set_column_headers' convention).
+                    b.extend_from_slice(tag);
+                    while b.len() % 8 != 0 {
+                        b.push(0);
+                    }
+                })
+            }
+            ApplyOp::SetDropTarget { id, operations, tag } => {
+                self.record(APPLY_SET_DROP_TARGET, |b, _blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&operations.to_le_bytes());
+                    b.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+                    b.extend_from_slice(tag);
+                    while b.len() % 8 != 0 {
+                        b.push(0);
+                    }
+                })
+            }
+            ApplyOp::SetReorderable { id, enabled } => {
+                self.record(APPLY_SET_REORDERABLE, |b, _blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&enabled.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                })
+            }
             ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {
                 self.record(APPLY_SET_COLUMN_HEADERS, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
@@ -2783,6 +2939,51 @@ impl Writer {
                     }
                 })
             }
+            TxOp::SetDragSource { widget, clip, operations, path } => {
+                self.record(TX_SET_DRAG_SOURCE, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    // The clip header (present, files, custom, reserved) is
+                    // write_clip's; here the reserved slot carries the
+                    // operations and the keys precede the reps.
+                    let mut body = Vec::new();
+                    write_clip(&mut body, clip, blobs);
+                    let (header, values) = body.split_at(16);
+                    b.extend_from_slice(&header[..12]);
+                    b.extend_from_slice(&operations.to_le_bytes());
+                    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    // values: count u32, pad u32, then the items — the keys
+                    // are spliced in ahead of the reps under one count.
+                    let mut r = Reader { buf: values, at: 0, blobs: &|_| None };
+                    let count = r.u32() as usize;
+                    let _pad = r.u32();
+                    b.extend_from_slice(&((path.len() + count) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for key in path {
+                        write_value(b, key, blobs);
+                    }
+                    b.extend_from_slice(&values[8..]);
+                })
+            }
+            TxOp::SetDropTarget { widget, operations, path } => {
+                self.record(TX_SET_DROP_TARGET, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&operations.to_le_bytes());
+                    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for key in path {
+                        write_value(b, key, blobs);
+                    }
+                })
+            }
+            TxOp::SetReorderable { container, enabled } => {
+                self.record(TX_SET_REORDERABLE, |b, _blobs| {
+                    b.extend_from_slice(&container.0.to_le_bytes());
+                    b.extend_from_slice(&enabled.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                })
+            }
             TxOp::SetDrawing { widget, viewbox, path, ops } => {
                 self.record(TX_SET_DRAWING, |b, blobs| {
                     b.extend_from_slice(&widget.0.to_le_bytes());
@@ -3020,14 +3221,25 @@ fn read_clip(r: &mut Reader<'_>) -> crate::protocol::Clip {
     let custom_count = r.u32() as usize;
     let _reserved = r.u32();
     let values = r.record();
+    clip_from_values(present, file_count, custom_count, values, "copy")
+}
 
+/// The clip record's values into a Clip, for the two records that carry
+/// one (copy, set_drag_source); `what` names the record in refusals.
+fn clip_from_values(
+    present: u32,
+    file_count: usize,
+    custom_count: usize,
+    values: Vec<Value>,
+    what: &str,
+) -> crate::protocol::Clip {
     let singles = usize::from(present & CLIP_TEXT != 0)
         + usize::from(present & CLIP_HTML != 0)
         + usize::from(present & CLIP_IMAGE != 0);
     let wanted = singles + file_count + custom_count * 2;
     assert!(
         values.len() == wanted,
-        "kaya: copy carries {} values but its header describes {wanted} \
+        "kaya: {what} carries {} values but its header describes {wanted} \
          (text/html/image flags, {file_count} files, {custom_count} custom)",
         values.len()
     );

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The classic-Win32 half of the probe pair: a WinForms window whose
+       drop target is plain OLE (RegisterDragDrop + IDropTarget) and whose
+       source is plain OLE (DoDragDrop over a hand-rolled IDataObject).
+       No WinRT anywhere in this process — that is the point. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>KayaDragProbe</RootNamespace>
+    <AssemblyName>StockOle</AssemblyName>
+    <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\shared\Ole.cs" Link="Ole.cs" />
+  </ItemGroup>
+</Project>

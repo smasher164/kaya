@@ -52,6 +52,8 @@ pub(crate) const REC_SORT_REQUESTED: u16 = 19;
 /// hands a ticking one the same size plus the frame's time.
 pub(crate) const REC_DRAW_REQUESTED: u16 = 20;
 pub(crate) const REC_TICK: u16 = 21;
+pub(crate) const REC_DROPPED: u16 = 22;
+pub(crate) const REC_DRAG_ENDED: u16 = 23;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

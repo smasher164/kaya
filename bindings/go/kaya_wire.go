@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x2d485dd5237b14c3
+	SpecHash uint64 = 0x2f008874cf6b2370
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -26,6 +26,9 @@ const (
 	ClipImage = 4
 	ClipFiles = 8
 	ClipCustom = 16
+	DragOpNone = 0
+	DragOpCopy = 1
+	DragOpMove = 2
 	KindColumn = 1
 	KindButton = 2
 	KindLabel = 3
@@ -218,6 +221,9 @@ const (
 	txSetDrawing = 46
 	txSetSizePolicy = 47
 	txCreateBreakpoint = 48
+	txSetDragSource = 49
+	txSetDropTarget = 50
+	txSetReorderable = 51
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -255,6 +261,9 @@ const (
 	applySetColumnHeaders = 35
 	applySetDrawing = 36
 	applyFold = 37
+	applySetDragSource = 38
+	applySetDropTarget = 39
+	applySetReorderable = 40
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -276,6 +285,8 @@ const (
 	occSortRequested = 19
 	occDrawRequested = 20
 	occTick = 21
+	occDropped = 22
+	occDragEnded = 23
 )
 
 func pad8(b []byte) []byte {
@@ -788,6 +799,39 @@ func TxCreateBreakpoint(window uint64, sizeClass any, count uint32, setters []an
 	b = binary.LittleEndian.AppendUint32(b, count)
 	b = binary.LittleEndian.AppendUint32(b, 0)
 	b = encodeValues(b, setters)
+	return endRecord(b)
+}
+
+// TxSetDragSource: DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
+func TxSetDragSource(widget uint64, present uint32, fileCount uint32, customCount uint32, operations uint32, pathLen uint32, reps []any) []byte {
+	b := beginRecord(txSetDragSource)
+	b = binary.LittleEndian.AppendUint64(b, widget)
+	b = binary.LittleEndian.AppendUint32(b, present)
+	b = binary.LittleEndian.AppendUint32(b, fileCount)
+	b = binary.LittleEndian.AppendUint32(b, customCount)
+	b = binary.LittleEndian.AppendUint32(b, operations)
+	b = binary.LittleEndian.AppendUint32(b, pathLen)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, reps)
+	return endRecord(b)
+}
+
+// TxSetDropTarget: DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source.
+func TxSetDropTarget(widget uint64, operations uint32, pathLen uint32, keys []any) []byte {
+	b := beginRecord(txSetDropTarget)
+	b = binary.LittleEndian.AppendUint64(b, widget)
+	b = binary.LittleEndian.AppendUint32(b, operations)
+	b = binary.LittleEndian.AppendUint32(b, pathLen)
+	b = encodeValues(b, keys)
+	return endRecord(b)
+}
+
+// TxSetReorderable: Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it.
+func TxSetReorderable(container uint64, enabled uint32) []byte {
+	b := beginRecord(txSetReorderable)
+	b = binary.LittleEndian.AppendUint64(b, container)
+	b = binary.LittleEndian.AppendUint32(b, enabled)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }
 
@@ -1880,7 +1924,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

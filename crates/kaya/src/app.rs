@@ -3833,7 +3833,9 @@ impl<M> Messages<M> {
                 | Occurrence::Toggled { id, .. }
                 | Occurrence::ValueChanged { id, .. }
                 | Occurrence::SortRequested { id, .. }
-                | Occurrence::Pasted { id, .. } => {
+                | Occurrence::Pasted { id, .. }
+                | Occurrence::Dropped { id, .. }
+                | Occurrence::DragEnded { id, .. } => {
                     self.widgets.borrow().get(&id.0).and_then(|f| f(&occ))
                 }
                 Occurrence::InstanceButtonClicked { node, .. }
@@ -3841,7 +3843,9 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceToggled { node, .. }
                 | Occurrence::InstanceValueChanged { node, .. }
                 | Occurrence::InstanceSortRequested { node, .. }
-                | Occurrence::InstancePasted { node, .. } => {
+                | Occurrence::InstancePasted { node, .. }
+                | Occurrence::InstanceDropped { node, .. }
+                | Occurrence::InstanceDragEnded { node, .. } => {
                     self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
                 }
                 Occurrence::CloseRequested { window } => {
@@ -6617,6 +6621,10 @@ mod tests {
                     | Occurrence::ClipboardResult { .. }
                     | Occurrence::Pasted { .. }
                     | Occurrence::InstancePasted { .. }
+                    | Occurrence::Dropped { .. }
+                    | Occurrence::InstanceDropped { .. }
+                    | Occurrence::DragEnded { .. }
+                    | Occurrence::InstanceDragEnded { .. }
                     | Occurrence::Undone { .. }
                     | Occurrence::Redone { .. }
                     | Occurrence::SortRequested { .. }

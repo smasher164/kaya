@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x2d485dd5237b14c3L;
+    public static final long SPEC_HASH = 0x2f008874cf6b2370L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -25,6 +25,9 @@ public final class KayaWire {
     public static final int CLIP_IMAGE = 4;
     public static final int CLIP_FILES = 8;
     public static final int CLIP_CUSTOM = 16;
+    public static final int DRAG_OP_NONE = 0;
+    public static final int DRAG_OP_COPY = 1;
+    public static final int DRAG_OP_MOVE = 2;
     public static final int KIND_COLUMN = 1;
     public static final int KIND_BUTTON = 2;
     public static final int KIND_LABEL = 3;
@@ -217,6 +220,9 @@ public final class KayaWire {
     public static final short TX_KIND_SET_DRAWING = 46;
     public static final short TX_KIND_SET_SIZE_POLICY = 47;
     public static final short TX_KIND_CREATE_BREAKPOINT = 48;
+    public static final short TX_KIND_SET_DRAG_SOURCE = 49;
+    public static final short TX_KIND_SET_DROP_TARGET = 50;
+    public static final short TX_KIND_SET_REORDERABLE = 51;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -254,6 +260,9 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_COLUMN_HEADERS = 35;
     public static final short APPLY_KIND_SET_DRAWING = 36;
     public static final short APPLY_KIND_FOLD = 37;
+    public static final short APPLY_KIND_SET_DRAG_SOURCE = 38;
+    public static final short APPLY_KIND_SET_DROP_TARGET = 39;
+    public static final short APPLY_KIND_SET_REORDERABLE = 40;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -275,6 +284,8 @@ public final class KayaWire {
     public static final short OCC_KIND_SORT_REQUESTED = 19;
     public static final short OCC_KIND_DRAW_REQUESTED = 20;
     public static final short OCC_KIND_TICK = 21;
+    public static final short OCC_KIND_DROPPED = 22;
+    public static final short OCC_KIND_DRAG_ENDED = 23;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -806,6 +817,39 @@ public final class KayaWire {
         b.putInt(count);
         b.putInt(0);
         encodeValues(b, setters);
+        return finish(b);
+    }
+
+    /** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. */
+    public static byte[] txSetDragSource(long widget, int present, int fileCount, int customCount, int operations, int pathLen, Object[] reps) {
+        Enc b = begin(TX_KIND_SET_DRAG_SOURCE);
+        b.putLong(widget);
+        b.putInt(present);
+        b.putInt(fileCount);
+        b.putInt(customCount);
+        b.putInt(operations);
+        b.putInt(pathLen);
+        b.putInt(0);
+        encodeValues(b, reps);
+        return finish(b);
+    }
+
+    /** DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. */
+    public static byte[] txSetDropTarget(long widget, int operations, int pathLen, Object[] keys) {
+        Enc b = begin(TX_KIND_SET_DROP_TARGET);
+        b.putLong(widget);
+        b.putInt(operations);
+        b.putInt(pathLen);
+        encodeValues(b, keys);
+        return finish(b);
+    }
+
+    /** Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it. */
+    public static byte[] txSetReorderable(long container, int enabled) {
+        Enc b = begin(TX_KIND_SET_REORDERABLE);
+        b.putLong(container);
+        b.putInt(enabled);
+        b.putInt(0);
         return finish(b);
     }
 
@@ -1747,7 +1791,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED) {
             return null;
         }
         long id = b.getLong(8);

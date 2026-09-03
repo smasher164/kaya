@@ -222,7 +222,10 @@ kaya understands.
 A dropped `files` representation registers into the picked table and
 the guest redeems it through `kaya_open_picked`, as a pasted file
 already does. No new vocabulary; iOS's coordinated read is why it
-cannot be a path.
+cannot be a path. MEASURED 2026-09-03 (probe 5): on iOS the provider
+dies about 3 s after `performDrop` returns, so the arm copies the file
+into the app's container inside the callback and registers the copy —
+what the picker's iOS arm already does for a security-scoped URL.
 
 ### D7 — The mac destination is an AppKit view, not a SwiftUI DropDelegate (RULING, visual and testability)
 
@@ -264,9 +267,11 @@ gaps in D10). Cross-app is part of the feature, not a later stage, and
 its proof is the clipboard milestone's: a foreign witness per desktop
 (a stock GTK reader for X11, a stock Win32 reader on the VM, `pbpaste`
 has no drag twin so the mac witness is an AppKit probe) plus the
-Windows Explorer question settled by the probe in §2 before the
-lowering is chosen (XAML `AllowDrop` versus OLE `RegisterDragDrop` on
-the HWND). Phones: same-app only, stated.
+Windows Explorer question, SETTLED by probes 1 and 2 (§2): the WinUI arm
+is XAML `AllowDrop` for WinRT sources AND `RegisterDragDrop` on the
+island HWND for Explorer and every Win32 source, the two coexisting in
+one window, with custom formats written as streams. Phones: same-app
+only, stated.
 
 ### D10 — The harness verb drives real input where the lane has it (RULING)
 
@@ -322,10 +327,51 @@ by what a wrong assumption costs:
 2. **Windows: does an Explorer file drop reach a WinUI 3 window on the
    VM**, elevated and not? Decides XAML versus the OLE route for the
    single most-wanted scenario.
+   MEASURED 2026-09-03, probes 1 and 2 together
+   (docs/probes/dnd-probe-windows-2026-09-03.md, the probe under
+   tools/win/dragprobe — a WinUI 3 app pair plus a stock Win32 OLE reader,
+   driven by SendInput in the interactive session, 13 scenarios). PROBE 1:
+   `DataPackage.SetData("dev.kaya/note", …)` crosses into a Win32 OLE
+   reader in another process with the id (registered clipboard format)
+   and bytes intact — as `TYMED_ISTREAM` only, seeked to its end, ONE tymed
+   per `GetData` (an OR is refused E_INVALIDARG); the string flavour
+   arrives UTF-16 with a NUL and the `IRandomAccessStream` flavour
+   byte-exact, so kaya writes `custom(id, bytes)` as a stream. The REVERSE
+   into XAML `AllowDrop` gets nothing — a census proved `AllowDrop`
+   registers no OLE drop target on any of the WinUI window's four HWNDs —
+   while the same Win32 source lands intact on `RegisterDragDrop` on the
+   island HWND (`Microsoft.UI.Content.DesktopChildSiteBridge`, after
+   `OleInitialize` on the XAML thread); and XAML does receive a
+   cross-process drag when the source is WinRT, so kaya-to-kaya works
+   through XAML. PROBE 2: Explorer to XAML NO, three runs including
+   `/rl highest`; Explorer to OLE on the WinUI HWND YES, `CF_HDROP` with
+   the real path, `parse_dropfiles`' own shape. THE TWO ROUTES COEXIST in
+   one window: both armed, an Explorer drop goes to OLE and a WinRT drag
+   to XAML. So the WinUI arm carries both. Elevation could not be measured:
+   the VM runs `EnableLUA=0`, every process reads the high integrity
+   level, and turning UAC on needs a reboot the probe did not take.
 3. **mac: does a MIME-shaped custom id survive a drag from an UNBUNDLED
    binary?** One report says SwiftUI drag needs `UTExportedTypeDeclarations`
    in an Info.plist the lane guests do not have. Probe bundled and
    unbundled, as `tools/mac/clipprobe` did.
+   MEASURED 2026-09-03 (docs/probes/dnd-probe-mac-2026-09-03.md, the
+   probe under tools/mac/dragprobe): the plist is a red herring, and the
+   real fact is sharper — `dev.kaya/note` is NOT A UTI. Every route a
+   drag source naturally takes drops it silently with the console's
+   "'dev.kaya/note' is not a valid UTI string": `NSPasteboardItem.setData`
+   returns false, a custom `NSPasteboardWriting`'s `writableTypes` is
+   refused, and a real `beginDraggingSession` composes a drag pasteboard
+   without it. It survives verbatim and cross-process ONLY through the
+   board-level `declareTypes`/`addTypes` + `setData` path — which also
+   works added onto a live session's own drag pasteboard — and bundling
+   changes nothing, because `UTExportedTypeDeclarations` cannot declare a
+   MIME-shaped string as a UTI at all (with the plist registered
+   system-wide, `UTType("dev.kaya/note")` is still nil and all seven
+   routes behave byte-identically). So the mac arm writes the drag
+   pasteboard at board level, the clipboard arm's own route; the plist
+   matters only for cross-app discovery under a reverse-DNS id. The one
+   premise a real drag still has to settle: the board-level add during a
+   live session.
 4. **Wayland: does `swaymsg 'seat - cursor press button1'` give a GDK
    client a serial `start_drag` accepts**, and does a seat pointer
    disturb the pooled legs the way the keyboard did? Decides whether
@@ -341,6 +387,24 @@ by what a wrong assumption costs:
    xdotool's XTEST pointer the same way.
 5. **iOS: does a drop from another app raise the iOS 16 paste prompt?**
    Reasoned no (the user's own gesture is the consent); measure it.
+   MEASURED 2026-09-03 (docs/probes/dnd-probe-ios-2026-09-03.md, the probe
+   under tools/ios/dragprobe, on an iPad-class pool device under iOS
+   26.5): NO PROMPT. A foreign drag from the stock Files app and from a
+   second bundle both reached a `UIDropInteraction` with
+   `session.localDragSession == nil`, and `performDrop` handed over the
+   foreign bytes in 60 ms and 4 ms with no prompt — against a positive
+   control minutes earlier where `UIPasteboard.general.string` raised
+   "would like to paste from" and parked the read for 26.5 s. Two
+   findings sharpen the plan: D6's premise is STRONGER than written — about
+   3 s after `performDrop` returns the whole `NSItemProvider` is dead
+   (`Code=-1000 "Cannot load representation"` for data, custom id and
+   file alike, the temp copy gone), so the iOS arm reads or copies a
+   dropped file INSIDE the callback and registers what it kept, never a
+   lazy handle; and D10's iOS row loses its "session double" caveat but
+   needs one driver verb: the lane's `drag` (`press(forDuration:thenDragTo:)`)
+   lost to a stock app's long-press context menu at all seven holds tried,
+   while `press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`
+   lifted it every time.
 
 ## §3 — The spec, in the record grammar
 

@@ -406,6 +406,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         // rides collection_move's undo run (docs/tables-plan.md).
         TxOp::CreateBreakpoint { .. } => UndoVerdict::Refused("create_breakpoint"),
         TxOp::SetColumnHeaders { .. } => UndoVerdict::Refused("set_column_headers"),
+        // Drag declarations describe how a widget behaves, not app state.
+        TxOp::SetDragSource { .. } => UndoVerdict::Refused("set_drag_source"),
+        TxOp::SetDropTarget { .. } => UndoVerdict::Refused("set_drop_target"),
+        TxOp::SetReorderable { .. } => UndoVerdict::Refused("set_reorderable"),
         // A drawing renders app state, it is not state
         // (docs/canvas-plan.md ruling 10, set_column_headers' reasoning).
         TxOp::SetDrawing { .. } => UndoVerdict::Refused("set_drawing"),
@@ -511,6 +515,15 @@ pub(crate) struct Scene {
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
     /// axis refusal below can be stated in both orderings.
     tables: std::collections::HashSet<WidgetId>,
+    /// Drag declarations (docs/dnd-plan.md D1), live widgets only until
+    /// the bindings sweep lands the template zone: what a source hands
+    /// over and allows, what a destination will perform, and each
+    /// widget's accept list as declared, so the hover verdict is answered
+    /// here with no app round trip.
+    drag_sources: HashMap<WidgetId, (crate::protocol::Clip, u32)>,
+    drop_targets: HashMap<WidgetId, u32>,
+    reorderable: std::collections::HashSet<WidgetId>,
+    accept_lists: HashMap<WidgetId, String>,
     /// `parent_of`'s ORDERED twin: parent -> children in declaration
     /// order, for the stacked fold (docs/adaptive-layout-plan.md D7),
     /// whose rule reads a breakpoint row's own shape at evaluation time.
@@ -1452,6 +1465,37 @@ impl Scene {
         self.windowing = true;
     }
 
+    /// THE HOVER AND DROP VERDICT (docs/dnd-plan.md D2), answered from
+    /// the two declarations with no app round trip: the operation a drop
+    /// on `target` settles on, or DRAG_OP_NONE. `offered` is the source's
+    /// clip mask and `offered_custom` its custom ids; `source_ops` the
+    /// source's mask; `local` whether the source is this process. A
+    /// foreign source is always answered copy so no other app deletes on
+    /// kaya's behalf; a local one gets move where both sides allow it.
+    /// A reorderable For's own rows are answered move onto the container.
+    pub fn drop_verdict(
+        &self,
+        target: WidgetId,
+        offered: u32,
+        offered_custom: &[&str],
+        source_ops: u32,
+        local: bool,
+    ) -> u32 {
+        let Some(&target_ops) = self.drop_targets.get(&target) else {
+            return crate::wire::DRAG_OP_NONE;
+        };
+        let Some(list) = self.accept_lists.get(&target) else {
+            return crate::wire::DRAG_OP_NONE;
+        };
+        crate::wire::drop_verdict(list, target_ops, offered, offered_custom, source_ops, local)
+    }
+
+    /// A reorderable For's rows drop onto rows of the same For, and
+    /// nothing else: the container answers whether it is one.
+    pub fn is_reorderable(&self, container: WidgetId) -> bool {
+        self.reorderable.contains(&container)
+    }
+
     fn alloc_internal(&mut self) -> WidgetId {
         self.next_internal += 1;
         WidgetId(INTERNAL_BIT | self.next_internal)
@@ -1594,6 +1638,9 @@ impl Scene {
                         .get(&widget)
                         .unwrap_or_else(|| panic!("kaya: property on unknown widget {widget:?}"));
                     check_prop(kind, prop);
+                    if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, &value) {
+                        self.accept_lists.insert(widget, list.clone());
+                    }
                     match value {
                         PropValue::Const(v) => {
                             check_prop_value(kind, prop, &v);
@@ -2620,6 +2667,110 @@ impl Scene {
                             self.bar_overrides.insert((node, keypath), bar);
                         }
                     }
+                }
+                TxOp::SetDragSource { widget, clip, operations, path } => {
+                    assert!(
+                        path.is_empty(),
+                        "kaya: set_drag_source keys {path:?} address a stamped copy — the \
+                         template zone lands with the bindings sweep (docs/dnd-plan.md §4)"
+                    );
+                    assert!(
+                        self.widgets.contains_key(&widget),
+                        "kaya: set_drag_source targets {widget:?}, which is not a live widget"
+                    );
+                    assert!(
+                        operations & !(crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE) == 0,
+                        "kaya: set_drag_source operations {operations:#x} name something \
+                         outside copy (1) and move (2) — link and ask are refused \
+                         (docs/dnd-plan.md D3)"
+                    );
+                    let empty = clip.text.is_none()
+                        && clip.html.is_none()
+                        && clip.image.is_none()
+                        && clip.files.is_empty()
+                        && clip.custom.is_empty();
+                    if empty {
+                        self.drag_sources.remove(&widget);
+                        out.push(ApplyOp::SetDragSource {
+                            id: widget,
+                            clip: crate::protocol::ClipOut::default(),
+                            operations: 0,
+                            tag: crate::wire::click_tag(widget.0, &[]),
+                        });
+                    } else {
+                        assert!(
+                            operations != 0,
+                            "kaya: set_drag_source on {widget:?} allows no operation — name \
+                             copy, move or both"
+                        );
+                        for (id, _) in &clip.custom {
+                            crate::wire::check_custom_id(id, "set_drag_source");
+                        }
+                        let files = clip
+                            .files
+                            .iter()
+                            .map(|handle| crate::capi::picked_locator(*handle))
+                            .collect();
+                        out.push(ApplyOp::SetDragSource {
+                            id: widget,
+                            clip: crate::protocol::ClipOut {
+                                text: clip.text.clone(),
+                                html: clip.html.clone(),
+                                image: clip.image.clone(),
+                                files,
+                                custom: clip.custom.clone(),
+                            },
+                            operations,
+                            tag: crate::wire::click_tag(widget.0, &[]),
+                        });
+                        self.drag_sources.insert(widget, (clip, operations));
+                    }
+                }
+                TxOp::SetDropTarget { widget, operations, path } => {
+                    assert!(
+                        path.is_empty(),
+                        "kaya: set_drop_target keys {path:?} address a stamped copy — the \
+                         template zone lands with the bindings sweep (docs/dnd-plan.md §4)"
+                    );
+                    assert!(
+                        self.widgets.contains_key(&widget),
+                        "kaya: set_drop_target targets {widget:?}, which is not a live widget"
+                    );
+                    assert!(
+                        operations & !(crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE) == 0,
+                        "kaya: set_drop_target operations {operations:#x} name something \
+                         outside copy (1) and move (2) (docs/dnd-plan.md D3)"
+                    );
+                    if operations == 0 {
+                        self.drop_targets.remove(&widget);
+                    } else {
+                        assert!(
+                            self.accept_lists.contains_key(&widget),
+                            "kaya: set_drop_target on {widget:?} needs its accept list first — \
+                             what a destination TAKES is its `accepts` prop, the same list a \
+                             paste consults (docs/dnd-plan.md D1)"
+                        );
+                        self.drop_targets.insert(widget, operations);
+                    }
+                    out.push(ApplyOp::SetDropTarget {
+                        id: widget,
+                        operations,
+                        tag: crate::wire::click_tag(widget.0, &[]),
+                    });
+                }
+                TxOp::SetReorderable { container, enabled } => {
+                    assert!(
+                        self.for_sites.values().any(|s| s.container == container),
+                        "kaya: set_reorderable targets {container:?}, which is not a live For's \
+                         container — rows reorder within the collection that stamps them \
+                         (docs/dnd-plan.md D8)"
+                    );
+                    if enabled == 0 {
+                        self.reorderable.remove(&container);
+                    } else {
+                        self.reorderable.insert(container);
+                    }
+                    out.push(ApplyOp::SetReorderable { id: container, enabled });
                 }
                 TxOp::SetDrawing { widget, viewbox, path, ops } => {
                     // The drawing's three addressings, spec doc order

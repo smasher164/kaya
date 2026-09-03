@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x2d485dd5237b14c3L
+let spec_hash = 0x2f008874cf6b2370L
 
 let value_bool = 1
 let value_i64 = 2
@@ -27,6 +27,9 @@ let clip_html = 2
 let clip_image = 4
 let clip_files = 8
 let clip_custom = 16
+let drag_op_none = 0
+let drag_op_copy = 1
+let drag_op_move = 2
 let kind_column = 1
 let kind_button = 2
 let kind_label = 3
@@ -219,6 +222,9 @@ let tx_kind_set_column_headers = 45
 let tx_kind_set_drawing = 46
 let tx_kind_set_size_policy = 47
 let tx_kind_create_breakpoint = 48
+let tx_kind_set_drag_source = 49
+let tx_kind_set_drop_target = 50
+let tx_kind_set_reorderable = 51
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -256,6 +262,9 @@ let apply_kind_set_app_identity = 34
 let apply_kind_set_column_headers = 35
 let apply_kind_set_drawing = 36
 let apply_kind_fold = 37
+let apply_kind_set_drag_source = 38
+let apply_kind_set_drop_target = 39
+let apply_kind_set_reorderable = 40
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -277,6 +286,8 @@ let occ_kind_redone = 18
 let occ_kind_sort_requested = 19
 let occ_kind_draw_requested = 20
 let occ_kind_tick = 21
+let occ_kind_dropped = 22
+let occ_kind_drag_ended = 23
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -668,6 +679,33 @@ let tx_create_breakpoint window size_class count setters =
       Buffer.add_int32_le b (Int32.of_int count);
       Buffer.add_int32_le b 0l;
       encode_values b setters)
+
+(* DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. *)
+let tx_set_drag_source widget present file_count custom_count operations path_len reps =
+  finish tx_kind_set_drag_source (fun b ->
+      Buffer.add_int64_le b widget;
+      Buffer.add_int32_le b (Int32.of_int present);
+      Buffer.add_int32_le b (Int32.of_int file_count);
+      Buffer.add_int32_le b (Int32.of_int custom_count);
+      Buffer.add_int32_le b (Int32.of_int operations);
+      Buffer.add_int32_le b (Int32.of_int path_len);
+      Buffer.add_int32_le b 0l;
+      encode_values b reps)
+
+(* DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. *)
+let tx_set_drop_target widget operations path_len keys =
+  finish tx_kind_set_drop_target (fun b ->
+      Buffer.add_int64_le b widget;
+      Buffer.add_int32_le b (Int32.of_int operations);
+      Buffer.add_int32_le b (Int32.of_int path_len);
+      encode_values b keys)
+
+(* Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it. *)
+let tx_set_reorderable container enabled =
+  finish tx_kind_set_reorderable (fun b ->
+      Buffer.add_int64_le b container;
+      Buffer.add_int32_le b (Int32.of_int enabled);
+      Buffer.add_int32_le b 0l)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -1564,7 +1602,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in

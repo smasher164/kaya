@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x2d485dd5237b14c3
+specHash = 0x2f008874cf6b2370
 
 valueBool :: Word32
 valueBool = 1
@@ -46,6 +46,12 @@ clipFiles :: Word32
 clipFiles = 8
 clipCustom :: Word32
 clipCustom = 16
+dragOpNone :: Word32
+dragOpNone = 0
+dragOpCopy :: Word32
+dragOpCopy = 1
+dragOpMove :: Word32
+dragOpMove = 2
 kindColumn :: Word32
 kindColumn = 1
 kindButton :: Word32
@@ -430,6 +436,12 @@ txKindSetSizePolicy :: Word16
 txKindSetSizePolicy = 47
 txKindCreateBreakpoint :: Word16
 txKindCreateBreakpoint = 48
+txKindSetDragSource :: Word16
+txKindSetDragSource = 49
+txKindSetDropTarget :: Word16
+txKindSetDropTarget = 50
+txKindSetReorderable :: Word16
+txKindSetReorderable = 51
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -504,6 +516,12 @@ applyKindSetDrawing :: Word16
 applyKindSetDrawing = 36
 applyKindFold :: Word16
 applyKindFold = 37
+applyKindSetDragSource :: Word16
+applyKindSetDragSource = 38
+applyKindSetDropTarget :: Word16
+applyKindSetDropTarget = 39
+applyKindSetReorderable :: Word16
+applyKindSetReorderable = 40
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -546,6 +564,10 @@ occKindDrawRequested :: Word16
 occKindDrawRequested = 20
 occKindTick :: Word16
 occKindTick = 21
+occKindDropped :: Word16
+occKindDropped = 22
+occKindDragEnded :: Word16
+occKindDragEnded = 23
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -769,6 +791,18 @@ txSetSizePolicy widgetId policy = wireRecord txKindSetSizePolicy (word64LE widge
 -- A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name.
 txCreateBreakpoint :: Word64 -> Value -> Word32 -> [Value] -> Builder
 txCreateBreakpoint window sizeClass count setters = wireRecord txKindCreateBreakpoint (word64LE window <> encodeValue sizeClass <> word32LE count <> word32LE 0 <> encodeValues setters)
+
+-- DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
+txSetDragSource :: Word64 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Value] -> Builder
+txSetDragSource widget present fileCount customCount operations pathLen reps = wireRecord txKindSetDragSource (word64LE widget <> word32LE present <> word32LE fileCount <> word32LE customCount <> word32LE operations <> word32LE pathLen <> word32LE 0 <> encodeValues reps)
+
+-- DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source.
+txSetDropTarget :: Word64 -> Word32 -> Word32 -> [Value] -> Builder
+txSetDropTarget widget operations pathLen keys = wireRecord txKindSetDropTarget (word64LE widget <> word32LE operations <> word32LE pathLen <> encodeValues keys)
+
+-- Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it.
+txSetReorderable :: Word64 -> Word32 -> Builder
+txSetReorderable container enabled = wireRecord txKindSetReorderable (word64LE container <> word32LE enabled <> word32LE 0)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1458,7 +1492,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

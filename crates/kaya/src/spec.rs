@@ -1296,6 +1296,74 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   `axis` only until the settable-prop ruling widens the list; \
                   anything else fails the batch by name.",
         },
+        Record {
+            kind: 49,
+            name: "set_drag_source",
+            fields: &[
+                f("widget", FieldTy::U64),
+                f("present", FieldTy::U32),
+                f("file_count", FieldTy::U32),
+                f("custom_count", FieldTy::U32),
+                f("operations", FieldTy::U32),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("reps", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "DECLARE that `widget` can be dragged, and what it hands over \
+                  (docs/dnd-plan.md D1): the copy record's body — a clip in \
+                  several representations, descending clip value, `present` \
+                  a mask over the single-valued kinds and the two plural \
+                  ones counted — plus `operations`, a mask over the drag_op \
+                  enum naming what the source allows (copy 1, move 2). \
+                  App-updated state: a widget whose payload changes \
+                  re-declares, and a `present` of zero with no files and no \
+                  custom ids withdraws the declaration. The core answers \
+                  every hover from this and the destination's own \
+                  declaration with no app round trip (D2). `path_len` keys \
+                  after the header address a stamped copy the way \
+                  set_column_headers' do; the template zone lands with the \
+                  bindings sweep and a keyed record is refused until then.",
+        },
+        Record {
+            kind: 50,
+            name: "set_drop_target",
+            fields: &[
+                f("widget", FieldTy::U64),
+                f("operations", FieldTy::U32),
+                f("path_len", FieldTy::U32),
+                f("keys", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "DECLARE that `widget` receives drops, with `operations` a \
+                  mask over the drag_op enum naming what it will perform \
+                  (copy 1, move 2; copy alone by default). WHAT it accepts \
+                  is the existing `accepts` prop — the same list a paste \
+                  consults, so a widget declares its vocabulary once. The \
+                  hover verdict is the intersection of the source's \
+                  operations with these, over a type the accept list names; \
+                  a foreign source into kaya is always answered copy (D2). A \
+                  zero mask withdraws the declaration. Keys as in \
+                  set_drag_source.",
+        },
+        Record {
+            kind: 51,
+            name: "set_reorderable",
+            fields: &[
+                f("container", FieldTy::U64),
+                f("enabled", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Make every stamped row of a live For draggable within its \
+                  own collection (docs/dnd-plan.md D8): each row is a source \
+                  whose payload is its key, and a destination that accepts \
+                  only its own collection's rows. The drop arrives as \
+                  `dropped` with the ANCHOR — the key of the row it landed \
+                  on and a before/onto bit — and the app confirms with the \
+                  collection_move it already has; the core reorders nothing \
+                  on its own. `enabled` 0 withdraws it.",
+        },
     ],
     apply: &[
         Record {
@@ -1894,6 +1962,59 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   RENDERS moves, exactly as the axis prop moves arrangement \
                   without moving identity.",
         },
+        Record {
+            kind: 38,
+            name: "set_drag_source",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("present", FieldTy::U32),
+                f("file_count", FieldTy::U32),
+                f("custom_count", FieldTy::U32),
+                f("operations", FieldTy::U32),
+                f("tag_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("reps", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The tx record's twin with the target resolved to a live \
+                  widget id, files as Str locators the way the copy twin \
+                  carries them, and the widget's identity TAG riding after \
+                  the values, 8-aligned (set_column_headers' shape): the \
+                  backend installs the platform's drag source over this \
+                  payload and hands the tag to kaya_emit_drag_ended verbatim \
+                  when the session ends.",
+        },
+        Record {
+            kind: 39,
+            name: "set_drop_target",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("operations", FieldTy::U32),
+                f("tag_len", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "The tx record's twin: the backend registers the widget as a \
+                  platform drop destination and asks the core, at every hover \
+                  and at the drop, through kaya_drag_verdict — it decides \
+                  nothing itself. The identity tag rides after the header, \
+                  8-aligned, and goes to kaya_emit_dropped verbatim.",
+        },
+        Record {
+            kind: 40,
+            name: "set_reorderable",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("enabled", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Rows of this live For container become drag sources and \
+                  destinations within the collection, in the platform's own \
+                  reorder idiom (docs/dnd-plan.md D8). The backend reports a \
+                  landing through kaya_emit_dropped with the moved row's tag \
+                  as the identity and the row it landed on as the anchor; \
+                  the model does not move until the app's collection_move.",
+        },
     ],
     occurrence: &[
         Record {
@@ -2320,6 +2441,56 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   count is part of the scene and never a fact about the \
                   machine's load.",
         },
+        Record {
+            kind: 22,
+            name: "dropped",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("operation", FieldTy::U32),
+                f("before", FieldTy::U32),
+                f("anchor_len", FieldTy::U32),
+                f("clip", FieldTy::U32),
+                f("value", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Content DROPPED on a widget (docs/dnd-plan.md D1): the \
+                  paste occurrence with a position, an operation and, for a \
+                  reorder, an anchor. IDENTITY READS AS IN button_clicked — \
+                  path_len key values follow the header — then the four \
+                  words: `operation` from the drag_op enum (copy or move, the \
+                  one the core settled on), `before` 1 when a reorder lands \
+                  before its anchor row and 0 onto it, `anchor_len` the \
+                  anchor row's key count (0 when there is no anchor), `clip` \
+                  the single representation kind that arrived; then the \
+                  point as two F64 values in the destination's own \
+                  coordinates, the anchor's keys, and the representation's \
+                  values in pasted's own layout. THE APP'S TRANSACTION AFTER \
+                  THIS IS THE VISIBLE EFFECT: a same-app move removes its \
+                  original in the same batch; a reorder confirms with \
+                  collection_move against the anchor. Files are picked \
+                  handles, redeemed with kaya_open_picked (D6).",
+        },
+        Record {
+            kind: 23,
+            name: "drag_ended",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("operation", FieldTy::U32),
+                f("reserved2", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "A drag that began on this widget has ended, and this is \
+                  what the destination did with it: `operation` from the \
+                  drag_op enum, `none` for a cancelled or refused drag. The \
+                  source of a move removes its original HERE for a drop that \
+                  landed outside this app; a same-app move was already one \
+                  transaction with its `dropped`. Identity as in \
+                  button_clicked, key values after the header.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -2342,6 +2513,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("files", 8),
                 ("custom", 16),
             ],
+        },
+        EnumSpec {
+            // What a drop settles on (docs/dnd-plan.md D3): the source's
+            // mask and the destination's meet here, and `none` is the
+            // outcome of a cancelled or refused drag. copy and move only;
+            // link and ask are refused on the record.
+            name: "drag_op",
+            variants: &[("none", 0), ("copy", 1), ("move", 2)],
         },
         EnumSpec {
             name: "kind",
@@ -2788,6 +2967,9 @@ mod tests {
             ("set_drawing", wire::TX_SET_DRAWING),
             ("set_size_policy", wire::TX_SET_SIZE_POLICY),
             ("create_breakpoint", wire::TX_CREATE_BREAKPOINT),
+            ("set_drag_source", wire::TX_SET_DRAG_SOURCE),
+            ("set_drop_target", wire::TX_SET_DROP_TARGET),
+            ("set_reorderable", wire::TX_SET_REORDERABLE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2838,6 +3020,9 @@ mod tests {
                 ("set_column_headers", wire::APPLY_SET_COLUMN_HEADERS),
                 ("set_drawing", wire::APPLY_SET_DRAWING),
                 ("fold", wire::APPLY_FOLD),
+                ("set_drag_source", wire::APPLY_SET_DRAG_SOURCE),
+                ("set_drop_target", wire::APPLY_SET_DROP_TARGET),
+                ("set_reorderable", wire::APPLY_SET_REORDERABLE),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -2868,6 +3053,8 @@ mod tests {
                 ("sort_requested", crate::ring::REC_SORT_REQUESTED),
                 ("draw_requested", crate::ring::REC_DRAW_REQUESTED),
                 ("tick", crate::ring::REC_TICK),
+                ("dropped", crate::ring::REC_DROPPED),
+                ("drag_ended", crate::ring::REC_DRAG_ENDED),
             ]
         );
     }
@@ -3135,6 +3322,9 @@ mod tests {
                     ("occurrence", "text_changed") => crate::ring::REC_TEXT_CHANGED as u32,
                     ("occurrence", "toggled") => crate::ring::REC_TOGGLED as u32,
                     ("occurrence", "value_changed") => crate::ring::REC_VALUE_CHANGED as u32,
+                    ("drag_op", "none") => wire::DRAG_OP_NONE,
+                    ("drag_op", "copy") => wire::DRAG_OP_COPY,
+                    ("drag_op", "move") => wire::DRAG_OP_MOVE,
                     ("clip", "text") => wire::CLIP_TEXT,
                     ("clip", "html") => wire::CLIP_HTML,
                     ("clip", "image") => wire::CLIP_IMAGE,

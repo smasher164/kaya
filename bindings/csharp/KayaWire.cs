@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x2d485dd5237b14c3;
+    public const ulong SpecHash = 0x2f008874cf6b2370;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -24,6 +24,9 @@ static class KayaWire
     public const uint ClipImage = 4;
     public const uint ClipFiles = 8;
     public const uint ClipCustom = 16;
+    public const uint DragOpNone = 0;
+    public const uint DragOpCopy = 1;
+    public const uint DragOpMove = 2;
     public const uint KindColumn = 1;
     public const uint KindButton = 2;
     public const uint KindLabel = 3;
@@ -216,6 +219,9 @@ static class KayaWire
     public const ushort TxKindSetDrawing = 46;
     public const ushort TxKindSetSizePolicy = 47;
     public const ushort TxKindCreateBreakpoint = 48;
+    public const ushort TxKindSetDragSource = 49;
+    public const ushort TxKindSetDropTarget = 50;
+    public const ushort TxKindSetReorderable = 51;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -253,6 +259,9 @@ static class KayaWire
     public const ushort ApplyKindSetColumnHeaders = 35;
     public const ushort ApplyKindSetDrawing = 36;
     public const ushort ApplyKindFold = 37;
+    public const ushort ApplyKindSetDragSource = 38;
+    public const ushort ApplyKindSetDropTarget = 39;
+    public const ushort ApplyKindSetReorderable = 40;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -274,6 +283,8 @@ static class KayaWire
     public const ushort OccKindSortRequested = 19;
     public const ushort OccKindDrawRequested = 20;
     public const ushort OccKindTick = 21;
+    public const ushort OccKindDropped = 22;
+    public const ushort OccKindDragEnded = 23;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -827,6 +838,42 @@ static class KayaWire
         w.Write(0u);
         EncodeValues(w, setters);
         return Finish(stream, w, TxKindCreateBreakpoint);
+    }
+
+    /// DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
+    public static byte[] TxSetDragSource(ulong widget, uint present, uint fileCount, uint customCount, uint operations, uint pathLen, object[] reps)
+    {
+        var w = Begin(out var stream);
+        w.Write(widget);
+        w.Write(present);
+        w.Write(fileCount);
+        w.Write(customCount);
+        w.Write(operations);
+        w.Write(pathLen);
+        w.Write(0u);
+        EncodeValues(w, reps);
+        return Finish(stream, w, TxKindSetDragSource);
+    }
+
+    /// DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source.
+    public static byte[] TxSetDropTarget(ulong widget, uint operations, uint pathLen, object[] keys)
+    {
+        var w = Begin(out var stream);
+        w.Write(widget);
+        w.Write(operations);
+        w.Write(pathLen);
+        EncodeValues(w, keys);
+        return Finish(stream, w, TxKindSetDropTarget);
+    }
+
+    /// Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it.
+    public static byte[] TxSetReorderable(ulong container, uint enabled)
+    {
+        var w = Begin(out var stream);
+        w.Write(container);
+        w.Write(enabled);
+        w.Write(0u);
+        return Finish(stream, w, TxKindSetReorderable);
     }
 
     /// set_property with a constant text value.
@@ -1698,7 +1745,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

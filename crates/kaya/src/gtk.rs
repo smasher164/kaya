@@ -6520,6 +6520,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 parent_box.reorder_child_after(&child_widget, after.as_ref());
             }
         }
+        ApplyOp::SetDragSource { .. } | ApplyOp::SetDropTarget { .. } | ApplyOp::SetReorderable { .. } => {
+            depth_stub("dnd")
+        }
         ApplyOp::Fold { child, table } => {
             // The stacked fold (D7): the child moves INTO the table's
             // content box, above the top spacer, and scrolls away with
@@ -13165,4 +13168,9 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
             }),
         }
     })
+}
+
+/// A depth stub is a CALL, never a sentence — tools/check-stubs.py reads it.
+fn depth_stub(scene: &str) -> ! {
+    panic!("kaya: the {scene} scene is not yet materialized on gtk — a depth slice; see CLAUDE.md's sequencing")
 }

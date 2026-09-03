@@ -7993,3 +7993,57 @@ assertion over video on the emulator lane is a flake by construction, and
 the read is a `-gpu host` or physical-device measurement. Decode itself was
 never the problem: `c2.goldfish.h264.decoder` and the VP9 path both ran
 every loop with no error, 247–450 ms from launch to the first frame.
+
+## A MIME-shaped id is not a UTI on macOS: the pasteboard-item routes drop it silently, and only the board-level write carries it (measured 2026-09-03)
+
+kaya's custom clip ids are MIME-shaped (`dev.kaya/note`). Probing the drag
+arm (docs/probes/dnd-probe-mac-2026-09-03.md): `NSPasteboardItem.setData`
+returns FALSE for that type, a custom `NSPasteboardWriting`'s
+`writableTypes` is refused, and a real `beginDraggingSession` composes a
+drag pasteboard with no trace of it — each with only a console line,
+"'dev.kaya/note' is not a valid UTI string", to say so. The board-level
+`NSPasteboard.declareTypes`/`addTypes` + `setData` path carries the
+string verbatim and cross-process, including added onto a live session's
+own drag pasteboard. Bundling does not change it: `UTExportedTypeDeclarations`
+cannot declare a MIME-shaped string as a UTI, and with such a plist
+registered system-wide `UTType("dev.kaya/note")` is still nil. Any Apple
+arm that hands kaya's custom id to an item-level API is writing nothing.
+
+## A dropped item's provider is dead three seconds after `performDrop` returns, and a plain long-press drag loses to a stock app's context menu (measured 2026-09-03)
+
+Two findings from the iOS drop probe (docs/probes/dnd-probe-ios-2026-09-03.md).
+First, `UIDropInteraction`'s `NSItemProvider` is usable only inside
+`performDrop`: about three seconds after the delegate returns, every load
+— data, a custom id, a file representation — fails with
+`Code=-1000 "Cannot load representation"` and the temporary file copy is
+gone. A drop arm that registers a lazy handle and reads later reads
+nothing; it copies or reads inside the callback. Second, the resident
+XCUITest driver's `drag` verb (`press(forDuration:thenDragTo:)`) lost to
+the Files app's long-press context menu at all seven hold durations
+tried — the menu opened and the drag never lifted — while
+`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)` lifted
+the item every time. A cross-app drag on the lane needs that form. The
+prompt question itself answered no: a foreign drop raises no iOS paste
+prompt (the gesture is the consent), where the same app's
+`UIPasteboard.general.string` parked 26.5 s behind one.
+
+## WinUI's `AllowDrop` registers no OLE drop target, so an Explorer drop never reaches it; custom formats cross to Win32 only as one stream per GetData (measured 2026-09-03)
+
+The Windows drag probes (docs/probes/dnd-probe-windows-2026-09-03.md, 13
+scenarios on the VM). A WinUI 3 window with `AllowDrop=true` receives a
+cross-process drag when the SOURCE is WinRT (kaya to kaya works), and
+nothing from Explorer or from any Win32 OLE source — three Explorer runs
+including one launched with `/rl highest`, and a census of the window's
+four HWNDs found no OLE drop target registered on any of them. The same
+sources land intact on `RegisterDragDrop` on the island HWND
+(`Microsoft.UI.Content.DesktopChildSiteBridge`, after `OleInitialize` on
+the XAML thread), Explorer as `CF_HDROP` with the real path, and the two
+routes coexist in one window: both armed, an Explorer drop goes to OLE
+and a WinRT drag to XAML. In the other direction a `DataPackage`'s
+custom format crosses into a Win32 reader as a registered clipboard
+format whose data is `TYMED_ISTREAM` ONLY, the stream seeked to its end,
+and `GetData` refuses an OR of tymeds with E_INVALIDARG — one tymed per
+call; the string flavour arrives UTF-16 with a NUL, the
+`IRandomAccessStream` flavour byte-exact. Elevation was not measurable:
+the VM runs with `EnableLUA=0`, so every process is high integrity and
+there is no UIPI barrier to observe.

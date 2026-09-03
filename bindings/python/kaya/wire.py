@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x2d485dd5237b14c3
+SPEC_HASH = 0x2f008874cf6b2370
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -22,6 +22,9 @@ CLIP_HTML = 2
 CLIP_IMAGE = 4
 CLIP_FILES = 8
 CLIP_CUSTOM = 16
+DRAG_OP_NONE = 0
+DRAG_OP_COPY = 1
+DRAG_OP_MOVE = 2
 KIND_COLUMN = 1
 KIND_BUTTON = 2
 KIND_LABEL = 3
@@ -215,6 +218,9 @@ TX_SET_COLUMN_HEADERS = 45
 TX_SET_DRAWING = 46
 TX_SET_SIZE_POLICY = 47
 TX_CREATE_BREAKPOINT = 48
+TX_SET_DRAG_SOURCE = 49
+TX_SET_DROP_TARGET = 50
+TX_SET_REORDERABLE = 51
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -252,6 +258,9 @@ APPLY_SET_APP_IDENTITY = 34
 APPLY_SET_COLUMN_HEADERS = 35
 APPLY_SET_DRAWING = 36
 APPLY_FOLD = 37
+APPLY_SET_DRAG_SOURCE = 38
+APPLY_SET_DROP_TARGET = 39
+APPLY_SET_REORDERABLE = 40
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -273,6 +282,8 @@ OCC_REDONE = 18
 OCC_SORT_REQUESTED = 19
 OCC_DRAW_REQUESTED = 20
 OCC_TICK = 21
+OCC_DROPPED = 22
+OCC_DRAG_ENDED = 23
 
 
 def _pad(b):
@@ -513,6 +524,18 @@ def tx_set_size_policy(widget_id, policy):
 def tx_create_breakpoint(window, size_class, count, setters):
     """A size-class breakpoint on a window: while the window's size class equals `size_class` (i64; SIZE_CLASS_COMPACT is the only class a guest may name today), the core applies the setter list; leaving the class it restores the guest-authored value, or the widget's own default where the guest never wrote one — the adaptation is a DIFF against the base declaration (docs/adaptive-layout-plan.md D3, size classes ruled 2026-08-31). The guest NEVER writes a width: iOS answers with the platform's own size class, and every other platform derives it from the latched width at the kaya-owned SIZE_CLASS_COMPACT_BELOW boundary.  THE CORE EVALUATES THE CONDITION, never the platform's breakpoint machinery and never a guest round trip: width and platform class are LATCHED from the backend's metrics reports, a breakpoint declared before any report applies at the first — the phone that never resizes — and a same-metrics report moves nothing.  `setters` is count triples flat: widgets (i64), then props (i64), then values, thirds by position. Setters may name `axis` only until the settable-prop ruling widens the list; anything else fails the batch by name."""
     return record(TX_CREATE_BREAKPOINT, struct.pack("<Q", window) + _enc.value(size_class) + struct.pack("<I", count) + struct.pack("<I", 0) + _enc.values(setters))
+
+def tx_set_drag_source(widget, present, file_count, custom_count, operations, path_len, reps):
+    """DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then."""
+    return record(TX_SET_DRAG_SOURCE, struct.pack("<Q", widget) + struct.pack("<I", present) + struct.pack("<I", file_count) + struct.pack("<I", custom_count) + struct.pack("<I", operations) + struct.pack("<I", path_len) + struct.pack("<I", 0) + _enc.values(reps))
+
+def tx_set_drop_target(widget, operations, path_len, keys):
+    """DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source."""
+    return record(TX_SET_DROP_TARGET, struct.pack("<Q", widget) + struct.pack("<I", operations) + struct.pack("<I", path_len) + _enc.values(keys))
+
+def tx_set_reorderable(container, enabled):
+    """Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it."""
+    return record(TX_SET_REORDERABLE, struct.pack("<Q", container) + struct.pack("<I", enabled) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id, text):
@@ -1067,7 +1090,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
