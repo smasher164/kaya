@@ -390,6 +390,36 @@ fn main() {
         "Microsoft.UI.Windowing.AppWindow".to_string(),
         "Microsoft.UI.Windowing.AppWindowTitleBar".to_string(),
         "Microsoft.UI.Windowing.TitleBarHeightOption".to_string(),
+        // DRAG AND DROP (docs/dnd-plan.md §5 step 5). Until these landed
+        // every ADD half of the six drag events was a `usize` vtable PAD
+        // while the Remove halves survived on their i64 token, and
+        // AllowDrop/CanDrag were reachable with no event to answer
+        // (docs/probes/dnd-2026-09-02-gtk-winui.md §2.5). The payload IS
+        // WinRT DataTransfer here: XAML drag is `DataPackage` and there is
+        // no classic-Win32 door into DragStarting, which is the one place
+        // the clipboard's "classic Win32, deliberately" ruling cannot hold.
+        // DragStarting and DropCompleted ride the already-filtered
+        // TypedEventHandler; only the four DragEnter/Over/Leave/Drop
+        // events have a handler type of their own.
+        "Microsoft.UI.Xaml.DragStartingEventArgs".to_string(),
+        "Microsoft.UI.Xaml.DropCompletedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.DragEventHandler".to_string(),
+        "Microsoft.UI.Xaml.DragEventArgs".to_string(),
+        "Microsoft.UI.Xaml.DragOperationDeferral".to_string(),
+        "Windows.ApplicationModel.DataTransfer.DataPackage".to_string(),
+        "Windows.ApplicationModel.DataTransfer.DataPackageView".to_string(),
+        "Windows.ApplicationModel.DataTransfer.DataPackageOperation".to_string(),
+        "Windows.ApplicationModel.DataTransfer.StandardDataFormats".to_string(),
+        // The image and files representations: SetBitmap takes a stream
+        // REFERENCE and SetStorageItems an IIterable<IStorageItem>, so the
+        // two carrier types come with them. `custom(id, bytes)` needs none
+        // of this — it rides SetData's IInspectable over a memory IStream
+        // (probe 1: the string flavour crosses as UTF-16 with a NUL).
+        "Windows.Storage.Streams.IRandomAccessStream".to_string(),
+        "Windows.Storage.Streams.IRandomAccessStreamWithContentType".to_string(),
+        "Windows.Storage.Streams.RandomAccessStreamReference".to_string(),
+        "Windows.Storage.IStorageItem".to_string(),
+        "Windows.Storage.StorageFile".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

@@ -140,6 +140,13 @@ if POOL < 1:
 TABLET_PORT = 5554 + 2 * POOL
 TABLET_SERIAL = f"emulator-{TABLET_PORT}"
 
+# The `drag` verb's injection budget (docs/dnd-plan.md D10): how many
+# times one request may be injected while the app has not acked it, and
+# how long after an injection ends before the next is allowed. Three
+# tries at ~1.5s each fit inside the verb's own 20s ack ceiling.
+DRAG_INJECT_TRIES = 3
+DRAG_INJECT_RETRY_S = 2.0
+
 
 def adb(serial, *args, **kw):
     return run(["adb", "-s", serial, *args], **kw)
@@ -1027,6 +1034,23 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # `am start -W` already blocks until the first frame and the scene
     # exits ~300ms after its verdict.
     out = ""
+    # THE `drag` VERB'S ONE HAND (docs/dnd-plan.md D10). The harness runs
+    # INSIDE the app and no app may inject a system drag, so it prints
+    # both widgets' centres in screen pixels and this poll — which is
+    # already re-reading the whole buffer every half second — runs the
+    # real gesture on the leg's OWN device.
+    #
+    # REQUEST, INJECT, and re-inject ONLY while the gesture was lost: a
+    # touch injected into the first ~400ms of a leg never starts (the
+    # launch transition and the splash window are still coming down,
+    # measured 2026-09-03). Re-injection exists for that alone — once the
+    # app logs KAYA_DRAG_STARTED (the source's transferData ran, so the
+    # gesture took) the seq is IN FLIGHT and a fresh drag would clobber
+    # a slow-ending one under load, which is exactly what reddened one
+    # reorder under the matrix (docs/traps.md). The app acks the drag that
+    # ENDED, refused or taken; drags are serial, so the start count at a
+    # seq's first injection dates every later start to that seq.
+    served = {}
     for _ in range(120):
         dump = out_of(["timeout", "10", "adb", "-s", serial, "logcat",
                        "-d", "-s", "kaya:*"])
@@ -1034,6 +1058,28 @@ def run_apk_on(serial, name, apk, component, script, extras,
         if m:
             out = m.group(0)
             break
+        acked = set(re.findall(r"KAYA_ACK: draganddrop (\d+)", dump))
+        starts = len(re.findall(r"KAYA_DRAG_STARTED: draganddrop", dump))
+        for seq, *point in re.findall(
+                r"KAYA_REQUEST: draganddrop (\d+) (-?\d+) (-?\d+) (-?\d+) "
+                r"(-?\d+) (\d+)", dump):
+            tries, last, starts_at = served.get(seq, (0, 0.0, starts))
+            if seq in acked or tries >= DRAG_INJECT_TRIES:
+                continue
+            # In flight: a start postdates this seq's first injection.
+            if tries and starts > starts_at:
+                continue
+            if tries and time.monotonic() - last < DRAG_INJECT_RETRY_S:
+                continue
+            began = time.monotonic()
+            rc = run(["timeout", "60", "adb", "-s", serial, "shell",
+                      "input", "draganddrop", *point],
+                     stdout=log, stderr=log).returncode
+            served[seq] = (tries + 1, time.monotonic(),
+                           starts_at if tries else starts)
+            print(f"{name}: draganddrop #{seq} try {tries + 1} "
+                  f"{' '.join(point)} -> rc={rc} in "
+                  f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         time.sleep(0.5)
     print(out, file=log)
     # THE RECREATION LEG'S OWN PROOF (docs/deferred.md's mount entry):

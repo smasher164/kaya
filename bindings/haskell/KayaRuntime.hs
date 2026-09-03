@@ -49,6 +49,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import KayaWire
   ( ClipValues,
+    DropValues,
     Value (..),
     occKindRedone,
     occKindUndone,
@@ -425,6 +426,7 @@ pollOccurrence ::
           [Value],
           Maybe Value,
           Maybe ClipValues,
+          Maybe DropValues,
           Maybe UndoDelta,
           [Value]
         )
@@ -444,12 +446,12 @@ pollOccurrence = do
               if kind == occKindUndone || kind == occKindRedone
                 then do
                   (w, label, delta) <- parseUndo (dat `plusPtr` at)
-                  return (Just (kind, w, [], Just (VStr label), Nothing, Just delta, []))
+                  return (Just (kind, w, [], Just (VStr label), Nothing, Nothing, Just delta, []))
                 else do
                   ordinary <- parseOccurrence occurrenceBlob (dat `plusPtr` at)
                   return
                     ( fmap
-                        (\(k, ident, keys, payload, clip, rest) -> (k, ident, keys, payload, clip, Nothing, rest))
+                        (\(k, ident, keys, payload, clip, drop_, rest) -> (k, ident, keys, payload, clip, drop_, Nothing, rest))
                         ordinary
                     )
             -- Word32 wraps on its own; hand the space back with release.

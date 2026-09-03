@@ -515,7 +515,6 @@ impl Step {
             | Step::ExpectRows(t, _)
             | Step::ExpectColumnEdges(t, _)
             | Step::ScrollToRow(t, _)
-            | Step::Drag(t, _, _)
             | Step::HeaderClick(t, _)
             | Step::ExpectShares(t, _)
             | Step::ExpectAligned(t, _)
@@ -530,6 +529,14 @@ impl Step {
             | Step::ExpectDrawing(t, _)
             | Step::ExpectRaster(t, _)
             | Step::Compose(t, _) => vec![t],
+            // BOTH ENDS OF A DRAG NORMALIZE. Handing the loop above the
+            // source alone left `drag label#0 to label@row[a]` reaching every
+            // rust-native backend as index 0 with the id still on it —
+            // label#0 — and no lane could see it, because the mac
+            // interpreter parses the script itself (tools/check-verbs.py
+            // holds every variant's Target fields against these arms).
+            // docs/traps.md: A Step's SECOND Target was never normalized
+            Step::Drag(source, destination, _) => vec![source, destination],
             Step::ExpectFolded(child, table) => {
                 let mut out = vec![child];
                 if let Some(table) = table {
@@ -4285,6 +4292,22 @@ mod tests {
                 Target { kind: TargetKind::Column, index: 1, id: None, keys: None },
                 "25,75".into()
             )
+        );
+    }
+
+    /// The runtime half of `targets_mut`'s drag arm (docs/traps.md: A
+    /// Step's SECOND Target was never normalized).
+    #[test]
+    fn a_drag_normalizes_both_ends() {
+        let mut step = parse("drag label@row[c] to label@row[a] before").unwrap()
+            .pop()
+            .unwrap();
+        let named: Vec<(Option<&str>, Option<&str>)> =
+            step.targets_mut().iter().map(|t| (t.id, t.keys)).collect();
+        assert_eq!(
+            named,
+            vec![(Some("row"), Some("c")), (Some("row"), Some("a"))],
+            "a drag's source AND destination must both be normalizable"
         );
     }
 

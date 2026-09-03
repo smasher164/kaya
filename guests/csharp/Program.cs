@@ -2,6 +2,12 @@
 // KAYA_CHECK the headless invariant check.
 static class Program
 {
+    // WinUI 3 hosts its UI on a single-threaded COM apartment, and the OLE
+    // drag route (docs/dnd-plan.md §5, D10) needs it too — OleInitialize
+    // returns RPC_E_CHANGED_MODE on the default MTA main thread and the
+    // drag's modal loop never runs. The framework's own generated Main
+    // carries this; kaya's hand-rolled one must too.
+    [System.STAThread]
     static void Main()
     {
         if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "abort")
@@ -43,6 +49,7 @@ static class Program
             case "clipboard": ClipboardScene.Run(); break;
             case "undo": UndoScene.Run(); break;
             case "dirty": DirtyScene.Run(); break;
+            case "dnd": DndScene.Run(); break;
             case "ranges": RangesScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;

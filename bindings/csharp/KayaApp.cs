@@ -664,6 +664,8 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx, Representation?>> clipboardReads = new();
     internal readonly Dictionary<ulong, Action<Tx, Representation>> widgetPastes = new();
     internal readonly Dictionary<ulong, Action<Tx, List<object>, Representation>> nodePastes = new();
+    internal readonly Dictionary<ulong, Action<Tx, Dropped>> widgetDrops = new();
+    internal readonly Dictionary<ulong, Action<Tx, Op?>> dragEnded = new();
     internal ulong nextAlert;
     internal ulong nextFileDialog;
     internal ulong nextClipboardRead;
@@ -1222,6 +1224,26 @@ sealed class KayaApp
                 if (nodePastes.TryGetValue(id, out var fn)
                     && Representation.From(payload as KayaWire.ClipValues) is { } clip)
                     Dispatch(tx => fn(tx, keys, clip));
+            }
+            // A drop rides the same tag with four more words
+            // (docs/dnd-plan.md D1); the template zone is refused, so a
+            // keyed drop reaches no handler.
+            else if (kind == KayaWire.OccKindDropped && keys.Count == 0)
+            {
+                if (widgetDrops.TryGetValue(id, out var fn)
+                    && payload is KayaWire.DropValues drop)
+                {
+                    var answer = Dropped.From(drop);
+                    Dispatch(tx => fn(tx, answer));
+                }
+            }
+            else if (kind == KayaWire.OccKindDragEnded && keys.Count == 0)
+            {
+                if (dragEnded.TryGetValue(id, out var fn))
+                {
+                    var answer = Dropped.Operate(payload is uint m ? m : 0);
+                    Dispatch(tx => fn(tx, answer));
+                }
             }
             // Menu occurrences key the menu-item tables — their own id
             // space. Node-anchored context items carry the stamped
@@ -2622,6 +2644,40 @@ sealed class Tx
     public void OnPaste(Node n, Action<Tx, List<object>, Representation> handler) =>
         App.nodePastes[n.Id] = handler;
 
+    /// DECLARE what a widget hands over when dragged: a clip in the copy
+    /// chain's own shapes plus the operations it allows
+    /// (docs/dnd-plan.md D1). Declare() sends it; an EMPTY chain
+    /// withdraws, which is how a same-app move removes its source.
+    public DragRef Draggable(Widget w) => new DragRef(this, w.Id);
+
+    /// DECLARE that a widget receives drops, performing these operations;
+    /// naming NONE withdraws it. WHAT it takes is its SetAccepts list,
+    /// which must be declared first — a destination has one vocabulary,
+    /// not two.
+    public void SetDropTarget(Widget w, params Op[] ops)
+    {
+        uint mask = 0;
+        foreach (var op in ops) mask |= (uint)op;
+        Records.Add(KayaWire.TxSetDropTarget(w.Id, mask, 0, Array.Empty<object>()));
+    }
+
+    /// Rows of this live For drag within their own collection
+    /// (docs/dnd-plan.md D8): the landing arrives at OnDrop on the For's
+    /// own container and the app confirms with a move.
+    public void SetReorderable(Widget container, bool enabled) =>
+        Records.Add(KayaWire.TxSetReorderable(container.Id, enabled ? 1u : 0u));
+
+    /// Take dropped content at a live widget, or a reorderable For's
+    /// landings (docs/dnd-plan.md D8). Only fires for a widget that
+    /// declared SetDropTarget over an accept list.
+    public void OnDrop(Widget w, Action<Tx, Dropped> handler) =>
+        App.widgetDrops[w.Id] = handler;
+
+    /// A drag that began at this widget has ended: null is a cancelled or
+    /// refused drag, not an error.
+    public void OnDragEnded(Widget w, Action<Tx, Op?> handler) =>
+        App.dragEnded[w.Id] = handler;
+
     /// Join an accept list: the closed kinds by name plus any custom ids,
     /// space separated. Ids reach every platform's registry verbatim, so
     /// they carry no spaces — which is what makes the join unambiguous.
@@ -3605,6 +3661,97 @@ sealed class CopyRef
         }
         tx.Records.Add(KayaWire.TxCopy(
             present, (uint)files.Count, (uint)custom.Count, values.ToArray()));
+    }
+}
+
+/// The drag chain: the copy chain's representations plus the operations
+/// the source allows; Declare() sends it. An EMPTY chain withdraws
+/// (docs/dnd-plan.md D1, D2).
+sealed class DragRef
+{
+    readonly Tx tx;
+    readonly ulong widget;
+    string? text;
+    string? html;
+    byte[]? image;
+    uint ops;
+    readonly List<ulong> files = new();
+    readonly List<(string Id, byte[] Bytes)> custom = new();
+
+    internal DragRef(Tx tx, ulong widget)
+    {
+        this.tx = tx;
+        this.widget = widget;
+    }
+
+    public DragRef Text(string value)
+    {
+        text = value;
+        return this;
+    }
+
+    public DragRef Html(string value)
+    {
+        html = value;
+        return this;
+    }
+
+    public DragRef Image(byte[] bytes)
+    {
+        image = bytes;
+        return this;
+    }
+
+    public DragRef File(PickedFile f)
+    {
+        files.Add(f.Handle);
+        return this;
+    }
+
+    public DragRef Custom(string id, byte[] bytes)
+    {
+        Tx.AcceptList(new[] { id });
+        custom.Add((id, bytes));
+        return this;
+    }
+
+    /// Allow this operation (copy, move, or both across two calls).
+    public DragRef Allow(Op op)
+    {
+        ops |= (uint)op;
+        return this;
+    }
+
+    public void Declare()
+    {
+        uint present = 0;
+        var values = new List<object>();
+        foreach (var (id, bytes) in custom)
+        {
+            values.Add(id);
+            values.Add(new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes)));
+        }
+        foreach (var handle in files)
+            values.Add((long)handle);
+        if (image != null)
+        {
+            present |= KayaWire.ClipImage;
+            values.Add(new KayaWire.BlobHandle(Kaya.RegisterBlob(image)));
+        }
+        if (html != null)
+        {
+            present |= KayaWire.ClipHtml;
+            values.Add(html);
+        }
+        if (text != null)
+        {
+            present |= KayaWire.ClipText;
+            values.Add(text);
+        }
+        bool empty = present == 0 && files.Count == 0 && custom.Count == 0;
+        tx.Records.Add(KayaWire.TxSetDragSource(
+            widget, present, (uint)files.Count, (uint)custom.Count,
+            empty ? 0 : ops, 0, values.ToArray()));
     }
 }
 

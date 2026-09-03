@@ -35,8 +35,9 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
 # §3.2); `sizepolicy` waits on the other bindings' `fixed`/`on_draw`/
-# `on_tick` spelling (docs/deferred.md's size-policy entry).
-DEPTH_SCENES="windowed canvas sizepolicy"
+# `on_tick` spelling (docs/deferred.md's size-policy entry); `dnd` waits
+# on the bindings sweep (docs/dnd-plan.md §4, §5 step 6).
+DEPTH_SCENES="windowed canvas sizepolicy dnd"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -99,6 +100,11 @@ timing core-build
 
 # The repo is mounted at /work, not at the compile-time default.
 export KAYA_SCENES_DIR=/work/tools/scenes
+# THE `drag` VERB'S HANDS (docs/dnd-plan.md D10): the same gesture and the
+# same window-origin read the pointer proof below runs. The verb refuses by
+# name when this is unset, because a drag that silently does not happen
+# reads exactly like a refused drop.
+export KAYA_DRAG_DRIVER=/work/tools/linux/dragdrive.py
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -1069,6 +1075,25 @@ for proto in x11 wayland; do
     # this scene asserts no ax verb, so it needs no session bus.
     run "$proto" sizepolicy-rust env KAYA_SELFTEST=sizepolicy \
         "$CARGO_TARGET_DIR/debug/examples/sizepolicy"
+    # THE DRAG-AND-DROP SCENE (docs/dnd-plan.md), nine languages since the
+    # bindings sweep. IT POOLS LIKE EVERY OTHER LEG: the `drag` verb
+    # injects REAL pointer input, but a leg already claims a SESSION of
+    # its own (run_one's lock — one Xvfb, or one sway, per pool slot), so
+    # the pointer it moves is that session's and no other leg's.
+    run "$proto" dnd-rust env KAYA_SELFTEST=dnd \
+        "$CARGO_TARGET_DIR/debug/examples/dnd"
+    run "$proto" dnd-python env KAYA_SELFTEST=dnd KAYA_LIB="$LIB" \
+        python3 guests/python/dnd.py
+    run "$proto" dnd-js env KAYA_SELFTEST=dnd KAYA_LIB="$LIB" \
+        node guests/js/dnd.ts
+    run "$proto" dnd-go env KAYA_SELFTEST=dnd /tmp/go-guests/kaya-go
+    run "$proto" dnd-csharp env KAYA_SELFTEST=dnd KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" dnd-ocaml env KAYA_SELFTEST=dnd KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/dnd.exe
+    run "$proto" dnd-haskell env KAYA_SELFTEST=dnd "$(hs_bin dnd)"
+    run "$proto" dnd-java env KAYA_SELFTEST=dnd KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

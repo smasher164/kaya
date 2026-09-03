@@ -363,13 +363,27 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("-- nothing else on the occurrence channel has ever carried them.");
     c.line("data ClipPart = CStr String | CI64 Int64 | CBytes BS.ByteString");
     c.line("");
-    c.line("-- Decode a representation at `at`: the clip kind, then its Values");
-    c.line("-- block. Blobs are redeemed and RELEASED by `redeem` here.");
-    c.line("parseClip ::");
-    c.line("  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO (ClipValues, Int)");
-    c.line("parseClip redeem rec at = do");
-    c.line("  kind <- peekByteOff rec at :: IO Word32");
-    c.line("  count <- peekByteOff rec (at + 8) :: IO Word32");
+    c.line("-- | What a drop delivered (docs/dnd-plan.md D1): the operation the");
+    c.line("-- core settled on, the point in the destination's own coordinates,");
+    c.line("-- and — for a reorder — the anchor row's key path and whether the");
+    c.line("-- drop landed before it.");
+    c.line("data DropValues = DropValues");
+    c.line("  { dropOperation :: !Word32,");
+    c.line("    dropBefore :: !Bool,");
+    c.line("    dropX :: !Double,");
+    c.line("    dropY :: !Double,");
+    c.line("    dropAnchor :: ![Value],");
+    c.line("    dropClip :: !ClipValues");
+    c.line("  }");
+    c.line("");
+    c.line("-- The VALUES half of a representation at `at`: the count, then that");
+    c.line("-- many values with blobs redeemed and RELEASED by `redeem`. Its own");
+    c.line("-- function because a drop's clip KIND sits four words and a point");
+    c.line("-- earlier (docs/dnd-plan.md D1).");
+    c.line("parseRepresentation ::");
+    c.line("  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO ([ClipPart], Int)");
+    c.line("parseRepresentation redeem rec at = do");
+    c.line("  count <- peekByteOff rec at :: IO Word32");
     c.line("  let go a 0 acc = return (reverse acc, a)");
     c.line("      go a n acc = do");
     c.line("        (v, next) <- parseValue rec a");
@@ -379,7 +393,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("          VStr t -> return (CStr t)");
     c.line("          other -> return (CStr (show other))");
     c.line("        go next (n - 1 :: Word32) (part : acc)");
-    c.line("  (parts, at') <- go (at + 16) count []");
+    c.line("  go (at + 8) count []");
+    c.line("");
+    c.line("-- Decode a representation at `at`: the clip kind, then its Values");
+    c.line("-- block. Blobs are redeemed and RELEASED by `redeem` here.");
+    c.line("parseClip ::");
+    c.line("  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO (ClipValues, Int)");
+    c.line("parseClip redeem rec at = do");
+    c.line("  kind <- peekByteOff rec at :: IO Word32");
+    c.line("  (parts, at') <- parseRepresentation redeem rec (at + 8)");
     c.line("  return (ClipValues kind parts, at')");
     c.line("");
     c.line("-- Decode one occurrence record at `rec` (header included). Just");
@@ -391,7 +413,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("parseOccurrence ::");
     c.line("  (Word64 -> IO BS.ByteString) ->");
     c.line("  Ptr Word8 ->");
-    c.line("  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, [Value]))");
+    c.line("  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))");
     c.line("parseOccurrence redeem rec = do");
     c.line("  kind <- peekByteOff rec 4 :: IO Word16");
     let accepted = crate::occurrence_names(spec)
@@ -407,7 +429,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        then do");
     c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
     c.line("          choice <- peekByteOff rec 16 :: IO Word32");
-    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, []))");
+    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, Nothing, []))");
     // The picker's answer is a LIST OF RECORDS and no single Value can
     // carry one, so the three values per file ride the VALUES slot
     // flattened and KayaApp regroups them in threes. Its own arm: the
@@ -423,7 +445,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                (v, next) <- parseValue rec at");
     c.line("                readValues (n - 1 :: Int) next (v : acc)");
     c.line("          vals <- readValues (fromIntegral count * 3) 32 []");
-    c.line("          return (Just (kind, ident, vals, Nothing, Nothing, []))");
+    c.line("          return (Just (kind, ident, vals, Nothing, Nothing, Nothing, []))");
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!(
             "      else if kind == occKind{}",
@@ -431,7 +453,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         ));
         c.line("        then do");
         c.line("          (clip, _) <- parseClip redeem rec 16");
-        c.line("          return (Just (kind, ident, [], Nothing, Just clip, []))");
+        c.line("          return (Just (kind, ident, [], Nothing, Just clip, Nothing, []))");
     }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
@@ -441,7 +463,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        -- Surface lifecycle records carry the surface id alone");
     c.line("        -- (derived from the record shapes).");
     c.line(&format!("        else if {id_only}"));
-    c.line("          then return (Just (kind, ident, [], Nothing, Nothing, []))");
+    c.line("          then return (Just (kind, ident, [], Nothing, Nothing, Nothing, []))");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))
@@ -453,7 +475,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("        else if {id_pair}"));
         c.line("          then do");
         c.line("            second <- peekByteOff rec 16 :: IO Word64");
-        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, []))");
+        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, Nothing, []))");
     }
     c.line("          else do");
     c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");
@@ -470,6 +492,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("              then do");
         c.line("                col <- peekByteOff rec 20 :: IO Word32");
         c.line("                return (Just (VI64 (fromIntegral col)))");
+        c.line("              else");
+    }
+    // The drag's outcome: one word past the key path.
+    for name in crate::drag_outcome_occurrence_names(spec) {
+        c.line(&format!("            if kind == occKind{}", pascal(name)));
+        c.line("              then do");
+        c.line("                op <- peekByteOff rec at' :: IO Word32");
+        c.line("                return (Just (VI64 (fromIntegral op)))");
         c.line("              else");
     }
     let with_payload = crate::payload_occurrence_names(spec)
@@ -498,6 +528,41 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line("              then do");
             c.line("                (c, _) <- parseClip redeem rec at'");
             c.line("                return (Just c)");
+            c.line("              else return Nothing");
+        }
+    }
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1). Its
+    // own slot because a drop is a paste with four more fields.
+    {
+        let dropped = crate::dropped_occurrence_names(spec)
+            .iter()
+            .map(|n| format!("kind == occKind{}", pascal(n)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        if dropped.is_empty() {
+            c.line("          let drop_ = Nothing");
+        } else {
+            c.line("          drop_ <-");
+            c.line(&format!("            if {dropped}"));
+            c.line("              then do");
+            c.line("                operation <- peekByteOff rec at' :: IO Word32");
+            c.line("                beforeWord <- peekByteOff rec (at' + 4) :: IO Word32");
+            c.line("                anchorLen <- peekByteOff rec (at' + 8) :: IO Word32");
+            c.line("                clipKind <- peekByteOff rec (at' + 12) :: IO Word32");
+            c.line("                (x, xNext) <- parseValue rec (at' + 16)");
+            c.line("                (y, yNext) <- parseValue rec xNext");
+            c.line("                let keysOf a 0 acc = return (reverse acc, a)");
+            c.line("                    keysOf a n acc = do");
+            c.line("                      (v, next) <- parseValue rec a");
+            c.line("                      keysOf next (n - 1 :: Word32) (v : acc)");
+            c.line("                (anchor, anchorEnd) <- keysOf yNext anchorLen []");
+            c.line("                (parts, _) <- parseRepresentation redeem rec anchorEnd");
+            c.line("                let coord v = case v of VF64 d -> d; _ -> 0");
+            c.line("                return");
+            c.line("                  ( Just");
+            c.line("                      (DropValues operation (beforeWord /= 0) (coord x) (coord y)");
+            c.line("                         anchor (ClipValues clipKind parts)))");
             c.line("              else return Nothing");
         }
     }
@@ -531,7 +596,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line("              else return []");
         }
     }
-    c.line("          return (Just (kind, ident, keys, payload, clip, tail_))");
+    c.line("          return (Just (kind, ident, keys, payload, clip, drop_, tail_))");
     c.out
 }
 

@@ -199,11 +199,14 @@ BUDGETS = {
     # column and the four quiet matrices since read 498, 442, 488 and
     # 559s. 600 is 1.2x over that band's top.
     "windows": 600,
-    # 600 since 2026-09-01: the lane has run 113 legs since 2026-08-31,
-    # five accepted matrices measuring 452-491s. 600 is 1.22x over that
-    # band's top. run-sim.py prints the LocalStorage admission's per-device
-    # time and the join's wait, so the next anomaly says whether the
-    # admission reached the critical path.
+    # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
+    # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
+    # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
+    # joined the rust-swiftui suite and cost 1s; the lane standalone read
+    # 302s that day), because the growth is inside the headroom rather
+    # than beside it. run-sim.py prints the LocalStorage admission's
+    # per-device time and the join's wait, so the next anomaly says
+    # whether the admission reached the critical path.
     "ios": 600,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator

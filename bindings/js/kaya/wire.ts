@@ -1172,13 +1172,20 @@ export function install_occurrence_blob(fn: (handle: number) => Uint8Array): voi
 
 export type ClipPayload = { clip: number; values: (Decoded | Uint8Array)[] };
 
+/** What a drop delivered (docs/dnd-plan.md D1): the operation the core
+ * settled on, the point in the destination's own coordinates, and — for a
+ * reorder — the anchor row's key path and whether the drop landed before it. */
+export type DroppedPayload = { operation: number; before: boolean; point: [number, number]; anchor: Decoded[]; clip: ClipPayload };
+
 /** Decode one representation: the clip kind, then its values. `clip` is a
  * SINGLE member of the clip enum and never a mask, and 0 with no values is
  * the universal empty answer. Blobs are redeemed to bytes and released here. */
-export function parse_clip(buf: Uint8Array, at: number): [ClipPayload, number] {
-  const clip = read_u32(buf, at);
-  const count = read_u32(buf, at + 8);
-  at += 16;
+/** The VALUES half of a representation: the count, then that many values
+ * with blobs redeemed and released. Its own function because a drop's clip
+ * KIND sits four words and a point earlier (docs/dnd-plan.md D1). */
+export function parse_representation(buf: Uint8Array, at: number): [(Decoded | Uint8Array)[], number] {
+  const count = read_u32(buf, at);
+  at += 8;
   const values: (Decoded | Uint8Array)[] = [];
   for (let i = 0; i < count; i++) {
     let value: Decoded | Uint8Array;
@@ -1189,6 +1196,13 @@ export function parse_clip(buf: Uint8Array, at: number): [ClipPayload, number] {
     }
     values.push(value);
   }
+  return [values, at];
+}
+
+export function parse_clip(buf: Uint8Array, at: number): [ClipPayload, number] {
+  const clip = read_u32(buf, at);
+  let values: (Decoded | Uint8Array)[];
+  [values, at] = parse_representation(buf, at + 8);
   return [{ clip, values }, at];
 }
 
@@ -1323,6 +1337,30 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   // A paste rides a click tag VERBATIM, so the key path above is already
   // read and the clip sits after it.
   if ([OCC_PASTED].includes(kind)) [payload, at] = parse_clip(buf, at);
+  if ([OCC_DROPPED].includes(kind)) {
+    // THE DROP: the four words, the point as two F64 values, the anchor's
+    // keys, then the representation in pasted's own layout (docs/dnd-plan.md D1).
+    const operation = read_u32(buf, at);
+    const before = read_u32(buf, at + 4) !== 0;
+    const anchor_len = read_u32(buf, at + 8);
+    const clip_kind = read_u32(buf, at + 12);
+    at += 16;
+    let x: Decoded, y: Decoded;
+    [x, at] = parse_value(buf, at);
+    [y, at] = parse_value(buf, at);
+    const anchor: Decoded[] = [];
+    for (let i = 0; i < anchor_len; i++) {
+      let key: Decoded;
+      [key, at] = parse_value(buf, at);
+      anchor.push(key);
+    }
+    let values: (Decoded | Uint8Array)[];
+    [values, at] = parse_representation(buf, at);
+    const drop: DroppedPayload = { operation, before, point: [x as number, y as number], anchor, clip: { clip: clip_kind, values } };
+    payload = drop;
+  }
+  // The drag's outcome: one word past the key path.
+  if ([OCC_DRAG_ENDED].includes(kind)) payload = read_u32(buf, at);
   if ([OCC_DRAW_REQUESTED, OCC_TICK].includes(kind)) {
     // The canvas asks carry a run of BARE values after the key path with
     // no count in front, read until the record ends (docs/canvas-plan.md §3.2.1).

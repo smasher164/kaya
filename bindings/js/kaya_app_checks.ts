@@ -412,6 +412,64 @@ if (isMainThread) {
   check("an undo moves the signal cache", (count as unknown as { _mirror: number })._mirror === 42);
   check("the onUndone handler fires with the label", undoneLabel === "add e");
 
+  // ------------------------------------------------- the drag surface
+  // (docs/dnd-plan.md D1, D3, §4). The template zone is refused BY NAME
+  // here, as the size policy is: one handle serves both zones.
+  check("a template drag source is refused by name", throws(() => {
+    app.window(() => {
+      kaya.column(() => {
+        for (const _t of todos) {
+          kaya.label("x").draggable({ text: "hi" });
+        }
+      });
+    });
+  }, /LIVE-ZONE declaration/));
+  check("a template drop target is refused by name", throws(() => {
+    app.window(() => {
+      kaya.column(() => {
+        for (const _t of todos) {
+          kaya.label("x").accepts(kaya.ACCEPT_TEXT).dropTarget(kaya.OP_COPY);
+        }
+      });
+    });
+  }, /LIVE-ZONE declaration/));
+  app.build(() => {
+    // LINK AND ASK ARE REFUSED (D3), and the word is named in the refusal.
+    check("an operation outside copy and move is refused by name", throws(() => kaya.label("x").draggable({ text: "hi", operations: ["link"] }), /"link" is not a drag operation/));
+    shipped.length = 0;
+    // AN EMPTY CHAIN WITHDRAWS: no representation, so no operation mask
+    // either — which is what a same-app move's removal sends.
+    kaya.label("x").draggable();
+  });
+  check("an empty drag chain withdraws the declaration", (() => {
+    const recs = shipped.at(-1)!.filter((r) => new DataView(r.buffer, r.byteOffset).getUint16(4, true) === wire.TX_SET_DRAG_SOURCE);
+    if (recs.length !== 1) return false;
+    const view = new DataView(recs[0]!.buffer, recs[0]!.byteOffset);
+    return view.getUint32(16, true) === 0 && view.getUint32(28, true) === 0;
+  })());
+  // THE REORDERABLE FOR: the declaration lands on the For's own
+  // container, and so does the landing handler (D8).
+  shipped.length = 0;
+  let dndFor = 0;
+  app.window(() => {
+    kaya.column(() => {
+      for (const _t of todos.rows({ reorderable: true, onDrop: () => {} })) {
+        kaya.label("row");
+      }
+    });
+  });
+  check("a reorderable For declares set_reorderable on its own container", (() => {
+    const recs = shipped.at(-1)!;
+    const kindOf = (r: Uint8Array): number => new DataView(r.buffer, r.byteOffset).getUint16(4, true);
+    const fors = recs.filter((r) => kindOf(r) === wire.TX_CREATE_FOR);
+    const reord = recs.filter((r) => kindOf(r) === wire.TX_SET_REORDERABLE);
+    if (fors.length === 0 || reord.length !== 1) return false;
+    dndFor = Number(new DataView(fors[0]!.buffer, fors[0]!.byteOffset).getBigUint64(8, true));
+    const view = new DataView(reord[0]!.buffer, reord[0]!.byteOffset);
+    return Number(view.getBigUint64(8, true)) === dndFor && view.getUint32(16, true) === 1;
+  })());
+  check("and its landing handler lands in the widget table", (app as unknown as { _widgetHandlers: Map<string, unknown> })._widgetHandlers.has(`${wire.OCC_DROPPED}:${dndFor}`));
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

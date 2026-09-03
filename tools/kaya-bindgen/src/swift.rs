@@ -432,14 +432,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    let parts: [KayaClipPart]");
     c.line("}");
     c.line("");
-    c.line("/// Decode a representation at `at`: the clip kind, then its Values");
-    c.line("/// block. Blobs are redeemed and RELEASED here.");
-    c.line("func kayaParseClip(_ raw: UnsafeRawBufferPointer, _ at: Int)");
-    c.line("    -> (clip: KayaClipValues, next: Int)");
+    c.line("/// The VALUES half of a representation at `at`: the count, then that");
+    c.line("/// many values with blobs redeemed and RELEASED. Its own function");
+    c.line("/// because a drop's clip KIND sits four words and a point earlier");
+    c.line("/// (docs/dnd-plan.md D1).");
+    c.line("func kayaParseRepresentation(_ raw: UnsafeRawBufferPointer, _ at: Int)");
+    c.line("    -> (parts: [KayaClipPart], next: Int)");
     c.line("{");
-    c.line("    let kind = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
-    c.line("    let count = Int(raw.loadUnaligned(fromByteOffset: at + 8, as: UInt32.self))");
-    c.line("    var at = at + 16");
+    c.line("    let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))");
+    c.line("    var at = at + 8");
     c.line("    var parts: [KayaClipPart] = []");
     c.line("    for _ in 0..<count {");
     c.line("        let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
@@ -464,7 +465,30 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        }");
     c.line("        at += 8 + ((vlen + 7) & ~7)");
     c.line("    }");
-    c.line("    return (KayaClipValues(kind: kind, parts: parts), at)");
+    c.line("    return (parts, at)");
+    c.line("}");
+    c.line("");
+    c.line("/// Decode a representation at `at`: the clip kind, then its Values");
+    c.line("/// block. Blobs are redeemed and RELEASED here.");
+    c.line("func kayaParseClip(_ raw: UnsafeRawBufferPointer, _ at: Int)");
+    c.line("    -> (clip: KayaClipValues, next: Int)");
+    c.line("{");
+    c.line("    let kind = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+    c.line("    let (parts, next) = kayaParseRepresentation(raw, at + 8)");
+    c.line("    return (KayaClipValues(kind: kind, parts: parts), next)");
+    c.line("}");
+    c.line("");
+    c.line("/// What a drop delivered (docs/dnd-plan.md D1): the operation the core");
+    c.line("/// settled on, the point in the destination's own coordinates, and —");
+    c.line("/// for a reorder — the anchor row's key path and whether the drop");
+    c.line("/// landed before it.");
+    c.line("struct KayaDropValues {");
+    c.line("    let operation: UInt32");
+    c.line("    let before: Bool");
+    c.line("    let x: Double");
+    c.line("    let y: Double");
+    c.line("    let anchor: [KayaValue]");
+    c.line("    let clip: KayaClipValues");
     c.line("}");
     c.line("");
     c.line("/// Decode one occurrence record (header included); nil for pad or");
@@ -473,10 +497,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// first. payload is the entry's new text for TEXT_CHANGED, the");
     c.line("/// checkbox's new state for TOGGLED, the slider's new value for");
     c.line("/// VALUE_CHANGED, nil for clicks.");
-    c.line("func kayaParseOccurrence(_ rec: [UInt8])");
-    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?, tail: [KayaValue])?");
-    c.line("{");
-    c.line("    rec.withUnsafeBytes { raw in");
+    // NAMED, and the closure's result type SPELLED: at eight members
+    // Swift infers the tuple from the first `return` it reads and then
+    // refuses the `nil` arms.
+    c.line("typealias KayaOccurrence = (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?, drop: KayaDropValues?, tail: [KayaValue])");
+    c.line("");
+    c.line("func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {");
+    c.line("    rec.withUnsafeBytes { raw -> KayaOccurrence? in");
     c.line("        let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)");
     let accepted = crate::occurrence_names(spec)
         .iter()
@@ -491,7 +518,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
     c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
-    c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil, [])");
+    c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil, nil, [])");
     c.line("        }");
     // The picker's answer is a LIST OF RECORDS, which no single
     // KayaValue can carry — hence the tuple's `files` member. Its own
@@ -522,7 +549,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                files.append(KayaPickedFile(");
     c.line("                    handle: UInt64(handle), name: name, localPath: localPath))");
     c.line("            }");
-    c.line("            return (kind, id, [], nil, files, nil, [])");
+    c.line("            return (kind, id, [], nil, files, nil, nil, [])");
     c.line("        }");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
@@ -532,7 +559,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             name.to_uppercase()
         ));
         c.line("            let (clip, _) = kayaParseClip(raw, 16)");
-        c.line("            return (kind, id, [], nil, [], clip, [])");
+        c.line("            return (kind, id, [], nil, [], clip, nil, [])");
         c.line("        }");
     }
     let id_only = crate::id_only_occurrence_names(spec)
@@ -546,7 +573,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("            || {cond}"));
     }
     c.line("        {");
-    c.line("            return (kind, id, [], nil, [], nil, [])");
+    c.line("            return (kind, id, [], nil, [], nil, nil, [])");
     c.line("        }");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
@@ -561,7 +588,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
         c.line("        {");
         c.line("            let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)");
-        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, [])");
+        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, nil, [])");
         c.line("        }");
     }
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
@@ -636,6 +663,69 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            clip = kayaParseClip(raw, at).clip");
         c.line("        }");
     }
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1). Its
+    // own tuple member because a drop is a paste with four more fields.
+    c.line("        var drop: KayaDropValues? = nil");
+    let dropped = crate::dropped_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !dropped.is_empty() {
+        c.line(&format!("        if {}", dropped[0]));
+        for cond in &dropped[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            let operation = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+        c.line("            let before = raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self) != 0");
+        c.line("            let anchorLen = Int(raw.loadUnaligned(fromByteOffset: at + 8, as: UInt32.self))");
+        c.line("            let clipKind = raw.loadUnaligned(fromByteOffset: at + 12, as: UInt32.self)");
+        c.line("            var dropAt = at + 16");
+        c.line("            var point: [Double] = []");
+        c.line("            for _ in 0..<2 {");
+        c.line("                point.append(Double(bitPattern:");
+        c.line("                    raw.loadUnaligned(fromByteOffset: dropAt + 8, as: UInt64.self)))");
+        c.line("                dropAt += 16");
+        c.line("            }");
+        c.line("            var anchor: [KayaValue] = []");
+        c.line("            for _ in 0..<anchorLen {");
+        c.line("                let ktype = raw.loadUnaligned(fromByteOffset: dropAt, as: UInt32.self)");
+        c.line("                let klen = Int(raw.loadUnaligned(fromByteOffset: dropAt + 4, as: UInt32.self))");
+        c.line("                switch ktype {");
+        c.line("                case UInt32(KAYA_VALUE_BOOL):");
+        c.line("                    anchor.append(.bool(raw[dropAt + 8] != 0))");
+        c.line("                case UInt32(KAYA_VALUE_I64):");
+        c.line("                    anchor.append(.i64(raw.loadUnaligned(fromByteOffset: dropAt + 8, as: Int64.self)))");
+        c.line("                case UInt32(KAYA_VALUE_F64):");
+        c.line("                    anchor.append(.f64(Double(bitPattern:");
+        c.line("                        raw.loadUnaligned(fromByteOffset: dropAt + 8, as: UInt64.self))))");
+        c.line("                default:");
+        c.line("                    anchor.append(.str(String(");
+        c.line("                        decoding: raw[(dropAt + 8)..<(dropAt + 8 + klen)], as: UTF8.self)))");
+        c.line("                }");
+        c.line("                dropAt += 8 + ((klen + 7) & ~7)");
+        c.line("            }");
+        c.line("            let parts = kayaParseRepresentation(raw, dropAt).parts");
+        c.line("            drop = KayaDropValues(");
+        c.line("                operation: operation, before: before, x: point[0], y: point[1],");
+        c.line("                anchor: anchor, clip: KayaClipValues(kind: clipKind, parts: parts))");
+        c.line("        }");
+    }
+    // The drag's outcome: one word past the key path.
+    let outcome = crate::drag_outcome_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !outcome.is_empty() {
+        c.line(&format!("        if {}", outcome[0]));
+        for cond in &outcome[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            payload = .i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)))");
+        c.line("        }");
+    }
     // The canvas asks: bare values after the key path with no count in
     // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     // Its own tuple member because the run is 2 values for a redraw and
@@ -677,7 +767,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            }");
         c.line("        }");
     }
-    c.line("        return (kind, id, keys, payload, [], clip, tail)");
+    c.line("        return (kind, id, keys, payload, [], clip, drop, tail)");
     c.line("    }");
     c.line("}");
     c.out

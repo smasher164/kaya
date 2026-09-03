@@ -372,6 +372,24 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                     .into(),
                 fn_ptr: present_emit_pasted as *mut _,
             },
+            // Drag and drop (docs/dnd-plan.md D1, D2).
+            NativeMethod {
+                name: "emitDropped".into(),
+                sig: "([BDDI[BZILjava/lang/String;[B[Ljava/lang/String;\
+                      [Ljava/lang/String;)V"
+                    .into(),
+                fn_ptr: present_emit_dropped as *mut _,
+            },
+            NativeMethod {
+                name: "emitDragEnded".into(),
+                sig: "([BI)V".into(),
+                fn_ptr: present_emit_drag_ended as *mut _,
+            },
+            NativeMethod {
+                name: "dragVerdict".into(),
+                sig: "(Ljava/lang/String;IILjava/lang/String;IZ)I".into(),
+                fn_ptr: present_drag_verdict as *mut _,
+            },
             NativeMethod {
                 name: "emitEntryPopped".into(),
                 sig: "(J)V".into(),
@@ -1129,6 +1147,98 @@ extern "system" fn present_emit_pasted<'local>(
     with_representation(&mut env, clip, text, bytes, locators, names, |rep| unsafe {
         crate::capi::kaya_emit_pasted(tag.as_ptr(), tag.len(), rep)
     });
+}
+
+/// KayaPresent.emitDropped: content DROPPED on a widget. The tag and the
+/// anchor ride verbatim; the representation marshals as emitPasted's does,
+/// and a 0 `clip` is refused here for the same reason.
+extern "system" fn present_emit_dropped<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    tag: JByteArray<'local>,
+    x: jni::sys::jdouble,
+    y: jni::sys::jdouble,
+    operation: jint,
+    anchor: JByteArray<'local>,
+    before: jni::sys::jboolean,
+    clip: jint,
+    text: JString<'local>,
+    bytes: JByteArray<'local>,
+    locators: jni::objects::JObjectArray<'local>,
+    names: jni::objects::JObjectArray<'local>,
+) {
+    let tag = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the drop tag failed");
+    let anchor = env
+        .convert_byte_array(&anchor)
+        .expect("kaya: reading the drop anchor tag failed");
+    assert_ne!(
+        clip, 0,
+        "kaya: KayaPresent.emitDropped was handed no representation — a drop \
+         that delivered nothing is not an occurrence"
+    );
+    with_representation(&mut env, clip, text, bytes, locators, names, |rep| unsafe {
+        crate::capi::kaya_emit_dropped(
+            tag.as_ptr(),
+            tag.len(),
+            x,
+            y,
+            operation as u32,
+            anchor.as_ptr(),
+            anchor.len(),
+            u32::from(before != 0),
+            rep,
+        )
+    });
+}
+
+/// KayaPresent.emitDragEnded: a drag that began on the tagged widget ended.
+extern "system" fn present_emit_drag_ended<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    tag: JByteArray<'local>,
+    operation: jint,
+) {
+    let tag = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the drag-ended tag failed");
+    unsafe { crate::capi::kaya_emit_drag_ended(tag.as_ptr(), tag.len(), operation as u32) };
+}
+
+/// KayaPresent.dragVerdict: the core's one pure hover/drop answer
+/// (docs/dnd-plan.md D2). `custom` is the offered ids space-joined, the
+/// spelling kaya_drag_verdict parses.
+extern "system" fn present_drag_verdict<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    accepts: JString<'local>,
+    target_ops: jint,
+    offered: jint,
+    custom: JString<'local>,
+    source_ops: jint,
+    local: jni::sys::jboolean,
+) -> jint {
+    let accepts: String = env
+        .get_string(&accepts)
+        .map(|s| s.into())
+        .expect("kaya: reading the drop target's accept list failed");
+    let custom: String = env
+        .get_string(&custom)
+        .map(|s| s.into())
+        .expect("kaya: reading the offered custom ids failed");
+    let accepts = std::ffi::CString::new(accepts).unwrap_or_default();
+    let custom = std::ffi::CString::new(custom).unwrap_or_default();
+    unsafe {
+        crate::capi::kaya_drag_verdict(
+            accepts.as_ptr(),
+            target_ops as u32,
+            offered as u32,
+            custom.as_ptr(),
+            source_ops as u32,
+            u32::from(local != 0),
+        ) as jint
+    }
 }
 
 /// KayaPresent.emitEntryPopped: a native back gesture popped an entry.

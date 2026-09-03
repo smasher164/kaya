@@ -8,7 +8,7 @@ use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, window_prop
 /// Names spec identifiers must avoid: this emitter's helpers, plus
 /// Python's keywords and builtins a parameter would shadow.
 pub const RESERVED: &[&str] = &[
-    "_enc", "record", "parse_value", "parse_occurrence", "struct", "BlobHandle",
+    "_enc", "record", "parse_value", "parse_occurrence", "parse_representation", "struct", "BlobHandle",
     "canonicalize_shortcut",
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
     "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
@@ -345,6 +345,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("at import (this module loads no library of its own).\"\"\"");
     c.line("");
     c.line("");
+    c.line("def parse_representation(buf, at):");
+    c.line("    \"\"\"The VALUES half of a representation: the count, then that many");
+    c.line("    values with blobs redeemed and released.");
+    c.line("");
+    c.line("    Its own function because a drop's clip KIND sits four words and a");
+    c.line("    point earlier than its values (docs/dnd-plan.md D1).\"\"\"");
+    c.line("    count, _reserved = struct.unpack_from(\"<II\", buf, at)");
+    c.line("    at += 8");
+    c.line("    values = []");
+    c.line("    for _ in range(count):");
+    c.line("        value, at = parse_value(buf, at)");
+    c.line("        if isinstance(value, BlobHandle):");
+    c.line("            value = occurrence_blob(value.handle)");
+    c.line("        values.append(value)");
+    c.line("    return values, at");
+    c.line("");
+    c.line("");
     c.line("def parse_clip(buf, at):");
     c.line("    \"\"\"Decode one representation: the clip kind, then its values.");
     c.line("");
@@ -352,14 +369,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    of the clip enum and never a mask — you offer many and you");
     c.line("    receive one — and 0 with no values is the universal empty");
     c.line("    answer. Blobs are redeemed to bytes and released here.\"\"\"");
-    c.line("    clip, _reserved, count, _pad = struct.unpack_from(\"<IIII\", buf, at)");
-    c.line("    at += 16");
-    c.line("    values = []");
-    c.line("    for _ in range(count):");
-    c.line("        value, at = parse_value(buf, at)");
-    c.line("        if isinstance(value, BlobHandle):");
-    c.line("            value = occurrence_blob(value.handle)");
-    c.line("        values.append(value)");
+    c.line("    clip, _reserved = struct.unpack_from(\"<II\", buf, at)");
+    c.line("    values, at = parse_representation(buf, at + 8)");
     c.line("    return clip, values, at");
     c.line("");
     c.line("");
@@ -527,6 +538,36 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    if kind in ({pasted},):"));
         c.line("        clip, values, at = parse_clip(buf, at)");
         c.line("        payload = (clip, values)");
+    }
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1).
+    let dropped = crate::dropped_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !dropped.is_empty() {
+        c.line(&format!("    if kind in ({dropped},):"));
+        c.line("        operation, before, anchor_len, clip = struct.unpack_from(\"<IIII\", buf, at)");
+        c.line("        at += 16");
+        c.line("        x, at = parse_value(buf, at)");
+        c.line("        y, at = parse_value(buf, at)");
+        c.line("        anchor = []");
+        c.line("        for _ in range(anchor_len):");
+        c.line("            key, at = parse_value(buf, at)");
+        c.line("            anchor.append(key)");
+        c.line("        values, at = parse_representation(buf, at)");
+        c.line("        payload = (operation, bool(before), (x, y), anchor, clip, values)");
+    }
+    // The drag's outcome: one word past the key path.
+    let outcome = crate::drag_outcome_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !outcome.is_empty() {
+        c.line(&format!("    if kind in ({outcome},):"));
+        c.line("        (payload,) = struct.unpack_from(\"<I\", buf, at)");
     }
     // The canvas asks: bare values after the key path with no count in
     // front, read until the record ends (docs/canvas-plan.md §3.2.1).

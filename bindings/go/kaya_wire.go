@@ -1869,26 +1869,49 @@ type ClipValues struct {
 	Values []any
 }
 
-// parseClip decodes a representation at `at`: the clip kind, then
-// its Values block. Blobs are redeemed and RELEASED here.
-func parseClip(rec []byte, at int) (ClipValues, int) {
-	clip := ClipValues{Kind: binary.LittleEndian.Uint32(rec[at:])}
-	count := int(binary.LittleEndian.Uint32(rec[at+8:]))
-	at += 16
+// DropValues is what a drop delivered, as the decoder hands it over
+// (docs/dnd-plan.md D1): the operation the core settled on, the point
+// in the destination's own coordinates, and — for a reorder — the
+// anchor row's key path and whether the drop landed before it.
+type DropValues struct {
+	Operation uint32
+	Before    bool
+	Point     [2]float64
+	Anchor    []any
+	Clip      ClipValues
+}
+
+// parseRepresentation decodes the VALUES half of a representation at
+// `at`: the count, then that many values with blobs redeemed and
+// RELEASED. Its own function because a drop's clip KIND sits four
+// words and a point earlier (docs/dnd-plan.md D1).
+func parseRepresentation(rec []byte, at int) ([]any, int) {
+	count := int(binary.LittleEndian.Uint32(rec[at:]))
+	at += 8
+	var values []any
 	for i := 0; i < count; i++ {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
 		body := rec[at+8 : at+8+vlen]
 		switch vtype {
 		case ValueI64:
-			clip.Values = append(clip.Values, int64(binary.LittleEndian.Uint64(body)))
+			values = append(values, int64(binary.LittleEndian.Uint64(body)))
 		case ValueBlob:
-			clip.Values = append(clip.Values, occurrenceBlob(binary.LittleEndian.Uint64(body)))
+			values = append(values, occurrenceBlob(binary.LittleEndian.Uint64(body)))
 		default:
-			clip.Values = append(clip.Values, string(body))
+			values = append(values, string(body))
 		}
 		at += 8 + (vlen+7)&^7
 	}
+	return values, at
+}
+
+// parseClip decodes a representation at `at`: the clip kind, then
+// its Values block. Blobs are redeemed and RELEASED here.
+func parseClip(rec []byte, at int) (ClipValues, int) {
+	clip := ClipValues{Kind: binary.LittleEndian.Uint32(rec[at:])}
+	values, at := parseRepresentation(rec, at+8)
+	clip.Values = values
 	return clip, at
 }
 
@@ -2098,6 +2121,30 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	if kind == occPasted {
 		clip, _ := parseClip(rec, at)
 		payload = clip
+	}
+	if kind == occDropped {
+		drop := DropValues{
+			Operation: binary.LittleEndian.Uint32(rec[at:]),
+			Before:    binary.LittleEndian.Uint32(rec[at+4:]) != 0,
+		}
+		anchorLen := int(binary.LittleEndian.Uint32(rec[at+8:]))
+		drop.Clip.Kind = binary.LittleEndian.Uint32(rec[at+12:])
+		at += 16
+		var x, y any
+		x, at = parseValue(rec, at)
+		y, at = parseValue(rec, at)
+		drop.Point[0], _ = x.(float64)
+		drop.Point[1], _ = y.(float64)
+		for i := 0; i < anchorLen; i++ {
+			var key any
+			key, at = parseValue(rec, at)
+			drop.Anchor = append(drop.Anchor, key)
+		}
+		drop.Clip.Values, at = parseRepresentation(rec, at)
+		payload = drop
+	}
+	if kind == occDragEnded {
+		payload = binary.LittleEndian.Uint32(rec[at:])
 	}
 	if kind == occDrawRequested || kind == occTick {
 		// The canvas asks carry a run of BARE values after the key

@@ -691,6 +691,37 @@ func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
     }
 }
 
+/// A drag operation (docs/dnd-plan.md D3): copy and move, nothing else.
+enum KayaOp: UInt32 {
+    case copy = 1
+    case move = 2
+}
+
+/// What a drop delivered (docs/dnd-plan.md D1): the representation a
+/// paste already delivers, the point in the destination's own
+/// coordinates, the operation the core settled on (nil for a refused
+/// drag), and — for a reorder — the anchor row and the side it landed on.
+struct KayaDropped {
+    let point: (x: Double, y: Double)
+    let operation: KayaOp?
+    let anchor: [KayaValue]
+    let before: Bool
+    let clip: KayaRepresentation?
+}
+
+/// The drag_op word, or nil for a cancelled or refused drag.
+func kayaOperation(_ mask: UInt32) -> KayaOp? {
+    KayaOp(rawValue: mask)
+}
+
+/// Turn the decoder's drop values into the app-facing struct.
+func kayaDropped(_ drop: KayaDropValues) -> KayaDropped {
+    KayaDropped(
+        point: (drop.x, drop.y), operation: kayaOperation(drop.operation),
+        anchor: drop.anchor, before: drop.before,
+        clip: kayaRepresentation(drop.clip))
+}
+
 /// What an undo (or a redo) PUT BACK — the core-authoritative statement
 /// of the restored state, never a replay of ops (docs/undo-plan.md D5).
 struct KayaUndoDelta {
@@ -959,6 +990,91 @@ struct KayaCopyRef {
     }
 }
 
+/// The drag chain: the copy chain's representations plus the operations
+/// the source allows; declare() sends it. An EMPTY chain withdraws, which
+/// is how a same-app move removes its source (docs/dnd-plan.md D1, D2).
+struct KayaDragRef {
+    let tx: KayaAppTx
+    let widget: UInt64
+    private var text: String?
+    private var html: String?
+    private var image: [UInt8]?
+    private var files: [UInt64] = []
+    private var custom: [(String, [UInt8])] = []
+    private var ops: UInt32 = 0
+
+    init(tx: KayaAppTx, widget: UInt64) {
+        self.tx = tx
+        self.widget = widget
+    }
+
+    func text(_ text: String) -> KayaDragRef {
+        var next = self
+        next.text = text
+        return next
+    }
+
+    func html(_ html: String) -> KayaDragRef {
+        var next = self
+        next.html = html
+        return next
+    }
+
+    func image(_ bytes: [UInt8]) -> KayaDragRef {
+        var next = self
+        next.image = bytes
+        return next
+    }
+
+    func file(_ f: KayaPickedFile) -> KayaDragRef {
+        var next = self
+        next.files.append(f.handle)
+        return next
+    }
+
+    func custom(_ id: String, _ bytes: [UInt8]) -> KayaDragRef {
+        _ = kayaAcceptList([id])
+        var next = self
+        next.custom.append((id, bytes))
+        return next
+    }
+
+    /// Allow this operation (copy, move, or both across two calls).
+    func allow(_ op: KayaOp) -> KayaDragRef {
+        var next = self
+        next.ops |= op.rawValue
+        return next
+    }
+
+    func declare() {
+        var present: UInt32 = 0
+        var values: [KayaValue] = []
+        for (id, bytes) in custom {
+            values.append(.str(id))
+            values.append(.blob(kayaRegisterBlob(Data(bytes))))
+        }
+        for handle in files {
+            values.append(.i64(Int64(bitPattern: handle)))
+        }
+        if let image {
+            present |= UInt32(KAYA_CLIP_IMAGE)
+            values.append(.blob(kayaRegisterBlob(Data(image))))
+        }
+        if let html {
+            present |= UInt32(KAYA_CLIP_HTML)
+            values.append(.str(html))
+        }
+        if let text {
+            present |= UInt32(KAYA_CLIP_TEXT)
+            values.append(.str(text))
+        }
+        let empty = present == 0 && files.isEmpty && custom.isEmpty
+        tx.tx.setDragSource(
+            widget, present, UInt32(files.count), UInt32(custom.count),
+            empty ? 0 : ops, 0, values)
+    }
+}
+
 /// The read chain: which representations this read can use, and the
 /// request id its one answer arrives under.
 struct KayaClipReadRef {
@@ -1201,6 +1317,8 @@ final class KayaApp {
     private var clipboardReads: [UInt64: (KayaAppTx, KayaRepresentation?) throws -> Void] = [:]
     private var widgetPastes: [UInt64: (KayaAppTx, KayaRepresentation) throws -> Void] = [:]
     private var nodePastes: [UInt64: (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void] = [:]
+    private var widgetDrops: [UInt64: (KayaAppTx, KayaDropped) throws -> Void] = [:]
+    private var dragEnded: [UInt64: (KayaAppTx, KayaOp?) throws -> Void] = [:]
     private var nextClipboardRead: UInt64 = 0
     private var nextAlert: UInt64 = 0
     private var nextFileDialog: UInt64 = 0
@@ -1661,6 +1779,20 @@ final class KayaApp {
         nodePastes[n.id] = handler
     }
 
+    func onDrop(
+        _ w: KayaWidget,
+        _ handler: @escaping (KayaAppTx, KayaDropped) throws -> Void
+    ) {
+        widgetDrops[w.id] = handler
+    }
+
+    func onDragEnded(
+        _ w: KayaWidget,
+        _ handler: @escaping (KayaAppTx, KayaOp?) throws -> Void
+    ) {
+        dragEnded[w.id] = handler
+    }
+
     /// Bind the picker's one-shot result handler; it retires with the
     /// result.
     func onFileDialog(
@@ -1748,7 +1880,7 @@ final class KayaApp {
                 }
                 continue
             }
-            guard let (kind, id, keys, payload, files, clip, tail) = kayaParseOccurrence(buf)
+            guard let (kind, id, keys, payload, files, clip, drop, tail) = kayaParseOccurrence(buf)
             else { continue }
             var text: String?
             var checked = false
@@ -1875,6 +2007,19 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_PASTED), false):
                 if let handler = nodePastes[id], let answer = kayaRepresentation(clip) {
                     dispatch { try build { tx in try handler(tx, keys, answer) } }
+                }
+            // A drop rides the same tag with four more words
+            // (docs/dnd-plan.md D1); the template zone is refused, so a
+            // keyed drop reaches no handler.
+            case (UInt16(KAYA_OCCURRENCE_DROPPED), true):
+                if let handler = widgetDrops[id], let drop {
+                    let answer = kayaDropped(drop)
+                    dispatch { try build { tx in try handler(tx, answer) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DRAG_ENDED), true):
+                if let handler = dragEnded[id] {
+                    let answer = kayaOperation(choice)
+                    dispatch { try build { tx in try handler(tx, answer) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT), _):
                 // One-shot. EMPTY IS CANCEL — no platform can confirm an
@@ -3007,6 +3152,47 @@ final class KayaAppTx {
         _ handler: @escaping (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void
     ) {
         app.onPaste(n, handler)
+    }
+
+    /// DECLARE what a widget hands over when dragged: a clip in the copy
+    /// chain's own shapes plus the operations it allows (docs/dnd-plan.md
+    /// D1). `declare()` sends it; an empty chain withdraws.
+    func draggable(_ w: KayaWidget) -> KayaDragRef {
+        KayaDragRef(tx: self, widget: w.id)
+    }
+
+    /// DECLARE that a widget receives drops, performing these operations;
+    /// naming NONE withdraws it. WHAT it takes is its `setAccepts` list,
+    /// which must be declared first — a destination has one vocabulary,
+    /// not two.
+    func setDropTarget(_ w: KayaWidget, _ ops: [KayaOp]) {
+        tx.setDropTarget(w.id, ops.reduce(0) { $0 | $1.rawValue }, 0, [])
+    }
+
+    /// Rows of this live For drag within their own collection
+    /// (docs/dnd-plan.md D8): the landing arrives at `onDrop` on the For's
+    /// own container and the app confirms with a move.
+    func setReorderable(_ container: KayaWidget, _ enabled: Bool) {
+        tx.setReorderable(container.id, enabled ? 1 : 0)
+    }
+
+    /// Take dropped content at a live widget, or a reorderable For's
+    /// landings (docs/dnd-plan.md D8). Only fires for a widget that
+    /// declared `setDropTarget` over an accept list.
+    func onDrop(
+        _ w: KayaWidget,
+        _ handler: @escaping (KayaAppTx, KayaDropped) throws -> Void
+    ) {
+        app.onDrop(w, handler)
+    }
+
+    /// A drag that began at this widget has ended: nil is a cancelled or
+    /// refused drag, not an error.
+    func onDragEnded(
+        _ w: KayaWidget,
+        _ handler: @escaping (KayaAppTx, KayaOp?) throws -> Void
+    ) {
+        app.onDragEnded(w, handler)
     }
 
     /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one

@@ -134,6 +134,8 @@ type App struct {
 	clipboardReads map[uint64]func(*Tx, Representation)
 	widgetPastes   map[uint64]func(*Tx, Representation)
 	nodePastes     map[uint64]func(*Tx, []any, Representation)
+	widgetDrops    map[uint64]func(*Tx, Dropped)
+	dragEnded      map[uint64]func(*Tx, Op)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	// Menu dispatch tables, keyed by MENU ITEM id — their own id space,
 	// separate from every widget/node table. The node flavors receive
@@ -203,6 +205,8 @@ func NewApp() *App {
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
 		widgetPastes:   make(map[uint64]func(*Tx, Representation)),
 		nodePastes:     make(map[uint64]func(*Tx, []any, Representation)),
+		widgetDrops:    make(map[uint64]func(*Tx, Dropped)),
+		dragEnded:      make(map[uint64]func(*Tx, Op)),
 		entryPopped:    make(map[uint64]func(*Tx)),
 		backRequested:  make(map[uint64]func(*Tx)),
 		sectionSelected: make(map[uint64]func(*Tx)),
@@ -1504,6 +1508,21 @@ func (r *Rows) OnSort(fn func(*Tx, uint32)) *Rows {
 	return r
 }
 
+// Reorderable makes every stamped row of this For drag within its own
+// collection (docs/dnd-plan.md D8) — Tx.SetReorderable at the For.
+func (r *Rows) Reorderable(enabled bool) *Rows {
+	r.st.tx.SetReorderable(r.Widget(), enabled)
+	return r
+}
+
+// OnDrop registers the landing handler at this For — handlers scope to
+// their creator. The moved row's key rides in the clip, the row it
+// landed on is the anchor, and the app confirms with a move.
+func (r *Rows) OnDrop(fn func(*Tx, Dropped)) *Rows {
+	r.st.tx.app.OnDrop(r.Widget(), fn)
+	return r
+}
+
 // All traces the template: the body runs ONCE, authoring the blueprint;
 // stamping is the core's replay.
 func (r *Rows) All() iter.Seq[Row] { return r.st.all }
@@ -2510,6 +2529,174 @@ func (a *App) OnPaste(w Widget, fn func(*Tx, Representation)) {
 // copy that declares nothing gets the platform's own insertion.
 func (a *App) OnPasteNode(n Node, fn func(*Tx, []any, Representation)) {
 	a.nodePastes[n.id] = fn
+}
+
+// Op is a drag operation (docs/dnd-plan.md D3): copy and move, nothing
+// else. OpNone is the outcome of a cancelled or refused drag.
+type Op uint32
+
+const (
+	OpNone Op = DragOpNone
+	OpCopy Op = DragOpCopy
+	OpMove Op = DragOpMove
+)
+
+// Dropped is what a drop delivered (docs/dnd-plan.md D1): the
+// representation a paste already delivers, the point in the
+// destination's own coordinates, the operation the core settled on, and
+// — for a reorder — the anchor row's key path and whether the drop
+// landed before it.
+type Dropped struct {
+	Point     [2]float64
+	Operation Op
+	Anchor    []any
+	Before    bool
+	Clip      Representation
+}
+
+// operations folds a guest's words into the drag_op mask; empty
+// withdraws the declaration.
+func operations(ops []Op) uint32 {
+	var mask uint32
+	for _, op := range ops {
+		if op != OpCopy && op != OpMove {
+			panic(fmt.Sprintf(
+				"kaya: %d is not a drag operation — copy and move are the "+
+					"vocabulary, and link and ask are refused "+
+					"(docs/dnd-plan.md D3)", uint32(op)))
+		}
+		mask |= uint32(op)
+	}
+	return mask
+}
+
+// Draggable begins the drag declaration: what this widget hands over
+// when dragged, in the copy chain's own shapes, plus the operations it
+// allows. Declare sends it, and an EMPTY chain withdraws — which is how
+// a same-app move removes its source (docs/dnd-plan.md D1, D2).
+func (tx *Tx) Draggable(w Widget) DragRef {
+	return DragRef{tx: tx, widget: w.id}
+}
+
+// DragRef accumulates the one set_drag_source record; nothing is
+// declared until Declare.
+type DragRef struct {
+	tx     *Tx
+	widget uint64
+	text   *string
+	html   *string
+	image  []byte
+	files  []uint64
+	custom [][2]any // id, bytes
+	ops    []Op
+}
+
+func (r DragRef) Text(text string) DragRef {
+	r.text = &text
+	return r
+}
+
+func (r DragRef) HTML(html string) DragRef {
+	r.html = &html
+	return r
+}
+
+func (r DragRef) Image(bytes []byte) DragRef {
+	r.image = bytes
+	return r
+}
+
+func (r DragRef) File(f PickedFile) DragRef {
+	r.files = append(r.files, f.Handle)
+	return r
+}
+
+func (r DragRef) Custom(id string, bytes []byte) DragRef {
+	acceptList([]string{id})
+	r.custom = append(r.custom, [2]any{id, bytes})
+	return r
+}
+
+// Allow names an operation this source permits (copy, move, or both
+// across two calls).
+func (r DragRef) Allow(op Op) DragRef {
+	r.ops = append(r.ops, op)
+	return r
+}
+
+// Declare puts the declaration on the wire. The wire order is kaya's,
+// not this chain's — descending richness, the copy record's own.
+func (r DragRef) Declare() {
+	var present uint32
+	values := make([]any, 0, 8)
+	for _, pair := range r.custom {
+		values = append(values, pair[0])
+		values = append(values, BlobHandle(RegisterBlob(pair[1].([]byte))))
+	}
+	for _, handle := range r.files {
+		values = append(values, int64(handle))
+	}
+	if r.image != nil {
+		present |= ClipImage
+		values = append(values, BlobHandle(RegisterBlob(r.image)))
+	}
+	if r.html != nil {
+		present |= ClipHtml
+		values = append(values, *r.html)
+	}
+	if r.text != nil {
+		present |= ClipText
+		values = append(values, *r.text)
+	}
+	mask := operations(r.ops)
+	if present == 0 && len(r.files) == 0 && len(r.custom) == 0 {
+		mask = 0
+	}
+	r.tx.emit(TxSetDragSource(r.widget, present, uint32(len(r.files)),
+		uint32(len(r.custom)), mask, 0, values))
+}
+
+// SetDropTarget declares that a widget receives drops, performing these
+// operations; naming NONE withdraws it. WHAT it takes is its Accepts
+// list, which must be declared first — a destination has one
+// vocabulary, not two (docs/dnd-plan.md D1).
+func (tx *Tx) SetDropTarget(w Widget, ops ...Op) {
+	tx.emit(TxSetDropTarget(w.id, operations(ops), 0, nil))
+}
+
+// DropTarget is SetDropTarget at construction:
+// tx.Label(nil).Accepts("text").DropTarget(kaya.OpCopy).
+func (w Widget) DropTarget(ops ...Op) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: DropTarget on a widget outside its build transaction — use Tx.SetDropTarget inside a live transaction")
+	}
+	w.tx.SetDropTarget(w, ops...)
+	return w
+}
+
+// SetReorderable makes every stamped row of a live For drag within its
+// own collection (docs/dnd-plan.md D8): the landing arrives at OnDrop on
+// the For's own container, with the moved row's key in the clip and the
+// row it landed on as the anchor, and the app confirms with a move.
+func (tx *Tx) SetReorderable(container Widget, enabled bool) {
+	var on uint32
+	if enabled {
+		on = 1
+	}
+	tx.emit(TxSetReorderable(container.id, on))
+}
+
+// OnDrop registers where dropped content lands: the widget's own drops,
+// or a reorderable For container's landings (docs/dnd-plan.md D8). Only
+// fires for a widget that declared DropTarget over an Accepts list.
+func (a *App) OnDrop(w Widget, fn func(*Tx, Dropped)) {
+	a.widgetDrops[w.id] = fn
+}
+
+// OnDragEnded registers what a drag that began on this widget settled
+// on: OpNone for a cancelled or refused drag, which is not an error.
+func (a *App) OnDragEnded(w Widget, fn func(*Tx, Op)) {
+	a.dragEnded[w.id] = fn
 }
 
 // WindowRef chains window props, the construction-sugar tier.
@@ -3946,6 +4133,8 @@ func (a *App) Serve() {
 		choice, _ := payload.(uint32)
 		files, _ := payload.([]PickedFile)
 		clipValues, isClip := payload.(ClipValues)
+		dropValues, isDrop := payload.(DropValues)
+		operationWord, _ := payload.(uint32)
 		undo, isUndo := payload.(undoReport)
 		tail, _ := payload.([]any)
 		switch {
@@ -4053,6 +4242,28 @@ func (a *App) Serve() {
 			if fn := a.nodePastes[id]; fn != nil && isClip {
 				clip := representation(clipValues)
 				a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
+			}
+		// A drop rides the same tag with four more words
+		// (docs/dnd-plan.md D1). NO WIDGET/NODE SPLIT: a dnd handler is
+		// registered by WIDGET id and the template zone is refused in
+		// this slice (§4), so there is one table and a keyed occurrence
+		// — a reorderable row's own drag_ended — matches no
+		// registration rather than a missing arm.
+		case kind == occDropped:
+			if fn := a.widgetDrops[id]; fn != nil && isDrop {
+				drop := Dropped{
+					Point:     dropValues.Point,
+					Operation: Op(dropValues.Operation),
+					Anchor:    dropValues.Anchor,
+					Before:    dropValues.Before,
+					Clip:      representation(dropValues.Clip),
+				}
+				a.dispatch(func(tx *Tx) { fn(tx, drop) })
+			}
+		case kind == occDragEnded:
+			if fn := a.dragEnded[id]; fn != nil {
+				op := Op(operationWord)
+				a.dispatch(func(tx *Tx) { fn(tx, op) })
 			}
 		// An undo moved core state without a transaction, so the mirror
 		// follows HERE — before any handler, and whether or not one is

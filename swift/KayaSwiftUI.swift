@@ -1317,6 +1317,461 @@ struct KayaDragPayload {
     }
 #endif
 
+#if !os(macOS)
+    /// Every live drag-and-drop surface's view, by widget id — main thread
+    /// only, like every registry here; the `drag` verb drives the real arms
+    /// through it (docs/dnd-plan.md D10).
+    nonisolated(unsafe) var kayaDragSurfaces: [UInt64: KayaDragDropView] = [:]
+
+    /// kaya's row payload for a reorder (docs/dnd-plan.md D8): the moved
+    /// row's key path, dot-joined, under a kaya-private id.
+    let kayaRowDragType = "dev.kaya/row"
+
+    func kayaDragOpMask(_ op: UIDropOperation) -> UInt32 {
+        switch op {
+        case .copy: return kayaDragOpCopy
+        case .move: return kayaDragOpMove
+        default: return kayaDragOpNone
+        }
+    }
+
+    /// A UIDropProposal carries ONE operation where AppKit carries a mask; the
+    /// core's verdict is already one (wire.rs, drop_verdict).
+    func kayaUIDropOperation(_ mask: UInt32) -> UIDropOperation {
+        if mask & kayaDragOpMove != 0 { return .move }
+        if mask & kayaDragOpCopy != 0 { return .copy }
+        return .cancel
+    }
+
+    /// ONE ITEM PER DRAG (docs/dnd-plan.md D5): every representation the
+    /// payload declares on one provider, in kaya's canonical order. A custom
+    /// id rides VERBATIM, where macOS's item level refuses one —
+    /// docs/traps.md: A MIME-shaped custom id registers verbatim on iOS, and
+    /// no private mapping is needed
+    func kayaDragItemProvider(_ payload: KayaDragPayload) -> NSItemProvider {
+        let provider = NSItemProvider()
+        func data(_ id: String, _ bytes: Data) {
+            provider.registerDataRepresentation(forTypeIdentifier: id, visibility: .all) {
+                done in
+                done(bytes, nil)
+                return nil
+            }
+        }
+        for (id, bytes) in payload.custom { data(id, bytes) }
+        let urls = payload.files.compactMap { URL(string: $0) }
+        if let url = urls.first { provider.registerObject(url as NSURL, visibility: .all) }
+        if let image = payload.image { data(kayaClipUTI("image"), image) }
+        if let html = payload.html { data(kayaClipUTI("html"), Data(html.utf8)) }
+        if let text = payload.text {
+            data(kayaClipUTI("text"), Data(text.utf8))
+        } else if !urls.isEmpty {
+            data(kayaClipUTI("text"), Data(urls.map(\.path).joined(separator: "\n").utf8))
+        }
+        return provider
+    }
+
+    /// What a session offers, in kaya's vocabulary: the closed kinds as a mask
+    /// and the custom ids among `accepted` it carries. THE TYPES ANSWER, never
+    /// the bytes — the hover verdict is synchronous (docs/dnd-plan.md §0).
+    func kayaProviderOffer(
+        _ providers: [NSItemProvider], customAccepted: [String]
+    ) -> (UInt32, [String]) {
+        var types: Set<String> = []
+        for provider in providers { types.formUnion(provider.registeredTypeIdentifiers) }
+        var mask: UInt32 = 0
+        if types.contains(kayaClipUTI("text")) { mask |= kayaClipText }
+        if types.contains(kayaClipUTI("html")) { mask |= kayaClipHtml }
+        if types.contains(kayaClipUTI("image")) || types.contains("public.tiff") {
+            mask |= kayaClipImage
+        }
+        if types.contains(kayaClipUTI("files")) { mask |= kayaClipFiles }
+        return (mask, customAccepted.filter { types.contains($0) })
+    }
+
+    /// The drop read — kayaReadBoardValue's precedence over item providers:
+    /// the accept list's own order, richest representation first. EVERY LOAD
+    /// STARTS INSIDE performDrop —
+    /// docs/traps.md: A dropped item's provider is dead three seconds after
+    /// `performDrop` returns. The answer lands on the main queue.
+    func kayaReadDropValue(
+        _ providers: [NSItemProvider], accepting: String,
+        _ answer: @escaping (KayaClipValue?) -> Void
+    ) {
+        let (kinds, custom) = kayaParseAcceptList(accepting)
+        func deliver(_ value: KayaClipValue?) {
+            DispatchQueue.main.async { answer(value) }
+        }
+        func offering(_ id: String) -> NSItemProvider? {
+            providers.first { $0.registeredTypeIdentifiers.contains(id) }
+        }
+        for id in custom {
+            guard let provider = offering(id) else { continue }
+            _ = provider.loadDataRepresentation(forTypeIdentifier: id) { bytes, _ in
+                deliver(bytes.map { KayaClipValue(clip: kayaClipCustom, id: id, bytes: $0) })
+            }
+            return
+        }
+        if kinds & kayaClipFiles != 0, let provider = offering(kayaClipUTI("files")) {
+            // THE BYTES ARE KEPT, NOT THE HANDLE (docs/dnd-plan.md D6): the
+            // provider's copy dies when this callback returns, so the arm
+            // copies it into the container and registers THAT with the picked
+            // table, exactly as the picker registers a picked URL.
+            _ = provider.loadFileRepresentation(forTypeIdentifier: "public.item") { url, _ in
+                guard let url else { return deliver(nil) }
+                let kept = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent("kaya-drop-\(UUID().uuidString)")
+                    .appendingPathComponent(url.lastPathComponent)
+                do {
+                    try FileManager.default.createDirectory(
+                        at: kept.deletingLastPathComponent(),
+                        withIntermediateDirectories: true)
+                    try FileManager.default.copyItem(at: url, to: kept)
+                } catch {
+                    return deliver(nil)
+                }
+                DispatchQueue.main.async {
+                    kayaPickedURLs[kept.absoluteString] = kept
+                    answer(
+                        KayaClipValue(
+                            clip: kayaClipFiles, locators: [kept.absoluteString],
+                            names: [url.lastPathComponent]))
+                }
+            }
+            return
+        }
+        if kinds & kayaClipImage != 0 {
+            for id in [kayaClipUTI("image"), "public.tiff"] {
+                guard let provider = offering(id) else { continue }
+                _ = provider.loadDataRepresentation(forTypeIdentifier: id) { bytes, _ in
+                    deliver(bytes.map { KayaClipValue(clip: kayaClipImage, bytes: $0) })
+                }
+                return
+            }
+        }
+        for (kind, clip) in [(kayaClipUTI("html"), kayaClipHtml), (kayaClipUTI("text"), kayaClipText)]
+        where kinds & clip != 0 {
+            guard let provider = offering(kind) else { continue }
+            _ = provider.loadDataRepresentation(forTypeIdentifier: kind) { bytes, _ in
+                deliver(
+                    bytes.map {
+                        KayaClipValue(clip: clip, text: String(decoding: $0, as: UTF8.self))
+                    })
+            }
+            return
+        }
+        deliver(nil)
+    }
+
+    /// The one UIKit view behind a drag-and-drop widget: a SOURCE when its
+    /// node declares a payload, a DESTINATION when its node declares
+    /// operations, and BOTH for a row of a reorderable For (docs/dnd-plan.md
+    /// D8). The verdict is the core's one pure function; nothing here decides.
+    final class KayaDragDropView: UIView, UIDragInteractionDelegate, UIDropInteractionDelegate {
+        weak var node: KayaNode?
+        weak var reorderIn: KayaNode?
+        private(set) var dragSite: UIDragInteraction?
+        private(set) var dropSite: UIDropInteraction?
+
+        func refreshRegistration() {
+            guard let node else { return }
+            let source = node.dragPayload != nil || reorderIn != nil
+            let destination = node.dropOps != 0 || reorderIn != nil
+            if source, dragSite == nil {
+                let site = UIDragInteraction(delegate: self)
+                site.isEnabled = true
+                addInteraction(site)
+                dragSite = site
+            } else if !source, let site = dragSite {
+                removeInteraction(site)
+                dragSite = nil
+            }
+            if destination, dropSite == nil {
+                let site = UIDropInteraction(delegate: self)
+                addInteraction(site)
+                dropSite = site
+            } else if !destination, let site = dropSite {
+                removeInteraction(site)
+                dropSite = nil
+            }
+        }
+
+        // ---- the source half
+        private var sourcePayload: KayaDragPayload? {
+            if let node, let payload = node.dragPayload { return payload }
+            if let node, reorderIn != nil, let stamp = kayaTableStamp(node.tag) {
+                var payload = KayaDragPayload()
+                payload.custom = [(kayaRowDragType, Data(stamp.keys.joined(separator: ".").utf8))]
+                return payload
+            }
+            return nil
+        }
+
+        private var sourceOps: UInt32 {
+            if let node, node.dragPayload != nil { return node.dragOps }
+            return reorderIn != nil ? kayaDragOpMove : 0
+        }
+
+        func dragInteraction(
+            _ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession
+        ) -> [UIDragItem] {
+            guard let payload = sourcePayload else { return [] }
+            // THE SOURCE'S DECLARED MASK RIDES THE SESSION: iOS reduces a
+            // source's operations to one `allowsMoveOperation` bool, which
+            // cannot say "move but not copy", so a LOCAL drop reads the real
+            // mask back off localContext and answers what the mac answers.
+            session.localContext = sourceOps
+            return [UIDragItem(itemProvider: kayaDragItemProvider(payload))]
+        }
+
+        func dragInteraction(
+            _ interaction: UIDragInteraction, sessionAllowsMoveOperation session: UIDragSession
+        ) -> Bool {
+            sourceOps & kayaDragOpMove != 0
+        }
+
+        func dragInteraction(
+            _ interaction: UIDragInteraction, session: UIDragSession,
+            willEndWith operation: UIDropOperation
+        ) {
+            guard let node else { return }
+            KayaHost.emitDragEnded(node.identityTag, kayaDragOpMask(operation))
+        }
+
+        // ---- the destination half
+        private func verdict(_ session: UIDropSession) -> UInt32 {
+            guard let node else { return kayaDragOpNone }
+            let providers = session.items.map(\.itemProvider)
+            let local = session.localDragSession != nil
+            if let container = reorderIn,
+                providers.contains(where: {
+                    $0.registeredTypeIdentifiers.contains(kayaRowDragType)
+                })
+            {
+                // A row of a reorderable For onto another row of the same For:
+                // move, or nothing (docs/dnd-plan.md D8).
+                guard local, let stamp = kayaTableStamp(node.tag),
+                    let own = kayaTableStamp(container.children.first?.tag ?? []),
+                    stamp.node == own.node
+                else { return kayaDragOpNone }
+                return kayaDragOpMove
+            }
+            guard node.dropOps != 0 else { return kayaDragOpNone }
+            let declared = session.localDragSession?.localContext as? UInt32
+            let sourceOps =
+                declared
+                ?? (session.allowsMoveOperation
+                    ? kayaDragOpCopy | kayaDragOpMove : kayaDragOpCopy)
+            let (_, custom) = kayaParseAcceptList(node.accepts)
+            let (offered, offeredCustom) = kayaProviderOffer(providers, customAccepted: custom)
+            return KayaHost.dragVerdict(
+                accepts: node.accepts, targetOps: node.dropOps, offered: offered,
+                custom: offeredCustom, sourceOps: sourceOps, local: local)
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction, canHandle session: UIDropSession
+        ) -> Bool {
+            verdict(session) != kayaDragOpNone
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession
+        ) -> UIDropProposal {
+            UIDropProposal(operation: kayaUIDropOperation(verdict(session)))
+        }
+
+        func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+            guard let node else { return }
+            let op = verdict(session)
+            guard op != kayaDragOpNone else { return }
+            let providers = session.items.map(\.itemProvider)
+            let where_ = session.location(in: self)
+            if let container = reorderIn,
+                let provider = providers.first(where: {
+                    $0.registeredTypeIdentifiers.contains(kayaRowDragType)
+                })
+            {
+                // The anchor is THIS row; before when the pointer is in its
+                // upper half, which on UIKit's top-left origin is the small y.
+                let before = where_.y < bounds.midY
+                _ = provider.loadDataRepresentation(forTypeIdentifier: kayaRowDragType) {
+                    bytes, _ in
+                    guard let bytes else { return }
+                    DispatchQueue.main.async {
+                        let value = KayaClipValue(
+                            clip: kayaClipCustom, id: kayaRowDragType, bytes: bytes)
+                        KayaHost.emitDropped(
+                            container.identityTag, where_, kayaDragOpMove,
+                            anchor: node.identityTag, before: before, value)
+                    }
+                }
+                return
+            }
+            kayaReadDropValue(providers, accepting: node.accepts) { value in
+                guard let value else { return }
+                KayaHost.emitDropped(
+                    node.identityTag, where_, op, anchor: [], before: false, value)
+            }
+        }
+    }
+
+    struct KayaPhoneDragDropSurface: UIViewRepresentable {
+        let node: KayaNode
+        let reorderIn: KayaNode?
+
+        func makeUIView(context: Context) -> KayaDragDropView {
+            let view = KayaDragDropView()
+            view.node = node
+            view.reorderIn = reorderIn
+            view.refreshRegistration()
+            kayaDragSurfaces[node.id] = view
+            return view
+        }
+
+        func updateUIView(_ view: KayaDragDropView, context: Context) {
+            view.node = node
+            view.reorderIn = reorderIn
+            view.refreshRegistration()
+            kayaDragSurfaces[node.id] = view
+        }
+
+        static func dismantleUIView(_ view: KayaDragDropView, coordinator: ()) {
+            if let id = view.node?.id, kayaDragSurfaces[id] === view {
+                kayaDragSurfaces.removeValue(forKey: id)
+            }
+        }
+    }
+
+    func kayaSessionConforms(_ items: [UIDragItem], _ typeIdentifiers: [String]) -> Bool {
+        items.contains { item in
+            typeIdentifiers.contains { item.itemProvider.hasItemConformingToTypeIdentifier($0) }
+        }
+    }
+
+    /// The drag session the `drag` verb's drop double reports as its local
+    /// one, so a driven drop reads `local` and the source's declared mask
+    /// exactly as a real session does (docs/dnd-plan.md D10).
+    final class KayaDragSessionDouble: NSObject, UIDragSession {
+        let items: [UIDragItem]
+        let point: CGPoint
+        let allowsMoveOperation: Bool
+        var localContext: Any?
+
+        init(items: [UIDragItem], point: CGPoint, ops: UInt32) {
+            self.items = items
+            self.point = point
+            self.allowsMoveOperation = ops & kayaDragOpMove != 0
+            self.localContext = ops
+        }
+
+        var isRestrictedToDraggingApplication: Bool { false }
+        func location(in view: UIView) -> CGPoint { point }
+        func hasItemsConforming(toTypeIdentifiers typeIdentifiers: [String]) -> Bool {
+            kayaSessionConforms(items, typeIdentifiers)
+        }
+        func canLoadObjects(ofClass aClass: any NSItemProviderReading.Type) -> Bool {
+            items.contains { $0.itemProvider.canLoadObject(ofClass: aClass) }
+        }
+    }
+
+    /// A UIDropSession the `drag` verb hands to the real destination arms
+    /// (docs/dnd-plan.md D10): real NSItemProviders built from the source's
+    /// declaration, a local drag session behind `localDragSession`, and the
+    /// destination's own point as the location.
+    final class KayaDropSessionDouble: NSObject, UIDropSession {
+        let items: [UIDragItem]
+        let point: CGPoint
+        let local: KayaDragSessionDouble
+        let progress = Progress()
+        var progressIndicatorStyle: UIDropSessionProgressIndicatorStyle = .none
+
+        init(items: [UIDragItem], point: CGPoint, local: KayaDragSessionDouble) {
+            self.items = items
+            self.point = point
+            self.local = local
+        }
+
+        var localDragSession: (any UIDragSession)? { local }
+        var allowsMoveOperation: Bool { local.allowsMoveOperation }
+        var isRestrictedToDraggingApplication: Bool { false }
+        func location(in view: UIView) -> CGPoint { point }
+        func hasItemsConforming(toTypeIdentifiers typeIdentifiers: [String]) -> Bool {
+            kayaSessionConforms(items, typeIdentifiers)
+        }
+        func canLoadObjects(ofClass aClass: any NSItemProviderReading.Type) -> Bool {
+            items.contains { $0.itemProvider.canLoadObject(ofClass: aClass) }
+        }
+
+        func loadObjects(
+            ofClass aClass: any NSItemProviderReading.Type,
+            completion: @escaping ([any NSItemProviderReading]) -> Void
+        ) -> Progress {
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var loaded: [any NSItemProviderReading] = []
+            for item in items where item.itemProvider.canLoadObject(ofClass: aClass) {
+                group.enter()
+                _ = item.itemProvider.loadObject(ofClass: aClass) { object, _ in
+                    if let object {
+                        lock.lock()
+                        loaded.append(object)
+                        lock.unlock()
+                    }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) { completion(loaded) }
+            return progress
+        }
+    }
+
+    /// Drive one drag in-process (docs/dnd-plan.md D10): the source's
+    /// declaration on real item providers, the destination's real delegate
+    /// arms called in UIKit's order, the source told the outcome. nil when it
+    /// ran (a refusal included — the source reads `none`), else the sentence
+    /// naming what stopped it. Main thread.
+    func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?) -> String? {
+        guard let view = kayaDragSurfaces[destination.id], let site = view.dropSite else {
+            return "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
+        }
+        let payload: KayaDragPayload
+        let ops: UInt32
+        if reorder != nil {
+            guard let stamp = kayaTableStamp(source.tag) else {
+                return "the source is not a stamped row, and a reorder drags rows"
+            }
+            payload = KayaDragPayload(
+                custom: [(kayaRowDragType, Data(stamp.keys.joined(separator: ".").utf8))])
+            ops = kayaDragOpMove
+        } else {
+            guard let declared = source.dragPayload else {
+                return "the source declares no drag payload (set_drag_source)"
+            }
+            payload = declared
+            ops = source.dragOps
+        }
+        // A reorder lands where the scene says: before is the upper half, the
+        // small y on UIKit's top-left origin.
+        let point: CGPoint
+        if let before = reorder {
+            point = CGPoint(
+                x: view.bounds.midX, y: before ? view.bounds.minY + 1 : view.bounds.maxY - 1)
+        } else {
+            point = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        }
+        let items = [UIDragItem(itemProvider: kayaDragItemProvider(payload))]
+        let dragging = KayaDragSessionDouble(items: items, point: point, ops: ops)
+        let session = KayaDropSessionDouble(items: items, point: point, local: dragging)
+        var op = kayaDragOpNone
+        if view.dropInteraction(site, canHandle: session) {
+            op = kayaDragOpMask(view.dropInteraction(site, sessionDidUpdate: session).operation)
+            if op != kayaDragOpNone { view.dropInteraction(site, performDrop: session) }
+        }
+        KayaHost.emitDragEnded(source.identityTag, op)
+        return nil
+    }
+#endif
+
 /// Put one clip on the system clipboard. SEVERAL FILES MEANS SEVERAL ITEMS
 /// here: item 0 carries every single-valued representation plus the first file.
 /// A file list's text rendition is DERIVED HERE, only when the clip offers none.
@@ -4012,9 +4467,6 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // { u64 id; u32 present; u32 file_count; u32 custom_count;
                 // u32 operations; u32 tag_len; u32 reserved; Values reps; tag }
                 // — the copy record's values in the canonical order.
-                #if !os(macOS)
-                    kayaDepthStub("dnd", on: "ios")
-                #endif
                 let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let spresent = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
                 let sfileCount = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
@@ -6050,12 +6502,7 @@ private func kayaRunScript(_ script: String) {
                 let off = DispatchQueue.main.sync { () -> String? in
                     guard let src = kayaAnyTarget(words[0]) else { return "no such source \(words[0])" }
                     guard let dst = kayaAnyTarget(words[2]) else { return "no such destination \(words[2])" }
-                    #if os(macOS)
-                        return kayaDriveDrag(source: src, destination: dst, reorder: reorder)
-                    #else
-                        _ = (src, dst, reorder)
-                        return "drag is a depth slice on ios (docs/dnd-plan.md §5)"
-                    #endif
+                    return kayaDriveDrag(source: src, destination: dst, reorder: reorder)
                 }
                 if let off { failures.append("drag: \(off)") }
             case "scroll_to_row":
@@ -11576,18 +12023,18 @@ struct KayaRender: View {
     }
 
     /// The drag-and-drop surface behind a node that declares a payload, an
-    /// operation mask, or is a row of a reorderable For (macOS; the phone
-    /// arms are a depth slice, docs/dnd-plan.md §5).
+    /// operation mask, or is a row of a reorderable For (docs/dnd-plan.md D7,
+    /// D8): an AppKit view on macOS, a UIKit one on iOS.
     @ViewBuilder private func kayaDragDrop(_ view: some View) -> some View {
-        #if os(macOS)
-            if node.dragPayload != nil || node.dropOps != 0 || reorderIn != nil {
+        if node.dragPayload != nil || node.dropOps != 0 || reorderIn != nil {
+            #if os(macOS)
                 view.background(KayaMacDragDropSurface(node: node, reorderIn: reorderIn))
-            } else {
-                view
-            }
-        #else
+            #else
+                view.background(KayaPhoneDragDropSurface(node: node, reorderIn: reorderIn))
+            #endif
+        } else {
             view
-        #endif
+        }
     }
 
     /// The stock-stack path's children, both axes: frame BEFORE the

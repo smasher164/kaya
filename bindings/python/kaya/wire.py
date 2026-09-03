@@ -1062,6 +1062,23 @@ occurrence_blob = None
 at import (this module loads no library of its own)."""
 
 
+def parse_representation(buf, at):
+    """The VALUES half of a representation: the count, then that many
+    values with blobs redeemed and released.
+
+    Its own function because a drop's clip KIND sits four words and a
+    point earlier than its values (docs/dnd-plan.md D1)."""
+    count, _reserved = struct.unpack_from("<II", buf, at)
+    at += 8
+    values = []
+    for _ in range(count):
+        value, at = parse_value(buf, at)
+        if isinstance(value, BlobHandle):
+            value = occurrence_blob(value.handle)
+        values.append(value)
+    return values, at
+
+
 def parse_clip(buf, at):
     """Decode one representation: the clip kind, then its values.
 
@@ -1069,14 +1086,8 @@ def parse_clip(buf, at):
     of the clip enum and never a mask — you offer many and you
     receive one — and 0 with no values is the universal empty
     answer. Blobs are redeemed to bytes and released here."""
-    clip, _reserved, count, _pad = struct.unpack_from("<IIII", buf, at)
-    at += 16
-    values = []
-    for _ in range(count):
-        value, at = parse_value(buf, at)
-        if isinstance(value, BlobHandle):
-            value = occurrence_blob(value.handle)
-        values.append(value)
+    clip, _reserved = struct.unpack_from("<II", buf, at)
+    values, at = parse_representation(buf, at + 8)
     return clip, values, at
 
 
@@ -1180,6 +1191,19 @@ def parse_occurrence(buf):
     if kind in (OCC_PASTED,):
         clip, values, at = parse_clip(buf, at)
         payload = (clip, values)
+    if kind in (OCC_DROPPED,):
+        operation, before, anchor_len, clip = struct.unpack_from("<IIII", buf, at)
+        at += 16
+        x, at = parse_value(buf, at)
+        y, at = parse_value(buf, at)
+        anchor = []
+        for _ in range(anchor_len):
+            key, at = parse_value(buf, at)
+            anchor.append(key)
+        values, at = parse_representation(buf, at)
+        payload = (operation, bool(before), (x, y), anchor, clip, values)
+    if kind in (OCC_DRAG_ENDED,):
+        (payload,) = struct.unpack_from("<I", buf, at)
     if kind in (OCC_DRAW_REQUESTED, OCC_TICK,):
         # The canvas asks carry a run of BARE values after the
         # key path — the assigned size, and a tick's frame time

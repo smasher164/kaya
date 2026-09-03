@@ -448,26 +448,49 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\tValues []any");
     c.line("}");
     c.line("");
-    c.line("// parseClip decodes a representation at `at`: the clip kind, then");
-    c.line("// its Values block. Blobs are redeemed and RELEASED here.");
-    c.line("func parseClip(rec []byte, at int) (ClipValues, int) {");
-    c.line("\tclip := ClipValues{Kind: binary.LittleEndian.Uint32(rec[at:])}");
-    c.line("\tcount := int(binary.LittleEndian.Uint32(rec[at+8:]))");
-    c.line("\tat += 16");
+    c.line("// DropValues is what a drop delivered, as the decoder hands it over");
+    c.line("// (docs/dnd-plan.md D1): the operation the core settled on, the point");
+    c.line("// in the destination's own coordinates, and — for a reorder — the");
+    c.line("// anchor row's key path and whether the drop landed before it.");
+    c.line("type DropValues struct {");
+    c.line("\tOperation uint32");
+    c.line("\tBefore    bool");
+    c.line("\tPoint     [2]float64");
+    c.line("\tAnchor    []any");
+    c.line("\tClip      ClipValues");
+    c.line("}");
+    c.line("");
+    c.line("// parseRepresentation decodes the VALUES half of a representation at");
+    c.line("// `at`: the count, then that many values with blobs redeemed and");
+    c.line("// RELEASED. Its own function because a drop's clip KIND sits four");
+    c.line("// words and a point earlier (docs/dnd-plan.md D1).");
+    c.line("func parseRepresentation(rec []byte, at int) ([]any, int) {");
+    c.line("\tcount := int(binary.LittleEndian.Uint32(rec[at:]))");
+    c.line("\tat += 8");
+    c.line("\tvar values []any");
     c.line("\tfor i := 0; i < count; i++ {");
     c.line("\t\tvtype := binary.LittleEndian.Uint32(rec[at:])");
     c.line("\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
     c.line("\t\tbody := rec[at+8 : at+8+vlen]");
     c.line("\t\tswitch vtype {");
     c.line("\t\tcase ValueI64:");
-    c.line("\t\t\tclip.Values = append(clip.Values, int64(binary.LittleEndian.Uint64(body)))");
+    c.line("\t\t\tvalues = append(values, int64(binary.LittleEndian.Uint64(body)))");
     c.line("\t\tcase ValueBlob:");
-    c.line("\t\t\tclip.Values = append(clip.Values, occurrenceBlob(binary.LittleEndian.Uint64(body)))");
+    c.line("\t\t\tvalues = append(values, occurrenceBlob(binary.LittleEndian.Uint64(body)))");
     c.line("\t\tdefault:");
-    c.line("\t\t\tclip.Values = append(clip.Values, string(body))");
+    c.line("\t\t\tvalues = append(values, string(body))");
     c.line("\t\t}");
     c.line("\t\tat += 8 + (vlen+7)&^7");
     c.line("\t}");
+    c.line("\treturn values, at");
+    c.line("}");
+    c.line("");
+    c.line("// parseClip decodes a representation at `at`: the clip kind, then");
+    c.line("// its Values block. Blobs are redeemed and RELEASED here.");
+    c.line("func parseClip(rec []byte, at int) (ClipValues, int) {");
+    c.line("\tclip := ClipValues{Kind: binary.LittleEndian.Uint32(rec[at:])}");
+    c.line("\tvalues, at := parseRepresentation(rec, at+8)");
+    c.line("\tclip.Values = values");
     c.line("\treturn clip, at");
     c.line("}");
     c.line("");
@@ -734,6 +757,37 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
         c.line("\t\tclip, _ := parseClip(rec, at)");
         c.line("\t\tpayload = clip");
+        c.line("\t}");
+    }
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1).
+    for name in crate::dropped_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tdrop := DropValues{");
+        c.line("\t\t\tOperation: binary.LittleEndian.Uint32(rec[at:]),");
+        c.line("\t\t\tBefore:    binary.LittleEndian.Uint32(rec[at+4:]) != 0,");
+        c.line("\t\t}");
+        c.line("\t\tanchorLen := int(binary.LittleEndian.Uint32(rec[at+8:]))");
+        c.line("\t\tdrop.Clip.Kind = binary.LittleEndian.Uint32(rec[at+12:])");
+        c.line("\t\tat += 16");
+        c.line("\t\tvar x, y any");
+        c.line("\t\tx, at = parseValue(rec, at)");
+        c.line("\t\ty, at = parseValue(rec, at)");
+        c.line("\t\tdrop.Point[0], _ = x.(float64)");
+        c.line("\t\tdrop.Point[1], _ = y.(float64)");
+        c.line("\t\tfor i := 0; i < anchorLen; i++ {");
+        c.line("\t\t\tvar key any");
+        c.line("\t\t\tkey, at = parseValue(rec, at)");
+        c.line("\t\t\tdrop.Anchor = append(drop.Anchor, key)");
+        c.line("\t\t}");
+        c.line("\t\tdrop.Clip.Values, at = parseRepresentation(rec, at)");
+        c.line("\t\tpayload = drop");
+        c.line("\t}");
+    }
+    // The drag's outcome: one word past the key path.
+    for name in crate::drag_outcome_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tpayload = binary.LittleEndian.Uint32(rec[at:])");
         c.line("\t}");
     }
     // The canvas asks: bare values after the key path with no count in

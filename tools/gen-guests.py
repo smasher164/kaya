@@ -122,6 +122,7 @@ def generate(tmp):
                        "kaya-swift-gen", "guests/swift/feed.swift",
                        "guests/swift/todos.swift",
                        "guests/swift/reorder.swift",
+                       "guests/swift/dnd.swift",
                        "guests/swift/undo.swift",
                        "guests/swift/table.swift"],
                       env=env, check=False).returncode != 0:

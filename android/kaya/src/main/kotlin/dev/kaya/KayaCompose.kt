@@ -32,6 +32,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.draganddrop.dragAndDropSource
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.gestures.ScrollableState
@@ -60,7 +62,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 // THE SEMANTIC ICON VOCABULARY's glyphs (docs/styling-plan.md D6), one
@@ -166,6 +168,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.DragAndDropTransferData
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -322,6 +329,35 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * paste hook and the standard commands' enablement both read it off
      * the focused node. Empty means the widget takes nothing. */
     var accepts by mutableStateOf("")
+
+    /**
+     * THE DRAG-AND-DROP DECLARATIONS (docs/dnd-plan.md D1, D8), all
+     * composition state because the surface appears and withdraws with
+     * them: what this widget hands over and which operations it allows,
+     * which operations it will perform on a drop (0 = not a
+     * destination), and whether its stamped rows drag within their own
+     * collection. WHAT it receives is [accepts], the one vocabulary a
+     * paste and a drop share.
+     */
+    internal var dragPayload by mutableStateOf<KayaDragPayload?>(null)
+    var dragOps by mutableStateOf(0)
+    var dropOps by mutableStateOf(0)
+    var reorderable by mutableStateOf(false)
+
+    /** The reorderable For this node is a stamped row of, if any (D8):
+     * its surface then drags and takes rows. Written by the two apply
+     * arms that can make it true — the container's own declaration and
+     * a later add_child — so the row needs no walk up a parent map the
+     * composition cannot recompose on. */
+    var reorderIn by mutableStateOf<KayaNode?>(null)
+
+    /** The identity bytes the three dnd apply twins carried. */
+    var dndTag by mutableStateOf(ByteArray(0))
+
+    /** What an occurrence from this node rides under: the dnd
+     * declaration's own tag, else the create tag (the mac arm's
+     * `identityTag`). */
+    val identityTag: ByteArray get() = if (dndTag.isEmpty()) tag else dndTag
 
     /** Semantic emphasis (docs/styling-plan.md D4), 0 = none. The
      * render layer lowers it to M3's own emphasis ladder, NEVER to a
@@ -860,6 +896,70 @@ internal fun kayaParseAcceptList(list: String): Pair<Int, List<String>> {
     return Pair(kinds, custom)
 }
 
+/**
+ * A drag source's declared payload — the copy record's representations
+ * (docs/dnd-plan.md D1), in the canonical descending-clip-value order.
+ */
+internal class KayaDragPayload(
+    val text: String? = null,
+    val html: String? = null,
+    val image: ByteArray? = null,
+    val files: List<String> = emptyList(),
+    val custom: List<Pair<String, ByteArray>> = emptyList(),
+)
+
+/**
+ * ONE LIVE DRAG THIS PROCESS STARTED, carried as the DragEvent's LOCAL
+ * STATE — Android's own process-local channel, which the platform hands
+ * back inside this process and nowhere else, so it is both the payload
+ * table a ClipData cannot be for custom and image bytes AND the
+ * discriminator that says a source is local (docs/dnd-plan.md D9;
+ * phones are same-app only).
+ *
+ * Written on the UI thread; the counters exist so the `drag` verb's
+ * expiry sentence can print what it measured rather than a guess.
+ */
+internal class KayaDragSession(
+    val sourceId: Long,
+    val payload: KayaDragPayload,
+    val ops: Int,
+    /** The reorderable For this source is a row of, 0 for a data drag. */
+    val rowOf: Long,
+) {
+    @Volatile var operation = KayaCompose.DRAG_OP_NONE
+    @Volatile var started = 0
+    @Volatile var entered = 0
+    @Volatile var dropped = 0
+    @Volatile var ended = false
+}
+
+@Volatile
+internal var kayaDragSession: KayaDragSession? = null
+
+/** How many drags this process has seen end — the `drag` verb's ack
+ * counter, so a second drag from the same source is not mistaken for the
+ * first (docs/dnd-plan.md D10). */
+@Volatile
+internal var kayaDragEndings = 0
+
+/**
+ * Where each drag-and-drop surface sits, published by its own layout
+ * reader. ROOT space is what a DragEvent's point is in; WINDOW space is
+ * what the `drag` verb turns into screen pixels for `input draganddrop`
+ * (docs/dnd-plan.md D10). Concurrent because the harness thread reads
+ * what the UI thread wrote.
+ */
+internal class KayaDragBox(
+    val rootLeft: Float,
+    val rootTop: Float,
+    val windowLeft: Float,
+    val windowTop: Float,
+    val width: Float,
+    val height: Float,
+)
+
+internal val kayaDragBoxes = java.util.concurrent.ConcurrentHashMap<Long, KayaDragBox>()
+
 /// A layout trace, off unless asked for (KAYA_LAYOUT_TRACE=1), matching
 /// the SwiftUI interpreter's channel of the same name.
 val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
@@ -1035,6 +1135,10 @@ object KayaCompose {
     internal const val DRAG_OP_NONE = 0
     internal const val DRAG_OP_COPY = 1
     internal const val DRAG_OP_MOVE = 2
+
+    /** kaya's row payload for a reorder (docs/dnd-plan.md D8): the moved
+     * row's key path, dot-joined, under a kaya-private id. */
+    internal const val ROW_DRAG_TYPE = "dev.kaya/row"
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -2053,13 +2157,81 @@ object KayaCompose {
                     // harness's label#N registry — their create arm
                     // appended before this parent was known, and
                     // without this every later label shifts index.
-                    val parentKind = KayaSceneModel.nodes[parent]!!.kind
+                    val parentNode = KayaSceneModel.nodes[parent]!!
+                    val parentKind = parentNode.kind
                     if (parentKind == KIND_SELECT || parentKind == KIND_RADIO) {
                         KayaSceneModel.labels.removeAll { it.id == child }
                     }
+                    // A row stamped into a reorderable For after the
+                    // declaration landed (docs/dnd-plan.md D8).
+                    if (parentNode.reorderable) {
+                        KayaSceneModel.nodes[child]!!.reorderIn = parentNode
+                    }
                 }
-                APPLY_SET_DRAG_SOURCE, APPLY_SET_DROP_TARGET, APPLY_SET_REORDERABLE ->
-                    depthStub("dnd")
+                APPLY_SET_DRAG_SOURCE -> {
+                    // { u64 id; u32 present; u32 file_count; u32
+                    // custom_count; u32 operations; u32 tag_len; u32
+                    // reserved } then a Values block in the copy
+                    // record's canonical order — custom pairs, files,
+                    // image, html, text — and the identity tag after it.
+                    val id = b.long
+                    val present = b.int
+                    val fileCount = b.int
+                    val customCount = b.int
+                    val ops = b.int
+                    val tagLen = b.int
+                    b.int // reserved
+                    b.int // slots — the prefetch walk's business
+                    b.int // reserved
+                    val custom = ArrayList<Pair<String, ByteArray>>(customCount)
+                    repeat(customCount) {
+                        val cid = readString(b)
+                        custom.add(Pair(cid, blobs[readBlobHandle(b)] ?: ByteArray(0)))
+                    }
+                    val files = (0 until fileCount).map { readString(b) }
+                    val image =
+                        if (present and CLIP_IMAGE != 0) blobs[readBlobHandle(b)] else null
+                    val html = if (present and CLIP_HTML != 0) readString(b) else null
+                    val text = if (present and CLIP_TEXT != 0) readString(b) else null
+                    val tag = ByteArray(tagLen).also { b.get(it) }
+                    val node = KayaSceneModel.nodes[id]
+                        ?: error("kaya: set_drag_source targets unknown widget $id")
+                    // A ZERO present WITH NO FILES AND NO CUSTOM
+                    // WITHDRAWS the declaration (the record's own rule).
+                    val empty = present == 0 && files.isEmpty() && custom.isEmpty()
+                    node.dragPayload =
+                        if (empty) null
+                        else KayaDragPayload(text, html, image, files, custom)
+                    node.dragOps = if (empty) 0 else ops
+                    node.dndTag = tag
+                }
+                APPLY_SET_DROP_TARGET -> {
+                    // { u64 id; u32 operations; u32 tag_len; tag }
+                    val id = b.long
+                    val ops = b.int
+                    val tagLen = b.int
+                    val tag = ByteArray(tagLen).also { b.get(it) }
+                    val node = KayaSceneModel.nodes[id]
+                        ?: error("kaya: set_drop_target targets unknown widget $id")
+                    node.dropOps = ops
+                    node.dndTag = tag
+                }
+                APPLY_SET_REORDERABLE -> {
+                    // { u64 id; u32 enabled; u32 tag_len; tag } — the tag
+                    // is the CONTAINER's, so a landing's identity is the
+                    // For the app registered on (D8, amended).
+                    val id = b.long
+                    val enabled = b.int
+                    val tagLen = b.int
+                    val tag = ByteArray(tagLen).also { b.get(it) }
+                    val node = KayaSceneModel.nodes[id]
+                        ?: error("kaya: set_reorderable targets unknown widget $id")
+                    node.reorderable = enabled != 0
+                    node.dndTag = tag
+                    // The rows already stamped; a later one takes it at
+                    // add_child.
+                    node.children.forEach { it.reorderIn = if (enabled != 0) node else null }
+                }
                 APPLY_FOLD -> {
                     // The stacked fold (D7). Order is the core's
                     // emission order — the row's declaration order — so
@@ -2417,6 +2589,107 @@ object KayaCompose {
         return out as T
     }
 
+    /** One `drag` verb's request line, or the sentence that stopped it. */
+    private class KayaDragPlan(
+        val error: String?,
+        val line: String = "",
+        val sourceId: Long = 0L,
+        val seq: Int = 0,
+    )
+
+    /**
+     * WAIT FOR THE LAYOUT THE LAST BATCH IMPLIES. Every drag-and-drop
+     * surface publishes its box from `onGloballyPositioned`, which runs
+     * in a frame's layout phase — so a `drag` issued in the same
+     * millisecond an `expect_order` read the MODEL back would aim at the
+     * PREVIOUS arrangement's boxes, which is measured: the second
+     * reorder injected the rows' pre-reorder centres and dropped a row
+     * onto itself (docs/traps.md). Two frames, because a posted callback
+     * fires at the START of a frame and the layout follows inside it.
+     */
+    private fun kayaAwaitFrames(activity: ComponentActivity, frames: Int) {
+        repeat(frames) {
+            val done = java.util.concurrent.CountDownLatch(1)
+            activity.runOnUiThread {
+                android.view.Choreographer.getInstance().postFrameCallback {
+                    done.countDown()
+                }
+            }
+            done.await(1, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
+    /**
+     * THE REQUEST THE RUNNER EXECUTES (docs/dnd-plan.md D10): the two
+     * widgets' centres in SCREEN PIXELS — each surface's own
+     * `boundsInWindow` plus the decor view's location on screen — on the
+     * tag the per-leg logcat poll already reads. A reorder aims at the
+     * landed row's upper or lower QUARTER, so the before/onto bit is the
+     * pointer's own half with room to spare. Main thread.
+     */
+    private fun kayaDragPlan(
+        activity: ComponentActivity,
+        sourceSpec: String,
+        destinationSpec: String,
+        reorder: Boolean?,
+    ): KayaDragPlan {
+        val source = kayaWidgetTarget(sourceSpec)
+            ?: return KayaDragPlan("no such source $sourceSpec")
+        val destination = kayaWidgetTarget(destinationSpec)
+            ?: return KayaDragPlan("no such destination $destinationSpec")
+        val from = kayaDragBoxes[source.id] ?: return KayaDragPlan(
+            "$sourceSpec is not a drag source — it declares no payload " +
+                "(set_drag_source) and sits in no reorderable For")
+        val to = kayaDragBoxes[destination.id] ?: return KayaDragPlan(
+            "$destinationSpec is not a drop destination — it declares no " +
+                "drop_target and sits in no reorderable For")
+        val corner = IntArray(2)
+        activity.window.decorView.getLocationOnScreen(corner)
+        val x1 = (corner[0] + from.windowLeft + from.width / 2f).toInt()
+        val y1 = (corner[1] + from.windowTop + from.height / 2f).toInt()
+        val x2 = (corner[0] + to.windowLeft + to.width / 2f).toInt()
+        val landing = when (reorder) {
+            true -> to.height / 4f
+            false -> to.height * 3f / 4f
+            null -> to.height / 2f
+        }
+        val y2 = (corner[1] + to.windowTop + landing).toInt()
+        kayaDragRequests += 1
+        return KayaDragPlan(
+            null,
+            "KAYA_REQUEST: draganddrop $kayaDragRequests $x1 $y1 $x2 $y2 $DRAG_INJECT_MS",
+            source.id,
+            kayaDragRequests)
+    }
+
+    /**
+     * THE ACK: the platform's own ACTION_DRAG_ENDED for the session this
+     * source started, which is the one signal that says the injected
+     * gesture ran end to end — a REFUSED drop acks too, since the source
+     * still reads `none`, so no ack means no gesture reached the app and
+     * the runner may inject again (docs/dnd-plan.md D10). Null when it
+     * landed; otherwise ONE sentence carrying the four counters this run
+     * measured — a drag that never started reads started=0, which is the
+     * whole discriminator.
+     */
+    private fun kayaAwaitDragEnd(sourceId: Long, endingsBefore: Int): String? {
+        val deadline = System.nanoTime() + DRAG_ACK_MS * 1_000_000
+        while (System.nanoTime() < deadline) {
+            val session = kayaDragSession
+            if (kayaDragEndings != endingsBefore && session != null &&
+                session.sourceId == sourceId && session.ended
+            ) {
+                return null
+            }
+            Thread.sleep(RETRY_PERIOD_MS)
+        }
+        val session = kayaDragSession?.takeIf { it.sourceId == sourceId }
+        return "the injected gesture did not finish in ${DRAG_ACK_MS}ms — " +
+            "started=${session?.started ?: 0} entered=${session?.entered ?: 0} " +
+            "dropped=${session?.dropped ?: 0} ended=${session?.ended ?: false} " +
+            "(the runner runs `input draganddrop` off the KAYA_REQUEST line)"
+    }
+
     /**
      * THE REAL-KEYSTROKE TYPING VERB — harness.rs `Stage::type_text`'s
      * six points. An app may not INJECT events but may DISPATCH into its
@@ -2547,9 +2820,9 @@ object KayaCompose {
         )
     }
 
-    private data class TableStamp(val node: Long, val keys: List<String>)
+    internal data class TableStamp(val node: Long, val keys: List<String>)
 
-    private fun tableStamp(tag: ByteArray): TableStamp? {
+    internal fun tableStamp(tag: ByteArray): TableStamp? {
         if (tag.size < 16) return null
         val b = ByteBuffer.wrap(tag).order(ByteOrder.LITTLE_ENDIAN)
         val node = b.long
@@ -4890,6 +5163,20 @@ object KayaCompose {
     /// expensive diagnosis only on the final look needs the period to
     /// tell which look that is.
     private const val RETRY_PERIOD_MS = 20L
+
+    /**
+     * The `drag` verb's two numbers (docs/dnd-plan.md D10, docs/traps.md:
+     * `input draganddrop` holds the long press itself). The INJECTION is
+     * how long the pointer takes from source to destination once the
+     * press has been held; the ACK is how long the verb waits for the
+     * platform's ACTION_DRAG_ENDED, which covers the runner's own poll
+     * period and adb on top of the gesture.
+     */
+    private const val DRAG_INJECT_MS = 1500
+    private const val DRAG_ACK_MS = 20_000L
+
+    /** The request sequence, so the runner never runs one line twice. */
+    private var kayaDragRequests = 0
     private const val RETRY_PERIOD_NS = RETRY_PERIOD_MS * 1_000_000
 
     /**
@@ -5670,9 +5957,46 @@ object KayaCompose {
                         }
                     }
                     "drag" -> {
-                        // docs/dnd-plan.md D10; the Compose arms are the
-                        // breadth slice (§5).
-                        failures.add("drag is a depth slice on android (docs/dnd-plan.md §5)")
+                        // drag <source> to <destination> [before|onto].
+                        // THE HARNESS RUNS INSIDE THE APP AND CANNOT
+                        // INJECT A SYSTEM DRAG, so the verb is a RUNNER
+                        // CHANNEL (docs/dnd-plan.md D10): it prints the
+                        // two screen-pixel centres and the runner's own
+                        // per-leg logcat poll executes
+                        // `input draganddrop` on the leg's device. A
+                        // refused drop is not this verb's failure — the
+                        // source reads `none`.
+                        var words = parts.drop(1)
+                        var reorder: Boolean? = null
+                        if (words.lastOrNull() == "before") {
+                            reorder = true
+                            words = words.dropLast(1)
+                        } else if (words.lastOrNull() == "onto") {
+                            reorder = false
+                            words = words.dropLast(1)
+                        }
+                        if (words.size != 3 || words[1] != "to") {
+                            failures.add(
+                                "drag wants `<source> to <destination> [before|onto]`")
+                        } else {
+                            kayaAwaitFrames(activity, 2)
+                            val plan = onUi(activity) {
+                                kayaDragPlan(activity, words[0], words[2], reorder)
+                            }
+                            if (plan.error != null) {
+                                failures.add("drag: ${plan.error}")
+                            } else {
+                                val endings = kayaDragEndings
+                                Log.i("kaya", plan.line)
+                                val off = kayaAwaitDragEnd(plan.sourceId, endings)
+                                if (off != null) {
+                                    failures.add("drag: $off")
+                                } else {
+                                    // THE ACK the runner stops re-injecting on.
+                                    Log.i("kaya", "KAYA_ACK: draganddrop ${plan.seq}")
+                                }
+                            }
+                        }
                     }
                     "scroll_to_row" -> {
                         // The core maps the KEY to an index in the
@@ -8537,6 +8861,290 @@ internal fun kayaWindowSpacers(offset: Double, extent: Double, band: Int, tail: 
     return Pair(top, bottom)
 }
 
+/**
+ * The ClipData a declared payload travels on. THE DESCRIPTION IS THE
+ * OFFER every destination reads (docs/dnd-plan.md D1) — a custom id is a
+ * mime type verbatim, and the bytes behind image and custom ride the
+ * session instead, since a same-app ClipData has nowhere to put them
+ * that a foreign reader could use anyway (D9).
+ */
+private fun kayaDragClipData(payload: KayaDragPayload): ClipData {
+    val mimes = ArrayList<String>()
+    payload.custom.forEach { mimes.add(it.first) }
+    if (payload.files.isNotEmpty()) mimes.add(ClipDescription.MIMETYPE_TEXT_URILIST)
+    if (payload.image != null) mimes.add("image/png")
+    if (payload.html != null) mimes.add(ClipDescription.MIMETYPE_TEXT_HTML)
+    if (payload.text != null || payload.files.isNotEmpty()) {
+        mimes.add(ClipDescription.MIMETYPE_TEXT_PLAIN)
+    }
+    // ClipDescription refuses an empty mime array, and a payload of
+    // custom bytes alone is a legal declaration.
+    if (mimes.isEmpty()) mimes.add(ClipDescription.MIMETYPE_TEXT_PLAIN)
+    // A file list's text rendition is DERIVED HERE, only when the clip
+    // offers none — kayaCopyToClipboard's rule, one surface over.
+    val text = payload.text ?: payload.files.joinToString("\n")
+    val clip = ClipData(
+        ClipDescription("kaya", mimes.toTypedArray()),
+        ClipData.Item(
+            text, payload.html, null,
+            payload.files.firstOrNull()?.let { Uri.parse(it) }),
+    )
+    payload.files.drop(1).forEach { clip.addItem(ClipData.Item(Uri.parse(it))) }
+    return clip
+}
+
+/**
+ * What a drag offers, in kaya's vocabulary: the closed kinds as a mask
+ * and the custom ids among [accepted] the description carries. A FOREIGN
+ * DRAG OFFERS NEITHER IMAGE NOR CUSTOM — their bytes live in this
+ * process's own session and nowhere the platform would hand over — so
+ * they are NOT ON OFFER rather than offered and empty (D9).
+ */
+private fun kayaDragOffer(
+    event: DragAndDropEvent,
+    accepted: List<String>,
+    local: Boolean,
+): Pair<Int, List<String>> {
+    val description = event.toAndroidDragEvent().clipDescription
+        ?: return Pair(0, emptyList())
+    var mask = 0
+    if (description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)) {
+        mask = mask or KayaCompose.CLIP_TEXT
+    }
+    if (description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)) {
+        mask = mask or KayaCompose.CLIP_HTML
+    }
+    if (description.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST)) {
+        mask = mask or KayaCompose.CLIP_FILES
+    }
+    if (local && description.hasMimeType("image/png")) {
+        mask = mask or KayaCompose.CLIP_IMAGE
+    }
+    if (!local) return Pair(mask, emptyList())
+    return Pair(mask, accepted.filter { description.hasMimeType(it) })
+}
+
+/**
+ * The hover and drop verdict for one node — THE CORE'S ONE PURE
+ * FUNCTION and nothing this file decides (docs/dnd-plan.md D2). A row of
+ * a reorderable For answers its own question first: a local row of the
+ * SAME container is a move, anything else is nothing (D8).
+ */
+private fun kayaDropVerdict(
+    node: KayaNode,
+    reorderIn: KayaNode?,
+    event: DragAndDropEvent,
+): Int {
+    val drag = event.toAndroidDragEvent()
+    val session = drag.localState as? KayaDragSession
+    val description = drag.clipDescription
+    if (reorderIn != null && description?.hasMimeType(KayaCompose.ROW_DRAG_TYPE) == true) {
+        if (session == null || session.rowOf != reorderIn.id) return KayaCompose.DRAG_OP_NONE
+        return if (KayaCompose.tableStamp(node.tag) == null) {
+            KayaCompose.DRAG_OP_NONE
+        } else {
+            KayaCompose.DRAG_OP_MOVE
+        }
+    }
+    if (node.dropOps == 0) return KayaCompose.DRAG_OP_NONE
+    val (_, custom) = kayaParseAcceptList(node.accepts)
+    val (offered, offeredCustom) = kayaDragOffer(event, custom, session != null)
+    return KayaPresent.dragVerdict(
+        node.accepts, node.dropOps, offered, offeredCustom.joinToString(" "),
+        session?.ops ?: 0, session != null)
+}
+
+/**
+ * The representation a drop delivers, richest accepted first — the
+ * accept list's own order for custom ids, then files, image, html, text
+ * (kayaMaterializeClipboard's walk, over the drag instead of the board).
+ * A LOCAL drag is read off the SOURCE'S OWN DECLARATION, which is where
+ * the bytes are; a foreign one off the ClipData, which is all there is.
+ */
+private fun kayaReadDropValue(
+    accepting: String,
+    drag: android.view.DragEvent,
+): KayaClipValue? {
+    val (kinds, custom) = kayaParseAcceptList(accepting)
+    val payload = (drag.localState as? KayaDragSession)?.payload
+    if (payload != null) {
+        for (id in custom) {
+            payload.custom.firstOrNull { it.first == id }?.let {
+                return KayaClipValue(KayaCompose.CLIP_CUSTOM, text = it.first, bytes = it.second)
+            }
+        }
+        if (kinds and KayaCompose.CLIP_FILES != 0 && payload.files.isNotEmpty()) {
+            return KayaClipValue(
+                KayaCompose.CLIP_FILES,
+                locators = payload.files.toTypedArray(),
+                names = payload.files
+                    .map { Uri.parse(it).lastPathSegment ?: it }
+                    .toTypedArray())
+        }
+        if (kinds and KayaCompose.CLIP_IMAGE != 0 && payload.image != null) {
+            return KayaClipValue(KayaCompose.CLIP_IMAGE, bytes = payload.image)
+        }
+        if (kinds and KayaCompose.CLIP_HTML != 0 && payload.html != null) {
+            return KayaClipValue(KayaCompose.CLIP_HTML, text = payload.html)
+        }
+        if (kinds and KayaCompose.CLIP_TEXT != 0 && payload.text != null) {
+            return KayaClipValue(KayaCompose.CLIP_TEXT, text = payload.text)
+        }
+        return null
+    }
+    val clip = drag.clipData ?: return null
+    val items = (0 until clip.itemCount).map { clip.getItemAt(it) }
+    if (kinds and KayaCompose.CLIP_FILES != 0) {
+        val locators = items.mapNotNull { it.uri?.toString() }
+        if (locators.isNotEmpty()) {
+            return KayaClipValue(
+                KayaCompose.CLIP_FILES,
+                locators = locators.toTypedArray(),
+                names = locators
+                    .map { Uri.parse(it).lastPathSegment ?: it }
+                    .toTypedArray())
+        }
+    }
+    if (kinds and KayaCompose.CLIP_HTML != 0) {
+        items.firstNotNullOfOrNull { it.htmlText }?.let {
+            return KayaClipValue(KayaCompose.CLIP_HTML, text = it)
+        }
+    }
+    if (kinds and KayaCompose.CLIP_TEXT != 0) {
+        val plain = items.firstOrNull()?.text?.toString()
+        if (!plain.isNullOrEmpty()) return KayaClipValue(KayaCompose.CLIP_TEXT, text = plain)
+    }
+    return null
+}
+
+/**
+ * Take the drop, or refuse it. The point rides in the DESTINATION'S OWN
+ * top-left space, in DP — the logical unit every other kaya coordinate
+ * on this backend is in — and a reorder's before bit is the pointer in
+ * the landed row's upper half (docs/dnd-plan.md D8).
+ */
+private fun kayaPerformDrop(
+    node: KayaNode,
+    reorderIn: KayaNode?,
+    event: DragAndDropEvent,
+): Boolean {
+    val operation = kayaDropVerdict(node, reorderIn, event)
+    if (operation == KayaCompose.DRAG_OP_NONE) return false
+    val drag = event.toAndroidDragEvent()
+    val session = drag.localState as? KayaDragSession
+    val box = kayaDragBoxes[node.id]
+    val density = if (kayaDensity > 0.0) kayaDensity else 1.0
+    val localX = (drag.x - (box?.rootLeft ?: 0f)) / density
+    val localY = (drag.y - (box?.rootTop ?: 0f)) / density
+    session?.operation = operation
+    session?.let { it.dropped += 1 }
+    if (reorderIn != null && session != null &&
+        drag.clipDescription?.hasMimeType(KayaCompose.ROW_DRAG_TYPE) == true
+    ) {
+        val moved = session.payload.custom
+            .firstOrNull { it.first == KayaCompose.ROW_DRAG_TYPE }
+            ?: return false
+        val before = (drag.y - (box?.rootTop ?: 0f)) < (box?.height ?: 0f) / 2f
+        // THE LANDING'S IDENTITY IS THE CONTAINER, the moved key rides in
+        // the clip and the landed row's own tag is the anchor (D8).
+        KayaPresent.emitDropped(
+            reorderIn.identityTag, localX, localY, KayaCompose.DRAG_OP_MOVE,
+            node.identityTag, before, KayaCompose.CLIP_CUSTOM, moved.first,
+            moved.second, emptyArray(), emptyArray())
+        return true
+    }
+    val value = kayaReadDropValue(node.accepts, drag) ?: return false
+    KayaPresent.emitDropped(
+        node.identityTag, localX, localY, operation, ByteArray(0), false,
+        value.clip, value.text, value.bytes, value.locators, value.names)
+    return true
+}
+
+/**
+ * THE DRAG-AND-DROP SURFACE behind a node that declares a payload, an
+ * operation mask, or is a row of a reorderable For — null for every
+ * other node, so a scene that declares nothing composes exactly as it
+ * did. The mac arm's KayaMacDragDropSurface, in Compose's own two
+ * modifiers (docs/dnd-plan.md D1, D8).
+ *
+ * A SOURCE IS ALSO A TARGET, deliberately: `onEnded` reaches only the
+ * nodes whose `shouldStartDragAndDrop` accepted the transfer, and the
+ * source is where `drag_ended` has to be emitted from.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
+    val reorderIn = node.reorderIn
+    val payload = node.dragPayload
+    if (payload == null && node.dropOps == 0 && reorderIn == null) return null
+    val target = remember(node, reorderIn) {
+        object : DragAndDropTarget {
+            override fun onStarted(event: DragAndDropEvent) {
+                (event.toAndroidDragEvent().localState as? KayaDragSession)
+                    ?.let { if (it.sourceId == node.id) it.started += 1 }
+            }
+
+            override fun onEntered(event: DragAndDropEvent) {
+                (event.toAndroidDragEvent().localState as? KayaDragSession)
+                    ?.let { it.entered += 1 }
+            }
+
+            override fun onDrop(event: DragAndDropEvent): Boolean =
+                kayaPerformDrop(node, reorderIn, event)
+
+            override fun onEnded(event: DragAndDropEvent) {
+                val session = event.toAndroidDragEvent().localState as? KayaDragSession
+                    ?: return
+                if (session.sourceId != node.id || session.ended) return
+                session.ended = true
+                KayaPresent.emitDragEnded(node.identityTag, session.operation)
+                kayaDragEndings += 1
+            }
+        }
+    }
+    var modifier: Modifier = Modifier.onGloballyPositioned {
+        val root = it.boundsInRoot()
+        val window = it.boundsInWindow()
+        kayaDragBoxes[node.id] = KayaDragBox(
+            root.left, root.top, window.left, window.top,
+            it.size.width.toFloat(), it.size.height.toFloat())
+    }
+    if (payload != null || reorderIn != null) {
+        // THE PLATFORM'S OWN GESTURE STARTS IT (D8): the default start
+        // detector of this overload is a LONG PRESS on touch, which is
+        // the phone's affordance and what `input draganddrop` injects.
+        modifier = modifier.dragAndDropSource(transferData = {
+            val declared = payload ?: KayaDragPayload(
+                custom = listOf(
+                    Pair(
+                        KayaCompose.ROW_DRAG_TYPE,
+                        (KayaCompose.tableStamp(node.tag)?.keys ?: emptyList())
+                            .joinToString(".").toByteArray(Charsets.UTF_8))))
+            val ops = if (payload != null) node.dragOps else KayaCompose.DRAG_OP_MOVE
+            val session = KayaDragSession(node.id, declared, ops, reorderIn?.id ?: 0L)
+            kayaDragSession = session
+            // The gesture took: the runner stops re-injecting on this, so a
+            // slow-ending drag under load is not clobbered by a fresh one
+            // (docs/traps.md: The android drag re-injection raced a slow end).
+            Log.i("kaya", "KAYA_DRAG_STARTED: draganddrop")
+            // NO GLOBAL FLAG: a phone drag is same-app (D9).
+            DragAndDropTransferData(kayaDragClipData(declared), session, 0)
+        })
+    }
+    return modifier.dragAndDropTarget(
+        shouldStartDragAndDrop = { event ->
+            // A SOURCE ACCEPTS ITS OWN DRAG (docs/traps.md: A Compose drag
+            // source must be a drop target of its own drag): a transfer
+            // nobody accepts gets no ACTION_DRAG_ENDED at all, and the
+            // source would never learn the answer was `none`.
+            val session = event.toAndroidDragEvent().localState as? KayaDragSession
+            (session != null && session.sourceId == node.id) ||
+                kayaDropVerdict(node, reorderIn, event) != KayaCompose.DRAG_OP_NONE
+        },
+        target = target,
+    )
+}
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun KayaRender(
@@ -8545,6 +9153,26 @@ fun KayaRender(
     flexVertical: Boolean? = null,
     flexStretch: Boolean = false,
     flexAlign: Long = KayaCompose.ALIGN_START,
+) {
+    val dnd = kayaDragAndDropSurface(node)
+    if (dnd == null) {
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
+        return
+    }
+    Box(modifier = dnd) {
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
+    }
+}
+
+/** The context catalog's anchor, one wrapper inside the drag-and-drop
+ * surface: both are wrappers a node that declares neither never gets. */
+@Composable
+private fun KayaRenderAnchored(
+    node: KayaNode,
+    isRoot: Boolean,
+    flexVertical: Boolean?,
+    flexStretch: Boolean,
+    flexAlign: Long,
 ) {
     val attachment = KayaSceneModel.contextMenus[node.id]
     if (attachment == null) {
@@ -10367,13 +10995,24 @@ fun KayaRoot() {
     LaunchedEffect(metricsWidth, metricsHeight) {
         KayaPresent.windowMetrics(0, metricsWidth, metricsHeight)
     }
-    // THE SOFT KEYBOARD IS AN INSET THIS SURFACE CONSUMES: without it
-    // the system PANS the whole window up for a focused field low in it
-    // (measured 2026-08-10, `getLocationInWindow()` = (0, -199)), putting
-    // the menu bar and first line ABOVE the window — never drawn, while
-    // the model, the semantics tree and the field's viewport all still
-    // read correctly, so only a PIXEL read notices.
-    Box(modifier = Modifier.fillMaxSize().imePadding()) {
+    // THE SYSTEM'S OWN CHROME IS AN INSET THIS SURFACE CONSUMES, all of
+    // it: the status bar, the navigation bar, a display cutout and the
+    // soft keyboard, whose union `safeDrawing` is.
+    // THE KEYBOARD HALF is the older half — without it the system PANS
+    // the whole window up for a focused field low in it (measured
+    // 2026-08-10, `getLocationInWindow()` = (0, -199)), putting the menu
+    // bar and first line ABOVE the window, never drawn, while the model,
+    // the semantics tree and the field's viewport all still read
+    // correctly, so only a PIXEL read notices.
+    // THE SYSTEM BARS joined 2026-09-03 (docs/traps.md: THE TOP 24px OF
+    // AN ANDROID KAYA WINDOW WAS THE STATUS BAR'S): these apps target
+    // SDK 35, where Android 15 forces edge to edge, so kaya's first row
+    // drew under the status bar and its last under the gesture bar — and
+    // that strip is the status bar's TOUCHABLE region, so no real input
+    // could reach it either. No lane could see it: every `click` is
+    // programmatic, and the dnd lane's real `input draganddrop` is the
+    // first injected touch this backend ever had.
+    Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         if (KayaSceneModel.menubar.isEmpty()) {
             // No catalog: the surface keeps its exact pre-menus shape (no
             // phantom bar over scenes that declared no commands).
@@ -11210,6 +11849,10 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaPresent.emitAlertResult(alert, choice)
 }
 
-/** A depth stub is a CALL, never a sentence — tools/check-stubs.py reads it. */
-private fun depthStub(scene: String): Nothing =
-    error("kaya: the $scene scene is not yet materialized on android — a depth slice; see CLAUDE.md's sequencing")
+// KayaCompose.kt stubs NOTHING again (the dnd arms landed 2026-09-03), so
+// its `depthStub` helper is gone — an unused private function fails
+// check-detekt. THE NEXT DEPTH SLICE PUTS IT BACK, in this exact shape,
+// because a depth stub is a CALL and never a sentence
+// (tools/check-stubs.py, docs/traps.md):
+//     private fun depthStub(scene: String): Nothing =
+//         error("kaya: the $scene scene is not yet materialized on android")

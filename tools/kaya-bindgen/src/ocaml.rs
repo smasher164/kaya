@@ -8,7 +8,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
-    "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence",
+    "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence", "parse_representation",
     "canonicalize_shortcut", "shortcut_named_keys",
     "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto", "else",
     "end", "exception", "external", "false", "for", "fun", "function", "functor", "if", "in",
@@ -34,6 +34,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  | F64 of float");
     c.line("  | Str of string");
     c.line("  | Blob of int64");
+    c.line("");
+    c.line("(* What a drop delivered (docs/dnd-plan.md D1): the operation the core");
+    c.line("   settled on, the point in the destination's own coordinates, and —");
+    c.line("   for a reorder — the anchor row's key path and whether the drop");
+    c.line("   landed before it. [dv_clip] is the representation's kind and");
+    c.line("   [dv_values] its values, pasted's own pair. *)");
+    c.line("type drop_values = {");
+    c.line("  dv_operation : int;");
+    c.line("  dv_before : bool;");
+    c.line("  dv_x : float;");
+    c.line("  dv_y : float;");
+    c.line("  dv_anchor : value list;");
+    c.line("  dv_clip : int;");
+    c.line("  dv_values : value list;");
+    c.line("}");
     c.line("");
     c.line(&format!("(* spec_hash: {}. *)", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
     c.line(&format!("let spec_hash = 0x{:016x}L", crate::spec_hash()));
@@ -378,10 +393,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("   ever reaches an app. The kind is a SINGLE member of the clip enum");
     c.line("   and never a mask (you offer many and you receive one); 0 with no");
     c.line("   values is the universal empty answer. *)");
-    c.line("let parse_clip byte at =");
-    c.line("  let clip = u32_at byte at in");
-    c.line("  let count = u32_at byte (at + 8) in");
-    c.line("  let at = ref (at + 16) in");
+    c.line("(* The VALUES half of a representation at [at]: the count, then that");
+    c.line("   many values with blobs redeemed and RELEASED. Its own function");
+    c.line("   because a drop's clip KIND sits four words and a point earlier");
+    c.line("   (docs/dnd-plan.md D1). *)");
+    c.line("let parse_representation byte at =");
+    c.line("  let count = u32_at byte at in");
+    c.line("  let at = ref (at + 8) in");
     c.line("  let out = ref [] in");
     c.line("  for _ = 1 to count do");
     c.line("    let v, next = parse_value byte !at in");
@@ -389,7 +407,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    out := v :: !out;");
     c.line("    at := next");
     c.line("  done;");
-    c.line("  (clip, List.rev !out, !at)");
+    c.line("  (List.rev !out, !at)");
+    c.line("");
+    c.line("let parse_clip byte at =");
+    c.line("  let clip = u32_at byte at in");
+    c.line("  let values, next = parse_representation byte (at + 8) in");
+    c.line("  (clip, values, next)");
     c.line("");
     c.line("(* Decode one occurrence record (header included) through the byte");
     c.line("   accessor. Some (kind, id, keys, payload) — keys is [] when id is");
@@ -411,7 +434,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    if kind = occ_kind_alert_result");
     c.line("    then");
     c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
-    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, [])");
+    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])");
     // The picker's answer is a LIST OF RECORDS and no single `value`
     // can carry one, so the three values per file ride the VALUES slot
     // flattened and kaya_app regroups them in threes. Its own arm: the
@@ -429,7 +452,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        out := v :: !out;");
     c.line("        at := next");
     c.line("      done;");
-    c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None, [])");
+    c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None, None, [])");
     c.line("    end");
     // Its own arm: the generic tail would take the CLIP KIND for a path
     // length and read the values header as a key.
@@ -437,7 +460,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    else if kind = occ_kind_{name}"));
         c.line("    then begin");
         c.line("      let clip, values, _ = parse_clip byte 16 in");
-        c.line("      Some (kind, Int64.of_int id, [], None, Some (clip, values), [])");
+        c.line("      Some (kind, Int64.of_int id, [], None, Some (clip, values), None, [])");
         c.line("    end");
     }
     let id_only = crate::id_only_occurrence_names(spec)
@@ -448,7 +471,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    (* Surface lifecycle records carry the surface id alone");
     c.line("       ( derived from the record shapes ). *)");
     c.line(&format!("    else if {id_only}"));
-    c.line("    then Some (kind, Int64.of_int id, [], None, None, [])");
+    c.line("    then Some (kind, Int64.of_int id, [], None, None, None, [])");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))
@@ -463,7 +486,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        ( kind,");
         c.line("          Int64.of_int (u32_at byte 16),");
         c.line("          [],");
-        c.line("          Some (I64 (Int64.of_int id)),\n          None,\n          [] )");
+        c.line("          Some (I64 (Int64.of_int id)),\n          None,\n          None,\n          [] )");
     }
     c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");
@@ -485,6 +508,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     if !u32_slot.is_empty() {
         c.line(&format!("      if {u32_slot} then"));
         c.line("        Some (I64 (Int64.of_int (u32_at byte 20)))");
+        c.line("      else");
+    }
+    // The drag's outcome: one word past the key path.
+    let outcome = crate::drag_outcome_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !outcome.is_empty() {
+        c.line(&format!("      if {outcome} then"));
+        c.line("        Some (I64 (Int64.of_int (u32_at byte !at)))");
         c.line("      else");
     }
     let with_payload = crate::payload_occurrence_names(spec)
@@ -510,6 +544,51 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("      if {pasted} then"));
         c.line("        let clip, values, _ = parse_clip byte !at in");
         c.line("        Some (clip, values)");
+        c.line("      else None");
+    }
+    c.line("    in");
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1). Its
+    // own slot because a drop is a paste with four more fields.
+    c.line("    let drop =");
+    let dropped = crate::dropped_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if dropped.is_empty() {
+        c.line("      None");
+    } else {
+        c.line(&format!("      if {dropped} then begin"));
+        c.line("        let operation = u32_at byte !at in");
+        c.line("        let before = u32_at byte (!at + 4) <> 0 in");
+        c.line("        let anchor_len = u32_at byte (!at + 8) in");
+        c.line("        let clip_kind = u32_at byte (!at + 12) in");
+        c.line("        at := !at + 16;");
+        c.line("        let x, next = parse_value byte !at in");
+        c.line("        at := next;");
+        c.line("        let y, next = parse_value byte !at in");
+        c.line("        at := next;");
+        c.line("        let anchor = ref [] in");
+        c.line("        for _ = 1 to anchor_len do");
+        c.line("          let v, next = parse_value byte !at in");
+        c.line("          anchor := v :: !anchor;");
+        c.line("          at := next");
+        c.line("        done;");
+        c.line("        let values, next = parse_representation byte !at in");
+        c.line("        at := next;");
+        c.line("        let coord = function F64 v -> v | _ -> 0.0 in");
+        c.line("        Some");
+        c.line("          {");
+        c.line("            dv_operation = operation;");
+        c.line("            dv_before = before;");
+        c.line("            dv_x = coord x;");
+        c.line("            dv_y = coord y;");
+        c.line("            dv_anchor = List.rev !anchor;");
+        c.line("            dv_clip = clip_kind;");
+        c.line("            dv_values = values;");
+        c.line("          }");
+        c.line("      end");
         c.line("      else None");
     }
     c.line("    in");
@@ -543,7 +622,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      else []");
     }
     c.line("    in");
-    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload, clip, tail)");
+    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload, clip, drop, tail)");
     c.line("    end");
     c.line("  end");
     c.out

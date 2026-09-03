@@ -26,7 +26,7 @@ SCENES = [
     "progress", "select", "radio", "grid", "textarea", "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
-    "typeface", "toolbar", "identity", "assets", "adaptive",
+    "typeface", "toolbar", "identity", "assets", "adaptive", "dnd",
 ]
 
 # Depth-slice scenes: a rust example + steps exist, the language
@@ -114,6 +114,29 @@ ORDER = [
      "identity_rust", "identity_python", "identity_js", "identity_go", "identity_csharp", "identity_java",
      "toolbar_rust", "toolbar_python", "toolbar_js", "toolbar_go", "toolbar_csharp", "toolbar_java",
      "assets_rust", "assets_python", "assets_js", "assets_go", "assets_csharp", "assets_java",
+    ],
+    # dnd_rust ALONE: the `drag` verb moves the REAL MOUSE across the
+    # desktop and presses it (docs/dnd-plan.md D10 — there is no
+    # generalized DoDragDrop for a UI element and OLE's modal loop reads
+    # real mouse messages), so a pooled neighbour would be dragged over
+    # mid-scene. check-steps' menu_serial pins the barrier.
+    [
+     "dnd_rust",
+    ],
+    [
+     "dnd_python",
+    ],
+    [
+     "dnd_js",
+    ],
+    [
+     "dnd_go",
+    ],
+    [
+     "dnd_csharp",
+    ],
+    [
+     "dnd_java",
     ],
     # ranges_rust ALONE: `type` injects OS-GLOBAL keystrokes and
     # `compose` starts a TSF composition in whatever document holds the

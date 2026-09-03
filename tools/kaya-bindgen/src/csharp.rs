@@ -450,27 +450,52 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        public List<object> Values = new List<object>();");
     c.line("    }");
     c.line("");
-    c.line("    /// Decode a representation at `at`: the clip kind, then its");
-    c.line("    /// Values block. Blobs are redeemed and RELEASED here.");
-    c.line("    public static ClipValues ParseClip(byte[] rec, int at, out int next)");
+    c.line("    /// The VALUES half of a representation at `at`: the count, then");
+    c.line("    /// that many values with blobs redeemed and RELEASED. Its own");
+    c.line("    /// method because a drop's clip KIND sits four words and a point");
+    c.line("    /// earlier (docs/dnd-plan.md D1).");
+    c.line("    public static List<object> ParseRepresentation(byte[] rec, int at, out int next)");
     c.line("    {");
-    c.line("        var clip = new ClipValues { Kind = BitConverter.ToUInt32(rec, at) };");
-    c.line("        int count = (int)BitConverter.ToUInt32(rec, at + 8);");
-    c.line("        at += 16;");
+    c.line("        int count = (int)BitConverter.ToUInt32(rec, at);");
+    c.line("        at += 8;");
+    c.line("        var values = new List<object>();");
     c.line("        for (int i = 0; i < count; i++)");
     c.line("        {");
     c.line("            uint vtype = BitConverter.ToUInt32(rec, at);");
     c.line("            int vlen = (int)BitConverter.ToUInt32(rec, at + 4);");
     c.line("            switch (vtype)");
     c.line("            {");
-    c.line("                case ValueI64: clip.Values.Add(BitConverter.ToInt64(rec, at + 8)); break;");
-    c.line("                case ValueBlob: clip.Values.Add(Kaya.OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8))); break;");
-    c.line("                default: clip.Values.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;");
+    c.line("                case ValueI64: values.Add(BitConverter.ToInt64(rec, at + 8)); break;");
+    c.line("                case ValueBlob: values.Add(Kaya.OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8))); break;");
+    c.line("                default: values.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;");
     c.line("            }");
     c.line("            at += 8 + ((vlen + 7) & ~7);");
     c.line("        }");
     c.line("        next = at;");
+    c.line("        return values;");
+    c.line("    }");
+    c.line("");
+    c.line("    /// Decode a representation at `at`: the clip kind, then its");
+    c.line("    /// Values block. Blobs are redeemed and RELEASED here.");
+    c.line("    public static ClipValues ParseClip(byte[] rec, int at, out int next)");
+    c.line("    {");
+    c.line("        var clip = new ClipValues { Kind = BitConverter.ToUInt32(rec, at) };");
+    c.line("        clip.Values = ParseRepresentation(rec, at + 8, out next);");
     c.line("        return clip;");
+    c.line("    }");
+    c.line("");
+    c.line("    /// What a drop delivered (docs/dnd-plan.md D1): the operation the");
+    c.line("    /// core settled on, the point in the destination's own coordinates,");
+    c.line("    /// and — for a reorder — the anchor row's key path and whether the");
+    c.line("    /// drop landed before it.");
+    c.line("    public sealed class DropValues");
+    c.line("    {");
+    c.line("        public uint Operation;");
+    c.line("        public bool Before;");
+    c.line("        public double X;");
+    c.line("        public double Y;");
+    c.line("        public List<object> Anchor = new List<object>();");
+    c.line("        public ClipValues Clip = new ClipValues();");
     c.line("    }");
     c.line("");
     c.line("    /// Decode one occurrence record (header included). Returns false");
@@ -612,6 +637,55 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("        if ({pasted})"));
         c.line("        {");
         c.line("            payload = ParseClip(rec, at, out int _pasteEnd);");
+        c.line("        }");
+    }
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1).
+    let dropped = crate::dropped_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !dropped.is_empty() {
+        c.line(&format!("        if ({dropped})"));
+        c.line("        {");
+        c.line("            var drop = new DropValues");
+        c.line("            {");
+        c.line("                Operation = BitConverter.ToUInt32(rec, at),");
+        c.line("                Before = BitConverter.ToUInt32(rec, at + 4) != 0,");
+        c.line("            };");
+        c.line("            int anchorLen = (int)BitConverter.ToUInt32(rec, at + 8);");
+        c.line("            drop.Clip.Kind = BitConverter.ToUInt32(rec, at + 12);");
+        c.line("            drop.X = BitConverter.ToDouble(rec, at + 24);");
+        c.line("            drop.Y = BitConverter.ToDouble(rec, at + 40);");
+        c.line("            at += 48;");
+        c.line("            for (int i = 0; i < anchorLen; i++)");
+        c.line("            {");
+        c.line("                uint ktype = BitConverter.ToUInt32(rec, at);");
+        c.line("                int klen = (int)BitConverter.ToUInt32(rec, at + 4);");
+        c.line("                switch (ktype)");
+        c.line("                {");
+        c.line("                    case ValueBool: drop.Anchor.Add(rec[at + 8] != 0); break;");
+        c.line("                    case ValueI64: drop.Anchor.Add(BitConverter.ToInt64(rec, at + 8)); break;");
+        c.line("                    case ValueF64: drop.Anchor.Add(BitConverter.ToDouble(rec, at + 8)); break;");
+        c.line("                    default: drop.Anchor.Add(Encoding.UTF8.GetString(rec, at + 8, klen)); break;");
+        c.line("                }");
+        c.line("                at += 8 + ((klen + 7) & ~7);");
+        c.line("            }");
+        c.line("            drop.Clip.Values = ParseRepresentation(rec, at, out at);");
+        c.line("            payload = drop;");
+        c.line("        }");
+    }
+    // The drag's outcome: one word past the key path.
+    let outcome = crate::drag_outcome_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !outcome.is_empty() {
+        c.line(&format!("        if ({outcome})"));
+        c.line("        {");
+        c.line("            payload = BitConverter.ToUInt32(rec, at);");
         c.line("        }");
     }
     // The canvas asks: bare values after the key path with no count in

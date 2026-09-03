@@ -11,7 +11,7 @@ use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, window_prop
 /// Names spec identifiers must avoid: this emitter's helpers, plus the
 /// JavaScript reserved words a parameter would collide with.
 pub const RESERVED: &[&str] = &[
-    "enc", "record", "pad", "cat", "u32", "u64", "i64", "f64", "parse_value", "parse_clip",
+    "enc", "record", "pad", "cat", "u32", "u64", "i64", "f64", "parse_value", "parse_clip", "parse_representation",
     "parse_occurrence", "BlobHandle", "I64", "canonicalize_shortcut", "occurrence_blob",
     "install_occurrence_blob", "text_encoder", "text_decoder",
     "arguments", "await", "break", "case", "catch", "class", "const", "continue", "debugger",
@@ -400,13 +400,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("export type ClipPayload = { clip: number; values: (Decoded | Uint8Array)[] };");
     c.line("");
+    c.line("/** What a drop delivered (docs/dnd-plan.md D1): the operation the core");
+    c.line(" * settled on, the point in the destination's own coordinates, and — for a");
+    c.line(" * reorder — the anchor row's key path and whether the drop landed before it. */");
+    c.line("export type DroppedPayload = { operation: number; before: boolean; point: [number, number]; anchor: Decoded[]; clip: ClipPayload };");
+    c.line("");
     c.line("/** Decode one representation: the clip kind, then its values. `clip` is a");
     c.line(" * SINGLE member of the clip enum and never a mask, and 0 with no values is");
     c.line(" * the universal empty answer. Blobs are redeemed to bytes and released here. */");
-    c.line("export function parse_clip(buf: Uint8Array, at: number): [ClipPayload, number] {");
-    c.line("  const clip = read_u32(buf, at);");
-    c.line("  const count = read_u32(buf, at + 8);");
-    c.line("  at += 16;");
+    c.line("/** The VALUES half of a representation: the count, then that many values");
+    c.line(" * with blobs redeemed and released. Its own function because a drop's clip");
+    c.line(" * KIND sits four words and a point earlier (docs/dnd-plan.md D1). */");
+    c.line("export function parse_representation(buf: Uint8Array, at: number): [(Decoded | Uint8Array)[], number] {");
+    c.line("  const count = read_u32(buf, at);");
+    c.line("  at += 8;");
     c.line("  const values: (Decoded | Uint8Array)[] = [];");
     c.line("  for (let i = 0; i < count; i++) {");
     c.line("    let value: Decoded | Uint8Array;");
@@ -417,6 +424,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    }");
     c.line("    values.push(value);");
     c.line("  }");
+    c.line("  return [values, at];");
+    c.line("}");
+    c.line("");
+    c.line("export function parse_clip(buf: Uint8Array, at: number): [ClipPayload, number] {");
+    c.line("  const clip = read_u32(buf, at);");
+    c.line("  let values: (Decoded | Uint8Array)[];");
+    c.line("  [values, at] = parse_representation(buf, at + 8);");
     c.line("  return [{ clip, values }, at];");
     c.line("}");
     c.line("");
@@ -596,6 +610,44 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("  // A paste rides a click tag VERBATIM, so the key path above is already");
         c.line("  // read and the clip sits after it.");
         c.line(&format!("  if ([{pasted}].includes(kind)) [payload, at] = parse_clip(buf, at);"));
+    }
+    let dropped = crate::dropped_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !dropped.is_empty() {
+        c.line(&format!("  if ([{dropped}].includes(kind)) {{"));
+        c.line("    // THE DROP: the four words, the point as two F64 values, the anchor's");
+        c.line("    // keys, then the representation in pasted's own layout (docs/dnd-plan.md D1).");
+        c.line("    const operation = read_u32(buf, at);");
+        c.line("    const before = read_u32(buf, at + 4) !== 0;");
+        c.line("    const anchor_len = read_u32(buf, at + 8);");
+        c.line("    const clip_kind = read_u32(buf, at + 12);");
+        c.line("    at += 16;");
+        c.line("    let x: Decoded, y: Decoded;");
+        c.line("    [x, at] = parse_value(buf, at);");
+        c.line("    [y, at] = parse_value(buf, at);");
+        c.line("    const anchor: Decoded[] = [];");
+        c.line("    for (let i = 0; i < anchor_len; i++) {");
+        c.line("      let key: Decoded;");
+        c.line("      [key, at] = parse_value(buf, at);");
+        c.line("      anchor.push(key);");
+        c.line("    }");
+        c.line("    let values: (Decoded | Uint8Array)[];");
+        c.line("    [values, at] = parse_representation(buf, at);");
+        c.line("    const drop: DroppedPayload = { operation, before, point: [x as number, y as number], anchor, clip: { clip: clip_kind, values } };");
+        c.line("    payload = drop;");
+        c.line("  }");
+    }
+    let outcome = crate::drag_outcome_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !outcome.is_empty() {
+        c.line("  // The drag's outcome: one word past the key path.");
+        c.line(&format!("  if ([{outcome}].includes(kind)) payload = read_u32(buf, at);"));
     }
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()

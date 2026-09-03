@@ -80,6 +80,11 @@ executable reorder
   main-is: reorder.hs
   build-depends: kaya-guests
 
+executable dnd
+  import: shared
+  main-is: dnd.hs
+  build-depends: kaya-guests, bytestring
+
 executable feed
   import: shared
   main-is: feed.hs

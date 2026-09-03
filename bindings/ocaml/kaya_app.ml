@@ -128,6 +128,27 @@ type representation =
   | Files of picked_file list
   | Custom of string * string
 
+(* A drag operation (docs/dnd-plan.md D3): copy and move, nothing else;
+   [None] is the outcome of a cancelled or refused drag. A MODULE
+   because the menu-role type already owns the constructor [Copy]. *)
+module Op = struct
+  type t = Copy | Move
+end
+
+type op = Op.t
+
+(* What a drop delivered (docs/dnd-plan.md D1): the representation a
+   paste already delivers, the point in the destination's own
+   coordinates, the operation the core settled on, and — for a reorder —
+   the anchor row and the side it landed on. *)
+type dropped = {
+  point : float * float;
+  operation : op option;
+  anchor : Kaya_wire.value list;
+  before : bool;
+  clip : representation option;
+}
+
 type app = {
   (* Work handed over by other threads, waiting to run as transactions
      on the app thread. THE ONLY FIELD HERE TOUCHED FROM ANOTHER
@@ -179,6 +200,8 @@ type app = {
   mutable next_clipboard_read : int64;
   widget_pastes : (int64, representation -> unit) Hashtbl.t;
   node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
+  widget_drops : (int64, dropped -> unit) Hashtbl.t;
+  drag_ended_handlers : (int64, op option -> unit) Hashtbl.t;
   window_closed : (int64, unit -> unit) Hashtbl.t;
   (* The history, per window and NOT one-shot: a history is walked as
      often as the user likes. *)
@@ -293,6 +316,8 @@ let create () =
     next_clipboard_read = 0L;
     widget_pastes = Hashtbl.create 4;
     node_pastes = Hashtbl.create 4;
+    widget_drops = Hashtbl.create 4;
+    drag_ended_handlers = Hashtbl.create 4;
     window_closed = Hashtbl.create 8;
     undone_handlers = Hashtbl.create 4;
     redone_handlers = Hashtbl.create 4;
@@ -1775,6 +1800,73 @@ let read_clipboard ?on_result accepting =
 let set_accepts (Widget id) kinds =
   emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
 
+(* The drag_op mask a guest's operations name; the empty list withdraws
+   the declaration. *)
+let operation_mask ops =
+  List.fold_left
+    (fun mask op ->
+      mask
+      lor
+      match op with
+      | Op.Copy -> Kaya_wire.drag_op_copy
+      | Op.Move -> Kaya_wire.drag_op_move)
+    0 ops
+
+(* The drag_op word, or None for a cancelled or refused drag. *)
+let operation_of mask =
+  if mask = Kaya_wire.drag_op_copy then Some Op.Copy
+  else if mask = Kaya_wire.drag_op_move then Some Op.Move
+  else None
+
+(* DECLARE what a widget hands over when dragged: a clip in [copy]'s own
+   shapes plus the operations it allows (docs/dnd-plan.md D1). An EMPTY
+   clip withdraws the declaration, which is how a same-app move removes
+   its source (D2). *)
+let draggable ?text ?html ?image ?(files = []) ?(custom = [])
+    ?(operations = [ Op.Copy ]) (Widget id) () =
+  let tx = the_tx () in
+  let present = ref 0 in
+  let values = ref [] in
+  let add v = values := v :: !values in
+  List.iter
+    (fun (cid, bytes) ->
+      ignore (accept_list [ cid ]);
+      add (Kaya_wire.Str cid);
+      add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+    custom;
+  List.iter (fun (f : picked_file) -> add (Kaya_wire.I64 f.handle)) files;
+  Option.iter
+    (fun bytes ->
+      present := !present lor Kaya_wire.clip_image;
+      add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+    image;
+  Option.iter
+    (fun html -> present := !present lor Kaya_wire.clip_html; add (Kaya_wire.Str html))
+    html;
+  Option.iter
+    (fun text -> present := !present lor Kaya_wire.clip_text; add (Kaya_wire.Str text))
+    text;
+  let empty = !present = 0 && files = [] && custom = [] in
+  emit tx
+    (Kaya_wire.tx_set_drag_source id !present (List.length files)
+       (List.length custom)
+       (if empty then 0 else operation_mask operations)
+       0 (List.rev !values))
+
+(* DECLARE that a widget receives drops, performing these operations;
+   naming NONE withdraws it. WHAT it takes is its [set_accepts] list,
+   which must be declared first — a destination has one vocabulary, not
+   two (docs/dnd-plan.md D1). *)
+let set_drop_target (Widget id) operations =
+  emit (the_tx ()) (Kaya_wire.tx_set_drop_target id (operation_mask operations) 0 [])
+
+(* Rows of this live For drag within their own collection
+   (docs/dnd-plan.md D8): the landing arrives at [on_drop] on the For's
+   own container — the widget [for_each] returns — and the app confirms
+   with a move. *)
+let set_reorderable (Widget id) enabled =
+  emit (the_tx ()) (Kaya_wire.tx_set_reorderable id (if enabled then 1 else 0))
+
 (* The alert_choice cancel sentinel, for handlers: the wire u32
    0xFFFFFFFF as an OCaml int32 (-1l). *)
 let alert_cancel = Kaya_wire.alert_choice_cancel
@@ -2814,6 +2906,17 @@ let on_paste_node app (Node id)
     (handler : Kaya_wire.value list -> representation -> unit) =
   Hashtbl.replace app.node_pastes id handler
 
+(* Take dropped content at a live widget, or a reorderable For's
+   landings (docs/dnd-plan.md D8). Only fires for a widget that declared
+   [set_drop_target] over an accept list. *)
+let on_drop app (Widget id) (handler : dropped -> unit) =
+  Hashtbl.replace app.widget_drops id handler
+
+(* A drag that began at this widget has ended: [None] is a cancelled or
+   refused drag, not an error. *)
+let on_drag_ended app (Widget id) (handler : op option -> unit) =
+  Hashtbl.replace app.drag_ended_handlers id handler
+
 (* Register a change handler for a live entry: the widget owns its text
    and reports each edit here; the app folds it into its own state —
    there is no read-back, by doctrine. *)
@@ -3044,7 +3147,7 @@ let dispatch_loop app =
     match Kaya_runtime.poll_occurrence () with
     | None ->
         if Kaya_runtime.wait_occurrences () then loop () else () (* shutdown *)
-    | Some (kind, id, keys, payload, clip, tail, undo) ->
+    | Some (kind, id, keys, payload, clip, drop, tail, undo) ->
         (if
            kind = Kaya_wire.occ_kind_draw_requested
            || kind = Kaya_wire.occ_kind_tick
@@ -3196,6 +3299,37 @@ let dispatch_loop app =
                (match Hashtbl.find_opt app.node_pastes id with
                | Some handler -> dispatch app (fun () -> handler keys rep)
                | None -> ()))
+         else if kind = Kaya_wire.occ_kind_dropped then
+           (* A drop rides the same tag with four more words
+              (docs/dnd-plan.md D1); the template zone is refused, so a
+              keyed drop reaches no handler. *)
+           (match (drop, keys) with
+           | Some d, [] -> (
+               match Hashtbl.find_opt app.widget_drops id with
+               | Some handler ->
+                   let answer =
+                     {
+                       point = (d.Kaya_wire.dv_x, d.Kaya_wire.dv_y);
+                       operation = operation_of d.Kaya_wire.dv_operation;
+                       anchor = d.Kaya_wire.dv_anchor;
+                       before = d.Kaya_wire.dv_before;
+                       clip =
+                         representation_of
+                           (Some (d.Kaya_wire.dv_clip, d.Kaya_wire.dv_values));
+                     }
+                   in
+                   dispatch app (fun () -> handler answer)
+               | None -> ())
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_drag_ended then
+           (match (payload, keys) with
+           | Some (Kaya_wire.I64 mask), [] -> (
+               match Hashtbl.find_opt app.drag_ended_handlers id with
+               | Some handler ->
+                   let answer = operation_of (Int64.to_int mask) in
+                   dispatch app (fun () -> handler answer)
+               | None -> ())
+           | _ -> ())
          else if
            kind = Kaya_wire.occ_kind_undone || kind = Kaya_wire.occ_kind_redone
          then

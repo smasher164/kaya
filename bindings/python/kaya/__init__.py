@@ -438,6 +438,70 @@ class _Handle:
         _app._register(self, wire.OCC_PASTED, fn)
         return self
 
+    def draggable(self, text=None, html=None, image=None, files=(),
+                  custom=None, operations=None):
+        """DECLARE what this widget hands over when dragged: a clip in
+        the shapes `copy` takes, plus the operations it allows.
+
+        App-updated state — re-declare when the payload changes, and
+        declaring NOTHING withdraws it, which is how a same-app move
+        removes its source (docs/dnd-plan.md D1, D2). Returns the
+        handle."""
+        _live_zone_only(self)
+        reps = []
+        present = 0
+        custom = dict(custom or {})
+        files = list(files)
+        for ident, data in custom.items():
+            _accept_list([ident])  # an id with a space would not survive
+            reps.append(str(ident))
+            reps.append(wire.BlobHandle(runtime.register_blob(data)))
+        for picked in files:
+            reps.append(getattr(picked, "handle", picked))
+        if image is not None:
+            present |= wire.CLIP_IMAGE
+            reps.append(wire.BlobHandle(runtime.register_blob(image)))
+        if html is not None:
+            present |= wire.CLIP_HTML
+            reps.append(str(html))
+        if text is not None:
+            present |= wire.CLIP_TEXT
+            reps.append(str(text))
+        empty = present == 0 and not files and not custom
+        mask = 0 if empty else _operations(
+            (OP_COPY,) if operations is None else operations)
+        _records().append(wire.tx_set_drag_source(
+            self.id, present, len(files), len(custom), mask, 0, reps))
+        return self
+
+    def drop_target(self, *operations):
+        """DECLARE that this widget receives drops, performing these
+        operations; naming NONE withdraws the declaration.
+
+        WHAT it takes is its `accepts` list, which must be declared
+        first — a destination has one vocabulary, not two
+        (docs/dnd-plan.md D1). Returns the handle."""
+        _live_zone_only(self)
+        _records().append(
+            wire.tx_set_drop_target(self.id, _operations(operations), 0, []))
+        return self
+
+    def on_drop(self, fn):
+        """Take dropped content here: fn(dropped), with the `Dropped` of
+        docs/dnd-plan.md D1. ONLY FIRES FOR A WIDGET THAT DECLARED
+        `drop_target` over an `accepts` list, or for a reorderable For's
+        container (D8). Returns the handle."""
+        _live_zone_only(self)
+        _app._register(self, wire.OCC_DROPPED, fn)
+        return self
+
+    def on_drag_ended(self, fn):
+        """A drag that began here has ended: fn(operation), OP_COPY,
+        OP_MOVE or None for cancelled or refused. Returns the handle."""
+        _live_zone_only(self)
+        _app._register(self, wire.OCC_DRAG_ENDED, fn)
+        return self
+
     def draw(self, *keys):
         """DECLARE the whole drawing on a canvas, replacing whatever was
         declared before: `with chart.draw() as d: ...`.
@@ -1035,13 +1099,22 @@ class Collection(_BoundCollection):
             )
         return _ForTrace(self)
 
-    def rows(self, grow=None, align=None, a11y_id=None):
+    def rows(self, grow=None, align=None, a11y_id=None, reorderable=False,
+             on_drop=None):
         """The configured spelling of the ordinary For loop:
-        `for item in items.rows(grow=1, align="stretch"):`."""
+        `for item in items.rows(grow=1, align="stretch"):`.
+
+        `reorderable=True` makes every stamped row drag within this
+        collection; the landing arrives at `on_drop` on the For's own
+        container, with the moved row's key in the clip and the row it
+        landed on as the anchor, and the app confirms with a move
+        (docs/dnd-plan.md D8)."""
         trace = iter(self)
         trace._grow = grow
         trace._align = align
         trace._a11y_id = a11y_id
+        trace._reorderable = reorderable
+        trace._on_drop = on_drop
         return trace
 
     def columns(self, *titles, sort=None, on_sort=None, grow=None, a11y_id=None):
@@ -1181,6 +1254,8 @@ class _ForTrace:
         self._grow = None
         self._align = None
         self._a11y_id = None
+        self._reorderable = False
+        self._on_drop = None
         self._state = 0
 
     def __iter__(self):
@@ -1213,6 +1288,11 @@ class _ForTrace:
                 # The copies of one For node share a node id, so a
                 # constant names N containers at once (`_Handle.a11y_id`).
                 self._template.handle.a11y_id(self._a11y_id)
+            if self._reorderable:
+                _records().append(wire.tx_set_reorderable(
+                    self._template.handle.id, 1))
+            if self._on_drop is not None:
+                self._template.handle.on_drop(self._on_drop)
         raise StopIteration
 
 
@@ -1522,6 +1602,72 @@ def _representation(payload):
     return None
 
 
+class Dropped:
+    """What a drop delivered (docs/dnd-plan.md D1).
+
+    `clip` is the `Representation` a paste already delivers; `operation`
+    is OP_COPY, OP_MOVE or None; `point` is (x, y) in the destination's
+    own coordinates; `anchor` and `before` are the reorder's landing row
+    and side (D8).
+    """
+    __slots__ = ("point", "operation", "anchor", "before", "clip")
+    __match_args__ = ("clip", "operation")
+
+    def __init__(self, point, operation, anchor, before, clip):
+        self.point = point
+        self.operation = operation
+        self.anchor = anchor
+        self.before = before
+        self.clip = clip
+
+    def __repr__(self):
+        return (f"Dropped(point={self.point!r}, operation={self.operation!r}, "
+                f"anchor={self.anchor!r}, before={self.before!r}, "
+                f"clip={self.clip!r})")
+
+
+def _operation(mask):
+    """The drag_op word, or None for a cancelled or refused drag."""
+    if mask == wire.DRAG_OP_COPY:
+        return OP_COPY
+    if mask == wire.DRAG_OP_MOVE:
+        return OP_MOVE
+    return None
+
+
+def _dropped(payload):
+    """Turn the decoder's drop tuple into the sum-carrying handle."""
+    operation, before, point, anchor, clip, values = payload
+    return Dropped(point, _operation(operation), list(anchor), before,
+                   _representation((clip, values)))
+
+
+def _live_zone_only(handle):
+    """The template zone is refused by name until its own slice
+    (docs/dnd-plan.md §4); the core refuses a keyed record too."""
+    if isinstance(handle, Node):
+        raise RuntimeError(
+            "kaya: drag and drop is a LIVE-ZONE declaration in this slice — "
+            "a widget inside a row template is neither a drag source nor a "
+            "drop target (docs/dnd-plan.md §4)")
+
+
+def _operations(operations):
+    """The drag_op mask a guest's words name; empty withdraws."""
+    mask = 0
+    for op in operations:
+        if op == OP_COPY:
+            mask |= wire.DRAG_OP_COPY
+        elif op == OP_MOVE:
+            mask |= wire.DRAG_OP_MOVE
+        else:
+            raise ValueError(
+                f"kaya: {op!r} is not a drag operation — copy and move are "
+                "the vocabulary, and link and ask are refused "
+                "(docs/dnd-plan.md D3)")
+    return mask
+
+
 class UndoDelta:
     """What one step put back: the CORE-AUTHORITATIVE restored state
     (docs/undo-plan.md D5). Four runs, each a list:
@@ -1786,6 +1932,12 @@ ACCEPT_TEXT = "text"
 ACCEPT_HTML = "html"
 ACCEPT_IMAGE = "image"
 ACCEPT_FILES = "files"
+
+#: The drag operation vocabulary (docs/dnd-plan.md D3). Named for the
+#: accept list's reason: a bare string that is not one of these two is a
+#: silent no-op everywhere, so `_operations` refuses it by name.
+OP_COPY = "copy"
+OP_MOVE = "move"
 
 
 ROLE_SETTINGS = "settings"
@@ -3815,6 +3967,13 @@ class App:
                 # the ordinary widget/node path. Never empty: a paste
                 # that delivered nothing is not an occurrence.
                 args.append(_representation(payload))
+            elif kind == wire.OCC_DROPPED:
+                # A drop rides the same tag with four more words
+                # (docs/dnd-plan.md D1).
+                args.append(_dropped(payload))
+            elif kind == wire.OCC_DRAG_ENDED:
+                # None is a cancelled or refused drag, not an error.
+                args.append(_operation(payload))
             elif payload is not None:
                 args.append(payload)
             self._dispatch(handler, *args)

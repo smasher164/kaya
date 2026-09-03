@@ -280,6 +280,13 @@ module KayaApp
     readClipboard,
     setAccepts,
     -- `onPaste` rides 'HandlerTarget (..)' above: it stands in both zones.
+    Op (..),
+    Dropped (..),
+    setDragSource,
+    setDropTarget,
+    setReorderable,
+    onDrop,
+    onDragEnded,
     acceptText,
     acceptHtml,
     acceptImage,
@@ -399,6 +406,23 @@ data Clip = Clip
     -- | The one plural field with names, since several app-defined formats
     -- are legitimate.
     clipCustom :: [(String, BS.ByteString)]
+  }
+
+-- | A drag operation (docs\/dnd-plan.md D3): copy and move, nothing
+-- else; 'Nothing' is the outcome of a cancelled or refused drag.
+data Op = OpCopy | OpMove
+  deriving (Eq, Show)
+
+-- | What a drop delivered (docs\/dnd-plan.md D1): the representation a
+-- paste already delivers, the point in the destination's own
+-- coordinates, the operation the core settled on, and — for a reorder —
+-- the anchor row and the side it landed on.
+data Dropped = Dropped
+  { droppedPoint :: (Double, Double),
+    droppedOperation :: Maybe Op,
+    droppedAnchor :: [W.Value],
+    droppedBefore :: Bool,
+    droppedClip :: Maybe Representation
   }
 
 -- | The empty clip, to fill in: @copy emptyClip { clipText = Just "hi" }@.
@@ -1618,6 +1642,81 @@ readClipboard accepting handler = do
 setAccepts :: Widget -> [String] -> Build ()
 setAccepts (Widget w) kinds = emitB (W.txSetAccepts w (acceptList kinds))
 
+-- | The drag_op mask a guest's operations name; the empty list
+-- withdraws the declaration.
+operationMask :: [Op] -> Word32
+operationMask = foldr (\o m -> m + opMask o) 0
+  where
+    opMask OpCopy = W.dragOpCopy
+    opMask OpMove = W.dragOpMove
+
+-- | The drag_op word, or 'Nothing' for a cancelled or refused drag.
+operationOf :: Word32 -> Maybe Op
+operationOf m
+  | m == W.dragOpCopy = Just OpCopy
+  | m == W.dragOpMove = Just OpMove
+  | otherwise = Nothing
+
+-- | DECLARE what a widget hands over when dragged: a clip in 'copy''s
+-- own shapes plus the operations it allows (docs\/dnd-plan.md D1) — the
+-- dynamic path; the declarative spelling is the 'Draggable' attribute
+-- at construction. An EMPTY clip withdraws the declaration, which is
+-- how a same-app move removes its source (D2).
+--
+-- LIVE WIDGETS ONLY, and the argument type is the refusal: the template
+-- zone lands with its own slice (docs\/dnd-plan.md §4).
+setDragSource :: Widget -> Clip -> [Op] -> Build ()
+setDragSource (Widget w) clip ops = emitBIO $ do
+  customValues <-
+    concat
+      <$> mapM
+        ( \(ident, bytes) -> do
+            h <- registerBlob bytes
+            return [W.VStr (acceptToken ident), W.VBlob h]
+        )
+        (clipCustom clip)
+  imageValue <- case clipImage clip of
+    Nothing -> return []
+    Just bytes -> (: []) . W.VBlob <$> registerBlob bytes
+  let present =
+        maybe 0 (const W.clipText) (clipText clip)
+          + maybe 0 (const W.clipHtml) (clipHtml clip)
+          + maybe 0 (const W.clipImage) (clipImage clip)
+      files = map (W.VI64 . fromIntegral . pickedHandle) (clipFiles clip)
+      values =
+        customValues
+          ++ files
+          ++ imageValue
+          ++ maybe [] (\h -> [W.VStr h]) (clipHtml clip)
+          ++ maybe [] (\t -> [W.VStr t]) (clipText clip)
+      empty = present == 0 && null (clipFiles clip) && null (clipCustom clip)
+  return
+    ( W.txSetDragSource
+        w
+        present
+        (fromIntegral (length (clipFiles clip)))
+        (fromIntegral (length (clipCustom clip)))
+        (if empty then 0 else operationMask ops)
+        0
+        values
+    )
+
+-- | DECLARE that a widget receives drops, performing these operations;
+-- naming NONE withdraws it. WHAT it takes is its 'setAccepts' list,
+-- which must be declared first — a destination has one vocabulary, not
+-- two (docs\/dnd-plan.md D1).
+setDropTarget :: Widget -> [Op] -> Build ()
+setDropTarget (Widget w) ops =
+  emitB (W.txSetDropTarget w (operationMask ops) 0 [])
+
+-- | Rows of this live For drag within their own collection
+-- (docs\/dnd-plan.md D8): the landing arrives at 'onDrop' on the For's
+-- own container — the element 'forEach' returns — and the app confirms
+-- with a move.
+setReorderable :: Widget -> Bool -> Build ()
+setReorderable (Widget w) enabled =
+  emitB (W.txSetReorderable w (if enabled then 1 else 0))
+
 -- | Ask the platform for files. THE PICK, NOT THE OPEN — the result
 -- carries handles you redeem later (DESIGN.md, File dialogs). The
 -- filters are (label, space-separated extensions) pairs, ADVISORY on
@@ -1907,6 +2006,12 @@ data Attr (c :: WClass) where
   -- | What this widget takes from a paste — the closed kinds by name
   -- ('acceptText' and friends) plus any custom format ids.
   Accepts :: [String] -> Attr c
+  -- | What this widget hands over when dragged, and the operations it
+  -- allows (docs\/dnd-plan.md D1). 'setDragSource' re-declares it.
+  Draggable :: Clip -> [Op] -> Attr c
+  -- | This widget receives drops, performing these operations; what it
+  -- TAKES is its 'Accepts' list, which must be declared first.
+  DropTarget :: [Op] -> Attr c
 
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
@@ -1919,6 +2024,8 @@ applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
 applyAttr (Role r) w = setRole w r
 applyAttr (Accepts kinds) w = setAccepts w kinds
+applyAttr (Draggable clip ops) w = setDragSource w clip ops
+applyAttr (DropTarget ops) w = setDropTarget w ops
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do
@@ -3172,6 +3279,8 @@ data App = App
     appNextClipboardRead :: IORef Word64,
     appWidgetPastes :: IORef (Map.Map Word64 (Representation -> IO ())),
     appNodePastes :: IORef (Map.Map Word64 ([W.Value] -> Representation -> IO ())),
+    appWidgetDrops :: IORef (Map.Map Word64 (Dropped -> IO ())),
+    appDragEnded :: IORef (Map.Map Word64 (Maybe Op -> IO ())),
     -- Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     -- separate from every widget/node table. The node flavors receive
     -- the stamped copy's key path.
@@ -3394,6 +3503,22 @@ instance HandlerTarget Node where
   onSort app (Node n) handler =
     modifyIORef' (appNodeSorts app) (Map.insert n handler)
 
+-- | Take dropped content at a live widget, or a reorderable For's
+-- landings (docs\/dnd-plan.md D8). Only fires for a widget that
+-- declared 'DropTarget' over an accept list.
+--
+-- LIVE WIDGETS ONLY, and the argument type is the refusal: a stamped
+-- copy's drops land with the template zone's own slice (§4).
+onDrop :: App -> Widget -> (Dropped -> IO ()) -> IO ()
+onDrop app (Widget w) handler =
+  modifyIORef' (appWidgetDrops app) (Map.insert w handler)
+
+-- | A drag that began at this widget has ended: 'Nothing' is a
+-- cancelled or refused drag, not an error.
+onDragEnded :: App -> Widget -> (Maybe Op -> IO ()) -> IO ()
+onDragEnded app (Widget w) handler =
+  modifyIORef' (appDragEnded app) (Map.insert w handler)
+
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
 -- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
 -- reader, an empty clipboard and content in no accepted representation
@@ -3457,6 +3582,8 @@ newApp =
     <*> newIORef 0 -- appNextClipboardRead
     <*> newIORef Map.empty -- appWidgetPastes
     <*> newIORef Map.empty -- appNodePastes
+    <*> newIORef Map.empty -- appWidgetDrops
+    <*> newIORef Map.empty -- appDragEnded
     <*> newIORef Map.empty -- appMenuActivated
     <*> newIORef Map.empty -- appMenuActivatedNode
     <*> newIORef Map.empty -- appMenuToggled
@@ -3522,7 +3649,7 @@ dispatchLoop app = do
     Nothing -> do
       more <- waitOccurrences
       if more then dispatchLoop app else return () -- shutdown
-    Just (kind, ident, keys, payload, clip, undone, askTail)
+    Just (kind, ident, keys, payload, clip, drop_, undone, askTail)
       -- THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER MAPPED
       -- (docs/canvas-plan.md §3.2.1): this calls the registered function
       -- for the size the core asked about and submits the one
@@ -3629,6 +3756,32 @@ dispatchLoop app = do
               handlers <- readIORef (appNodePastes app)
               dispatch (mapM_ (\h -> h ks rep) (Map.lookup ident handlers))
           dispatchLoop app
+      | kind == W.occKindDropped -> do
+          -- A drop rides the same tag with four more words
+          -- (docs/dnd-plan.md D1); the template zone is refused, so a
+          -- keyed drop reaches no handler.
+          case (drop_, keys) of
+            (Just d, []) -> do
+              handlers <- readIORef (appWidgetDrops app)
+              let answer =
+                    Dropped
+                      { droppedPoint = (W.dropX d, W.dropY d),
+                        droppedOperation = operationOf (W.dropOperation d),
+                        droppedAnchor = W.dropAnchor d,
+                        droppedBefore = W.dropBefore d,
+                        droppedClip = representationOf (Just (W.dropClip d))
+                      }
+              dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
+            _ -> return ()
+          dispatchLoop app
+      | kind == W.occKindDragEnded -> do
+          case (payload, keys) of
+            (Just (W.VI64 mask), []) -> do
+              handlers <- readIORef (appDragEnded app)
+              let answer = operationOf (fromIntegral mask)
+              dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
+            _ -> return ()
+          dispatchLoop app
       | kind == W.occKindFileDialogResult -> do
           -- One-shot like the alert, and the id retires with it. The
           -- parser flattens three values per file into the values slot
@@ -3698,11 +3851,11 @@ dispatchLoop app = do
               handlers <- readIORef (appMenuSelectedNode app)
               dispatch (mapM_ (\h -> h keys index) (Map.lookup ident handlers))
           dispatchLoop app
-    Just (_, ident, [], _, _, _, _) -> do
+    Just (_, ident, [], _, _, _, _, _) -> do
       handlers <- readIORef (appWidgetHandlers app)
       dispatch (mapM_ id (Map.lookup ident handlers))
       dispatchLoop app
-    Just (_, ident, keys, _, _, _, _) -> do
+    Just (_, ident, keys, _, _, _, _, _) -> do
       handlers <- readIORef (appNodeHandlers app)
       dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
       dispatchLoop app

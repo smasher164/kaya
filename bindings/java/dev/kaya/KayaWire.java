@@ -1669,13 +1669,14 @@ public final class KayaWire {
         }
     }
 
-    /** Decode a representation at {@code at}: the clip kind, then
-     * its Values block. Blobs are redeemed and RELEASED here.
-     * {@code next[0]} receives the offset past the block. */
-    public static ClipValues parseClip(byte[] rec, ByteBuffer b, int at, int[] next) {
-        int kind = b.getInt(at);
-        int count = b.getInt(at + 8);
-        at += 16;
+    /** The VALUES half of a representation at {@code at}: the count,
+     * then that many values with blobs redeemed and RELEASED. Its own
+     * method because a drop's clip KIND sits four words and a point
+     * earlier (docs/dnd-plan.md D1). */
+    public static List<Object> parseRepresentation(
+            byte[] rec, ByteBuffer b, int at, int[] next) {
+        int count = b.getInt(at);
+        at += 8;
         List<Object> values = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             int vtype = b.getInt(at);
@@ -1689,7 +1690,38 @@ public final class KayaWire {
             at += 8 + ((vlen + 7) & ~7);
         }
         next[0] = at;
-        return new ClipValues(kind, values);
+        return values;
+    }
+
+    /** Decode a representation at {@code at}: the clip kind, then
+     * its Values block. Blobs are redeemed and RELEASED here.
+     * {@code next[0]} receives the offset past the block. */
+    public static ClipValues parseClip(byte[] rec, ByteBuffer b, int at, int[] next) {
+        int kind = b.getInt(at);
+        return new ClipValues(kind, parseRepresentation(rec, b, at + 8, next));
+    }
+
+    /** What a drop delivered (docs/dnd-plan.md D1): the operation the
+     * core settled on, the point in the destination's own coordinates,
+     * and — for a reorder — the anchor row's key path and whether the
+     * drop landed before it. */
+    public static final class DropValues {
+        public final int operation;
+        public final boolean before;
+        public final double x;
+        public final double y;
+        public final List<Object> anchor;
+        public final ClipValues clip;
+
+        DropValues(int operation, boolean before, double x, double y,
+                List<Object> anchor, ClipValues clip) {
+            this.operation = operation;
+            this.before = before;
+            this.x = x;
+            this.y = y;
+            this.anchor = anchor;
+            this.clip = clip;
+        }
     }
 
     /** One Value at {@code next[0]}, which advances past it.
@@ -1939,6 +1971,25 @@ public final class KayaWire {
         }
         if (kind == OCC_KIND_PASTED) {
             payload = parseClip(rec, b, at, new int[1]);
+        }
+        if (kind == OCC_KIND_DROPPED) {
+            int operation = b.getInt(at);
+            boolean before = b.getInt(at + 4) != 0;
+            int anchorLen = b.getInt(at + 8);
+            int clipKind = b.getInt(at + 12);
+            int[] cursor = new int[] {at + 16};
+            double x = (Double) parseValue(rec, b, cursor);
+            double y = (Double) parseValue(rec, b, cursor);
+            List<Object> anchor = new ArrayList<>(anchorLen);
+            for (int i = 0; i < anchorLen; i++) {
+                anchor.add(parseValue(rec, b, cursor));
+            }
+            List<Object> values = parseRepresentation(rec, b, cursor[0], cursor);
+            payload = new DropValues(operation, before, x, y, anchor,
+                    new ClipValues(clipKind, values));
+        }
+        if (kind == OCC_KIND_DRAG_ENDED) {
+            payload = b.getInt(at);
         }
         if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK) {
             // The canvas asks carry a run of BARE values after the

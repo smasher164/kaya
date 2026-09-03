@@ -511,13 +511,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        }");
     c.line("    }");
     c.line("");
-    c.line("    /** Decode a representation at {@code at}: the clip kind, then");
-    c.line("     * its Values block. Blobs are redeemed and RELEASED here.");
-    c.line("     * {@code next[0]} receives the offset past the block. */");
-    c.line("    public static ClipValues parseClip(byte[] rec, ByteBuffer b, int at, int[] next) {");
-    c.line("        int kind = b.getInt(at);");
-    c.line("        int count = b.getInt(at + 8);");
-    c.line("        at += 16;");
+    c.line("    /** The VALUES half of a representation at {@code at}: the count,");
+    c.line("     * then that many values with blobs redeemed and RELEASED. Its own");
+    c.line("     * method because a drop's clip KIND sits four words and a point");
+    c.line("     * earlier (docs/dnd-plan.md D1). */");
+    c.line("    public static List<Object> parseRepresentation(");
+    c.line("            byte[] rec, ByteBuffer b, int at, int[] next) {");
+    c.line("        int count = b.getInt(at);");
+    c.line("        at += 8;");
     c.line("        List<Object> values = new ArrayList<>(count);");
     c.line("        for (int i = 0; i < count; i++) {");
     c.line("            int vtype = b.getInt(at);");
@@ -531,7 +532,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            at += 8 + ((vlen + 7) & ~7);");
     c.line("        }");
     c.line("        next[0] = at;");
-    c.line("        return new ClipValues(kind, values);");
+    c.line("        return values;");
+    c.line("    }");
+    c.line("");
+    c.line("    /** Decode a representation at {@code at}: the clip kind, then");
+    c.line("     * its Values block. Blobs are redeemed and RELEASED here.");
+    c.line("     * {@code next[0]} receives the offset past the block. */");
+    c.line("    public static ClipValues parseClip(byte[] rec, ByteBuffer b, int at, int[] next) {");
+    c.line("        int kind = b.getInt(at);");
+    c.line("        return new ClipValues(kind, parseRepresentation(rec, b, at + 8, next));");
+    c.line("    }");
+    c.line("");
+    c.line("    /** What a drop delivered (docs/dnd-plan.md D1): the operation the");
+    c.line("     * core settled on, the point in the destination's own coordinates,");
+    c.line("     * and — for a reorder — the anchor row's key path and whether the");
+    c.line("     * drop landed before it. */");
+    c.line("    public static final class DropValues {");
+    c.line("        public final int operation;");
+    c.line("        public final boolean before;");
+    c.line("        public final double x;");
+    c.line("        public final double y;");
+    c.line("        public final List<Object> anchor;");
+    c.line("        public final ClipValues clip;");
+    c.line("");
+    c.line("        DropValues(int operation, boolean before, double x, double y,");
+    c.line("                List<Object> anchor, ClipValues clip) {");
+    c.line("            this.operation = operation;");
+    c.line("            this.before = before;");
+    c.line("            this.x = x;");
+    c.line("            this.y = y;");
+    c.line("            this.anchor = anchor;");
+    c.line("            this.clip = clip;");
+    c.line("        }");
     c.line("    }");
     c.line("");
     // The same decode the key loop and the payload switch do inline,
@@ -849,6 +881,42 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     if !pasted.is_empty() {
         c.line(&format!("        if ({pasted}) {{"));
         c.line("            payload = parseClip(rec, b, at, new int[1]);");
+        c.line("        }");
+    }
+    // THE DROP: the four words, the point, the anchor's keys, then the
+    // representation in pasted's own layout (docs/dnd-plan.md D1).
+    let dropped = crate::dropped_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !dropped.is_empty() {
+        c.line(&format!("        if ({dropped}) {{"));
+        c.line("            int operation = b.getInt(at);");
+        c.line("            boolean before = b.getInt(at + 4) != 0;");
+        c.line("            int anchorLen = b.getInt(at + 8);");
+        c.line("            int clipKind = b.getInt(at + 12);");
+        c.line("            int[] cursor = new int[] {at + 16};");
+        c.line("            double x = (Double) parseValue(rec, b, cursor);");
+        c.line("            double y = (Double) parseValue(rec, b, cursor);");
+        c.line("            List<Object> anchor = new ArrayList<>(anchorLen);");
+        c.line("            for (int i = 0; i < anchorLen; i++) {");
+        c.line("                anchor.add(parseValue(rec, b, cursor));");
+        c.line("            }");
+        c.line("            List<Object> values = parseRepresentation(rec, b, cursor[0], cursor);");
+        c.line("            payload = new DropValues(operation, before, x, y, anchor,");
+        c.line("                    new ClipValues(clipKind, values));");
+        c.line("        }");
+    }
+    // The drag's outcome: one word past the key path.
+    let outcome = crate::drag_outcome_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !outcome.is_empty() {
+        c.line(&format!("        if ({outcome}) {{"));
+        c.line("            payload = b.getInt(at);");
         c.line("        }");
     }
     // The canvas asks: bare values after the key path with no count in

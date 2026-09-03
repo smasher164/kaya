@@ -272,7 +272,8 @@ in docs/deferred.md.
    must match something, brace groups are expanded member by member, and
    a `<placeholder>` names a family rather than a file. A sentence that
    must name what the tree no longer has says so ONE way — struck,
-   quoted inside a fenced block, or marked `(gone)` — and the exemption
+   quoted inside a fenced block, or marked `(gone)` — `(built)` marks a
+   path only the build writes, held to being gitignored — and the exemption
    counts are printed on every run, with a refusal if they ever
    outnumber the checks),
    `tools/check-case.py` (every tracked path matches the filesystem's
@@ -704,7 +705,7 @@ in docs/deferred.md.
    both directions: a missing entry, and an EXTRA one, which is the half
    the census actually catches.
    AND THE LEDGER NETS TO THE BOOK since 2026-08-26: the portfolio's two
-   screens claim the same positions, so guests/assets/market/transactions.csv
+   screens claim the same positions, so guests/assets/market/transactions.csv (built)
    is GENERATED to net to guests/python/portfolio.py's BOOK — per account
    and per ticker, buys minus sells, dividends carrying no quantity — the
    generator reads that book by ast and refuses to write a file that does

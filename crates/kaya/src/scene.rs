@@ -1348,6 +1348,7 @@ impl Scene {
     /// the backend (kaya_window_metrics). THE CORE EVALUATES the declared
     /// breakpoints here — one rule, every platform
     /// (docs/adaptive-layout-plan.md D3).
+    #[cfg(test)]
     pub(crate) fn window_metrics_of(&self, window: WindowId) -> Option<(f64, i64)> {
         self.window_metrics.get(&window).copied()
     }

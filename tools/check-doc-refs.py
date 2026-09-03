@@ -75,6 +75,11 @@ LINEREF = re.compile(r":(\d+)(?:-(\d+))?")
 FENCE = re.compile(r"^\s*```")
 STRIKE = re.compile(r"~~.+?~~", re.S)
 GONE = "(gone)"
+# A path the BUILD writes and .gitignore hides: it exists in a checkout that
+# ran the build and in no fresh worktree, so a citation carries this marker
+# and the gate holds the marker to a path git really ignores (2026-09-03:
+# four citations passed here for months on build output alone).
+BUILT = "(built)"
 # The line clause's verdict, named once: the printer below tells the two
 # failures apart by it, because they want DIFFERENT fixes — a missing
 # file wants the path corrected or struck, an over-length line wants the
@@ -179,6 +184,8 @@ def scan(path, text):
                 why = "struck"
             elif GONE in rest[:12]:
                 why = "gone-marker"
+            elif BUILT in rest[:13]:
+                why = "built-marker"
             elif rest[:1] == "<":
                 why = "placeholder"
             out.append((n, token, why, suffix, want))
@@ -222,6 +229,34 @@ def resolve(token, want=None):
     return None
 
 
+def ignored(tokens):
+    """The subset of `tokens` .gitignore hides, in ONE git call."""
+    tokens = [t for t in tokens if "*" not in t and "?" not in t]
+    if not tokens:
+        return set()
+    got = subprocess.run(["git", "check-ignore", "--stdin"], cwd=root,
+                         input="\n".join(tokens) + "\n", stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                         check=False)
+    return set(got.stdout.split("\n")) - {""}
+
+
+IGNORED = "exists only as BUILD OUTPUT this checkout wrote"
+UNBUILT = f"carries {BUILT} but is a path git tracks"
+
+
+def built_clause(refs):
+    """(n, token, why) for every (n, token, why-exempt) whose citation and
+    .gitignore disagree: a good path that is ignored, or a {BUILT}-marked
+    path that is not."""
+    good = [(n, tok) for n, tok, why in refs if why is None and not resolve(tok)]
+    built = [(n, tok) for n, tok, why in refs if why == "built-marker"]
+    hidden = ignored([tok for _, tok in good + built])
+    out = [(n, tok, IGNORED) for n, tok in good if tok in hidden]
+    out += [(n, tok, UNBUILT) for n, tok in built if tok not in hidden]
+    return out
+
+
 # ------------------------------------------------------ the scan itself
 
 def run(files):
@@ -250,6 +285,12 @@ def run(files):
                 except ValueError:
                     rel = path
                 findings.append((str(rel), n, token + (suffix or ""), bad))
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            rel = path
+        for n, token, bad in built_clause([(n, t, w) for n, t, w, _s, _w in refs]):
+            findings.append((str(rel), n, token, bad))
     return findings, checked, exempt, groups, members, anchored
 
 
@@ -481,6 +522,50 @@ if n7_cold != n7_base:
     fail(f"self-test N7: a {GONE}-marked scratch path was reported anyway — "
          f"the exemption is not being applied")
 
+# N9 — a citation of BUILD OUTPUT must be reported, and the same path
+# behind (built) must not: a planted file under a node_modules/ (ignored
+# everywhere, and under a root TOKEN scans) cited hot and marked.
+n9_parent = root / "guests" / "js" / "node_modules"
+n9_parent_was = n9_parent.is_dir()
+n9_dir = n9_parent / "check-doc-refs-selftest"
+n9_dir.mkdir(parents=True, exist_ok=True)
+n9_file = n9_dir / "planted.txt"
+n9_file.write_text("planted\n", encoding="utf-8")
+try:
+    n9_token = "guests/js/node_modules/check-doc-refs-selftest/planted.txt"
+    if n9_token not in ignored([n9_token]):
+        fail("self-test N9 impossible: node_modules/ is not gitignored here, so "
+             "the planted build output would read as tracked")
+
+    def built_findings(text):
+        refs, _, _ = scan(pathlib.Path("<doctored>"), text)
+        return built_clause([(n, t, w) for n, t, w, _s, _w in refs])
+    n9_hot = built_findings(sample_text + f"\nSee {n9_token} for this.\n")
+    n9_cold = built_findings(sample_text + f"\nSee {n9_token} {BUILT} for this.\n")
+    print(f"check-doc-refs: self-test N9 planted a build-output path hot and "
+          f"behind {BUILT} -> {len(n9_hot)} and {len(n9_cold)} finding(s)")
+    if not any(why == IGNORED for _, _, why in n9_hot):
+        fail("self-test N9: a citation of gitignored build output was not "
+             "reported — the tracked-path clause is vacuous")
+    if n9_cold:
+        fail(f"self-test N9: a {BUILT}-marked build output was reported anyway — "
+             f"the marker is not being honoured")
+finally:
+    # The planted file and its directory go; the node_modules/ parent goes
+    # only if this run created it and nothing else has since used it.
+    n9_file.unlink(missing_ok=True)
+    n9_dir.rmdir()
+    if not n9_parent_was and not any(n9_parent.iterdir()):
+        n9_parent.rmdir()
+
+# N10 — (built) on a path git TRACKS is a lie the gate refuses.
+n10 = built_findings(sample_text + f"\nSee tools/gates.py {BUILT} for this.\n")
+print(f"check-doc-refs: self-test N10 marked a tracked path {BUILT} -> "
+      f"{len(n10)} finding(s)")
+if not any(why == UNBUILT for _, _, why in n10):
+    fail(f"self-test N10: a {BUILT} marker on a tracked path was not reported "
+         f"— the marker clause is vacuous")
+
 # ------------------------------------------------------- 1. the clauses
 
 files = docs() + extra
@@ -496,6 +581,13 @@ else:
             advice = ("Fix the LINE NUMBER — the file is there, the line is "
                       "not. Re-read the target and cite where the thing "
                       "moved to, or drop the anchor and name it in prose.")
+        elif why == IGNORED:
+            advice = (f"A fresh worktree does not have it. Cite the TRACKED "
+                      f"source the build reads instead, or mark it "
+                      f"`{token} {BUILT}` if the sentence is about the built "
+                      f"copy itself.")
+        elif why == UNBUILT:
+            advice = f"Drop the {BUILT} marker — the path is in the tree."
         else:
             advice = (f"Fix the path, or — if the sentence must name something "
                       f"the tree no longer has — strike it, quote it inside a "

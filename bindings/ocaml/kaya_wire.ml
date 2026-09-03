@@ -14,6 +14,21 @@ type value =
   | Str of string
   | Blob of int64
 
+(* What a drop delivered (docs/dnd-plan.md D1): the operation the core
+   settled on, the point in the destination's own coordinates, and —
+   for a reorder — the anchor row's key path and whether the drop
+   landed before it. [dv_clip] is the representation's kind and
+   [dv_values] its values, pasted's own pair. *)
+type drop_values = {
+  dv_operation : int;
+  dv_before : bool;
+  dv_x : float;
+  dv_y : float;
+  dv_anchor : value list;
+  dv_clip : int;
+  dv_values : value list;
+}
+
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
 let spec_hash = 0x4f5c2121bd4d241aL
 
@@ -1581,10 +1596,13 @@ let occurrence_blob : (int64 -> string) ref =
    ever reaches an app. The kind is a SINGLE member of the clip enum
    and never a mask (you offer many and you receive one); 0 with no
    values is the universal empty answer. *)
-let parse_clip byte at =
-  let clip = u32_at byte at in
-  let count = u32_at byte (at + 8) in
-  let at = ref (at + 16) in
+(* The VALUES half of a representation at [at]: the count, then that
+   many values with blobs redeemed and RELEASED. Its own function
+   because a drop's clip KIND sits four words and a point earlier
+   (docs/dnd-plan.md D1). *)
+let parse_representation byte at =
+  let count = u32_at byte at in
+  let at = ref (at + 8) in
   let out = ref [] in
   for _ = 1 to count do
     let v, next = parse_value byte !at in
@@ -1592,7 +1610,12 @@ let parse_clip byte at =
     out := v :: !out;
     at := next
   done;
-  (clip, List.rev !out, !at)
+  (List.rev !out, !at)
+
+let parse_clip byte at =
+  let clip = u32_at byte at in
+  let values, next = parse_representation byte (at + 8) in
+  (clip, values, next)
 
 (* Decode one occurrence record (header included) through the byte
    accessor. Some (kind, id, keys, payload) — keys is [] when id is
@@ -1609,7 +1632,7 @@ let parse_occurrence byte =
     if kind = occ_kind_alert_result
     then
       (* The alert's one answer: id + u32 choice (the alert_choice values). *)
-      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, [])
+      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])
     else if kind = occ_kind_file_dialog_result
     then begin
       (* id, a count, then three Values per file (handle, name,
@@ -1623,17 +1646,17 @@ let parse_occurrence byte =
         out := v :: !out;
         at := next
       done;
-      Some (kind, Int64.of_int id, List.rev !out, None, None, [])
+      Some (kind, Int64.of_int id, List.rev !out, None, None, None, [])
     end
     else if kind = occ_kind_clipboard_result
     then begin
       let clip, values, _ = parse_clip byte 16 in
-      Some (kind, Int64.of_int id, [], None, Some (clip, values), [])
+      Some (kind, Int64.of_int id, [], None, Some (clip, values), None, [])
     end
     (* Surface lifecycle records carry the surface id alone
        ( derived from the record shapes ). *)
     else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested
-    then Some (kind, Int64.of_int id, [], None, None, [])
+    then Some (kind, Int64.of_int id, [], None, None, None, [])
     (* Surface-pair records (window, section): the SECOND id
        keys the handler; the first rides as the payload. *)
     else if kind = occ_kind_section_selected
@@ -1643,6 +1666,7 @@ let parse_occurrence byte =
           Int64.of_int (u32_at byte 16),
           [],
           Some (I64 (Int64.of_int id)),
+          None,
           None,
           [] )
     else begin
@@ -1658,6 +1682,9 @@ let parse_occurrence byte =
       if kind = occ_kind_sort_requested then
         Some (I64 (Int64.of_int (u32_at byte 20)))
       else
+      if kind = occ_kind_drag_ended then
+        Some (I64 (Int64.of_int (u32_at byte !at)))
+      else
       if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed then
         Some (fst (parse_value byte !at))
       else None
@@ -1666,6 +1693,39 @@ let parse_occurrence byte =
       if kind = occ_kind_pasted then
         let clip, values, _ = parse_clip byte !at in
         Some (clip, values)
+      else None
+    in
+    let drop =
+      if kind = occ_kind_dropped then begin
+        let operation = u32_at byte !at in
+        let before = u32_at byte (!at + 4) <> 0 in
+        let anchor_len = u32_at byte (!at + 8) in
+        let clip_kind = u32_at byte (!at + 12) in
+        at := !at + 16;
+        let x, next = parse_value byte !at in
+        at := next;
+        let y, next = parse_value byte !at in
+        at := next;
+        let anchor = ref [] in
+        for _ = 1 to anchor_len do
+          let v, next = parse_value byte !at in
+          anchor := v :: !anchor;
+          at := next
+        done;
+        let values, next = parse_representation byte !at in
+        at := next;
+        let coord = function F64 v -> v | _ -> 0.0 in
+        Some
+          {
+            dv_operation = operation;
+            dv_before = before;
+            dv_x = coord x;
+            dv_y = coord y;
+            dv_anchor = List.rev !anchor;
+            dv_clip = clip_kind;
+            dv_values = values;
+          }
+      end
       else None
     in
     let tail =
@@ -1685,6 +1745,6 @@ let parse_occurrence byte =
       end
       else []
     in
-    Some (kind, Int64.of_int id, List.rev !keys, payload, clip, tail)
+    Some (kind, Int64.of_int id, List.rev !keys, payload, clip, drop, tail)
     end
   end

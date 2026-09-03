@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
             // with none and resolve out of the APK's own assets/. The
             // same byte-frozen census must come out of both.
             "assets" -> Assets::app
+            "dnd" -> Dnd::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

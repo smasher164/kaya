@@ -1253,8 +1253,8 @@ KEYED_ARMS = [
      "let candidates = kind_registry(core, kind);",
      "let candidates: Vec<gtk4::Widget> = Vec::new();"),
     ("crates/kaya/src/winui/mod.rs",
-     "K::Button => find(&core.button_controls, &id),",
-     "K::Button => None,"),
+     "let candidates = registry_ids(core, kind);",
+     "let candidates: Vec<u64> = Vec::new();"),
     ("swift/KayaSwiftUI.swift",
      'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)',
      "kayaTableStamp($0.sortTag)"),
@@ -1265,6 +1265,8 @@ KEYED_ARMS = [
 COLUMN_ONLY = [
     ("crates/kaya/src/gtk.rs",
      "if kind != K::Column {\n                    return None;"),
+    ("crates/kaya/src/winui/mod.rs",
+     "if kind != K::Column {\n                    return Ok(None);"),
     ("swift/KayaSwiftUI.swift", 'guard kind == "column" else { return nil }'),
     ("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
      'if (kind != "column") return null'),
@@ -1351,10 +1353,147 @@ print(f"check-verbs: verb trace: {len(VTRACE_LINES)} line shapes in 3 "
       f"harnesses, {len(VTRACE_NEGATIVES)} watched negatives refused",
       file=sys.stderr)
 
+
+# --- EVERY TARGET OF EVERY STEP NORMALIZES -------------------------
+# A `kind@id[keys]` target means nothing until the runner resolves it
+# through Stage::resolve_id, and that happens ONCE PER STEP over
+# Step::targets_mut. A variant that carries two Targets and hands over
+# one leaves the second with `index` 0 and its id still on it, so every
+# rust-native backend addresses widget #0 and says nothing: `drag
+# label#0 to label@row[a]` did exactly that on GTK, and NO LANE COULD
+# SEE IT, because the mac interpreter parses the script text itself and
+# resolves both ends by another route (2026-09-03, docs/traps.md).
+# The rule is a census: a variant's Target fields, against the bindings
+# its targets_mut arm hands over.
+
+
+def split_top(text, opens="([{<", closes=")]}>"):
+    """Comma-separated pieces at depth 0."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in opens:
+            depth += 1
+        elif ch in closes:
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append(text[start:i])
+            start = i + 1
+    out.append(text[start:])
+    return [piece.strip() for piece in out if piece.strip()]
+
+
+def balanced(text, at):
+    """The group starting at `at` (an opening bracket), with its bracket."""
+    pairs = {"(": ")", "{": "}", "[": "]"}
+    close = pairs[text[at]]
+    depth = 0
+    for i in range(at, len(text)):
+        if text[i] in pairs:
+            depth += 1
+        elif text[i] == close and depth == 1:
+            return text[at:i + 1]
+        elif text[i] in pairs.values():
+            depth -= 1
+    return text[at:]
+
+
+def step_variants(harness_src):
+    """variant name -> how many Target fields it carries."""
+    anchor = re.search(r"enum Step \{", harness_src)
+    if not anchor:
+        return {}
+    body = balanced(harness_src, harness_src.index("{", anchor.start()))[1:-1]
+    # Comments carry the word Target in prose; blank them positionally.
+    body = re.sub(r"//[^\n]*", "", body)
+    out = {}
+    for piece in split_top(body):
+        m = re.match(r"([A-Z]\w*)", piece)
+        if not m:
+            continue
+        out[m.group(1)] = len(re.findall(r"\bTarget\b", piece[m.end():]))
+    return out
+
+
+def targets_mut_bindings(harness_src):
+    """variant name -> how many bindings its targets_mut pattern hands over."""
+    anchor = harness_src.index("fn targets_mut(")
+    body = balanced(harness_src, harness_src.index("{", anchor))
+    out = {}
+    for m in re.finditer(r"Step::(\w+)", body):
+        rest = body[m.end():]
+        lead = len(rest) - len(rest.lstrip())
+        head = rest[lead:lead + 1]
+        if head in "({":
+            group = balanced(rest, lead)[1:-1]
+            bound = [x for x in split_top(group)
+                     if re.fullmatch(r"[a-z_][a-z_0-9]*", x) and x != "_"]
+        else:
+            bound = []
+        out[m.group(1)] = max(out.get(m.group(1), 0), len(bound))
+    return out
+
+
+def target_census(harness_src):
+    """Findings, plus (variants read, variants carrying 2+ Targets)."""
+    declared = step_variants(harness_src)
+    handed = targets_mut_bindings(harness_src)
+    out = []
+    for name, count in sorted(declared.items()):
+        got = handed.get(name, 0)
+        if got != count:
+            out.append(
+                f"Step::{name} carries {count} Target field(s) but "
+                f"targets_mut hands over {got} — an unnormalized "
+                f"`kind@id` target reaches the backend as index 0")
+    return out, len(declared), sum(1 for n in declared.values() if n >= 2)
+
+
+norm_out, norm_variants, norm_multi = target_census(harness)
+if norm_variants < 30:
+    g.refuse(f"read only {norm_variants} Step variants out of {HARNESS} — "
+             f"the enum's shape moved and this census agrees with anything")
+if norm_multi < 1:
+    g.refuse("no Step variant carries two Targets, so the rule this clause "
+             "exists for matches nothing and can only ever pass")
+for line in norm_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+norm_status = 1 if norm_out else 0
+
+# The watched negatives: the shipped defect itself, and the same shape one
+# variant over. Each on a doctored copy, count printed, red demanded.
+NORM_NEGATIVES = [
+    ("the Drag verb's destination dropped again",
+     r"Step::Drag\(source, destination, _\) => vec!\[source, destination\],",
+     "Step::Drag(source, _, _) => vec![source],", "Step::Drag"),
+    ("the fold verb's table dropped",
+     r"Step::ExpectFolded\(child, table\) => \{\n                let mut out",
+     "Step::ExpectFolded(child, _table) => {\n                let mut out",
+     "Step::ExpectFolded"),
+]
+for label, pattern, repl, want in NORM_NEGATIVES:
+    doctored = g.doctor(label, harness, pattern, repl)
+    out, _, _ = target_census(doctored)
+    if not any(want in line for line in out):
+        fail(f"check-verbs SELF-TEST: {label} passed the target-normalization "
+             f"census (wanted a finding naming {want}; got {out!r})")
+# ... and a compliant two-Target variant stays quiet, so the census is not
+# simply refusing everything.
+SAMPLE = ("enum Step {\n    Alpha(Target, Target, bool),\n    Beta(Target),\n}\n"
+          "fn targets_mut(&mut self) -> Vec<&mut Target> {\n    match self {\n"
+          "        Step::Alpha(a, b, _) => vec![a, b],\n"
+          "        Step::Beta(t) => vec![t],\n    }\n}\n")
+sample_out, _, sample_multi = target_census(SAMPLE)
+if sample_out or sample_multi != 1:
+    fail(f"check-verbs SELF-TEST: a compliant two-Target variant was refused "
+         f"({sample_out!r}, {sample_multi} multi-target variant(s))")
+print(f"check-verbs: step targets: {norm_variants} variants read, "
+      f"{norm_multi} carrying two, {len(NORM_NEGATIVES)} watched negatives "
+      f"refused", file=sys.stderr)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
-        or metrics_status or keyed_status or vtrace_status):
+        or metrics_status or keyed_status or vtrace_status or norm_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -1362,4 +1501,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"the ax spelling in 3 harnesses + the verb trace in 3 "
           f"harnesses + the windowed tier's loop "
           f"+ the metrics class channel + the keyed target arms on 4 "
-          f"backends + spec hash against 2 interpreters")
+          f"backends + every Step's Targets normalized "
+          f"+ spec hash against 2 interpreters")

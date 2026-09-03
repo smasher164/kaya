@@ -1478,6 +1478,12 @@ def _claim_slot():
 def _release_slot(slot):
     with _slots_lock:
         _slots.append(slot)
+        # SORTED, so a leg that runs ALONE always gets slot 0 and its
+        # window always lands in the same place: the tiling's slots 4 and
+        # 5 sit at y=786 on this VM's 800-tall screen, off the bottom, and
+        # a leg that aims REAL INPUT at screen pixels (dnd's `drag`) then
+        # presses the taskbar (docs/traps.md: TWO OF THE SIX WINDOW TILES).
+        _slots.sort()
         _slots_lock.notify()
 
 

@@ -511,6 +511,68 @@ export class Handle {
     return this;
   }
 
+  /** DECLARE what this widget hands over when dragged: a clip in the
+   * shapes `copy` takes, plus the operations it allows. App-updated
+   * state — re-declare when the payload changes, and declaring NOTHING
+   * withdraws it, which is how a same-app move removes its source
+   * (docs/dnd-plan.md D1, D2). Chains. */
+  draggable(opts: DraggableOptions = {}): this {
+    liveZoneOnly(this);
+    const reps: wire.WireValue[] = [];
+    let present = 0;
+    const custom = Object.entries(opts.custom ?? {});
+    const files = [...(opts.files ?? [])];
+    for (const [ident, data] of custom) {
+      acceptList([ident]);
+      reps.push(ident, new BlobHandle(runtime.registerBlob(data)));
+    }
+    for (const picked of files) reps.push(new I64(typeof picked === "number" ? picked : picked.handle));
+    if (opts.image !== undefined) {
+      present |= wire.CLIP_IMAGE;
+      reps.push(new BlobHandle(runtime.registerBlob(opts.image)));
+    }
+    if (opts.html !== undefined) {
+      present |= wire.CLIP_HTML;
+      reps.push(String(opts.html));
+    }
+    if (opts.text !== undefined) {
+      present |= wire.CLIP_TEXT;
+      reps.push(String(opts.text));
+    }
+    const empty = present === 0 && files.length === 0 && custom.length === 0;
+    const mask = empty ? 0 : operationMask(opts.operations ?? [OP_COPY]);
+    records().push(wire.tx_set_drag_source(this.id, present, files.length, custom.length, mask, 0, reps));
+    return this;
+  }
+
+  /** DECLARE that this widget receives drops, performing these
+   * operations; naming NONE withdraws the declaration. WHAT it takes is
+   * its `accepts` list, which must be declared first — a destination has
+   * one vocabulary, not two (docs/dnd-plan.md D1). Chains. */
+  dropTarget(...operations: string[]): this {
+    liveZoneOnly(this);
+    records().push(wire.tx_set_drop_target(this.id, operationMask(operations), 0, []));
+    return this;
+  }
+
+  /** Take dropped content here: fn(dropped), the `Dropped` of
+   * docs/dnd-plan.md D1. Only fires for a widget that declared
+   * `dropTarget` over an `accepts` list, or for a reorderable For's
+   * container (D8). Chains. */
+  onDrop(fn: Handler): this {
+    liveZoneOnly(this);
+    app()._register(this, wire.OCC_DROPPED, fn);
+    return this;
+  }
+
+  /** A drag that began here has ended: fn(operation), OP_COPY, OP_MOVE
+   * or null for cancelled or refused. Chains. */
+  onDragEnded(fn: Handler): this {
+    liveZoneOnly(this);
+    app()._register(this, wire.OCC_DRAG_ENDED, fn);
+    return this;
+  }
+
   /** DECLARE the whole drawing on a canvas, replacing whatever was
    * declared before: `chart.draw((d) => {...})`. On a template node the
    * leading keys select ONE stamped copy; with none the drawing every
@@ -1114,7 +1176,19 @@ function pathKey(path: readonly Key[]): string {
 }
 
 /** The configured spelling of the ordinary For loop, and the table one. */
-export type RowsOptions = { grow?: number; align?: AlignValue | AlignName; a11yId?: Bindable | string };
+export type RowsOptions = {
+  grow?: number;
+  align?: AlignValue | AlignName;
+  a11yId?: Bindable | string;
+  /** Every stamped row drags within this collection; the landing arrives
+   * at `onDrop` on the For's own container, with the moved row's key in
+   * the clip and the row it landed on as the anchor (docs/dnd-plan.md D8). */
+  reorderable?: boolean;
+  onDrop?: Handler;
+};
+/** The clip a drag hands over, in `copy`'s own shape, plus the
+ * operations the source allows (docs/dnd-plan.md D1). */
+export type DraggableOptions = CopyOptions & { operations?: readonly string[] };
 export type ColumnsOptions = RowsOptions & { sort?: Sort; onSort?: Handler };
 
 export class Collection<E, R> extends BoundCollection<E, R> {
@@ -1158,6 +1232,8 @@ export class Collection<E, R> extends BoundCollection<E, R> {
     trace._grow = opts.grow ?? null;
     trace._align = opts.align ?? null;
     trace._a11yId = opts.a11yId ?? null;
+    trace._reorderable = opts.reorderable ?? false;
+    trace._onDrop = opts.onDrop ?? null;
     return { [Symbol.iterator]: () => trace as unknown as Iterator<R> };
   }
 
@@ -1299,6 +1375,8 @@ class ForTrace implements Iterator<unknown> {
   _grow: number | null = null;
   _align: AlignValue | AlignName | null = null;
   _a11yId: Bindable | string | null = null;
+  _reorderable = false;
+  _onDrop: Handler | null = null;
   private _state = 0;
 
   constructor(coll: Collection<unknown, unknown>) {
@@ -1325,6 +1403,8 @@ class ForTrace implements Iterator<unknown> {
       if (this._grow !== null) records().push(wire.tx_set_grow(handle.id, Number(this._grow)));
       if (this._align !== null) records().push(wire.tx_set_align(handle.id, alignValue(this._align)));
       if (this._a11yId !== null) handle.a11yId(this._a11yId);
+      if (this._reorderable) records().push(wire.tx_set_reorderable(handle.id, 1));
+      if (this._onDrop !== null) handle.onDrop(this._onDrop);
     }
     return { value: undefined, done: true };
   }
@@ -1642,6 +1722,60 @@ function representation(payload: wire.ClipPayload): Clip | null {
   return null;
 }
 
+/** What a drop delivered (docs/dnd-plan.md D1): `clip` is the sum a paste
+ * already delivers, `operation` is OP_COPY, OP_MOVE or null, `point` is
+ * (x, y) in the destination's own coordinates, and `anchor`/`before` are
+ * the reorder's landing row and side (D8). */
+export type Dropped = {
+  point: [number, number];
+  operation: string | null;
+  anchor: wire.Decoded[];
+  before: boolean;
+  clip: Clip | null;
+};
+
+/** The drag_op word, or null for a cancelled or refused drag. */
+function operation(mask: number): string | null {
+  if (mask === wire.DRAG_OP_COPY) return OP_COPY;
+  if (mask === wire.DRAG_OP_MOVE) return OP_MOVE;
+  return null;
+}
+
+/** The drag_op mask a guest's words name; empty withdraws. */
+function operationMask(operations: readonly string[]): number {
+  let mask = 0;
+  for (const op of operations) {
+    if (op === OP_COPY) mask |= wire.DRAG_OP_COPY;
+    else if (op === OP_MOVE) mask |= wire.DRAG_OP_MOVE;
+    else {
+      throw new Error(
+        `kaya: ${JSON.stringify(op)} is not a drag operation — copy and move are the vocabulary, and link and ask are refused (docs/dnd-plan.md D3)`,
+      );
+    }
+  }
+  return mask;
+}
+
+/** The template zone is refused by name until its own slice
+ * (docs/dnd-plan.md §4); the core refuses a keyed record too. */
+function liveZoneOnly(handle: Handle): void {
+  if (handle instanceof Widget && handle.isNode) {
+    throw new Error(
+      "kaya: drag and drop is a LIVE-ZONE declaration in this slice — a widget inside a row template is neither a drag source nor a drop target (docs/dnd-plan.md §4)",
+    );
+  }
+}
+
+function dropped(payload: wire.DroppedPayload): Dropped {
+  return {
+    point: payload.point,
+    operation: operation(payload.operation),
+    anchor: payload.anchor,
+    before: payload.before,
+    clip: representation(payload.clip),
+  };
+}
+
 /** What one undo step put back: the CORE-AUTHORITATIVE restored state
  * (docs/undo-plan.md D5). The collection mirrors are already reconciled
  * before your handler runs; signals and text are handed to the app. */
@@ -1853,6 +1987,12 @@ export const ACCEPT_TEXT = "text";
 export const ACCEPT_HTML = "html";
 export const ACCEPT_IMAGE = "image";
 export const ACCEPT_FILES = "files";
+
+/** The drag operation vocabulary (docs/dnd-plan.md D3), named for the
+ * accept list's reason: a bare string that is neither of these is a
+ * silent no-op everywhere, so `operationMask` refuses it by name. */
+export const OP_COPY = "copy";
+export const OP_MOVE = "move";
 
 export const ROLE_SETTINGS = "settings";
 export const ROLE_CUT = "cut";
@@ -3386,6 +3526,10 @@ export class App {
     if (handler === undefined) return;
     const args: unknown[] = this._rowArgs(ident, keys as Key[]);
     if (kind === wire.OCC_PASTED) args.push(representation(payload as wire.ClipPayload));
+    // A drop rides the same tag with four more words (docs/dnd-plan.md D1);
+    // a null operation is a cancelled or refused drag, not an error.
+    else if (kind === wire.OCC_DROPPED) args.push(dropped(payload as wire.DroppedPayload));
+    else if (kind === wire.OCC_DRAG_ENDED) args.push(operation(payload as number));
     else if (payload !== null) args.push(payload);
     this._dispatch(handler, ...args);
   }

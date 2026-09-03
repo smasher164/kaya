@@ -155,6 +155,32 @@ abstract record Representation
     }
 }
 
+/// A drag operation (docs/dnd-plan.md D3): copy and move, nothing else.
+enum Op : uint
+{
+    Copy = KayaWire.DragOpCopy,
+    Move = KayaWire.DragOpMove,
+}
+
+/// What a drop delivered (docs/dnd-plan.md D1): the representation a
+/// paste already delivers, the point in the destination's own
+/// coordinates, the operation the core settled on (null for a refused
+/// drag), and — for a reorder — the anchor row and the side it landed on.
+readonly record struct Dropped(
+    (double X, double Y) Point, Op? Operation, List<object> Anchor, bool Before,
+    Representation? Clip)
+{
+    /// The drag_op word, or null for a cancelled or refused drag.
+    internal static Op? Operate(uint mask) =>
+        mask == KayaWire.DragOpCopy ? Op.Copy
+        : mask == KayaWire.DragOpMove ? Op.Move
+        : null;
+
+    internal static Dropped From(KayaWire.DropValues drop) =>
+        new Dropped((drop.X, drop.Y), Operate(drop.Operation), drop.Anchor,
+            drop.Before, Representation.From(drop.Clip));
+}
+
 /// One signal the core put back: its id and its restored value.
 readonly record struct UndoSignal(ulong Signal, object Value);
 

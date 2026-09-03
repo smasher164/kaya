@@ -118,6 +118,49 @@ object KayaPresent {
     )
 
     /**
+     * Content DROPPED on a widget (docs/dnd-plan.md D1). [tag] is the
+     * destination's identity bytes and [anchor] the landed row's for a
+     * reorder (empty otherwise); [x]/[y] are the point in the
+     * destination's own top-left space, [operation] the drag_op
+     * [dragVerdict] answered. The payload flattens exactly as
+     * [emitPasted]'s does, [clip] never 0. kaya_emit_dropped's JNI
+     * spelling.
+     */
+    @JvmStatic external fun emitDropped(
+        tag: ByteArray,
+        x: Double,
+        y: Double,
+        operation: Int,
+        anchor: ByteArray,
+        before: Boolean,
+        clip: Int,
+        text: String,
+        bytes: ByteArray,
+        locators: Array<String>,
+        names: Array<String>,
+    )
+
+    /** A drag that began on the tagged widget ended, [operation] being
+     * what the drop settled on or DRAG_OP_NONE.
+     * kaya_emit_drag_ended's JNI spelling. */
+    @JvmStatic external fun emitDragEnded(tag: ByteArray, operation: Int)
+
+    /**
+     * THE HOVER AND DROP VERDICT (docs/dnd-plan.md D2): the core's one
+     * pure function, so no backend decides. [custom] is the offered
+     * custom ids SPACE-JOINED; [local] says the source is this process.
+     * Answers a drag_op. kaya_drag_verdict's JNI spelling.
+     */
+    @JvmStatic external fun dragVerdict(
+        accepts: String,
+        targetOps: Int,
+        offered: Int,
+        custom: String,
+        sourceOps: Int,
+        local: Boolean,
+    ): Int
+
+    /**
      * Redeem a picked URI: `openFileDescriptor(uri, mode)` then
      * `detachFd`. CALLED FROM THE CORE, and a handle is redeemable more
      * than once. The mode is `android_open_mode`'s — Write arrives as

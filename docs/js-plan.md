@@ -15,7 +15,7 @@ binding's twin), `kaya_app_checks.ts` (the negatives, run by the
 `js-app-checks` gate), `package.json` (npm name `kaya-gui`, ruled), a
 strict `tsconfig.json`. `guests/js/*.ts` are the scene guests, one per
 Python guest, importing `kaya-gui` through the workspace link
-`guests/js/node_modules/kaya-gui -> bindings/js` that `npm install
+`guests/js/node_modules/kaya-gui (built) -> bindings/js` that `npm install
 --offline` writes (tools/js-typecheck.py makes it; node_modules is
 ignored). The guests are TypeScript run DIRECTLY by node 24 — type
 stripping is on by default there, `erasableSyntaxOnly` keeps every

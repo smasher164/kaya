@@ -1711,27 +1711,52 @@ static class KayaWire
         public List<object> Values = new List<object>();
     }
 
-    /// Decode a representation at `at`: the clip kind, then its
-    /// Values block. Blobs are redeemed and RELEASED here.
-    public static ClipValues ParseClip(byte[] rec, int at, out int next)
+    /// The VALUES half of a representation at `at`: the count, then
+    /// that many values with blobs redeemed and RELEASED. Its own
+    /// method because a drop's clip KIND sits four words and a point
+    /// earlier (docs/dnd-plan.md D1).
+    public static List<object> ParseRepresentation(byte[] rec, int at, out int next)
     {
-        var clip = new ClipValues { Kind = BitConverter.ToUInt32(rec, at) };
-        int count = (int)BitConverter.ToUInt32(rec, at + 8);
-        at += 16;
+        int count = (int)BitConverter.ToUInt32(rec, at);
+        at += 8;
+        var values = new List<object>();
         for (int i = 0; i < count; i++)
         {
             uint vtype = BitConverter.ToUInt32(rec, at);
             int vlen = (int)BitConverter.ToUInt32(rec, at + 4);
             switch (vtype)
             {
-                case ValueI64: clip.Values.Add(BitConverter.ToInt64(rec, at + 8)); break;
-                case ValueBlob: clip.Values.Add(Kaya.OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8))); break;
-                default: clip.Values.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;
+                case ValueI64: values.Add(BitConverter.ToInt64(rec, at + 8)); break;
+                case ValueBlob: values.Add(Kaya.OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8))); break;
+                default: values.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;
             }
             at += 8 + ((vlen + 7) & ~7);
         }
         next = at;
+        return values;
+    }
+
+    /// Decode a representation at `at`: the clip kind, then its
+    /// Values block. Blobs are redeemed and RELEASED here.
+    public static ClipValues ParseClip(byte[] rec, int at, out int next)
+    {
+        var clip = new ClipValues { Kind = BitConverter.ToUInt32(rec, at) };
+        clip.Values = ParseRepresentation(rec, at + 8, out next);
         return clip;
+    }
+
+    /// What a drop delivered (docs/dnd-plan.md D1): the operation the
+    /// core settled on, the point in the destination's own coordinates,
+    /// and — for a reorder — the anchor row's key path and whether the
+    /// drop landed before it.
+    public sealed class DropValues
+    {
+        public uint Operation;
+        public bool Before;
+        public double X;
+        public double Y;
+        public List<object> Anchor = new List<object>();
+        public ClipValues Clip = new ClipValues();
     }
 
     /// Decode one occurrence record (header included). Returns false
@@ -1832,6 +1857,38 @@ static class KayaWire
         if (kind == OccKindPasted)
         {
             payload = ParseClip(rec, at, out int _pasteEnd);
+        }
+        if (kind == OccKindDropped)
+        {
+            var drop = new DropValues
+            {
+                Operation = BitConverter.ToUInt32(rec, at),
+                Before = BitConverter.ToUInt32(rec, at + 4) != 0,
+            };
+            int anchorLen = (int)BitConverter.ToUInt32(rec, at + 8);
+            drop.Clip.Kind = BitConverter.ToUInt32(rec, at + 12);
+            drop.X = BitConverter.ToDouble(rec, at + 24);
+            drop.Y = BitConverter.ToDouble(rec, at + 40);
+            at += 48;
+            for (int i = 0; i < anchorLen; i++)
+            {
+                uint ktype = BitConverter.ToUInt32(rec, at);
+                int klen = (int)BitConverter.ToUInt32(rec, at + 4);
+                switch (ktype)
+                {
+                    case ValueBool: drop.Anchor.Add(rec[at + 8] != 0); break;
+                    case ValueI64: drop.Anchor.Add(BitConverter.ToInt64(rec, at + 8)); break;
+                    case ValueF64: drop.Anchor.Add(BitConverter.ToDouble(rec, at + 8)); break;
+                    default: drop.Anchor.Add(Encoding.UTF8.GetString(rec, at + 8, klen)); break;
+                }
+                at += 8 + ((klen + 7) & ~7);
+            }
+            drop.Clip.Values = ParseRepresentation(rec, at, out at);
+            payload = drop;
+        }
+        if (kind == OccKindDragEnded)
+        {
+            payload = BitConverter.ToUInt32(rec, at);
         }
         if (kind == OccKindDrawRequested || kind == OccKindTick)
         {

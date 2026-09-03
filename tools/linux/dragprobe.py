@@ -12,10 +12,11 @@ source's string. This is the drag-and-drop plan's probe 4
 (docs/dnd-plan.md §2), kept as the lane's wall rather than a one-off.
 
 It drives itself: the window's content origin is read from the SERVER
-(sway's IPC tree on wayland, xdotool's geometry on x11) and the widget
-boxes from GTK, and the injector runs as a child while the main loop
-keeps delivering events. A drop that never arrives prints every signal
-the probe DID see, the injector's exit and its stderr, and fails.
+and the widget boxes from GTK, and the injector runs as a child while
+the main loop keeps delivering events. A drop that never arrives prints
+every signal the probe DID see, the injector's exit and its stderr, and
+fails. THE ORIGIN AND THE GESTURE ARE tools/linux/dragdrive.py's, the
+same copy the harness `drag` verb runs (docs/dnd-plan.md D10).
 
 Watched failing 2026-09-02 against sway's own `seat - cursor press`,
 which succeeds on a deviceless seat and delivers nothing: the geometry
@@ -28,8 +29,8 @@ Runs INSIDE the container under the leg environment (GDK_BACKEND and
 the session variables of one pool slot); no prelude, like the other
 in-container python here.
 """
-import json
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -39,74 +40,16 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, GLib, GObject, Gtk  # noqa: E402
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from dragdrive import DragDriveError, content_origin, injector_argv  # noqa: E402
+
 PAYLOAD = "alpha"
-STEPS = 12
 DROP_DEADLINE_MS = 10000
 
 
 def fail(*words):
     print("dragprobe: " + " ".join(words), file=sys.stderr, flush=True)
     sys.exit(1)
-
-
-def content_origin_wayland(pid):
-    """This process's toplevel content origin, from sway's tree."""
-    out = subprocess.run(["swaymsg", "-t", "get_tree"], capture_output=True,
-                         text=True, encoding="utf-8", check=False)
-    if out.returncode != 0:
-        fail("swaymsg -t get_tree failed:", out.stderr.strip())
-
-    def walk(node):
-        if node.get("pid") == pid and node.get("app_id"):
-            rect, win = node["rect"], node["window_rect"]
-            return (rect["x"] + win["x"], rect["y"] + win["y"])
-        for child in node.get("nodes", []) + node.get("floating_nodes", []):
-            hit = walk(child)
-            if hit:
-                return hit
-        return None
-
-    return walk(json.loads(out.stdout))
-
-
-def content_origin_x11(pid):
-    """This process's largest X window, which under bare Xvfb is the
-    toplevel with its content at the window's own origin (no manager,
-    no frame)."""
-    ids = subprocess.run(["xdotool", "search", "--pid", str(pid)], capture_output=True,
-                         text=True, encoding="utf-8", check=False).stdout.split()
-    best = None
-    for wid in ids:
-        geo = subprocess.run(["xdotool", "getwindowgeometry", "--shell", wid],
-                             capture_output=True, text=True, encoding="utf-8",
-                             check=False).stdout
-        fields = dict(line.split("=", 1) for line in geo.split() if "=" in line)
-        try:
-            area = int(fields["WIDTH"]) * int(fields["HEIGHT"])
-            at = (int(fields["X"]), int(fields["Y"]))
-        except (KeyError, ValueError):
-            continue
-        if best is None or area > best[0]:
-            best = (area, at)
-    return best[1] if best else None
-
-
-def injector_argv(proto, injector, start, end):
-    """One process that presses at `start`, walks to `end` and releases."""
-    (x0, y0), (x1, y1) = start, end
-    path = [(x0 + (x1 - x0) * i // STEPS, y0 + (y1 - y0) * i // STEPS)
-            for i in range(1, STEPS + 1)]
-    if proto == "wayland":
-        argv = [injector, "set", str(x0), str(y0), "sleep", "200", "press", "left",
-                "sleep", "200"]
-        for x, y in path:
-            argv += ["set", str(x), str(y), "sleep", "40"]
-        return argv + ["sleep", "300", "release", "left", "sleep", "300"]
-    argv = [injector, "mousemove", str(x0), str(y0), "sleep", "0.2", "mousedown", "1",
-            "sleep", "0.2"]
-    for x, y in path:
-        argv += ["mousemove", str(x), str(y), "sleep", "0.04"]
-    return argv + ["sleep", "0.3", "mouseup", "1"]
 
 
 def main():
@@ -166,8 +109,14 @@ def main():
         target.add_controller(drop)
 
         def drive():
-            origin = (content_origin_wayland if proto == "wayland"
-                      else content_origin_x11)(os.getpid())
+            # THE SURFACE TRANSFORM IS THE CALLER'S TO SUPPLY (dragdrive.py's
+            # own docstring says why): the CSD shadow sits inside the X window
+            # and outside sway's window geometry.
+            transform = win.get_surface_transform()
+            try:
+                origin = content_origin(proto, os.getpid(), transform)
+            except DragDriveError as e:
+                fail(str(e))
             if origin is None:
                 state["origin_tries"] += 1
                 if state["origin_tries"] > 20:
@@ -179,7 +128,8 @@ def main():
                      int(origin[1] + src.origin.y + src.size.height / 2))
             end = (int(origin[0] + dst.origin.x + dst.size.width / 2),
                    int(origin[1] + dst.origin.y + dst.size.height / 2))
-            print(f"dragprobe: {proto} window content at {origin}; "
+            print(f"dragprobe: {proto} window content at {origin} "
+                  f"(surface transform {transform}); "
                   f"drag {start} -> {end}", flush=True)
             state["child"] = subprocess.Popen(injector_argv(proto, injector, start, end),
                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,

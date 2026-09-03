@@ -55,6 +55,7 @@ LEGS = {
         "a11yrows-compose", "styling-compose", "typeface-compose",
         "assets-compose", "clipboard-compose", "background-compose",
         "undo-compose", "dirty-compose", "ranges-compose",
+        "dnd-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -69,7 +70,7 @@ LEGS = {
         "background-jvm", "undo-jvm", "filedialog-jvm",
         "table-jvm", "save-jvm", "dirty-jvm",
         "ranges-jvm", "styling-jvm", "typeface-jvm",
-        "assets-jvm",
+        "assets-jvm", "dnd-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -85,6 +86,7 @@ LEGS = {
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
         "dirty-go", "ranges-go", "editor-go",
+        "dnd-go",
     ],
     "python": [
         "varied-python", "portfolio-python",

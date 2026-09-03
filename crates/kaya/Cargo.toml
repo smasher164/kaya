@@ -81,6 +81,16 @@ windows = { version = "0.62", features = [
     # behind Ole; it is the route from the file dialog to the view it is
     # showing (sample_folder_view).
     "Win32_System_Ole",
+    # The classic drop target the WinUI arm registers on the island HWND:
+    # XAML's AllowDrop puts no OLE target on any of a WinUI window's four
+    # HWNDs, so Explorer and every Win32 source arrive there or nowhere
+    # (docs/probes/dnd-probe-windows-2026-09-03.md). SystemServices is
+    # IDropTarget_Impl's MODIFIERKEYS_FLAGS and nothing else; NO
+    # Win32_Graphics_Gdi, which STGMEDIUM's real declaration is gated on —
+    # it re-declares the eight gdi32 entries this file already declares
+    # with its own signatures, so the struct is hand-rolled beside the
+    # drop target instead.
+    "Win32_System_SystemServices",
     # IBufferByteAccess, the ONE way to reach a WinRT IBuffer's bytes
     # (docs/canvas-plan.md §8) — a classic COM interface out of
     # robuffer.h, so it comes from here and not from tools/winui-bindgen.

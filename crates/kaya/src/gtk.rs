@@ -2591,6 +2591,8 @@ struct CoreState {
     /// The clipboard hub (see ClipboardHub). Rc'd to reach it without
     /// borrowing CORE.
     clipboard: Rc<ClipboardHub>,
+    /// The drag-and-drop hub (see DndHub), Rc'd for the same reason.
+    dnd: Rc<DndHub>,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
 }
@@ -5479,8 +5481,8 @@ impl ClipboardHub {
                     return true;
                 };
                 let hub = self.clone();
-                materialize_clipboard(
-                    &display.clipboard(),
+                materialize(
+                    &ClipOffer::Board(display.clipboard()),
                     &accepts,
                     Box::new(move |clip| {
                         // A paste that delivered nothing is not an
@@ -5897,28 +5899,92 @@ fn widget_focused(widget: &impl IsA<gtk4::Widget>) -> bool {
     &focus == widget || focus.is_ancestor(widget)
 }
 
-/// Choose the RICHEST representation the clipboard offers that the accept
+/// WHERE A REPRESENTATION IS READ FROM: the system clipboard, or a drag in
+/// flight. One chooser serves both, because a paste and a drop pick from the
+/// same offer with the same accept list — which is the platforms' own
+/// implementation and not an analogy (docs/dnd-plan.md §0).
+enum ClipOffer {
+    Board(gdk::Clipboard),
+    Drop(gdk::Drop),
+}
+
+impl ClipOffer {
+    fn formats(&self) -> gdk::ContentFormats {
+        match self {
+            ClipOffer::Board(board) => board.formats(),
+            ClipOffer::Drop(drop) => drop.formats(),
+        }
+    }
+
+    /// One mime type's bytes, whole, then the callback — None for a failed
+    /// transfer (GDK fails an unservable read fast, measured §5b).
+    fn read_bytes(&self, mime: &str, done: Box<dyn FnOnce(Option<Vec<u8>>)>) {
+        let finish = move |res: Result<
+            (gtk4::gio::InputStream, glib::GString),
+            glib::Error,
+        >| match res {
+            Ok((stream, _mime)) => read_stream_to_end(stream, Vec::new(), done),
+            Err(_) => done(None),
+        };
+        match self {
+            ClipOffer::Board(board) => board.read_async(
+                &[mime],
+                glib::Priority::DEFAULT,
+                gtk4::gio::Cancellable::NONE,
+                finish,
+            ),
+            ClipOffer::Drop(drop) => drop.read_async(
+                &[mime],
+                glib::Priority::DEFAULT,
+                gtk4::gio::Cancellable::NONE,
+                finish,
+            ),
+        }
+    }
+
+    fn read_text(&self, done: Box<dyn FnOnce(Option<String>)>) {
+        match self {
+            ClipOffer::Board(board) => {
+                board.read_text_async(gtk4::gio::Cancellable::NONE, move |res| {
+                    done(match res {
+                        Ok(Some(s)) => Some(s.to_string()),
+                        _ => None,
+                    });
+                })
+            }
+            // A drop has no text convenience: the STRING value IS
+            // read_text_async here, and GDK short-circuits a local transfer.
+            ClipOffer::Drop(drop) => drop.read_value_async(
+                glib::types::Type::STRING,
+                glib::Priority::DEFAULT,
+                gtk4::gio::Cancellable::NONE,
+                move |res| done(res.ok().and_then(|v| v.get::<String>().ok())),
+            ),
+        }
+    }
+}
+
+/// Choose the RICHEST representation the offer carries that the accept
 /// list takes, transfer exactly that one, and answer exactly once — None for
 /// no intersection or a failed transfer, the universal no. The chooser
 /// consults formats(), so no transfer runs for a representation nobody asked
 /// for and the unsatisfiable case answers immediately (measured §5b: 0ms).
 /// Descending clip value — custom, files, image, html, text (§1).
-fn materialize_clipboard(
-    clipboard: &gdk::Clipboard,
+fn materialize(
+    offer: &ClipOffer,
     accepting: &str,
     done: Box<dyn FnOnce(Option<crate::protocol::Representation>)>,
 ) {
     use crate::protocol::Representation as R;
     let (kinds, custom) = crate::wire::parse_accept_list(accepting);
-    let formats = clipboard.formats();
+    let formats = offer.formats();
     if let Some(id) = custom
         .iter()
         .find(|id| formats.contain_mime_type(id))
         .map(|id| (*id).to_owned())
     {
         let mime = id.clone();
-        read_clipboard_bytes(
-            clipboard,
+        offer.read_bytes(
             &mime,
             Box::new(move |bytes| {
                 done(bytes.map(|b| R::Custom {
@@ -5930,8 +5996,7 @@ fn materialize_clipboard(
     } else if kinds & crate::wire::CLIP_FILES != 0
         && formats.contain_mime_type("text/uri-list")
     {
-        read_clipboard_bytes(
-            clipboard,
+        offer.read_bytes(
             "text/uri-list",
             Box::new(move |bytes| {
                 let Some(bytes) = bytes else { return done(None) };
@@ -5973,8 +6038,7 @@ fn materialize_clipboard(
     } else if kinds & crate::wire::CLIP_IMAGE != 0
         && formats.contain_mime_type("image/png")
     {
-        read_clipboard_bytes(
-            clipboard,
+        offer.read_bytes(
             "image/png",
             Box::new(move |bytes| {
                 done(bytes.map(|b| {
@@ -5986,8 +6050,7 @@ fn materialize_clipboard(
     {
         // Raw UTF-8 under the bare type — measured: GDK adds no
         // charset alias for html (that aliasing is text/plain-only).
-        read_clipboard_bytes(
-            clipboard,
+        offer.read_bytes(
             "text/html",
             Box::new(move |bytes| {
                 done(bytes
@@ -5995,33 +6058,10 @@ fn materialize_clipboard(
             }),
         );
     } else if kinds & crate::wire::CLIP_TEXT != 0 && clipboard_offers_text(&formats) {
-        clipboard.read_text_async(gtk4::gio::Cancellable::NONE, move |res| {
-            done(match res {
-                Ok(Some(s)) => Some(R::Text(s.to_string())),
-                _ => None,
-            });
-        });
+        offer.read_text(Box::new(move |text| done(text.map(R::Text))));
     } else {
         done(None);
     }
-}
-
-/// One mime type's bytes off the clipboard, whole, then the callback — None
-/// for a failed transfer (GDK fails an unservable read fast, measured §5b).
-fn read_clipboard_bytes(
-    clipboard: &gdk::Clipboard,
-    mime: &str,
-    done: Box<dyn FnOnce(Option<Vec<u8>>)>,
-) {
-    clipboard.read_async(
-        &[mime],
-        glib::Priority::DEFAULT,
-        gtk4::gio::Cancellable::NONE,
-        move |res| match res {
-            Ok((stream, _mime)) => read_stream_to_end(stream, Vec::new(), done),
-            Err(_) => done(None),
-        },
-    );
 }
 
 fn read_stream_to_end(
@@ -6044,6 +6084,688 @@ fn read_stream_to_end(
             Err(_) => done(None),
         },
     );
+}
+
+// --- Drag and drop (docs/dnd-plan.md) ---------------------------------
+// The source is a GtkDragSource over the declared payload, the destination a
+// GtkDropTargetAsync (D2's ruling: this toolkit can answer the drop LATER,
+// so the occurrence is emitted when the bytes arrive and nothing here waits).
+// Every hover and every drop is answered by crate::wire::drop_verdict, the
+// core's one pure function; nothing in this file decides.
+
+/// kaya's row payload for a reorder (docs/dnd-plan.md D8): the moved row's
+/// key path, dot-joined, under a kaya-private id.
+const KAYA_ROW_MIME: &str = "dev.kaya/row";
+
+/// The script the `drag` verb runs (docs/dnd-plan.md D10). tools/linux/
+/// run-suites.sh exports it; the verb refuses by name when it is unset,
+/// because a drag that silently does not happen reads as a refused drop.
+#[cfg(feature = "harness")]
+const DRAG_DRIVER_VAR: &str = "KAYA_DRAG_DRIVER";
+
+fn drag_actions(mask: u32) -> gdk::DragAction {
+    let mut actions = gdk::DragAction::empty();
+    if mask & crate::wire::DRAG_OP_COPY != 0 {
+        actions |= gdk::DragAction::COPY;
+    }
+    if mask & crate::wire::DRAG_OP_MOVE != 0 {
+        actions |= gdk::DragAction::MOVE;
+    }
+    actions
+}
+
+fn drag_mask(actions: gdk::DragAction) -> u32 {
+    let mut mask = 0;
+    if actions.contains(gdk::DragAction::COPY) {
+        mask |= crate::wire::DRAG_OP_COPY;
+    }
+    if actions.contains(gdk::DragAction::MOVE) {
+        mask |= crate::wire::DRAG_OP_MOVE;
+    }
+    mask
+}
+
+/// One provider per populated representation, in descending clip value —
+/// the copy arm's own construction, shared because a drag payload IS a
+/// GdkContentProvider on this platform (docs/dnd-plan.md §0).
+fn clip_providers(clip: &crate::protocol::ClipOut) -> Vec<gdk::ContentProvider> {
+    let mut providers: Vec<gdk::ContentProvider> = Vec::new();
+    for (id, bytes) in &clip.custom {
+        providers.push(gdk::ContentProvider::for_bytes(
+            id,
+            &glib::Bytes::from(&bytes.0[..]),
+        ));
+    }
+    if !clip.files.is_empty() {
+        // text/uri-list with the RFC's CRLF separators and trailing
+        // terminator (measured: the foreign reader is unbothered either way,
+        // so the RFC spelling stands).
+        let mut uris = String::new();
+        for path in &clip.files {
+            match glib::filename_to_uri(path, None) {
+                Ok(uri) => {
+                    uris.push_str(&uri);
+                    uris.push_str("\r\n");
+                }
+                Err(e) => panic!(
+                    "kaya: a clip carries file locator {path:?} that does \
+                     not name a filesystem path: {e}"
+                ),
+            }
+        }
+        providers.push(gdk::ContentProvider::for_bytes(
+            "text/uri-list",
+            &glib::Bytes::from_owned(uris.into_bytes()),
+        ));
+    }
+    if let Some(png) = &clip.image {
+        // RAW BYTES UNDER THE TYPE, never GdkTexture: the texture re-encodes
+        // on demand and the bytes stop round-tripping (the macOS
+        // writeObjects lesson, measured again here, §5b).
+        providers.push(gdk::ContentProvider::for_bytes(
+            "image/png",
+            &glib::Bytes::from(&png.0[..]),
+        ));
+    }
+    if let Some(html) = &clip.html {
+        // Raw UTF-8 under the bare type; GDK adds no charset alias for html
+        // (measured §5b), which is what the reader asks for.
+        providers.push(gdk::ContentProvider::for_bytes(
+            "text/html",
+            &glib::Bytes::from_owned(html.clone().into_bytes()),
+        ));
+    }
+    if let Some(text) = &clip.text {
+        use gtk4::glib::prelude::ToValue;
+        // A string VALUE, not bytes: GTK derives the text/plain spellings
+        // and charset aliases from it.
+        providers.push(gdk::ContentProvider::for_value(&text.to_value()));
+    }
+    providers
+}
+
+/// A union advertises every provider in it rather than letting the last one
+/// win (measured §5b); one provider needs no union.
+fn union_provider(mut providers: Vec<gdk::ContentProvider>) -> gdk::ContentProvider {
+    if providers.len() == 1 {
+        providers.remove(0)
+    } else {
+        gdk::ContentProvider::new_union(&providers)
+    }
+}
+
+/// The mime types an accept list names, in the ACCEPT LIST'S OWN descending
+/// clip value — what a destination advertises to the platform.
+fn accept_formats(accepts: &str) -> gdk::ContentFormats {
+    let (kinds, custom) = crate::wire::parse_accept_list(accepts);
+    let mut mimes: Vec<&str> = Vec::new();
+    mimes.extend(custom);
+    if kinds & crate::wire::CLIP_FILES != 0 {
+        mimes.push("text/uri-list");
+    }
+    if kinds & crate::wire::CLIP_IMAGE != 0 {
+        mimes.push("image/png");
+    }
+    if kinds & crate::wire::CLIP_HTML != 0 {
+        mimes.push("text/html");
+    }
+    if kinds & crate::wire::CLIP_TEXT != 0 {
+        mimes.push("text/plain;charset=utf-8");
+        mimes.push("text/plain");
+    }
+    gdk::ContentFormats::new(&mimes)
+}
+
+/// What a drag in flight OFFERS, in kaya's vocabulary: the closed kinds as a
+/// mask and the custom ids among `accepted` it carries.
+fn drop_offer<'a>(drop: &gdk::Drop, accepted: &[&'a str]) -> (u32, Vec<&'a str>) {
+    let formats = drop.formats();
+    let mut kinds = 0;
+    if clipboard_offers_text(&formats) {
+        kinds |= crate::wire::CLIP_TEXT;
+    }
+    if formats.contain_mime_type("text/html") {
+        kinds |= crate::wire::CLIP_HTML;
+    }
+    if formats.contain_mime_type("image/png") {
+        kinds |= crate::wire::CLIP_IMAGE;
+    }
+    if formats.contain_mime_type("text/uri-list") {
+        kinds |= crate::wire::CLIP_FILES;
+    }
+    let custom = accepted
+        .iter()
+        .copied()
+        .filter(|id| formats.contain_mime_type(id))
+        .collect();
+    (kinds, custom)
+}
+
+/// THE VERDICT, for a hover and for the drop alike: the core's pure function
+/// over what this destination declared and what the drag offers. A foreign
+/// source (`gdk_drop_get_drag` is null) is answered copy there, so no other
+/// application deletes on kaya's behalf (D2).
+fn drop_action(accepts: &str, operations: u32, drop: &gdk::Drop) -> gdk::DragAction {
+    let (_, accepted) = crate::wire::parse_accept_list(accepts);
+    let (offered, offered_custom) = drop_offer(drop, &accepted);
+    let mask = crate::wire::drop_verdict(
+        accepts,
+        operations,
+        offered,
+        &offered_custom,
+        drag_mask(drop.actions()),
+        drop.drag().is_some(),
+    );
+    drag_actions(mask)
+}
+
+/// One stamped row's key path, out of the identity tag every stamped copy
+/// carries (docs/dnd-plan.md D8's third rule).
+fn tag_path(tag: &[u8]) -> Option<crate::protocol::Path> {
+    match crate::wire::decode_click_tag(tag) {
+        Occurrence::InstanceButtonClicked { path, .. } => Some(path),
+        _ => None,
+    }
+}
+
+/// The same path as the reorder payload's bytes. STRING KEYS ONLY, which is
+/// the addressing grammar the whole harness uses (docs/tables-plan.md).
+fn path_keys(path: &crate::protocol::Path) -> Option<String> {
+    let mut keys = Vec::new();
+    for value in path {
+        match value {
+            Value::Str(s) => keys.push(s.as_str()),
+            _ => return None,
+        }
+    }
+    (!keys.is_empty()).then(|| keys.join("."))
+}
+
+/// The box a For's rows are parented into: its own container, or the
+/// viewport's content when columns were declared on it (MoveChild's
+/// resolution, and for the same reason).
+fn rows_box(core: &CoreState, container: WidgetId) -> Option<gtk4::Widget> {
+    let base = match core.widgets.get(&container)? {
+        NativeWidget::Column(b) => b.clone(),
+        NativeWidget::Row(b) => b.clone(),
+        _ => return None,
+    };
+    Some(match core.tables.get(&container.0) {
+        Some(table) => table.content.clone().upcast(),
+        None => base.upcast(),
+    })
+}
+
+/// The ROW of a reorderable container under a point in that container's own
+/// coordinates: a For stamps its copies as the container's own children, so
+/// the row is that child and nothing deeper. The spacers are geometry
+/// (table_rows' filter, for the same reason).
+fn row_under(rows: &gtk4::Widget, x: f64, y: f64) -> Option<gtk4::Widget> {
+    children_of(rows).into_iter().find(|child| {
+        if !child.is_visible()
+            || child.has_css_class(TABLE_SPACER_CLASS)
+            || child.has_css_class(TABLE_HEADER_CLASS)
+            || child.has_css_class(KAYA_FOLDED_CLASS)
+        {
+            return false;
+        }
+        child.compute_bounds(rows).is_some_and(|b| {
+            let (bx, by) = (f64::from(b.x()), f64::from(b.y()));
+            x >= bx
+                && x < bx + f64::from(b.width())
+                && y >= by
+                && y < by + f64::from(b.height())
+        })
+    })
+}
+
+/// The row a reorder press picked, and then the drag it became. A reorder's
+/// destination takes rows of its OWN container and nothing else, so the drag
+/// itself is what says which container a row left; the source's drag_ended
+/// rides the ROW's identity, as the mac arm's does.
+struct RowDrag {
+    container: u64,
+    tag: Vec<u8>,
+    drag: Option<gdk::Drag>,
+}
+
+/// The drag-and-drop declarations, reachable from a GTK callback. Rc'd for
+/// ClipboardHub's reason: a controller's closure fires from the main loop
+/// while apply may hold CORE's borrow, so it reads its state here.
+struct DndHub {
+    /// Live sources by widget id: the payload, the operations allowed, and
+    /// the identity tag drag_ended rides back on.
+    sources: RefCell<HashMap<u64, (crate::protocol::ClipOut, u32, Vec<u8>)>>,
+    /// Live destinations: the operation mask and the identity tag. The
+    /// accept list is the widget's own `accepts` prop, on the clipboard hub,
+    /// because paste and drop declare ONE vocabulary.
+    targets: RefCell<HashMap<u64, (u32, Vec<u8>)>>,
+    /// Reorderable For containers: the container's own tag, which is a
+    /// landing's identity (docs/dnd-plan.md D8 as amended).
+    reorder: RefCell<HashMap<u64, Vec<u8>>>,
+    row_drag: RefCell<Option<RowDrag>>,
+    /// The controllers installed, so a re-declaration replaces rather than
+    /// stacks and a withdrawal takes the platform's registration off.
+    source_ctl: RefCell<HashMap<u64, gtk4::DragSource>>,
+    target_ctl: RefCell<HashMap<u64, gtk4::DropTargetAsync>>,
+    reorder_ctl: RefCell<HashMap<u64, (gtk4::DragSource, gtk4::DropTargetAsync)>>,
+    clip: Rc<ClipboardHub>,
+    sink: OccSink,
+}
+
+impl DndHub {
+    fn new(clip: Rc<ClipboardHub>, sink: OccSink) -> Self {
+        DndHub {
+            sources: RefCell::new(HashMap::new()),
+            targets: RefCell::new(HashMap::new()),
+            reorder: RefCell::new(HashMap::new()),
+            row_drag: RefCell::new(None),
+            source_ctl: RefCell::new(HashMap::new()),
+            target_ctl: RefCell::new(HashMap::new()),
+            reorder_ctl: RefCell::new(HashMap::new()),
+            clip,
+            sink,
+        }
+    }
+
+    fn accepts_of(&self, id: u64) -> String {
+        self.clip.accepts.borrow().get(&id).cloned().unwrap_or_default()
+    }
+
+    /// The identity tag of a widget the pointer landed on — the same bytes a
+    /// click rides, which is what makes a stamped row addressable at all.
+    fn identity_of(&self, widget: &gtk4::Widget) -> Option<Vec<u8>> {
+        let id = self.clip.widgets.borrow().iter().find_map(|(id, (weak, _))| {
+            (weak.upgrade().as_ref() == Some(widget)).then_some(*id)
+        })?;
+        self.clip.tags.borrow().get(&id).cloned()
+    }
+
+    fn emit_dropped(
+        &self,
+        tag: &[u8],
+        point: (f64, f64),
+        operation: u32,
+        anchor: crate::protocol::Path,
+        before: bool,
+        clip: crate::protocol::Representation,
+    ) {
+        let occurrence = match crate::wire::decode_click_tag(tag) {
+            Occurrence::ButtonClicked { id } => Occurrence::Dropped {
+                id,
+                point,
+                operation,
+                anchor,
+                before,
+                clip,
+            },
+            Occurrence::InstanceButtonClicked { node, path } => Occurrence::InstanceDropped {
+                node,
+                path,
+                point,
+                operation,
+                anchor,
+                before,
+                clip,
+            },
+            other => panic!(
+                "kaya: a drop tag decoded to {other:?}, which is not a widget identity"
+            ),
+        };
+        self.sink.send(occurrence);
+    }
+
+    fn emit_drag_ended(&self, tag: &[u8], operation: u32) {
+        let occurrence = match crate::wire::decode_click_tag(tag) {
+            Occurrence::ButtonClicked { id } => Occurrence::DragEnded { id, operation },
+            Occurrence::InstanceButtonClicked { node, path } => {
+                Occurrence::InstanceDragEnded { node, path, operation }
+            }
+            other => panic!(
+                "kaya: a drag tag decoded to {other:?}, which is not a widget identity"
+            ),
+        };
+        self.sink.send(occurrence);
+    }
+}
+
+/// (Re)install the platform's drag source over a widget's declaration. The
+/// declaration is CAPTURED, not read live: a same-app move withdraws the
+/// source inside the app's reaction to the drop, and a drag already in
+/// flight still owes its source a drag_ended.
+fn install_drag_source(core: &CoreState, id: WidgetId) {
+    let widget = core
+        .widgets
+        .get(&id)
+        .expect("scene validated the id")
+        .control();
+    let hub = core.dnd.clone();
+    if let Some(old) = hub.source_ctl.borrow_mut().remove(&id.0) {
+        widget.remove_controller(&old);
+    }
+    let Some((clip, operations, tag)) = hub.sources.borrow().get(&id.0).cloned() else {
+        return;
+    };
+    let source = gtk4::DragSource::new();
+    source.set_actions(drag_actions(operations));
+    source.connect_prepare(move |_source, _x, _y| {
+        let providers = clip_providers(&clip);
+        (!providers.is_empty()).then(|| union_provider(providers))
+    });
+    // GDK reports the action it settled on; a cancelled drag reports none,
+    // and the flag makes the refused case say so whatever the toolkit left
+    // in `selected_action`.
+    let cancelled = Rc::new(std::cell::Cell::new(false));
+    let began = cancelled.clone();
+    source.connect_drag_begin(move |_source, _drag| began.set(false));
+    let refused = cancelled.clone();
+    source.connect_drag_cancel(move |_source, _drag, _reason| {
+        refused.set(true);
+        false
+    });
+    let end_hub = hub.clone();
+    source.connect_drag_end(move |_source, drag, _delete| {
+        let operation = if cancelled.get() {
+            crate::wire::DRAG_OP_NONE
+        } else {
+            drag_mask(drag.selected_action())
+        };
+        end_hub.emit_drag_ended(&tag, operation);
+    });
+    widget.add_controller(source.clone());
+    hub.source_ctl.borrow_mut().insert(id.0, source);
+}
+
+/// (Re)install the platform's drop destination. Called from the drop_target
+/// arm AND from the `accepts` prop, because the two together are one
+/// declaration and the formats a destination advertises come from the list.
+fn install_drop_target(core: &CoreState, id: WidgetId) {
+    let widget = core
+        .widgets
+        .get(&id)
+        .expect("scene validated the id")
+        .control();
+    let hub = core.dnd.clone();
+    if let Some(old) = hub.target_ctl.borrow_mut().remove(&id.0) {
+        widget.remove_controller(&old);
+    }
+    let Some((operations, tag)) = hub.targets.borrow().get(&id.0).cloned() else {
+        return;
+    };
+    let accepts = hub.accepts_of(id.0);
+    let target =
+        gtk4::DropTargetAsync::new(Some(accept_formats(&accepts)), drag_actions(operations));
+    let accept_hub = hub.clone();
+    target.connect_accept(move |_target, drop| {
+        !drop_action(&accept_hub.accepts_of(id.0), operations, drop).is_empty()
+    });
+    let enter_hub = hub.clone();
+    target.connect_drag_enter(move |_target, drop, _x, _y| {
+        drop_action(&enter_hub.accepts_of(id.0), operations, drop)
+    });
+    let motion_hub = hub.clone();
+    target.connect_drag_motion(move |_target, drop, _x, _y| {
+        drop_action(&motion_hub.accepts_of(id.0), operations, drop)
+    });
+    let drop_hub = hub.clone();
+    target.connect_drop(move |_target, drop, x, y| {
+        let accepts = drop_hub.accepts_of(id.0);
+        let action = drop_action(&accepts, operations, drop);
+        if action.is_empty() {
+            return false;
+        }
+        // NOTHING WAITS HERE (D2): the bytes arrive when they arrive and the
+        // occurrence goes out then, which is what GtkDropTargetAsync is for.
+        let finish = drop.clone();
+        let hub = drop_hub.clone();
+        let tag = tag.clone();
+        materialize(
+            &ClipOffer::Drop(drop.clone()),
+            &accepts,
+            Box::new(move |clip| match clip {
+                Some(clip) => {
+                    hub.emit_dropped(&tag, (x, y), drag_mask(action), Vec::new(), false, clip);
+                    finish.finish(action);
+                }
+                // Nothing transferred is not a drop; the source learns
+                // `none` through its own drag_ended, as a refusal does.
+                None => finish.finish(gdk::DragAction::empty()),
+            }),
+        );
+        true
+    });
+    widget.add_controller(target.clone());
+    hub.target_ctl.borrow_mut().insert(id.0, target);
+}
+
+/// A reorderable For: BOTH HALVES ON THE CONTAINER, not on each row.
+/// The rows of a For are stamped, moved and destroyed on every collection
+/// delta and on every windowing scroll, so a per-row controller would have
+/// to be reinstalled from four apply arms; the container's are installed
+/// once and the ROW is the child under the pointer. The semantics are the
+/// mac arm's: a row is a source whose payload is its key path under
+/// `dev.kaya/row`, and a destination that takes only that id from a drag
+/// its OWN container started (docs/dnd-plan.md D8).
+fn install_reorder(core: &CoreState, container: WidgetId) {
+    let rows = rows_box(core, container).unwrap_or_else(|| {
+        panic!("kaya: set_reorderable on {container:?}, which is not a For container")
+    });
+    let hub = core.dnd.clone();
+    if let Some((old_source, old_target)) = hub.reorder_ctl.borrow_mut().remove(&container.0) {
+        rows.remove_controller(&old_source);
+        rows.remove_controller(&old_target);
+    }
+    let Some(container_tag) = hub.reorder.borrow().get(&container.0).cloned() else {
+        return;
+    };
+    let source = gtk4::DragSource::new();
+    source.set_actions(gdk::DragAction::MOVE);
+    let prepare_hub = hub.clone();
+    let prepare_rows = rows.clone();
+    source.connect_prepare(move |_source, x, y| {
+        let row = row_under(&prepare_rows, x, y)?;
+        let tag = prepare_hub.identity_of(&row)?;
+        let keys = path_keys(&tag_path(&tag)?)?;
+        *prepare_hub.row_drag.borrow_mut() = Some(RowDrag {
+            container: container.0,
+            tag,
+            drag: None,
+        });
+        Some(gdk::ContentProvider::for_bytes(
+            KAYA_ROW_MIME,
+            &glib::Bytes::from_owned(keys.into_bytes()),
+        ))
+    });
+    let begin_hub = hub.clone();
+    source.connect_drag_begin(move |_source, drag| {
+        if let Some(row) = begin_hub.row_drag.borrow_mut().as_mut() {
+            row.drag = Some(drag.clone());
+        }
+    });
+    let end_hub = hub.clone();
+    source.connect_drag_end(move |_source, drag, _delete| {
+        let ended = end_hub.row_drag.borrow_mut().take();
+        if let Some(row) = ended {
+            end_hub.emit_drag_ended(&row.tag, drag_mask(drag.selected_action()));
+        }
+    });
+    rows.add_controller(source.clone());
+    let target = gtk4::DropTargetAsync::new(
+        Some(gdk::ContentFormats::new(&[KAYA_ROW_MIME])),
+        gdk::DragAction::MOVE,
+    );
+    let accept_hub = hub.clone();
+    target.connect_accept(move |_target, drop| reorder_takes(&accept_hub, container.0, drop));
+    let enter_hub = hub.clone();
+    target.connect_drag_enter(move |_target, drop, _x, _y| {
+        reorder_action(&enter_hub, container.0, drop)
+    });
+    let motion_hub = hub.clone();
+    target.connect_drag_motion(move |_target, drop, _x, _y| {
+        reorder_action(&motion_hub, container.0, drop)
+    });
+    let drop_hub = hub.clone();
+    let drop_rows = rows.clone();
+    target.connect_drop(move |_target, drop, x, y| {
+        if !reorder_takes(&drop_hub, container.0, drop) {
+            return false;
+        }
+        let Some(row) = row_under(&drop_rows, x, y) else {
+            return false;
+        };
+        let Some(bounds) = row.compute_bounds(&drop_rows) else {
+            return false;
+        };
+        let Some(anchor) = drop_hub.identity_of(&row).as_deref().and_then(tag_path) else {
+            return false;
+        };
+        // Before is the row's UPPER HALF, the anchor is the row the drop
+        // landed on, and the identity is the CONTAINER the app registered
+        // on (docs/dnd-plan.md D8 as amended).
+        let before = y < f64::from(bounds.y()) + f64::from(bounds.height()) / 2.0;
+        let finish = drop.clone();
+        let hub = drop_hub.clone();
+        let tag = container_tag.clone();
+        materialize(
+            &ClipOffer::Drop(drop.clone()),
+            KAYA_ROW_MIME,
+            Box::new(move |clip| match clip {
+                Some(clip) => {
+                    hub.emit_dropped(
+                        &tag,
+                        (x, y),
+                        crate::wire::DRAG_OP_MOVE,
+                        anchor,
+                        before,
+                        clip,
+                    );
+                    finish.finish(gdk::DragAction::MOVE);
+                }
+                None => finish.finish(gdk::DragAction::empty()),
+            }),
+        );
+        true
+    });
+    rows.add_controller(target.clone());
+    hub.reorder_ctl.borrow_mut().insert(container.0, (source, target));
+}
+
+/// Whether a reorder destination takes this drag: the row id, from a LOCAL
+/// source, whose drag THIS container started.
+fn reorder_takes(hub: &DndHub, container: u64, drop: &gdk::Drop) -> bool {
+    if !drop.formats().contain_mime_type(KAYA_ROW_MIME) {
+        return false;
+    }
+    let Some(drag) = drop.drag() else {
+        return false;
+    };
+    hub.row_drag
+        .borrow()
+        .as_ref()
+        .is_some_and(|row| row.container == container && row.drag.as_ref() == Some(&drag))
+}
+
+fn reorder_action(hub: &DndHub, container: u64, drop: &gdk::Drop) -> gdk::DragAction {
+    if reorder_takes(hub, container, drop) {
+        gdk::DragAction::MOVE
+    } else {
+        gdk::DragAction::empty()
+    }
+}
+
+/// Whether a widget is a row of some reorderable For — the other way a
+/// widget takes part in a drag without declaring anything itself.
+#[cfg(feature = "harness")]
+fn in_reorderable(core: &CoreState, widget: &gtk4::Widget) -> bool {
+    core.dnd
+        .reorder
+        .borrow()
+        .keys()
+        .filter_map(|id| rows_box(core, WidgetId(*id)))
+        .any(|rows| widget.is_ancestor(&rows))
+}
+
+/// Where the `drag` verb presses and where it releases, in the WINDOW's own
+/// content coordinates (docs/dnd-plan.md D10). A reorder aims at the landing
+/// row's upper or lower quarter, which is what `before` and `onto` mean.
+#[cfg(feature = "harness")]
+fn drag_points(
+    core: &CoreState,
+    source: crate::harness::Target,
+    destination: crate::harness::Target,
+    reorder: Option<bool>,
+) -> Result<((f64, f64), (f64, f64)), String> {
+    let src = target_widget(core, source)
+        .ok_or_else(|| format!("no such source {:?}", source))?;
+    let dst = target_widget(core, destination)
+        .ok_or_else(|| format!("no such destination {:?}", destination))?;
+    if !in_reorderable(core, &src) && !core_declares_source(core, &src) {
+        return Err(format!(
+            "the source {:?} declares no drag payload (set_drag_source) and sits in \
+             no reorderable For: {} widgets declare a payload, {} Fors reorder",
+            source,
+            core.dnd.sources.borrow().len(),
+            core.dnd.reorder.borrow().len()
+        ));
+    }
+    if !in_reorderable(core, &dst) && !core_declares_target(core, &dst) {
+        return Err(format!(
+            "the destination {:?} declares no drop_target and sits in no reorderable \
+             For: {} widgets declare a drop target, {} Fors reorder",
+            destination,
+            core.dnd.targets.borrow().len(),
+            core.dnd.reorder.borrow().len()
+        ));
+    }
+    let (Some(sb), Some(db)) = (
+        src.compute_bounds(&core.window),
+        dst.compute_bounds(&core.window),
+    ) else {
+        return Err("the window has not laid the two widgets out yet".to_owned());
+    };
+    if sb.width() <= 0.0 || sb.height() <= 0.0 || db.width() <= 0.0 || db.height() <= 0.0 {
+        return Err(format!(
+            "a widget has no extent to press: source {}x{}, destination {}x{}",
+            sb.width(),
+            sb.height(),
+            db.width(),
+            db.height()
+        ));
+    }
+    let from = (
+        f64::from(sb.x()) + f64::from(sb.width()) / 2.0,
+        f64::from(sb.y()) + f64::from(sb.height()) / 2.0,
+    );
+    let share = match reorder {
+        Some(true) => 0.25,
+        Some(false) => 0.75,
+        None => 0.5,
+    };
+    let to = (
+        f64::from(db.x()) + f64::from(db.width()) / 2.0,
+        f64::from(db.y()) + f64::from(db.height()) * share,
+    );
+    Ok((from, to))
+}
+
+#[cfg(feature = "harness")]
+fn core_declares_source(core: &CoreState, widget: &gtk4::Widget) -> bool {
+    core.dnd
+        .source_ctl
+        .borrow()
+        .keys()
+        .filter_map(|id| core.widgets.get(&WidgetId(*id)))
+        .any(|native| &native.control() == widget)
+}
+
+#[cfg(feature = "harness")]
+fn core_declares_target(core: &CoreState, widget: &gtk4::Widget) -> bool {
+    core.dnd
+        .target_ctl
+        .borrow()
+        .keys()
+        .filter_map(|id| core.widgets.get(&WidgetId(*id)))
+        .any(|native| &native.control() == widget)
 }
 
 /// THE CANVAS'S WIDGET: a `GdkPaintable` drawn at the size the CORE rastered
@@ -6520,8 +7242,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 parent_box.reorder_child_after(&child_widget, after.as_ref());
             }
         }
-        ApplyOp::SetDragSource { .. } | ApplyOp::SetDropTarget { .. } | ApplyOp::SetReorderable { .. } => {
-            depth_stub("dnd")
+        // THE THREE DRAG-AND-DROP DECLARATIONS (docs/dnd-plan.md D1, D8).
+        // Each is stored on the hub and then (re)installed: the controller a
+        // widget carries is whatever its CURRENT declaration says, and an
+        // empty clip or a zero mask takes the platform's registration off.
+        ApplyOp::SetDragSource { id, clip, operations, tag } => {
+            if clip == crate::protocol::ClipOut::default() {
+                core.dnd.sources.borrow_mut().remove(&id.0);
+            } else {
+                core.dnd.sources.borrow_mut().insert(id.0, (clip, operations, tag));
+            }
+            install_drag_source(core, id);
+        }
+        ApplyOp::SetDropTarget { id, operations, tag } => {
+            if operations == 0 {
+                core.dnd.targets.borrow_mut().remove(&id.0);
+            } else {
+                core.dnd.targets.borrow_mut().insert(id.0, (operations, tag));
+            }
+            install_drop_target(core, id);
+        }
+        ApplyOp::SetReorderable { id, enabled, tag } => {
+            if enabled == 0 {
+                core.dnd.reorder.borrow_mut().remove(&id.0);
+            } else {
+                core.dnd.reorder.borrow_mut().insert(id.0, tag);
+            }
+            install_reorder(core, id);
         }
         ApplyOp::Fold { child, table } => {
             // The stacked fold (D7): the child moves INTO the table's
@@ -6591,6 +7338,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.clipboard.widgets.borrow_mut().remove(&id.0);
             core.clipboard.tags.borrow_mut().remove(&id.0);
             core.clipboard.accepts.borrow_mut().remove(&id.0);
+            // A destroyed widget takes its drag-and-drop declarations with
+            // it; the controllers die with the widget they were added to.
+            core.dnd.sources.borrow_mut().remove(&id.0);
+            core.dnd.targets.borrow_mut().remove(&id.0);
+            core.dnd.reorder.borrow_mut().remove(&id.0);
+            core.dnd.source_ctl.borrow_mut().remove(&id.0);
+            core.dnd.target_ctl.borrow_mut().remove(&id.0);
+            core.dnd.reorder_ctl.borrow_mut().remove(&id.0);
             // A destroyed For container takes its composed header with
             // it; the entry would otherwise outlive the widget it holds.
             core.tables.remove(&id.0);
@@ -7097,68 +7852,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 
         ApplyOp::Copy(clip) => {
             core.clipboard.armed.set(true);
-            // One provider per populated representation, unioned: the union
-            // advertises all of them (measured §5b — it does not let the
-            // last provider win).
-            let mut providers: Vec<gdk::ContentProvider> = Vec::new();
-            // Descending clip value — custom, files, image, html, text —
-            // the canonical order (§1).
-            for (id, bytes) in &clip.custom {
-                providers.push(gdk::ContentProvider::for_bytes(
-                    id,
-                    &glib::Bytes::from(&bytes.0[..]),
-                ));
-            }
-            if !clip.files.is_empty() {
-                // text/uri-list with the RFC's CRLF separators and trailing
-                // terminator (measured: the foreign reader is unbothered
-                // either way, so the RFC spelling stands).
-                let mut uris = String::new();
-                for path in &clip.files {
-                    match glib::filename_to_uri(path, None) {
-                        Ok(uri) => {
-                            uris.push_str(&uri);
-                            uris.push_str("\r\n");
-                        }
-                        Err(e) => panic!(
-                            "kaya: copy carries file locator {path:?} that does \
-                             not name a filesystem path: {e}"
-                        ),
-                    }
-                }
-                providers.push(gdk::ContentProvider::for_bytes(
-                    "text/uri-list",
-                    &glib::Bytes::from_owned(uris.into_bytes()),
-                ));
-            }
-            if let Some(png) = &clip.image {
-                // RAW BYTES UNDER THE TYPE, never GdkTexture: the texture
-                // re-encodes on demand and the bytes stop round-tripping (the
-                // macOS writeObjects lesson, measured again here, §5b).
-                providers.push(gdk::ContentProvider::for_bytes(
-                    "image/png",
-                    &glib::Bytes::from(&png.0[..]),
-                ));
-            }
-            if let Some(html) = &clip.html {
-                // Raw UTF-8 under the bare type; GDK adds no charset alias
-                // for html (measured §5b), which is what the reader asks for.
-                providers.push(gdk::ContentProvider::for_bytes(
-                    "text/html",
-                    &glib::Bytes::from_owned(html.clone().into_bytes()),
-                ));
-            }
-            if let Some(text) = &clip.text {
-                use gtk4::glib::prelude::ToValue;
-                // A string VALUE, not bytes: GTK derives the
-                // text/plain spellings and charset aliases from it.
-                providers.push(gdk::ContentProvider::for_value(&text.to_value()));
-            }
-            let provider = if providers.len() == 1 {
-                providers.remove(0)
-            } else {
-                gdk::ContentProvider::new_union(&providers)
-            };
+            // One provider per populated representation, unioned (clip_providers).
+            let provider = union_provider(clip_providers(&clip));
             let clipboard = gtk4::prelude::WidgetExt::display(&core.window).clipboard();
             if let Err(e) = clipboard.set_content(Some(&provider)) {
                 // This error is LOCAL bookkeeping only. The failure that
@@ -7172,8 +7867,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.clipboard.armed.set(true);
             let clipboard = gtk4::prelude::WidgetExt::display(&core.window).clipboard();
             let sink = core.occurrences.clone();
-            materialize_clipboard(
-                &clipboard,
+            materialize(
+                &ClipOffer::Board(clipboard),
                 &accepting,
                 Box::new(move |clip| {
                     // Answered exactly once; None IS an answer — the universal
@@ -7818,6 +8513,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     }
                     core.clipboard.armed.set(true);
                     refresh_roles(core);
+                    // THE OTHER HALF OF A DROP DECLARATION: the formats a
+                    // destination advertises come from this list, and the
+                    // two records arrive in either order.
+                    install_drop_target(core, id);
                 }
                 // SEMANTIC EMPHASIS (docs/styling-plan.md D4): what the widget
                 // MEANS, lowered to libadwaita's own documented style classes
@@ -8668,6 +9367,34 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         }
 
 
+        let clipboard_hub = {
+            let hub = Rc::new(ClipboardHub::new(occ_tx.clone()));
+            // Enablement moves when the clipboard or the focus does
+            // (the mac finding, §3), and BOTH signals can fire
+            // mid-apply while CORE is borrowed — so each defers.
+            let defer = || {
+                glib::idle_add_local_once(|| {
+                    CORE.with_borrow(|core| {
+                        if let Some(core) = core.as_ref() {
+                            refresh_roles(core);
+                        }
+                    });
+                });
+            };
+            if let Some(display) = gtk4::gdk::Display::default() {
+                let refresh = defer;
+                display.clipboard().connect_changed(move |_| refresh());
+            }
+            {
+                use gtk4::prelude::ObjectExt;
+                let refresh = defer;
+                window
+                    .connect_notify_local(Some("focus-widget"), move |_, _| {
+                        refresh()
+                    });
+            }
+            hub
+        };
         CORE.with_borrow_mut(|core| {
             *core = Some(CoreState {
                 transactions: tx_rx,
@@ -8747,34 +9474,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 open_context: Rc::new(RefCell::new(None)),
                 #[cfg(feature = "harness")]
                 context_trail: Rc::new(RefCell::new(Vec::new())),
-                clipboard: {
-                    let hub = Rc::new(ClipboardHub::new(occ_tx.clone()));
-                    // Enablement moves when the clipboard or the focus does
-                    // (the mac finding, §3), and BOTH signals can fire
-                    // mid-apply while CORE is borrowed — so each defers.
-                    let defer = || {
-                        glib::idle_add_local_once(|| {
-                            CORE.with_borrow(|core| {
-                                if let Some(core) = core.as_ref() {
-                                    refresh_roles(core);
-                                }
-                            });
-                        });
-                    };
-                    if let Some(display) = gtk4::gdk::Display::default() {
-                        let refresh = defer;
-                        display.clipboard().connect_changed(move |_| refresh());
-                    }
-                    {
-                        use gtk4::prelude::ObjectExt;
-                        let refresh = defer;
-                        window
-                            .connect_notify_local(Some("focus-widget"), move |_, _| {
-                                refresh()
-                            });
-                    }
-                    hub
-                },
+                clipboard: clipboard_hub.clone(),
+                // The drop half of a declaration reads the accept list the
+                // clipboard hub keeps: paste and drop are ONE vocabulary.
+                dnd: Rc::new(DndHub::new(clipboard_hub, occ_tx.clone())),
                 window_veto: {
                     let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
                     {
@@ -9081,6 +9784,35 @@ impl GtkStage {
             glib::ControlFlow::Break
         });
         rx.recv().expect("the main context applied the step")
+    }
+}
+
+#[cfg(feature = "harness")]
+impl GtkStage {
+    /// Wait, from the HARNESS thread, for `frames` of the window's own frame
+    /// clock — the only way to know a queued reallocation has actually been
+    /// laid out, since `compute_bounds` answers with the last frame's
+    /// transform. A tick callback keeps the clock running while it is
+    /// installed and removes itself when the count is reached.
+    fn await_frames(frames: usize) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let seen = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = seen.clone();
+        Self::on_main(move |core| {
+            core.window.add_tick_callback(move |_widget, _clock| {
+                if counter.fetch_add(1, Ordering::SeqCst) + 1 >= frames {
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        });
+        // BOUNDED, and silent when it expires: a clock that never ticked is
+        // reported by the reading that follows, which says what it measured.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        while seen.load(Ordering::SeqCst) < frames && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
 }
 
@@ -10552,6 +11284,91 @@ impl crate::harness::Stage for GtkStage {
             String::new()
         })
     }
+    /// THE DRAG VERB IS REAL INPUT ON THIS LANE (docs/dnd-plan.md D10): a
+    /// pointer press on the source, a walk past GTK's drag threshold, a
+    /// release on the destination, through XTEST on x11 and a virtual
+    /// pointer device on wayland. The gesture and the window's content
+    /// origin are tools/linux/dragdrive.py's, the same copy
+    /// tools/linux/dragprobe.py proves the route with before the first leg.
+    ///
+    /// THE INJECTOR RUNS FROM THIS THREAD, never the main one: the pointer's
+    /// walk needs the loop it is walking through. The verb returns when the
+    /// gesture has been delivered and does not wait for the drop — the
+    /// scene's expects retry, and a refused drop is not this verb's failure.
+    fn drag(
+        &self,
+        source: crate::harness::Target,
+        destination: crate::harness::Target,
+        reorder: Option<bool>,
+    ) -> String {
+        let driver = match std::env::var(DRAG_DRIVER_VAR) {
+            Ok(path) if !path.is_empty() => path,
+            _ => {
+                return format!(
+                    "{DRAG_DRIVER_VAR} is unset, so this lane has no hands: export it \
+                     naming tools/linux/dragdrive.py (tools/linux/run-suites.sh does)"
+                )
+            }
+        };
+        // A WIDGET'S BOX IS THE ONE THE LAST FRAME GAVE IT. A reorder's
+        // move_child queues a reallocation and nothing more, so the boxes
+        // read straight after it are the boxes from BEFORE the move — which
+        // aimed the second reorder at the rows the first one had displaced.
+        // Two frames of the window's own clock: the first carries the queued
+        // layout, the second proves it ran.
+        // docs/traps.md: A widget's box is the one the LAST FRAME gave it
+        Self::await_frames(2);
+        // A step's own consequences may still be landing: the widgets are
+        // asked for their boxes until both have one, or until the wait is
+        // spent and the reading itself is the failure.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+        let points = loop {
+            match Self::on_main(move |core| drag_points(core, source, destination, reorder)) {
+                Ok(points) => break Ok(points),
+                Err(why) if std::time::Instant::now() >= deadline => break Err(why),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
+        let (from, to) = match points {
+            Ok(points) => points,
+            Err(why) => return why,
+        };
+        let proto = if linux_wayland_session() { "wayland" } else { "x11" };
+        // THE TOPLEVEL'S OWN ORIGIN INSIDE ITS SURFACE — the CSD shadow, which
+        // the two servers report on opposite sides of.
+        // docs/traps.md: The x11 lane's toplevel X window is BIGGER than its content
+        let transform =
+            Self::on_main(|core| gtk4::prelude::NativeExt::surface_transform(&core.window));
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args([
+                proto,
+                &std::process::id().to_string(),
+                &format!("{}", transform.0.round() as i64),
+                &format!("{}", transform.1.round() as i64),
+                &format!("{}", from.0.round() as i64),
+                &format!("{}", from.1.round() as i64),
+                &format!("{}", to.0.round() as i64),
+                &format!("{}", to.1.round() as i64),
+            ])
+            .output();
+        match out {
+            Ok(out) if out.status.success() => {
+                // The screen points it pressed and released ride the leg log:
+                // a gesture that landed on the wrong pixel and one that never
+                // ran read the same from the model alone.
+                eprint!("KAYA_DIAG {}", String::from_utf8_lossy(&out.stdout));
+                String::new()
+            }
+            Ok(out) => format!(
+                "the pointer gesture failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            Err(e) => format!("{driver} could not be run: {e}"),
+        }
+    }
+
     fn header_click(&self, t: crate::harness::Target, column: u32) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.columns.len());
@@ -13170,7 +13987,3 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
     })
 }
 
-/// A depth stub is a CALL, never a sentence — tools/check-stubs.py reads it.
-fn depth_stub(scene: &str) -> ! {
-    panic!("kaya: the {scene} scene is not yet materialized on gtk — a depth slice; see CLAUDE.md's sequencing")
-}

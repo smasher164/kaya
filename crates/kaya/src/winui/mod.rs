@@ -561,6 +561,30 @@ struct CoreState {
     /// A BRACKET AND NOT A FLAG-WITH-A-TIMER: a routed `TextBox.Undo()` raises
     /// TextChanged a runloop turn LATER (7ms, `inside_undo_call=false`).
     ledger_quiet: HashMap<u64, String>,
+    /// Every tagged widget's CREATE tag by id — a stamped copy's
+    /// (template node, keys) identity. A reorder row's payload is its keys
+    /// and the keyed harness target resolves through it (gtk.rs keeps the
+    /// same map; docs/deferred.md's keyed-target entry).
+    widget_tags: HashMap<u64, Vec<u8>>,
+    /// The three drag-and-drop declarations (docs/dnd-plan.md D1, D8), by
+    /// widget id: what a source hands over, what a destination will do,
+    /// and which live For reorders its own rows.
+    drag_sources: HashMap<u64, WinDragSource>,
+    drop_targets: HashMap<u64, (u32, Vec<u8>)>,
+    reorderables: HashMap<u64, Vec<u8>>,
+    /// A reorderable For's rows, row id -> container id, rebuilt at every
+    /// drain's end: the rows are the container's children and arrive
+    /// batches after the declaration.
+    reorder_rows: HashMap<u64, u64>,
+    /// Widgets whose drag and drop handlers are attached — WinRT events
+    /// have no idempotent add, so a re-declaration must not stack a second
+    /// copy of every handler.
+    dnd_wired: std::collections::HashSet<u64>,
+    /// The OLE drop targets registered on this window's HWNDs, kept alive
+    /// for as long as they are registered (probe 2: XAML's AllowDrop
+    /// registers none, so Explorer and every Win32 source reach kaya only
+    /// here).
+    ole_targets: Vec<(isize, windows::Win32::System::Ole::IDropTarget)>,
 }
 
 // ---- Text ranges: the two pieces of state that CANNOT live in
@@ -1374,6 +1398,12 @@ fn drain_transactions() {
             // declared titles can all have moved, and the column tracks
             // are computed from all three.
             sync_tables(core);
+            // AND THE REORDERABLE FOR'S ROWS, which are its container's
+            // children and arrive batches after the declaration, plus the
+            // classic-OLE route's registration, which needs the island
+            // HWND to exist (docs/dnd-plan.md D8; probe 2).
+            sync_reorder_rows(core);
+            arm_ole_route(core);
             // AND THE PRESENTATION, last: a window has no XamlRoot until
             // something is mounted, so the first drain is where the scale
             // and the appearance become askable at all, and it is what
@@ -7110,6 +7140,1156 @@ fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::
     Ok(answer)
 }
 
+// ---- Drag and drop (DESIGN.md, docs/dnd-plan.md D1, D2, D8) ----------
+// TWO ROUTES IN ONE WINDOW, measured rather than chosen
+// (docs/probes/dnd-probe-windows-2026-09-03.md): XAML's CanDrag/AllowDrop
+// carries every WinRT drag, in process and across processes, and registers
+// NO OLE drop target on any of a WinUI window's four HWNDs — so Explorer
+// and every classic Win32 source reach kaya only through RegisterDragDrop
+// on the ISLAND HWND. Both are armed unconditionally; each world's drags
+// go to its own receiver.
+
+/// kaya's row payload for a reorder (docs/dnd-plan.md D8): the moved
+/// row's key path, dot-joined, under a kaya-private id.
+const ROW_DRAG_TYPE: &str = "dev.kaya/row";
+
+/// The LOCAL marker (D2): a format whose NAME carries this process's id.
+/// A hover verdict is synchronous on every platform, so "is this drag
+/// mine?" must be answerable from the FORMAT LIST alone — reading a value
+/// would be an async round trip inside DragOver.
+fn local_marker() -> String {
+    format!("dev.kaya/local.{}", std::process::id())
+}
+
+fn clip_is_empty(clip: &crate::protocol::ClipOut) -> bool {
+    clip.text.is_none()
+        && clip.html.is_none()
+        && clip.image.is_none()
+        && clip.files.is_empty()
+        && clip.custom.is_empty()
+}
+
+/// A live widget's declared payload and operation mask.
+struct WinDragSource {
+    clip: crate::protocol::ClipOut,
+    operations: u32,
+    tag: Vec<u8>,
+}
+
+/// DataPackageOperation's Copy and Move ARE kaya's 1 and 2; link and the
+/// two target bits are dropped (D3 refuses link).
+fn drag_ops_of(
+    op: bindings::Windows::ApplicationModel::DataTransfer::DataPackageOperation,
+) -> u32 {
+    op.0 & (crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE)
+}
+
+fn package_op(
+    mask: u32,
+) -> bindings::Windows::ApplicationModel::DataTransfer::DataPackageOperation {
+    bindings::Windows::ApplicationModel::DataTransfer::DataPackageOperation(
+        mask & (crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE),
+    )
+}
+
+/// The key path a stamped copy's create tag carries, dot-joined — a
+/// reorder row's whole payload (D8). STR KEYS ONLY, the mac arm's own
+/// rule (kayaTableStamp): the payload is bytes the app turns straight
+/// back into a key, and no other value type round-trips through one.
+fn tag_keys(tag: &[u8]) -> Option<String> {
+    match crate::wire::decode_click_tag(tag) {
+        Occurrence::InstanceButtonClicked { path, .. } => path
+            .iter()
+            .map(|value| match value {
+                Value::Str(key) => Some(key.clone()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|keys| keys.join(".")),
+        _ => None,
+    }
+}
+
+/// What this widget hands over: its own declaration, or — for a row of a
+/// reorderable For — its keys under the kaya-private id.
+fn source_payload(core: &CoreState, id: u64) -> Option<(crate::protocol::ClipOut, u32)> {
+    if let Some(source) = core.drag_sources.get(&id) {
+        // A WITHDRAWN source keeps its entry for the identity alone (see
+        // the SetDragSource arm), so emptiness is what says "no payload".
+        if !clip_is_empty(&source.clip) {
+            return Some((source.clip.clone(), source.operations));
+        }
+    }
+    if core.reorder_rows.contains_key(&id) {
+        let keys = tag_keys(core.widget_tags.get(&id)?)?;
+        let clip = crate::protocol::ClipOut {
+            custom: vec![(
+                ROW_DRAG_TYPE.to_owned(),
+                crate::protocol::Blob(std::sync::Arc::from(keys.as_bytes())),
+            )],
+            ..Default::default()
+        };
+        return Some((clip, crate::wire::DRAG_OP_MOVE));
+    }
+    None
+}
+
+/// A source's identity for drag_ended: the declaration's tag, or the
+/// row's own create tag.
+fn source_tag(core: &CoreState, id: u64) -> Option<Vec<u8>> {
+    if let Some(source) = core.drag_sources.get(&id) {
+        return Some(source.tag.clone());
+    }
+    if core.reorder_rows.contains_key(&id) {
+        return core.widget_tags.get(&id).cloned();
+    }
+    None
+}
+
+/// The custom ids this destination could take: its accept list's, plus
+/// the row id when it is a row of a reorderable For.
+fn accepted_custom(core: &CoreState, id: u64) -> Vec<String> {
+    let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
+    let (_, custom) = crate::wire::parse_accept_list(&accepts);
+    let mut ids: Vec<String> = custom.iter().map(|id| (*id).to_owned()).collect();
+    if core.reorder_rows.contains_key(&id) {
+        ids.push(ROW_DRAG_TYPE.to_owned());
+    }
+    ids
+}
+
+/// THE HOVER AND DROP VERDICT, from the two declarations alone (D2). A
+/// reorder row answers move for a LOCAL row and nothing else (D8); every
+/// other destination asks the core's one pure function.
+fn hover_verdict(
+    core: &CoreState,
+    id: u64,
+    offered: u32,
+    offered_custom: &[&str],
+    source_ops: u32,
+    local: bool,
+) -> u32 {
+    if core.reorder_rows.contains_key(&id) && offered_custom.contains(&ROW_DRAG_TYPE) {
+        return if local { crate::wire::DRAG_OP_MOVE } else { crate::wire::DRAG_OP_NONE };
+    }
+    let Some((operations, _)) = core.drop_targets.get(&id) else {
+        return crate::wire::DRAG_OP_NONE;
+    };
+    let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
+    crate::wire::drop_verdict(&accepts, *operations, offered, offered_custom, source_ops, local)
+}
+
+/// The landing's identity and anchor: a reorder reports through the
+/// CONTAINER the app registered on, with the landed row's own key path as
+/// the anchor and the pointer's half deciding before (D8, amended).
+fn drop_identity(
+    core: &CoreState,
+    id: u64,
+    upper_half: bool,
+) -> Option<(Vec<u8>, crate::protocol::Path, bool)> {
+    if let Some(container) = core.reorder_rows.get(&id) {
+        let tag = core.reorderables.get(container)?.clone();
+        let anchor = match crate::wire::decode_click_tag(core.widget_tags.get(&id)?) {
+            Occurrence::InstanceButtonClicked { path, .. } => path,
+            _ => Vec::new(),
+        };
+        return Some((tag, anchor, upper_half));
+    }
+    let (_, tag) = core.drop_targets.get(&id)?;
+    Some((tag.clone(), Vec::new(), false))
+}
+
+fn emit_dropped(
+    sink: &OccSink,
+    tag: &[u8],
+    point: (f64, f64),
+    operation: u32,
+    anchor: crate::protocol::Path,
+    before: bool,
+    clip: crate::protocol::Representation,
+) {
+    let occurrence = match crate::wire::decode_click_tag(tag) {
+        Occurrence::ButtonClicked { id } => {
+            Occurrence::Dropped { id, point, operation, anchor, before, clip }
+        }
+        Occurrence::InstanceButtonClicked { node, path } => {
+            Occurrence::InstanceDropped { node, path, point, operation, anchor, before, clip }
+        }
+        other => panic!("kaya: a drop tag decoded to {other:?}, which is not a widget identity"),
+    };
+    sink.send(occurrence);
+}
+
+fn emit_drag_ended(core: &CoreState, tag: &[u8], operation: u32) {
+    let occurrence = match crate::wire::decode_click_tag(tag) {
+        Occurrence::ButtonClicked { id } => Occurrence::DragEnded { id, operation },
+        Occurrence::InstanceButtonClicked { node, path } => {
+            Occurrence::InstanceDragEnded { node, path, operation }
+        }
+        other => panic!("kaya: a drag tag decoded to {other:?}, which is not a widget identity"),
+    };
+    core.occurrences.send(occurrence);
+}
+
+/// Bytes as an IRandomAccessStream, over a memory IStream — the carrier
+/// `custom(id, bytes)` and `image` both ride. NOT `SetData(id, string)`:
+/// the string flavour crosses the Win32 bridge as UTF-16 with a NUL while
+/// the stream flavour crosses byte-exact (probe 1).
+fn random_access_stream(
+    bytes: &[u8],
+) -> windows_core::Result<bindings::Windows::Storage::Streams::IRandomAccessStream> {
+    use windows::Win32::System::WinRT::{BSOS_DEFAULT, CreateRandomAccessStreamOverStream};
+    let stream = unsafe { windows::Win32::UI::Shell::SHCreateMemStream(Some(bytes)) }
+        .ok_or_else(|| windows_core::Error::from(windows::Win32::Foundation::E_OUTOFMEMORY))?;
+    unsafe { CreateRandomAccessStreamOverStream(&stream, BSOS_DEFAULT) }
+}
+
+/// The equal and opposite read: a delivered stream arrives SEEKED TO ITS
+/// END (probe 1, mechanism fact 4), so the seek is mandatory rather than
+/// tidy.
+fn winrt_stream_bytes(object: &windows_core::IInspectable) -> windows_core::Result<Vec<u8>> {
+    use windows::Win32::System::Com::{STATFLAG_NONAME, STREAM_SEEK_SET};
+    use windows::Win32::System::WinRT::CreateStreamOverRandomAccessStream;
+    let stream: windows::Win32::System::Com::IStream =
+        unsafe { CreateStreamOverRandomAccessStream(object)? };
+    let mut stat = Default::default();
+    unsafe { stream.Stat(&mut stat, STATFLAG_NONAME)? };
+    let len = usize::try_from(stat.cbSize).unwrap_or(0);
+    let mut out = vec![0u8; len];
+    let mut read = 0u32;
+    unsafe {
+        stream.Seek(0, STREAM_SEEK_SET, None)?;
+        stream.Read(out.as_mut_ptr().cast(), len as u32, Some(&mut read)).ok()?;
+    }
+    out.truncate(read as usize);
+    Ok(out)
+}
+
+/// Resolve the clip's file paths and fill the package. A `files`
+/// representation is the platform's own reference (D4), and the only
+/// route to one is `StorageFile.GetFileFromPathAsync` — asynchronous,
+/// with no blocking counterpart, so DragStarting takes its DEFERRAL and
+/// the paths are resolved one at a time behind it. The resolved items
+/// ride as AgileReferences because the generated `IStorageItem` is not
+/// `Send` and a completion handler must be.
+fn start_drag_payload(
+    data: bindings::Windows::ApplicationModel::DataTransfer::DataPackage,
+    clip: crate::protocol::ClipOut,
+    operations: u32,
+    deferral: bindings::Microsoft::UI::Xaml::DragOperationDeferral,
+) {
+    resolve_drag_files(data, clip, operations, deferral, Vec::new(), 0);
+}
+
+fn resolve_drag_files(
+    data: bindings::Windows::ApplicationModel::DataTransfer::DataPackage,
+    clip: crate::protocol::ClipOut,
+    operations: u32,
+    deferral: bindings::Microsoft::UI::Xaml::DragOperationDeferral,
+    items: Vec<windows_core::AgileReference<bindings::Windows::Storage::IStorageItem>>,
+    at: usize,
+) {
+    use bindings::Windows::Storage::{IStorageItem, StorageFile};
+    use windows_core::HSTRING;
+    if at >= clip.files.len() {
+        let resolved: Vec<Option<IStorageItem>> =
+            items.iter().map(|item| item.resolve().ok()).filter(Option::is_some).collect();
+        let _ = write_data_package(&data, &clip, operations, resolved);
+        let _ = deferral.Complete();
+        return;
+    }
+    let path = clip.files[at].clone();
+    let started = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_str()));
+    let Ok(started) = started else {
+        resolve_drag_files(data, clip, operations, deferral, items, at + 1);
+        return;
+    };
+    let once = std::sync::Mutex::new(Some((data, clip, operations, deferral, items)));
+    let queued = on_async(started, move |file| {
+        let Some((data, clip, operations, deferral, mut items)) = once.lock().unwrap().take()
+        else {
+            return;
+        };
+        if let Some(item) = file
+            .and_then(|file| windows_core::Interface::cast::<IStorageItem>(&file).ok())
+            .and_then(|item| windows_core::AgileReference::new(&item).ok())
+        {
+            items.push(item);
+        }
+        resolve_drag_files(data, clip, operations, deferral, items, at + 1);
+    });
+    let _ = queued;
+}
+
+/// Fill a DataPackage from a kaya clip. XAML drag IS WinRT DataTransfer —
+/// there is no classic-Win32 door into DragStarting, which is the one
+/// place the clipboard's "classic Win32, deliberately" ruling cannot hold
+/// (docs/clipboard-plan.md §6 finding 2).
+fn write_data_package(
+    data: &bindings::Windows::ApplicationModel::DataTransfer::DataPackage,
+    clip: &crate::protocol::ClipOut,
+    operations: u32,
+    files: Vec<Option<bindings::Windows::Storage::IStorageItem>>,
+) -> windows_core::Result<()> {
+    use bindings::Windows::Storage::IStorageItem;
+    use windows_core::HSTRING;
+    data.SetRequestedOperation(package_op(operations))?;
+    for (id, bytes) in &clip.custom {
+        data.SetData(&HSTRING::from(id.as_str()), &random_access_stream(&bytes.0)?)?;
+    }
+    if !files.is_empty() {
+        data.SetStorageItems(
+            &windows_collections::IIterable::<IStorageItem>::from(files),
+            false,
+        )?;
+    }
+    if let Some(image) = &clip.image {
+        let stream = random_access_stream(&image.0)?;
+        data.SetBitmap(
+            &bindings::Windows::Storage::Streams::RandomAccessStreamReference::CreateFromStream(
+                &stream,
+            )?,
+        )?;
+    }
+    if let Some(html) = &clip.html {
+        // SetHtmlFormat takes CF_HTML WITH its header, which is the same
+        // 10-digit-offset construction the clipboard arm builds by hand.
+        data.SetHtmlFormat(&HSTRING::from(
+            String::from_utf8_lossy(&build_cf_html(html)).as_ref(),
+        ))?;
+    }
+    if let Some(text) = &clip.text {
+        data.SetText(&HSTRING::from(text.as_str()))?;
+    }
+    data.SetData(&HSTRING::from(local_marker()), &random_access_stream(b"1")?)?;
+    Ok(())
+}
+
+/// What a DataPackageView offers, in kaya's vocabulary: the closed kinds
+/// as a mask, the accepted custom ids it carries, and whether the drag is
+/// this process's own.
+fn package_offer(
+    view: &bindings::Windows::ApplicationModel::DataTransfer::DataPackageView,
+    accepted: &[String],
+) -> windows_core::Result<(u32, Vec<String>, bool)> {
+    use bindings::Windows::ApplicationModel::DataTransfer::StandardDataFormats;
+    let formats = view.AvailableFormats()?;
+    let mut names = Vec::new();
+    for i in 0..formats.Size()? {
+        names.push(formats.GetAt(i)?.to_string());
+    }
+    let carries = |format: windows_core::Result<windows_core::HSTRING>| -> bool {
+        format
+            .map(|format| names.iter().any(|name| *name == format.to_string()))
+            .unwrap_or(false)
+    };
+    let mut offered = 0;
+    if carries(StandardDataFormats::Text()) {
+        offered |= crate::wire::CLIP_TEXT;
+    }
+    if carries(StandardDataFormats::Html()) {
+        offered |= crate::wire::CLIP_HTML;
+    }
+    if carries(StandardDataFormats::Bitmap()) {
+        offered |= crate::wire::CLIP_IMAGE;
+    }
+    if carries(StandardDataFormats::StorageItems()) {
+        offered |= crate::wire::CLIP_FILES;
+    }
+    let marker = local_marker();
+    let local = names.iter().any(|name| *name == marker);
+    let custom = accepted
+        .iter()
+        .filter(|id| names.iter().any(|name| name == *id))
+        .cloned()
+        .collect();
+    Ok((offered, custom, local))
+}
+
+/// One drop's landing, carried through the asynchronous read to the
+/// emission (the deferral holds the DataPackageView alive across it).
+struct WinDropLanding {
+    tag: Vec<u8>,
+    point: (f64, f64),
+    operation: u32,
+    anchor: crate::protocol::Path,
+    before: bool,
+    /// THE SINK, NOT THE CORE: an unfinished async delivers its completion
+    /// on a threadpool thread, where `CORE` is None (docs/traps.md: A
+    /// DEFERRED WinUI DROP MUST BE FINISHED ON THE UI THREAD).
+    sink: OccSink,
+    view: bindings::Windows::ApplicationModel::DataTransfer::DataPackageView,
+    deferral: bindings::Microsoft::UI::Xaml::DragOperationDeferral,
+}
+
+/// Finish a drop ON THE UI THREAD (docs/traps.md: A DEFERRED WinUI DROP
+/// MUST BE FINISHED ON THE UI THREAD). The hop cannot park the drag
+/// waiting for its own deferral: the queue is pumped inside OLE's modal
+/// loop, which is what lets app logic keep running there at all
+/// (DESIGN.md's drag paragraph).
+fn finish_drop(landing: WinDropLanding, clip: Option<crate::protocol::Representation>) {
+    let dispatcher = DISPATCHER.get();
+    let here = dispatcher.is_none_or(|d| d.0.HasThreadAccess().unwrap_or(true));
+    if here {
+        finish_drop_now(landing, clip);
+        return;
+    }
+    let cell = std::sync::Mutex::new(Some((landing, clip)));
+    let handler = DispatcherQueueHandler::new(move || {
+        if let Some((landing, clip)) = cell.lock().unwrap().take() {
+            finish_drop_now(landing, clip);
+        }
+        Ok(())
+    });
+    if let Some(dispatcher) = dispatcher {
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+}
+
+fn finish_drop_now(landing: WinDropLanding, clip: Option<crate::protocol::Representation>) {
+    if let Some(clip) = clip {
+        emit_dropped(
+            &landing.sink,
+            &landing.tag,
+            landing.point,
+            landing.operation,
+            landing.anchor,
+            landing.before,
+            clip,
+        );
+    }
+    // WHAT THE SOURCE LEARNS: DropCompleted reads the view's reported
+    // operation, and a deferred drop has to report it by hand.
+    let _ = landing
+        .view
+        .ReportOperationCompleted(package_op(landing.operation));
+    let _ = landing.deferral.Complete();
+}
+
+/// Run `then` when an async operation settles. THE COMPLETION HANDLER AND
+/// NOT `get()`: the XAML thread is an ASTA, and blocking it on an
+/// operation whose completion is marshalled back to it is a deadlock. An
+/// operation that already finished invokes the handler on THIS stack, so
+/// nothing it reaches may run inside a CORE borrow.
+fn on_async<T: windows_core::RuntimeType + 'static>(
+    op: windows_future::IAsyncOperation<T>,
+    then: impl Fn(Option<T>) + Send + 'static,
+) -> windows_core::Result<()> {
+    op.SetCompleted(&windows_future::AsyncOperationCompletedHandler::new(
+        move |op: windows_core::Ref<'_, windows_future::IAsyncOperation<T>>, _status| {
+            let value = op.ok().and_then(|op| op.GetResults()).ok();
+            then(value);
+            Ok(())
+        },
+    ))
+}
+
+/// Read the RICHEST representation the view offers that the accept list
+/// takes, then emit and complete the deferral. Descending clip value —
+/// custom (accept-list order), files, image, html, text — the canonical
+/// order the clipboard read already uses.
+fn read_dropped_value(
+    view: bindings::Windows::ApplicationModel::DataTransfer::DataPackageView,
+    accepting: String,
+    wanted_custom: Vec<String>,
+    landing: WinDropLanding,
+) -> windows_core::Result<()> {
+    use bindings::Windows::ApplicationModel::DataTransfer::StandardDataFormats;
+    use crate::protocol::Representation as R;
+    use windows_core::HSTRING;
+    let (kinds, _) = crate::wire::parse_accept_list(&accepting);
+    let chosen = wanted_custom
+        .into_iter()
+        .find(|id| view.Contains(&HSTRING::from(id.as_str())).unwrap_or(false));
+    let once = std::sync::Mutex::new(Some(landing));
+    if let Some(id) = chosen {
+        let format = id.clone();
+        return on_async(view.GetDataAsync(&HSTRING::from(id.as_str()))?, move |value| {
+            let Some(landing) = once.lock().unwrap().take() else { return };
+            let bytes = value.as_ref().and_then(|value| winrt_stream_bytes(value).ok());
+            let clip = bytes.map(|bytes| R::Custom {
+                id: format.clone(),
+                bytes: crate::protocol::Blob(std::sync::Arc::from(&bytes[..])),
+            });
+            finish_drop(landing, clip);
+        });
+    }
+    if kinds & crate::wire::CLIP_FILES != 0
+        && view.Contains(&StandardDataFormats::StorageItems()?).unwrap_or(false)
+    {
+        return on_async(view.GetStorageItemsAsync()?, move |items| {
+            let Some(landing) = once.lock().unwrap().take() else { return };
+            let clip = items
+                .and_then(|items| picked_from_storage_items(&items).ok())
+                .and_then(|files| (!files.is_empty()).then_some(R::Files(files)));
+            finish_drop(landing, clip);
+        });
+    }
+    if kinds & crate::wire::CLIP_IMAGE != 0
+        && view.Contains(&StandardDataFormats::Bitmap()?).unwrap_or(false)
+    {
+        return on_async(view.GetBitmapAsync()?, move |reference| {
+            let Some(landing) = once.lock().unwrap().take() else { return };
+            let opened = reference.and_then(|reference| reference.OpenReadAsync().ok());
+            let Some(opened) = opened else {
+                finish_drop(landing, None);
+                return;
+            };
+            let inner = std::sync::Mutex::new(Some(landing));
+            let started = on_async(opened, move |stream| {
+                let Some(landing) = inner.lock().unwrap().take() else { return };
+                let clip = stream
+                    .and_then(|stream| {
+                        windows_core::Interface::cast::<windows_core::IInspectable>(&stream).ok()
+                    })
+                    .and_then(|object| winrt_stream_bytes(&object).ok())
+                    .map(|bytes| R::Image(crate::protocol::Blob(std::sync::Arc::from(&bytes[..]))));
+                finish_drop(landing, clip);
+            });
+            let _ = started;
+        });
+    }
+    if kinds & crate::wire::CLIP_HTML != 0
+        && view.Contains(&StandardDataFormats::Html()?).unwrap_or(false)
+    {
+        return on_async(view.GetHtmlFormatAsync()?, move |html| {
+            let Some(landing) = once.lock().unwrap().take() else { return };
+            // kaya's html representation is the raw FRAGMENT, sliced out
+            // by the payload's own StartFragment/EndFragment offsets.
+            let clip = html
+                .and_then(|html| parse_cf_html(html.to_string().as_bytes()))
+                .map(R::Html);
+            finish_drop(landing, clip);
+        });
+    }
+    if kinds & crate::wire::CLIP_TEXT != 0
+        && view.Contains(&StandardDataFormats::Text()?).unwrap_or(false)
+    {
+        return on_async(view.GetTextAsync()?, move |text| {
+            let Some(landing) = once.lock().unwrap().take() else { return };
+            // The lf boundary: guest strings are LF everywhere.
+            let clip = text.map(|text| R::Text(lf(text.to_string())));
+            finish_drop(landing, clip);
+        });
+    }
+    if let Some(landing) = once.lock().unwrap().take() {
+        finish_drop(landing, None);
+    }
+    Ok(())
+}
+
+/// Dropped files are PICKED files (D6): the same registration the file
+/// dialog result makes, so `kaya_open_picked` redeems a dropped file
+/// identically.
+fn picked_paths(paths: Vec<String>) -> Vec<crate::protocol::PickedFile> {
+    paths
+        .into_iter()
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let handle = crate::capi::picked_register(std::sync::Arc::new(
+                crate::protocol::PathSource { name: name.clone(), path: path.clone() },
+            ));
+            crate::protocol::PickedFile { handle, name, local_path: path }
+        })
+        .collect()
+}
+
+fn picked_from_storage_items(
+    items: &windows_collections::IVectorView<bindings::Windows::Storage::IStorageItem>,
+) -> windows_core::Result<Vec<crate::protocol::PickedFile>> {
+    let mut paths = Vec::new();
+    for i in 0..items.Size()? {
+        paths.push(items.GetAt(i)?.Path()?.to_string());
+    }
+    Ok(picked_paths(paths))
+}
+
+/// A widget's box in SCREEN pixels: the XAML transform to the content
+/// root, which sits at the window's client origin, times the
+/// rasterization scale. The OLE route hit-tests with it and the `drag`
+/// verb aims real input at it.
+fn widget_screen_rect(core: &CoreState, id: u64) -> Option<(f64, f64, f64, f64)> {
+    use bindings::Microsoft::UI::Xaml::{FrameworkElement, UIElement};
+    use windows_core::Interface;
+    let element = core.widgets.get(&WidgetId(id))?.element().ok()?;
+    let frame: FrameworkElement = element.cast().ok()?;
+    let origin = element
+        .TransformToVisual(None::<&UIElement>)
+        .ok()?
+        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })
+        .ok()?;
+    let scale = element.XamlRoot().ok()?.RasterizationScale().ok()?;
+    let native: IWindowNative = Interface::cast(&core.window).ok()?;
+    let hwnd = native.window_handle().ok()?;
+    let mut client = Point32 { x: 0, y: 0 };
+    unsafe { ClientToScreen(hwnd, &mut client) };
+    Some((
+        f64::from(client.x) + f64::from(origin.X) * scale,
+        f64::from(client.y) + f64::from(origin.Y) * scale,
+        frame.ActualWidth().ok()? * scale,
+        frame.ActualHeight().ok()? * scale,
+    ))
+}
+
+/// The drag-and-drop widget under a SCREEN point — the innermost, by
+/// area. One OLE target serves the whole island, so the drop point is
+/// what names the widget; the bindgen filter generates no VisualTreeHelper
+/// and these are the same rectangles the harness already computes.
+fn dnd_widget_at(core: &CoreState, x: f64, y: f64) -> Option<u64> {
+    let mut best: Option<(f64, u64)> = None;
+    let ids = core
+        .drop_targets
+        .keys()
+        .chain(core.reorder_rows.keys())
+        .copied()
+        .collect::<Vec<_>>();
+    for id in ids {
+        let Some((left, top, width, height)) = widget_screen_rect(core, id) else { continue };
+        if x < left || y < top || x >= left + width || y >= top + height {
+            continue;
+        }
+        let area = width * height;
+        if best.is_none_or(|(seen, _)| area < seen) {
+            best = Some((area, id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Attach a widget's drag and drop handlers ONCE: WinRT events have no
+/// idempotent add, so a re-declaration must not stack a second copy of
+/// every handler.
+fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::{
+        DragEventHandler, DragStartingEventArgs, DropCompletedEventArgs, UIElement,
+    };
+    if !core.dnd_wired.insert(id) {
+        return Ok(());
+    }
+    let element = core
+        .widgets
+        .get(&WidgetId(id))
+        .expect("scene validated the id")
+        .element()?;
+    element.DragStarting(&TypedEventHandler::<UIElement, DragStartingEventArgs>::new(
+        move |_, args| {
+            let Some(args) = args.as_ref() else { return Ok(()) };
+            let declared = CORE.with_borrow(|core| {
+                core.as_ref().and_then(|core| source_payload(core, id))
+            });
+            let Some((clip, operations)) = declared else {
+                args.SetCancel(true)?;
+                return Ok(());
+            };
+            args.SetAllowedOperations(package_op(operations))?;
+            start_drag_payload(args.Data()?, clip, operations, args.GetDeferral()?);
+            Ok(())
+        },
+    ))?;
+    element.DropCompleted(&TypedEventHandler::<UIElement, DropCompletedEventArgs>::new(
+        move |_, args| {
+            let Some(args) = args.as_ref() else { return Ok(()) };
+            // The source learns the outcome (D1) — WinUI's counterpart to
+            // AppKit's session-ended operation.
+            let operation = drag_ops_of(args.DropResult()?);
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    if let Some(tag) = source_tag(core, id) {
+                        emit_drag_ended(core, &tag, operation);
+                    }
+                }
+            });
+            Ok(())
+        },
+    ))?;
+    let hover = DragEventHandler::new(move |_, args| xaml_drag_event(id, args, false));
+    element.DragEnter(&hover)?;
+    element.DragOver(&hover)?;
+    element.Drop(&DragEventHandler::new(move |_, args| xaml_drag_event(id, args, true)))?;
+    Ok(())
+}
+
+/// One XAML hover or drop: the verdict, then — on a drop — the read that
+/// ends in `dropped`.
+fn xaml_drag_event(
+    id: u64,
+    args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::DragEventArgs>,
+    dropping: bool,
+) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::FrameworkElement;
+    use windows_core::Interface;
+    let Some(args) = args.as_ref() else { return Ok(()) };
+    let view = args.DataView()?;
+    let accepted = CORE.with_borrow(|core| {
+        core.as_ref().map(|core| accepted_custom(core, id)).unwrap_or_default()
+    });
+    let (offered, custom, local) = package_offer(&view, &accepted)?;
+    let source_ops = drag_ops_of(args.AllowedOperations()?);
+    let offered_custom: Vec<&str> = custom.iter().map(String::as_str).collect();
+    let verdict = CORE.with_borrow(|core| {
+        core.as_ref()
+            .map(|core| hover_verdict(core, id, offered, &offered_custom, source_ops, local))
+            .unwrap_or(crate::wire::DRAG_OP_NONE)
+    });
+    args.SetAcceptedOperation(package_op(verdict))?;
+    args.SetHandled(true)?;
+    if !dropping || verdict == crate::wire::DRAG_OP_NONE {
+        return Ok(());
+    }
+    let element = CORE.with_borrow(|core| {
+        core.as_ref()
+            .and_then(|core| core.widgets.get(&WidgetId(id)))
+            .map(NativeWidget::element)
+    });
+    let Some(Ok(element)) = element else { return Ok(()) };
+    // `point` is the DESTINATION's own top-left DIP coordinates.
+    let point = args.GetPosition(&element)?;
+    let height = element.cast::<FrameworkElement>()?.ActualHeight()?;
+    let upper = f64::from(point.Y) < height / 2.0;
+    let landing = CORE.with_borrow(|core| {
+        let core = core.as_ref()?;
+        let (tag, anchor, before) = drop_identity(core, id, upper)?;
+        Some((
+            tag,
+            anchor,
+            before,
+            core.accepts.get(&id).cloned().unwrap_or_default(),
+            core.occurrences.clone(),
+        ))
+    });
+    let Some((tag, anchor, before, accepts, sink)) = landing else { return Ok(()) };
+    let deferral = args.GetDeferral()?;
+    read_dropped_value(
+        view.clone(),
+        accepts,
+        accepted,
+        WinDropLanding {
+            tag,
+            point: (f64::from(point.X), f64::from(point.Y)),
+            operation: verdict,
+            anchor,
+            before,
+            sink,
+            view,
+            deferral,
+        },
+    )
+}
+
+/// A reorderable For's rows are its CONTAINER'S CHILDREN, and they arrive
+/// batches after the declaration — so the wiring is one coalesced pass at
+/// each drain's end, beside the table and menu passes.
+fn sync_reorder_rows(core: &mut CoreState) {
+    if core.reorderables.is_empty() && core.reorder_rows.is_empty() {
+        return;
+    }
+    let mut rows = HashMap::new();
+    for container in core.reorderables.keys().copied().collect::<Vec<_>>() {
+        for child in core.child_order.children(WidgetId(container)).to_vec() {
+            if core.widgets.contains_key(&child) {
+                rows.insert(child.0, container);
+            }
+        }
+    }
+    core.reorder_rows = rows;
+    for id in core.reorder_rows.keys().copied().collect::<Vec<_>>() {
+        if let Some(Ok(element)) = core.widgets.get(&WidgetId(id)).map(NativeWidget::element) {
+            let _ = element.SetCanDrag(true);
+            let _ = element.SetAllowDrop(true);
+        }
+        let _ = wire_dnd(core, id);
+    }
+}
+
+// ---- The OLE route (probe 2) ----------------------------------------
+// `AllowDrop` registers no OLE drop target on ANY of the four HWNDs a
+// WinUI 3 window is made of, so Explorer and every classic Win32 source
+// arrive here or nowhere. The drop lands on the CHILD ISLAND window
+// (`Microsoft.UI.Content.DesktopChildSiteBridge`); the top-level window
+// sees the frame border and then a DragLeave.
+
+const ISLAND_CLASS: &str = "Microsoft.UI.Content.DesktopChildSiteBridge";
+
+/// STGMEDIUM and its release, declared here rather than by enabling
+/// `Win32_Graphics_Gdi`: the union's HBITMAP arm is what gates the real
+/// ones, and that feature re-declares the eight gdi32 entries this file
+/// already declares with its own signatures.
+#[repr(C)]
+struct KayaStgMedium {
+    tymed: u32,
+    handle: *mut core::ffi::c_void,
+    unk_for_release: *mut core::ffi::c_void,
+}
+
+#[link(name = "ole32")]
+unsafe extern "system" {
+    fn ReleaseStgMedium(medium: *mut KayaStgMedium);
+}
+
+/// IDataObject::GetData, slot 3 of the vtable — reached by hand for the
+/// same reason as the struct above.
+unsafe fn ole_get_data(
+    data: &windows::Win32::System::Com::IDataObject,
+    format: &windows::Win32::System::Com::FORMATETC,
+) -> Option<KayaStgMedium> {
+    type GetData = unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *const windows::Win32::System::Com::FORMATETC,
+        *mut KayaStgMedium,
+    ) -> windows_core::HRESULT;
+    unsafe {
+        let raw = windows_core::Interface::as_raw(data);
+        let vtable = *(raw as *const *const *const core::ffi::c_void);
+        let get_data: GetData = std::mem::transmute(*vtable.add(3));
+        let mut medium = KayaStgMedium {
+            tymed: 0,
+            handle: core::ptr::null_mut(),
+            unk_for_release: core::ptr::null_mut(),
+        };
+        get_data(raw, format, &mut medium).ok().ok()?;
+        Some(medium)
+    }
+}
+
+fn ole_format(format: u32, tymed: u32) -> windows::Win32::System::Com::FORMATETC {
+    windows::Win32::System::Com::FORMATETC {
+        cfFormat: format as u16,
+        ptd: core::ptr::null_mut(),
+        dwAspect: windows::Win32::System::Com::DVASPECT_CONTENT.0,
+        lindex: -1,
+        tymed,
+    }
+}
+
+/// ONE TYMED PER CALL, both directions: an OR'd FORMATETC is refused
+/// `E_INVALIDARG` by a WinRT-side data object for EVERY format, so a
+/// reader that ORs cannot tell a refused request from an absent one
+/// (probe 1, mechanism fact 3).
+const OLE_TYMEDS: [u32; 2] = [
+    windows::Win32::System::Com::TYMED_HGLOBAL.0 as u32,
+    windows::Win32::System::Com::TYMED_ISTREAM.0 as u32,
+];
+
+fn ole_has(data: &windows::Win32::System::Com::IDataObject, format: u32) -> bool {
+    OLE_TYMEDS.iter().any(|tymed| {
+        let etc = ole_format(format, *tymed);
+        unsafe { data.QueryGetData(&etc) }.is_ok()
+    })
+}
+
+fn ole_bytes(data: &windows::Win32::System::Com::IDataObject, format: u32) -> Option<Vec<u8>> {
+    use windows::Win32::System::Com::{IStream, STATFLAG_NONAME, STREAM_SEEK_SET, TYMED_HGLOBAL};
+    for tymed in OLE_TYMEDS {
+        let etc = ole_format(format, tymed);
+        let Some(mut medium) = (unsafe { ole_get_data(data, &etc) }) else { continue };
+        let bytes = unsafe {
+            if medium.tymed == TYMED_HGLOBAL.0 as u32 {
+                let hglobal = windows::Win32::Foundation::HGLOBAL(medium.handle);
+                let size = windows::Win32::System::Memory::GlobalSize(hglobal);
+                let p = windows::Win32::System::Memory::GlobalLock(hglobal);
+                let read = (!p.is_null())
+                    .then(|| std::slice::from_raw_parts(p as *const u8, size).to_vec());
+                let _ = windows::Win32::System::Memory::GlobalUnlock(hglobal);
+                read
+            } else {
+                let stream: Option<&IStream> =
+                    windows_core::Interface::from_raw_borrowed(&medium.handle);
+                stream.and_then(|stream| {
+                    let mut stat = Default::default();
+                    stream.Stat(&mut stat, STATFLAG_NONAME).ok()?;
+                    let len = usize::try_from(stat.cbSize).unwrap_or(0);
+                    let mut out = vec![0u8; len];
+                    let mut got = 0u32;
+                    // The delivered stream arrives SEEKED TO ITS END
+                    // (probe 1, mechanism fact 4).
+                    stream.Seek(0, STREAM_SEEK_SET, None).ok()?;
+                    stream.Read(out.as_mut_ptr().cast(), len as u32, Some(&mut got)).ok().ok()?;
+                    out.truncate(got as usize);
+                    Some(out)
+                })
+            }
+        };
+        unsafe { ReleaseStgMedium(&mut medium) };
+        if bytes.is_some() {
+            return bytes;
+        }
+    }
+    None
+}
+
+/// What a classic IDataObject offers, in kaya's vocabulary.
+fn ole_offer(
+    data: &windows::Win32::System::Com::IDataObject,
+    accepted: &[String],
+) -> (u32, Vec<String>, bool) {
+    let mut offered = 0;
+    if ole_has(data, CF_UNICODETEXT) {
+        offered |= crate::wire::CLIP_TEXT;
+    }
+    if ole_has(data, clip_register("HTML Format")) {
+        offered |= crate::wire::CLIP_HTML;
+    }
+    if ole_has(data, clip_register("PNG")) {
+        offered |= crate::wire::CLIP_IMAGE;
+    }
+    if ole_has(data, CF_HDROP) {
+        offered |= crate::wire::CLIP_FILES;
+    }
+    let custom = accepted
+        .iter()
+        .filter(|id| ole_has(data, clip_register(id)))
+        .cloned()
+        .collect();
+    let local = ole_has(data, clip_register(&local_marker()));
+    (offered, custom, local)
+}
+
+/// The one representation a classic drop delivers, in the accept list's
+/// own descending order — the clipboard read's shape, one door over.
+fn ole_value(
+    data: &windows::Win32::System::Com::IDataObject,
+    accepting: &str,
+    wanted_custom: &[String],
+) -> Option<crate::protocol::Representation> {
+    use crate::protocol::Representation as R;
+    let (kinds, _) = crate::wire::parse_accept_list(accepting);
+    for id in wanted_custom {
+        let format = clip_register(id);
+        if let Some(bytes) = ole_bytes(data, format) {
+            return Some(R::Custom {
+                id: id.clone(),
+                bytes: crate::protocol::Blob(std::sync::Arc::from(&bytes[..])),
+            });
+        }
+    }
+    if kinds & crate::wire::CLIP_FILES != 0 {
+        // A shell drop is CF_HDROP with real paths, which is
+        // `parse_dropfiles`' own shape (probe 2, mechanism fact 5).
+        if let Some(paths) = ole_bytes(data, CF_HDROP).map(|b| parse_dropfiles(&b)) {
+            let files = picked_paths(paths);
+            if !files.is_empty() {
+                return Some(R::Files(files));
+            }
+        }
+    }
+    if kinds & crate::wire::CLIP_IMAGE != 0 {
+        if let Some(bytes) = ole_bytes(data, clip_register("PNG")) {
+            return Some(R::Image(crate::protocol::Blob(std::sync::Arc::from(&bytes[..]))));
+        }
+    }
+    if kinds & crate::wire::CLIP_HTML != 0 {
+        if let Some(html) = ole_bytes(data, clip_register("HTML Format")).and_then(|b| parse_cf_html(&b)) {
+            return Some(R::Html(html));
+        }
+    }
+    if kinds & crate::wire::CLIP_TEXT != 0 {
+        if let Some(bytes) = ole_bytes(data, CF_UNICODETEXT) {
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .take_while(|&u| u != 0)
+                .collect();
+            return Some(R::Text(lf(String::from_utf16_lossy(&units))));
+        }
+    }
+    None
+}
+
+/// kaya's classic drop target. The hover verdict is the core's, exactly
+/// as on the XAML side; only the way the offer is read differs.
+#[windows_core::implement(windows::Win32::System::Ole::IDropTarget)]
+struct KayaOleDropTarget {
+    /// The live drag's data object, kept from DragEnter: `DragOver`
+    /// carries none, and the verdict is the CORE'S on both routes rather
+    /// than a mask this arm invented (docs/dnd-plan.md D2).
+    hovering: RefCell<Option<windows::Win32::System::Com::IDataObject>>,
+}
+
+impl KayaOleDropTarget {
+    fn verdict_at(
+        data: Option<&windows::Win32::System::Com::IDataObject>,
+        x: i32,
+        y: i32,
+        allowed: u32,
+    ) -> (u32, Option<u64>) {
+        let Some(data) = data else { return (crate::wire::DRAG_OP_NONE, None) };
+        CORE.with_borrow(|core| {
+            let Some(core) = core.as_ref() else { return (crate::wire::DRAG_OP_NONE, None) };
+            let Some(id) = dnd_widget_at(core, f64::from(x), f64::from(y)) else {
+                return (crate::wire::DRAG_OP_NONE, None);
+            };
+            let accepted = accepted_custom(core, id);
+            let (offered, custom, local) = ole_offer(data, &accepted);
+            let offered_custom: Vec<&str> = custom.iter().map(String::as_str).collect();
+            let source_ops = allowed & (crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE);
+            (
+                hover_verdict(core, id, offered, &offered_custom, source_ops, local),
+                Some(id),
+            )
+        })
+    }
+}
+
+impl windows::Win32::System::Ole::IDropTarget_Impl for KayaOleDropTarget_Impl {
+    fn DragEnter(
+        &self,
+        data: windows_core::Ref<windows::Win32::System::Com::IDataObject>,
+        _keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+        point: &windows::Win32::Foundation::POINTL,
+        effect: *mut windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows_core::Result<()> {
+        self.hovering.replace(data.cloned());
+        let allowed = unsafe { *effect }.0;
+        let (verdict, _) = KayaOleDropTarget::verdict_at(data.as_ref(), point.x, point.y, allowed);
+        unsafe { *effect = windows::Win32::System::Ole::DROPEFFECT(verdict) };
+        Ok(())
+    }
+
+    fn DragOver(
+        &self,
+        _keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+        point: &windows::Win32::Foundation::POINTL,
+        effect: *mut windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows_core::Result<()> {
+        let data = self.hovering.borrow().clone();
+        let allowed = unsafe { *effect }.0;
+        let (verdict, _) =
+            KayaOleDropTarget::verdict_at(data.as_ref(), point.x, point.y, allowed);
+        unsafe { *effect = windows::Win32::System::Ole::DROPEFFECT(verdict) };
+        Ok(())
+    }
+
+    fn DragLeave(&self) -> windows_core::Result<()> {
+        self.hovering.replace(None);
+        Ok(())
+    }
+
+    fn Drop(
+        &self,
+        data: windows_core::Ref<windows::Win32::System::Com::IDataObject>,
+        _keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+        point: &windows::Win32::Foundation::POINTL,
+        effect: *mut windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows_core::Result<()> {
+        self.hovering.replace(None);
+        let allowed = unsafe { *effect }.0;
+        let (verdict, id) = KayaOleDropTarget::verdict_at(data.as_ref(), point.x, point.y, allowed);
+        unsafe { *effect = windows::Win32::System::Ole::DROPEFFECT(verdict) };
+        let (Some(data), Some(id)) = (data.as_ref(), id) else { return Ok(()) };
+        if verdict == crate::wire::DRAG_OP_NONE {
+            return Ok(());
+        }
+        CORE.with_borrow(|core| {
+            let Some(core) = core.as_ref() else { return };
+            let Some((left, top, _, height)) = widget_screen_rect(core, id) else { return };
+            let upper = f64::from(point.y) - top < height / 2.0;
+            let Some((tag, anchor, before)) = drop_identity(core, id, upper) else { return };
+            let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
+            let wanted = accepted_custom(core, id);
+            let Some(clip) = ole_value(data, &accepts, &wanted) else { return };
+            emit_dropped(
+                &core.occurrences,
+                &tag,
+                (f64::from(point.x) - left, f64::from(point.y) - top),
+                verdict,
+                anchor,
+                before,
+                clip,
+            );
+        });
+        Ok(())
+    }
+}
+
+/// Arm the classic route on this window's HWNDs. `OleInitialize` FIRST:
+/// `RegisterDragDrop` answers `0x8007000e` (E_OUTOFMEMORY) on a thread
+/// that only called `CoInitializeEx`, which is all the XAML thread does,
+/// and that HRESULT names nothing about the cause (probe 2, fact 2).
+fn arm_ole_route(core: &mut CoreState) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Ole::{IDropTarget, OleInitialize, RegisterDragDrop};
+    if !core.ole_targets.is_empty() {
+        return;
+    }
+    if core.drop_targets.is_empty() && core.reorderables.is_empty() {
+        return;
+    }
+    let Ok(native) = windows_core::Interface::cast::<IWindowNative>(&core.window) else { return };
+    let Ok(top) = native.window_handle() else { return };
+    let mut hwnds = vec![top];
+    hwnds.extend(child_windows_of_class(top, ISLAND_CLASS));
+    if hwnds.len() < 2 {
+        // The island window is not up yet; the next drain tries again.
+        return;
+    }
+    let ole = unsafe { OleInitialize(None) };
+    let mut armed = Vec::new();
+    for hwnd in hwnds {
+        let target: IDropTarget =
+            KayaOleDropTarget { hovering: RefCell::new(None) }.into();
+        let registered = unsafe { RegisterDragDrop(HWND(hwnd as *mut core::ffi::c_void), &target) };
+        armed.push(format!(
+            "{}={}",
+            window_class(hwnd),
+            match &registered {
+                Ok(()) => "ok".to_owned(),
+                Err(e) => format!("{:#010x}", e.code().0),
+            }
+        ));
+        if registered.is_ok() {
+            core.ole_targets.push((hwnd, target));
+        }
+    }
+    // ONCE, and it is the only record that the classic route exists at
+    // all: no lane leg can send it a drag (that is docs/dnd-plan.md §5
+    // step 7's foreign witness), so nothing else would ever say so.
+    // RPC_E_CHANGED_MODE means the app thread is MTA — a WinUI host must
+    // be STA (the guest's Main needs [STAThread]), and both routes AND
+    // the XAML drag's modal loop are dead until it is (docs/traps.md).
+    let ole_code = ole.map(|()| 0).unwrap_or_else(|e| e.code().0);
+    let apartment = if ole_code as u32 == 0x8001_0106 {
+        " — the app thread is MTA; a WinUI host must run [STAThread]"
+    } else {
+        ""
+    };
+    eprintln!(
+        "kaya: winui OLE drop route armed (OleInitialize {ole_code:?}{apartment}): {}",
+        armed.join(" ")
+    );
+}
+
+fn window_class(hwnd: isize) -> String {
+    let mut buf = [0u16; 256];
+    let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    String::from_utf16_lossy(&buf[..n.max(0) as usize])
+}
+
+/// Every child window of `hwnd` carrying `class`, depth first — how the
+/// XAML island's HWND is found without a UI Automation client.
+fn child_windows_of_class(hwnd: isize, class: &str) -> Vec<isize> {
+    struct Hunt {
+        class: Vec<u16>,
+        found: Vec<isize>,
+    }
+    unsafe extern "system" fn visit(hwnd: isize, param: isize) -> i32 {
+        let hunt = unsafe { &mut *(param as *mut Hunt) };
+        let mut buf = [0u16; 256];
+        let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        if n > 0 && buf[..n as usize] == hunt.class[..] {
+            hunt.found.push(hwnd);
+        }
+        unsafe { EnumChildWindows(hwnd, Some(visit), param) };
+        1
+    }
+    let mut hunt = Hunt { class: class.encode_utf16().collect(), found: Vec::new() };
+    unsafe { EnumChildWindows(hwnd, Some(visit), &mut hunt as *mut Hunt as isize) };
+    hunt.found
+}
+
 /// The focused editable widget, if any: the root admits `accepts` on entries
 /// and textareas alone (scene.rs), and each control IS its own focus target
 /// here — no GtkText delegation to walk.
@@ -9104,6 +10284,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     }
     match op {
         ApplyOp::Create { id, kind, tag } => {
+            if let Some(carried) = &tag {
+                core.widget_tags.insert(id.0, carried.clone());
+            }
             let native = match kind {
                 WidgetKind::Entry => {
                     // Two prerequisites, both VM-proven (2026-07-15):
@@ -10610,8 +11793,42 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // stamped once for the whole batch (winui/order.rs).
             core.child_order.append(parent, child);
         }
-        ApplyOp::SetDragSource { .. } | ApplyOp::SetDropTarget { .. } | ApplyOp::SetReorderable { .. } => {
-            depth_stub("dnd")
+        ApplyOp::SetDragSource { id, clip, operations, tag } => {
+            let element = core
+                .widgets
+                .get(&id)
+                .expect("scene validated the id")
+                .element()?;
+            let empty = clip_is_empty(&clip);
+            // A WITHDRAWAL KEEPS THE ENTRY, emptied — the identity outlives
+            // the declaration (docs/traps.md: A DEFERRED WinUI DROP MUST BE
+            // FINISHED ON THE UI THREAD, its closing paragraph).
+            wire_dnd(core, id.0)?;
+            element.SetCanDrag(!empty)?;
+            core.drag_sources
+                .insert(id.0, WinDragSource { clip, operations, tag });
+        }
+        ApplyOp::SetDropTarget { id, operations, tag } => {
+            let element = core
+                .widgets
+                .get(&id)
+                .expect("scene validated the id")
+                .element()?;
+            if operations == 0 {
+                core.drop_targets.remove(&id.0);
+                element.SetAllowDrop(core.reorder_rows.contains_key(&id.0))?;
+            } else {
+                wire_dnd(core, id.0)?;
+                core.drop_targets.insert(id.0, (operations, tag));
+                element.SetAllowDrop(true)?;
+            }
+        }
+        ApplyOp::SetReorderable { id, enabled, tag } => {
+            if enabled == 0 {
+                core.reorderables.remove(&id.0);
+            } else {
+                core.reorderables.insert(id.0, tag);
+            }
         }
         ApplyOp::Fold { child, table } => {
             // The stacked fold (D7): the element moves into the table's
@@ -11700,8 +12917,15 @@ unsafe extern "system" {
     fn GetDC(hwnd: isize) -> isize;
     #[cfg(feature = "harness")]
     fn ReleaseDC(hwnd: isize, hdc: isize) -> i32;
-    #[cfg(feature = "harness")]
     fn ClientToScreen(hwnd: isize, point: *mut Point32) -> i32;
+    /// The `drag` verb's real input, the caption-centre probe's proven
+    /// shape (docs/probes/dnd-probe-windows-2026-09-03.md, D10).
+    #[cfg(feature = "harness")]
+    fn SetCursorPos(x: i32, y: i32) -> i32;
+    #[cfg(feature = "harness")]
+    fn mouse_event(flags: u32, dx: u32, dy: u32, data: u32, extra: usize);
+    #[cfg(feature = "harness")]
+    fn GetSystemMetrics(index: i32) -> i32;
     #[cfg(feature = "harness")]
     fn PrintWindow(hwnd: isize, hdc: isize, flags: u32) -> i32;
 
@@ -11767,7 +12991,6 @@ unsafe extern "system" {
     /// configurations).
     #[cfg(feature = "harness")]
     fn RegisterClassW(class: *const WndClassW) -> u16;
-    #[cfg(feature = "harness")]
     fn EnumChildWindows(
         parent: isize,
         callback: Option<unsafe extern "system" fn(isize, isize) -> i32>,
@@ -11823,7 +13046,6 @@ struct Rect {
 
 /// Win32's POINT, for `ClientToScreen` — named apart from WinRT's
 /// `Point`, which this file already uses for XAML's float coordinates.
-#[cfg(feature = "harness")]
 #[repr(C)]
 struct Point32 {
     x: i32,
@@ -12066,6 +13288,13 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             roles_armed: false,
             banked_text: HashMap::new(),
             ledger_quiet: HashMap::new(),
+            widget_tags: HashMap::new(),
+            drag_sources: HashMap::new(),
+            drop_targets: HashMap::new(),
+            reorderables: HashMap::new(),
+            reorder_rows: HashMap::new(),
+            dnd_wired: std::collections::HashSet::new(),
+            ole_targets: Vec::new(),
         });
     });
 
@@ -12567,6 +13796,181 @@ fn target_element(
             }
         }
     }))
+}
+
+/// The widget id behind each slot of a kind's registry, in the registry's
+/// own creation order. The registries and `widgets` hold clones of ONE
+/// control, so equality here is COM identity; a slot whose widget is gone
+/// answers 0. Four kinds keep an id vector of their own and are read
+/// straight off it.
+#[cfg(feature = "harness")]
+fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> {
+    use crate::harness::TargetKind as K;
+    macro_rules! ids {
+        ($reg:expr, $pat:pat, $ctrl:ident) => {
+            $reg.iter()
+                .map(|want| {
+                    core.widgets
+                        .iter()
+                        .find(|(_, native)| matches!(native, $pat if $ctrl == want))
+                        .map_or(0, |(id, _)| id.0)
+                })
+                .collect()
+        };
+    }
+    match kind {
+        K::Button => ids!(core.button_controls, NativeWidget::Button { button, .. }, button),
+        K::Checkbox => ids!(core.checkboxes, NativeWidget::Checkbox { check, .. }, check),
+        K::Slider => ids!(core.sliders, NativeWidget::Slider(slider), slider),
+        K::Entry => core.entry_ids.clone(),
+        K::Label => ids!(core.labels, NativeWidget::Label(label), label),
+        K::Column => core.column_ids.iter().map(|id| id.0).collect(),
+        K::Row => ids!(core.rows, NativeWidget::Row(panel), panel),
+        K::Image => ids!(core.images, NativeWidget::Image(image), image),
+        K::Scroll => ids!(core.scrolls, NativeWidget::Scroll(viewer), viewer),
+        K::Progress => ids!(core.progresses, NativeWidget::Progress(bar), bar),
+        K::Select => ids!(core.selects, NativeWidget::Select(combo), combo),
+        K::Radio => ids!(core.radios, NativeWidget::Radio(group), group),
+        K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
+        K::Textarea => core.textarea_ids.clone(),
+        K::Canvas => core.canvas_ids.clone(),
+    }
+}
+
+/// The AUTHORED a11y id a widget carries, read off the element the way
+/// `resolve_id` reads it — one reader for both keyed halves.
+#[cfg(feature = "harness")]
+fn automation_id_of(core: &CoreState, id: u64) -> Option<windows_core::HSTRING> {
+    use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
+    use bindings::Microsoft::UI::Xaml::DependencyObject;
+    let element = core.widgets.get(&WidgetId(id))?.element().ok()?;
+    let object: DependencyObject = windows_core::Interface::cast(&element).ok()?;
+    AutomationProperties::GetAutomationId(&object).ok()
+}
+
+#[cfg(feature = "harness")]
+fn target_widget_id(core: &CoreState, target: crate::harness::Target) -> Option<u64> {
+    let ids = registry_ids(core, target.kind);
+    let at = crate::harness::try_resolve(target.index, ids.len())?;
+    (ids[at] != 0).then_some(ids[at])
+}
+
+/// The measured drag: a settle, the press, six small moves inside the
+/// source past SM_CXDRAG/SM_CYDRAG, a stepped path, a pause, one nudge,
+/// the release (docs/probes/dnd-probe-windows-2026-09-03.md's drive.ps1,
+/// which drove a real XAML source through DragStarting to DropCompleted
+/// and a real Explorer drag into an OLE target). THE VERB DOES NOT WAIT
+/// FOR THE DROP: the scene's expects retry.
+#[cfg(feature = "harness")]
+fn inject_drag(from: (i32, i32), to: (i32, i32)) {
+    const MOVE: u32 = 0x0001;
+    const ABSOLUTE: u32 = 0x8000;
+    const LEFTDOWN: u32 = 0x0002;
+    const LEFTUP: u32 = 0x0004;
+    let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
+    let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
+    let move_to = |x: i32, y: i32| unsafe {
+        mouse_event(
+            MOVE | ABSOLUTE,
+            ((i64::from(x) * 65535) / width) as u32,
+            ((i64::from(y) * 65535) / height) as u32,
+            0,
+            0,
+        );
+        SetCursorPos(x, y);
+    };
+    let nap = |ms: u64| std::thread::sleep(std::time::Duration::from_millis(ms));
+    move_to(from.0, from.1);
+    nap(500);
+    unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
+    nap(300);
+    for step in 1..=6 {
+        move_to(from.0 + step * 3, from.1 + step * 2);
+        nap(60);
+    }
+    const STEPS: i32 = 30;
+    for step in 1..=STEPS {
+        let at = f64::from(step) / f64::from(STEPS);
+        move_to(
+            from.0 + (f64::from(to.0 - from.0) * at) as i32,
+            from.1 + (f64::from(to.1 - from.1) * at) as i32,
+        );
+        nap(60);
+    }
+    move_to(to.0, to.1);
+    nap(400);
+    move_to(to.0 + 2, to.1 + 1);
+    nap(300);
+    unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
+}
+
+/// Both centres in SCREEN pixels, or the sentence naming what stopped
+/// the drag. Its own function because the `drag` verb's settle calls it
+/// again.
+#[cfg(feature = "harness")]
+fn drag_plan(
+    source: crate::harness::Target,
+    destination: crate::harness::Target,
+    reorder: Option<bool>,
+) -> windows_core::Result<Result<((i32, i32), (i32, i32)), String>> {
+    type Aim = Result<((i32, i32), (i32, i32)), String>;
+    WinUiStage::on_ui_read(move |core| -> windows_core::Result<Aim> {
+        let Some(from) = target_widget_id(core, source) else {
+            return Ok(Err(format!("no such target {source:?}")));
+        };
+        let Some(onto) = target_widget_id(core, destination) else {
+            return Ok(Err(format!("no such target {destination:?}")));
+        };
+        if source_payload(core, from).is_none() {
+            return Ok(Err(format!(
+                "{source:?} declares no drag payload (set_drag_source) and is no row of a reorderable For"
+            )));
+        }
+        if !core.drop_targets.contains_key(&onto) && !core.reorder_rows.contains_key(&onto) {
+            return Ok(Err(format!(
+                "{destination:?} is not a drop destination — it declares no drop_target and sits in no reorderable For"
+            )));
+        }
+        if let Ok(content) = core.window.Content() {
+            let _ = content.UpdateLayout();
+        }
+        let (Some(src), Some(dst)) =
+            (widget_screen_rect(core, from), widget_screen_rect(core, onto))
+        else {
+            return Ok(Err("a drag end has no laid-out box yet".to_owned()));
+        };
+        if src.2 <= 0.0 || src.3 <= 0.0 || dst.2 <= 0.0 || dst.3 <= 0.0 {
+            return Ok(Err("a drag end has no laid-out box yet".to_owned()));
+        }
+        // ON SCREEN, because the injection is blind: a window placed past
+        // the desktop's edge takes the press to whatever is clamped under
+        // it — the taskbar (docs/traps.md: TWO OF THE SIX WINDOW TILES the
+        // windows lane places its legs in are off the VM's screen).
+        let (screen_w, screen_h) =
+            unsafe { (f64::from(GetSystemMetrics(0)), f64::from(GetSystemMetrics(1))) };
+        for (name, boxed) in [("source", src), ("destination", dst)] {
+            if boxed.0 < 0.0
+                || boxed.1 < 0.0
+                || boxed.0 + boxed.2 > screen_w
+                || boxed.1 + boxed.3 > screen_h
+            {
+                return Ok(Err(format!(
+                    "the {name}'s box {boxed:?} is off a {screen_w}x{screen_h} screen"
+                )));
+            }
+        }
+        // A reorder aims at the row's upper quarter (before) or lower
+        // quarter (onto); every other drop at the centre.
+        let share = match reorder {
+            Some(true) => 0.25,
+            Some(false) => 0.75,
+            None => 0.5,
+        };
+        Ok(Ok((
+            ((src.0 + src.2 / 2.0) as i32, (src.1 + src.3 / 2.0) as i32),
+            ((dst.0 + dst.2 / 2.0) as i32, (dst.1 + dst.3 * share) as i32),
+        )))
+    })
 }
 
 #[cfg(feature = "harness")]
@@ -13925,6 +15329,59 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    fn drag(
+        &self,
+        source: crate::harness::Target,
+        destination: crate::harness::Target,
+        reorder: Option<bool>,
+    ) -> String {
+        // REAL INPUT, from the leg's own process (docs/dnd-plan.md D10):
+        // WinUI's own remarks say there is no generalized DoDragDrop for a
+        // UI element, and OLE's modal loop reads real mouse messages.
+        type Aim = Result<((i32, i32), (i32, i32)), String>;
+        // A BOUNDED SETTLE, not a sleep: a scene's first step can reach
+        // this before the window has laid out at all, and the boxes this
+        // aims at are the layout's (measured 2026-09-03 — the first dnd
+        // drag ran 19ms after the epoch and read a zero-sized box).
+        const UNLAID: &str = "a drag end has no laid-out box yet";
+        // FOREGROUND FIRST, THEN MEASURE: the boxes below are SCREEN
+        // pixels, and a window that is not yet frontmost can still be
+        // covered by the leg before it. The desktop is this leg's alone
+        // for the same reason (tools/check-steps.py).
+        Self::foreground_guest("drag");
+        // TWICE THE SAME ANSWER: a window still finding its place answers
+        // a moving box, and the blind injection below cannot see that it
+        // missed.
+        let mut aimed: Aim = Err(UNLAID.to_owned());
+        let mut last: Option<((i32, i32), (i32, i32))> = None;
+        for _ in 0..80 {
+            aimed = match drag_plan(source, destination, reorder) {
+                Ok(aim) => aim,
+                Err(e) => return format!("<unreadable: {e}>"),
+            };
+            match &aimed {
+                Ok(points) if last == Some(*points) => break,
+                Ok(points) => last = Some(*points),
+                Err(_) => last = None,
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let (from, to) = match (aimed, last) {
+            (Ok(points), Some(settled)) if points == settled => points,
+            (Ok(points), _) => {
+                return format!("the drag's boxes never settled — last read {points:?}");
+            }
+            (Err(sentence), _) => return sentence,
+        };
+        // WHERE IT AIMED, on every drag: this verb drives BLIND real input
+        // at screen pixels, so the two points are the only record of what
+        // it actually did (docs/dnd-plan.md D10).
+        eprintln!("kaya: winui drag {source:?} at {from:?} -> {destination:?} at {to:?}");
+        inject_drag(from, to);
+        String::new()
+    }
+
+
     fn header_click(&self, t: crate::harness::Target, column: u32) {
         // THE HEADER BUTTON'S OWN INVOKE, so the emission comes out of the
         // Click handler a user would have run. The handle is read out and the
@@ -13984,37 +15441,46 @@ impl crate::harness::Stage for WinUiStage {
                     .map(|i| i as isize)
             }
             if let Some(keys) = keys.as_deref() {
-                if kind == K::Button {
-                    // A STAMPED BUTTON BY KEY: the template node off any
-                    // copy carrying the authored id, then the copy whose
-                    // click tag names that node and these keys
+                if kind != K::Column {
+                    // EVERY TAGGED KIND resolves through its CREATE tag,
+                    // which carries the table sort tag's own node-and-keys
+                    // layout: the template node off any copy carrying the
+                    // authored id, then the copy whose keys match
                     // (docs/deferred.md's keyed-target entry, 2026-09-01).
-                    let node = core
-                        .button_controls
+                    let candidates = registry_ids(core, kind);
+                    let tag_of = |widget: &u64| core.widget_tags.get(widget);
+                    let carries = |widget: &u64| {
+                        automation_id_of(core, *widget).is_some_and(|got| got == id)
+                    };
+                    let node = candidates
                         .iter()
-                        .zip(&core.buttons)
-                        .filter(|(control, _)| carries_id(*control, &id))
-                        .find_map(|(_, tag)| crate::harness::table_tag_node(tag));
+                        .filter(|widget| carries(widget))
+                        .find_map(tag_of)
+                        .and_then(|tag| crate::harness::table_tag_node(tag));
                     let Some(node) = node else {
-                        let with_id = core.button_controls.iter().filter(|c| carries_id(*c, &id)).count();
+                        // The miss says what the registry held: one
+                        // sentence for every cause is what cost a
+                        // stale-interpreter run on the mac (docs/traps.md).
+                        let with_id = candidates.iter().filter(|w| carries(w)).count();
+                        let tagged = candidates.iter().filter(|w| tag_of(w).is_some()).count();
                         eprintln!(
-                            "KAYA_DIAG keyed target button@{id}[{keys}] unresolved: {} live, {with_id} carrying the id",
-                            core.button_controls.len()
+                            "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] unresolved: {} live, {with_id} carrying the id, {tagged} tagged",
+                            candidates.len()
                         );
                         return Ok(None);
                     };
-                    return Ok(core
-                        .buttons
+                    return Ok(candidates
                         .iter()
-                        .position(|tag| crate::harness::table_tag_matches_keys(tag, node, keys))
+                        .position(|widget| {
+                            tag_of(widget).is_some_and(|tag| {
+                                crate::harness::table_tag_matches_keys(tag, node, keys)
+                            })
+                        })
                         .map(|i| i as isize));
                 }
-                if kind != K::Column {
-                    // The other registries hold controls without their
-                    // tags; a keyed target on them is this arm's stated
-                    // divergence until they carry both.
-                    return Ok(None);
-                }
+                // A COLUMN'S TAG IS ITS TABLE'S SORT TAG: a stamped
+                // container's Create carries none, so this one kind reads
+                // the declaration instead of `widget_tags`.
                 return TABLES.with_borrow(|tables| {
                     let node = core
                         .columns
@@ -16776,7 +18242,3 @@ mod tests {
     }
 }
 
-/// A depth stub is a CALL, never a sentence — tools/check-stubs.py reads it.
-fn depth_stub(scene: &str) -> ! {
-    panic!("kaya: the {scene} scene is not yet materialized on winui — a depth slice; see CLAUDE.md's sequencing")
-}

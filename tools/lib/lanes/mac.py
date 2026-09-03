@@ -145,7 +145,7 @@ ORDER = [
     ("drain",),
     ("canvas", ("rust",)),
     ("drain",),
-    ("dnd", ("rust",)),
+    ("dnd", LANGS),
     ("drain",),
     ("dark_leg",),
     ("drain",),

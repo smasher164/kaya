@@ -545,7 +545,11 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
                 fail(f"swift/KayaSwiftUI.swift has {got} executable "
                      f"{spelling} call(s), wanted {want}")
 
-    ktable = section(kotlin, "private fun tableStamp(",
+    # `internal` since 2026-09-03: the drag-and-drop surface renders
+    # outside `object KayaCompose` and reads a stamped row's keys for the
+    # reorder payload (docs/dnd-plan.md D8). The anchor takes either
+    # visibility so the census still reads the block.
+    ktable = section(kotlin, "fun tableStamp(",
                      "private fun target(", TARGET_KOTLIN)
     ktarget = section(kotlin, "private fun target(",
                       "private fun quotedHead(", TARGET_KOTLIN)
@@ -2378,19 +2382,20 @@ if out:
     status = 1
 
 
-# The staged WinUI ruling (docs/traps.md), covering THREE scene families
+# The staged WinUI ruling (docs/traps.md), covering FOUR scene families
 # that share one cause: the leg needs the DESKTOP to itself — menus_*
-# puts a real chord on the system input queue, and filedialog_* and
-# save_* are OS-global modal chrome found by walking the desktop. Each
-# runs ALONE between drains, which in the lane module's ORDER is "a block
-# of its own" — read structurally, so a parallelizing refactor cannot
+# puts a real chord on the system input queue, filedialog_* and save_*
+# are OS-global modal chrome found by walking the desktop, and dnd_*
+# moves the REAL MOUSE and presses it (docs/dnd-plan.md D10). Each runs
+# ALONE between drains, which in the lane module's ORDER is "a block of
+# its own" — read structurally, so a parallelizing refactor cannot
 # re-pool one without moving it into a wider block this refuses.
 def menu_serial(order, path):
     bad = []
     seen = 0
     for block in order:
         for leg in block:
-            if not re.match(r"(menus|filedialog|save|undo)_", leg):
+            if not re.match(r"(menus|filedialog|save|undo|dnd)_", leg):
                 continue
             seen += 1
             if list(block) != [leg]:
@@ -2398,8 +2403,8 @@ def menu_serial(order, path):
                            f"{len(block) - 1} other leg(s) and lacks "
                            f"the drain/run/drain barrier")
     if seen == 0:
-        bad.append(f"{path}: no menus_*/filedialog_*/save_*/undo_* "
-                   f"leg found (all four scenes must stay wired)")
+        bad.append(f"{path}: no menus_*/filedialog_*/save_*/undo_*/dnd_* "
+                   f"leg found (all five scenes must stay wired)")
     return bad
 
 
@@ -2412,12 +2417,14 @@ if not menu_serial([["layout_java", "save_rust"]], "-"):
     selftest_fail("pooled save leg passed")
 if not menu_serial([["layout_java", "undo_rust"]], "-"):
     selftest_fail("pooled undo leg passed")
+if not menu_serial([["layout_java", "dnd_rust"]], "-"):
+    selftest_fail("pooled dnd leg passed")
 
 out = menu_serial(win_lane.ORDER, "tools/lib/lanes/win.py")
 if out:
-    print("check-steps: the win lane's menus/filedialog/save/undo legs "
-          "must run in blocks of their own (docs/traps.md — each needs "
-          "the desktop to itself):", file=sys.stderr)
+    print("check-steps: the win lane's menus/filedialog/save/undo/dnd "
+          "legs must run in blocks of their own (docs/traps.md — each "
+          "needs the desktop to itself):", file=sys.stderr)
     print("\n".join(out), file=sys.stderr)
     status = 1
 

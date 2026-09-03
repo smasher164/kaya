@@ -119,6 +119,9 @@ public final class Main {
             case "dirty":
                 app = Dirty::app;
                 break;
+            case "dnd":
+                app = Dnd::app;
+                break;
             case "ranges":
                 app = Ranges::app;
                 break;

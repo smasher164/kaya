@@ -305,6 +305,38 @@ pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
         .collect()
 }
 
+/// THE DROP (docs/dnd-plan.md D1): a click identity tag, then four words
+/// — operation, before, anchor_len, clip — the point as two F64 values,
+/// the anchor's keys, and the representation in pasted's own layout
+/// (`wire::dropped_body`). DERIVED off `anchor_len`, which no other
+/// record carries: the generic tail hands the app a drop with NO payload
+/// at all, which is what all eight bindings did before the sweep.
+pub(crate) fn dropped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| r.fields.iter().any(|f| f.name == "anchor_len"))
+        .map(|r| r.name)
+        .collect()
+}
+
+/// THE DRAG'S OUTCOME: a click identity tag and one `operation` word
+/// after the key path (`wire::drag_ended_body`). Its slot is PAST the
+/// path, so the u32-slot family below cannot see it.
+pub(crate) fn drag_outcome_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 5
+                && r.fields[0].name == "id"
+                && r.fields[1].name == "path_len"
+                && r.fields[3].name == "operation"
+                && !r.fields.iter().any(|f| f.name == "anchor_len")
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
 /// Occurrences whose THIRD field — the u32 at offset 20, where the
 /// click-tag family writes `reserved` — is a NAMED value the handler
 /// needs. The generic tag fallthrough skips that slot, so every parser

@@ -1769,6 +1769,23 @@ list, in rough priority order; chat / todo / media stay unpicked.
   sway and pointer injector (the session-architecture entry above,
   struck), probe 4 measured with it; the resident iOS XCUITest driver
   is the other half.
+  ITS §5 STEP 6 IS DONE 2026-09-03 — THE EIGHT OTHER BINDINGS: Python,
+  Go, JS, C#, Java, Swift, OCaml and Haskell all spell the three
+  declarations and the two handlers in their own idiom, with the
+  per-language do/can't/defer verdict in docs/dnd-plan.md §4 (nine DO,
+  the C floor the records alone) and a `dnd` guest each, byte-identical
+  to guests/rust/dnd.rs on tools/scenes/dnd.steps and green on the mac
+  lane. check-sugar-surface carries the DND SURFACE census (five
+  spellings × nine bindings, five watched fake-name negatives, the
+  template-zone sentence perturbed in the two ambient bindings and the
+  seven typed refusals watched firing on a spliced breach). STILL OPEN
+  under this entry: the four other lanes' backend arms (§5 step 5), the
+  files drop's picked-table redemption (§5 step 4, D6), the TEMPLATE
+  ZONE — every binding refuses a stamped copy by name or by type today,
+  and a STAMPED COPY'S OWN `drag_ended` (a reorderable row IS a stamped
+  copy) reaches no registration, which the sweep found through Go's
+  live-arm/node-arm pairing test and docs/dnd-plan.md §4 states — and
+  the cross-app witnesses (§5 step 7).
   KEY: drag and drop, dropped, drag_ended, drop_target, draggable,
   reorderable, dnd-plan, DataPackage, GtkDropTargetAsync, input draganddrop
 - **Standard commands LANDED 2026-07-24** (the follow-up milestone to
@@ -2881,7 +2898,7 @@ reach.
   THE CHART LANDED 2026-08-27 (phase 4), which is the artifact this
   whole feature exists to feed: guests/python/portfolio.py's dashboard
   draws the book valued at each of the last 90 days' prices, as app
-  arithmetic over a new derived asset (guests/assets/market/prices.csv,
+  arithmetic over a new derived asset (guests/assets/market/prices.csv (built),
   which tools/gen-market.py now writes beside the ledger) spoken in the
   op vocabulary and the paint roles — no new core surface. The scene
   freezes the three verbs plus the drawing's accessible name on the
@@ -10340,8 +10357,9 @@ binding's surface moves. Close it by rewriting the encoder against the
 probe's output bytes as the oracle, with bindings/js/kaya_app_checks.ts's
 byte-equality negatives held, and record the new batch time here.
 
-## DRAG AND DROP — the depth slice is under way (2026-09-03): spec, core, the mac arm, the `drag` verb, the Rust sugar and the dnd scene landed; four backend arms and eight bindings are depth stubs
-KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md, KayaDragDropView, kayaDriveDrag, identityTag, kaya_blob_count
+## DRAG AND DROP — LANDED on every lane in every language 2026-09-03 (spec, core, five backend arms, the `drag` verb per lane, nine bindings, the dnd scene); open: the files drop (D6), the template zone, a stamped row's own `drag_ended` registration, the cross-app witnesses
+KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md, KayaDragDropView, kayaDriveDrag, identityTag, kaya_blob_count, KayaPhoneDragDropSurface, KayaDropSessionDouble, kayaReadDropValue, DndHub, dragdrive.py, KAYA_DRAG_DRIVER, await_frames, targets_mut
+
 
 The design pass is docs/dnd-plan.md; the maintainer ruled it first among
 the video editor's features (2026-09-03). LANDED: the three transaction
@@ -10378,15 +10396,80 @@ each a stub the runner reads (tools/check-stubs.py):
     the leg itself: the verb drives the same arms a session does, and
     the source's real gesture (mouseDown/mouseDragged into
     beginDraggingSession) is witnessed only by hand in step 7.
-  - **DEPTH STUB: dnd on swiftui/ios** — the UIDropInteraction route with
-    a session double (D10), after the mac arm; probe 5's answer on the
-    paste prompt lands here.
-  - **DEPTH STUB: dnd on compose** — the two modifiers and the `input
-    draganddrop` verb (D10), in the breadth phase (§5 step 5).
-  - **DEPTH STUB: dnd on gtk** — GtkDropTargetAsync for every target and
-    the X11 verb through xdotool (D10), in the breadth phase (§5 step 5).
-  - **DEPTH STUB: dnd on winui** — DataPackage or the OLE route, decided
-    by probes 1 and 2, and the SendInput verb (D10), in the breadth phase.
+  - ~~**DEPTH STUB: dnd on swiftui/ios**~~ — LANDED 2026-09-03: the same
+    `KayaDragDropView` name over a `UIView`, a `UIDragInteraction` behind
+    every source and a `UIDropInteraction` behind every destination, the
+    core's verdict answered as a `UIDropProposal`, every provider load
+    STARTED inside `performDrop` (probe 5's three-second death), and the
+    `drag` verb's in-process route through `KayaDropSessionDouble` +
+    `KayaDragSessionDouble` (D10) — the same three destination arms the
+    mac verb drives. Two things the arm settled: a MIME-shaped custom id
+    registers VERBATIM on iOS, so no private mapping and one id vocabulary
+    on both Apple platforms (docs/traps.md, docs/dnd-plan.md D9), and the
+    source's declared operation mask rides `localContext`, since iOS
+    reduces it to one `allowsMoveOperation` bool. The dnd legs ride the
+    ios lane's rust-swiftui suite.
+  - ~~**DEPTH STUB: dnd on compose**~~ — LANDED 2026-09-03: the three
+    apply arms, `kayaDragAndDropSurface` (Compose 1.9's
+    `dragAndDropSource(transferData:)` plus `dragAndDropTarget`, behind
+    any node that declares a payload, an operation mask, or is a row of a
+    reorderable For), the three `KayaPresent` natives, and the `drag`
+    verb as the REQUEST/ACK runner channel D10's Android bullet now
+    spells — the dnd-compose leg green at 17 of 17 with both reorders.
+    A drag's process-local payload rides Android's own
+    `DragEvent.getLocalState()`, which is the payload table AND the
+    local/foreign discriminator (D9). Five findings on the record
+    (docs/traps.md): the compose BOM does not decide the compose version
+    here, `input draganddrop` holds no long press against a detector that
+    waits 500ms from the DOWN, a touch injected into a leg's first
+    ~400ms is lost to the launch transition, a `drag` aimed the frame
+    before the layout lands drops a row onto itself, and a Compose drag
+    source must be a drop target of its own drag or a refused drag ends
+    in silence. AND ONE DEFECT THAT WAS NOT DND'S: targetSdk 35 makes
+    Android 15 force edge to edge, so kaya drew its first row under the
+    status bar and its last under the gesture bar, with that strip the
+    status bar's own touchable region — `KayaRoot` consumes
+    `safeDrawingPadding()` now, and no lane could ever have seen it
+    because every click on this backend is programmatic.
+  - ~~**DEPTH STUB: dnd on gtk**~~ — LANDED 2026-09-03: a GtkDragSource
+    over the declared payload and a GtkDropTargetAsync over the accept
+    list on every declared widget, the reorder's two halves on the For's
+    CONTAINER (its rows churn on every delta and every windowing scroll,
+    so the row under the pointer is found by hit test rather than by a
+    controller per row), every hover and drop answered by
+    `wire::drop_verdict`, and the `drag` verb as REAL POINTER INPUT on
+    both pools through tools/linux/dragdrive.py — the gesture and the
+    window-origin read tools/linux/dragprobe.py already proved, now one
+    copy shared by the probe and the verb. tools/scenes/dnd.steps runs
+    as the dnd-rust leg on x11 and wayland. THREE MEASURED FINDINGS on
+    the way, each with its guard: `Step::targets_mut` handed the
+    normalizer a drag's SOURCE ALONE, so the destination reached every
+    rust-native backend as index 0 with its id still on it (no lane
+    could see it — the mac interpreter parses the script itself;
+    tools/check-verbs.py censuses every variant's Target fields now,
+    two watched negatives); the x11 toplevel X window is BIGGER than
+    its content by the CSD shadow while sway reports the other side of
+    that border, so a press computed from the X window origin was 5px
+    off and missed an 8px row (the caller passes the surface transform
+    now); and a widget's box is the one the LAST FRAME gave it, so the
+    boxes read after a move_child were the boxes from before it
+    (`GtkStage::await_frames(2)`). All three are in docs/traps.md.
+  - ~~**DEPTH STUB: dnd on winui**~~ — LANDED 2026-09-03: BOTH routes, as
+    probes 1 and 2 ruled. XAML `CanDrag`/`DragStarting`/`DropCompleted` and
+    `AllowDrop`/`DragEnter`/`DragOver`/`Drop` carry every WinRT drag with
+    the verdict coming from `wire::drop_verdict`, `custom(id, bytes)`
+    riding `SetData(id, IRandomAccessStream)` over a memory `IStream`, and
+    a pid-named private format answering local-versus-foreign from the
+    format list; classic OLE `RegisterDragDrop` is armed beside it on the
+    top-level HWND and the island, reading HGLOBAL then ISTREAM one tymed
+    per `GetData` (its own drags are §5 step 7's foreign witness — no leg
+    can send it one yet, so the arming census is what it prints). The
+    `drag` verb is real `mouse_event` input in the probe's measured shape
+    and the dnd-rust leg runs alone between drains. The bindgen filter
+    grew the eleven drag and DataTransfer types whose absence left every
+    ADD half of the six drag events a `usize` vtable pad, and winui's
+    keyed harness target is generic now (every create tag by widget id),
+    which is what let `label@row[c]` resolve at all.
 
 ## WATCH — iOS varied-python: `scroll_to_row r100` landed the band at 98 (first sighting 2026-09-03)
 KEY: varied-python, scroll_to_row, expect_window, first visible, synthesized tier, variable row heights, "98 300"

@@ -227,6 +227,15 @@ dies about 3 s after `performDrop` returns, so the arm copies the file
 into the app's container inside the callback and registers the copy —
 what the picker's iOS arm already does for a security-scoped URL.
 
+BUILT 2026-09-03 (§5 step 5, iOS): `kayaReadDropValue`'s files branch is
+that shape — `loadFileRepresentation(forTypeIdentifier: "public.item")`
+STARTED inside `performDrop`, the temp copy copied again under the app's
+own `NSTemporaryDirectory()`, and that URL registered in
+`kayaPickedURLs`, which is the table `kaya_swiftui_open_picked` reads.
+No leg exercises it yet: dnd.steps' files target is the REFUSED type,
+and a files DROP joins the scene when the picked-table drop route lands
+(§5 step 4's own note).
+
 ### D7 — The mac destination is an AppKit view, not a SwiftUI DropDelegate (RULING, visual and testability)
 
 SwiftUI's `DropDelegate` cannot be driven in-process (`DropInfo` has no
@@ -283,6 +292,29 @@ island HWND for Explorer and every Win32 source, the two coexisting in
 one window, with custom formats written as streams. Phones: same-app
 only, stated.
 
+THE CUSTOM ID NEEDS NO PHONE MAPPING, measured 2026-09-03 with the iOS
+arm (§5 step 5). `NSItemProvider.registerDataRepresentation(forTypeIdentifier:
+"dev.kaya/note", …)` keeps a MIME-shaped id verbatim in
+`registeredTypeIdentifiers` — same-app inside kaya's OWN bundle, which
+declares no `UTExportedTypeDeclarations` for it, and cross-process per
+probe 5 — where macOS refuses that same string at ITEM level and the mac
+arm therefore writes the board directly (probe 3, docs/traps.md). So both
+Apple arms present ONE id vocabulary and read a foreign kaya id exactly
+as they read a local one; D2's "a foreign source is answered copy" is
+what keeps that safe. A per-id private UTI was considered and refused:
+it would have made a foreign custom drop invisible on iOS and visible on
+the mac, which is a semantics divergence rather than a spelling one.
+
+ANDROID'S PROCESS-LOCAL CHANNEL IS THE PLATFORM'S OWN, settled while the
+Compose arm was written: a `ClipData` cannot carry custom or image BYTES
+to another process here, so those representations ride
+`DragAndDropTransferData(clipData, localState, flags)` — the object
+Android hands back through `DragEvent.getLocalState()` inside the process
+that started the drag and nowhere else. It is both the payload table and
+the discriminator that says a source is local, so the arm needs no id of
+its own in the ClipData. A FOREIGN drag therefore offers neither image
+nor custom: they are NOT ON OFFER rather than offered and empty.
+
 ### D10 — The harness verb drives real input where the lane has it (RULING)
 
 One shared verb, `drag <source> to <destination> [at <row key> before|onto]`,
@@ -294,6 +326,20 @@ addressed by kind and id like every other verb. Per lane:
 - Windows: `SendInput` from the leg's own launcher, the caption probe's
   proven shape.
 - Android: `adb shell input draganddrop` between two testTags' centres.
+  BUILT 2026-09-03 as a REQUEST/ACK channel, because the harness runs
+  inside the app and no app may inject a system drag. The verb computes
+  both surfaces' centres in SCREEN PIXELS (each one's own
+  `boundsInWindow` plus the decor view's `getLocationOnScreen`; a reorder
+  aims at the landed row's upper or lower QUARTER) and logs
+  `KAYA_REQUEST: draganddrop <seq> x1 y1 x2 y2 <ms>` on the tag the
+  per-leg poll in tools/android/run-emulator.py already reads; that poll
+  runs `adb -s <serial> shell input draganddrop …` on the leg's own
+  device. The verb then waits for the platform's own ACTION_DRAG_ENDED
+  and logs `KAYA_ACK: draganddrop <seq>`; a request served but not acked
+  is re-injected, three tries 2s apart, since a REFUSED drop acks too and
+  a missing ack means no gesture reached the app at all. Its expiry
+  sentence carries the four counters it measured. The point delivered to
+  the app is in the destination's own top-left space, in DP.
 - mac: the in-process AppKit route — a real `NSPasteboard` built from
   the source's declaration and the real `NSDraggingDestination` arms
   called in order on the main thread — because real input is refused
@@ -441,6 +487,85 @@ existing move sugar. The C floor is the records. check-sugar-surface
 gains the receiver-keyed rows; the sweep is assessed per language with
 a do/can't/defer verdict before the fan-out.
 
+### THE SWEEP, DONE 2026-09-03 — nine DO, the C floor the records alone
+
+AMENDED AT THE SPELLING, not the semantics: this section's sketch put
+`on_drop` inside `drop_target(...)` and gave `reorderable` an
+`on_move(key, anchor, before)` of its own. The RUST ARM shipped first
+(step 4) and its shape is what the other eight mirror, because invariant
+1 is one observable semantics and the reference is the one that runs:
+`reorderable` is a DECLARATION, and a reorder's landing arrives through
+`on_drop` ON THE FOR'S OWN CONTAINER — the moved row's key in the clip,
+the row it landed on as the anchor, before/onto beside it (D8 amended) —
+so the app confirms with the move sugar it already has. One handler
+family, not two.
+
+| language | verdict | draggable | drop_target | reorderable | on_drop / on_drag_ended |
+| --- | --- | --- | --- | --- | --- |
+| Rust | do | `tx.draggable(w).text(..).custom(id, b).allow(Op::Move).declare()` | `.accepts(&[..]).drop_target(&[Op::Copy])` | `tx.reorderable(list, true)` | `msgs.on_drop(w, ..)` / `msgs.on_drag_ended(w, ..)` |
+| Python | do | `w.draggable(text=.., custom={..}, operations=(OP_COPY,))` | `w.accepts("text").drop_target(OP_COPY)` | `items.rows(reorderable=True, on_drop=fn)` | `w.on_drop(fn)` / `w.on_drag_ended(fn)` |
+| Go | do | `tx.Draggable(w).Text(..).Custom(..).Allow(OpMove).Declare()` | `w.Accepts(..).DropTarget(OpCopy)`, `tx.SetDropTarget` | `tx.SetReorderable(c, true)`, `rows.Reorderable(true)` | `app.OnDrop(w, ..)` / `app.OnDragEnded(w, ..)` |
+| C# | do | `tx.Draggable(w).Text(..).Custom(..).Allow(Op.Move).Declare()` | `tx.SetAccepts(w, ..); tx.SetDropTarget(w, Op.Copy)` | `tx.SetReorderable(c, true)` | `tx.OnDrop(w, ..)` / `tx.OnDragEnded(w, ..)` |
+| Java | do | `tx.draggable(w).text(..).custom(..).allow(Op.MOVE).declare()` | `tx.setAccepts(w, ..); tx.setDropTarget(w, Op.COPY)` | `tx.setReorderable(c, true)` | `app.onDrop(w, ..)` / `app.onDragEnded(w, ..)` |
+| Swift | do | `tx.draggable(w).text(..).custom(..).allow(.move).declare()` | `tx.setAccepts(w, ..); tx.setDropTarget(w, [.copy])` | `tx.setReorderable(c, true)` | `tx.onDrop(w) { .. }` / `tx.onDragEnded(w) { .. }` |
+| OCaml | do | `draggable ~text ~custom ~operations:[Op.Copy] w ()` | `set_accepts w [..]; set_drop_target w [Op.Copy]` | `set_reorderable w true` | `on_drop app w fn` / `on_drag_ended app w fn` |
+| Haskell | do | the `Draggable Clip [Op]` attr, `setDragSource w clip ops` | the `DropTarget [Op]` attr, `setDropTarget w ops` | `setReorderable w True` | `onDrop app w fn` / `onDragEnded app w fn` |
+| JS | do | `w.draggable({ text, custom, operations: [OP_COPY] })` | `w.accepts("text").dropTarget(OP_COPY)` | `items.rows({ reorderable: true, onDrop: fn })` | `w.onDrop(fn)` / `w.onDragEnded(fn)` |
+| C floor | records only | the generated `kaya_tx_set_drag_source` packer | `kaya_tx_set_drop_target` | `kaya_tx_set_reorderable` | the occurrence bytes; no decoder, as for `pasted` |
+
+The C floor gets no `dnd` guest and no decoder in this slice, which is
+this section's own ruling ("The C floor is the records") and the shape
+`pasted` already has there: the packers ride the generator, the
+occurrence side is undecoded, and the mac lane's `dnd` roster excludes
+`c` for that reason.
+
+THE OPERATION VOCABULARY IS THE BINDING'S OWN SPELLING of one closed
+set: an enum where a language has them (Rust `Op`, Go's `Op` uint32 with
+`OpNone` for the refused outcome, C#'s `Op?`, Java's nullable `Op`,
+Swift's `KayaOp?`, OCaml's `Op.t option` — a MODULE because the menu
+role type already owns the constructor `Copy` — and Haskell's `Maybe
+Op`), and a named STRING in the two whose accept list is already strings
+(Python's and JS's `OP_COPY`/`OP_MOVE`, refused by name when a guest
+writes anything else). `none` is never spelled by a guest; it is what a
+cancelled or refused drag hands the source.
+
+THE TEMPLATE ZONE IS REFUSED IN ALL NINE, by the wall each binding
+already has: by TYPE in the seven whose zones are separate handles (a
+`Node`/`KayaNodeHandle`/`node` cannot be passed), and by name in the two
+whose one handle serves both — Python and JS raise the byte-frozen
+sentence "kaya: drag and drop is a LIVE-ZONE declaration in this slice —
+a widget inside a row template is neither a drag source nor a drop
+target (docs/dnd-plan.md §4)". The core refuses a keyed record beside
+them (crates/kaya/src/scene.rs). tools/check-sugar-surface.py holds all
+of it: five spellings × nine bindings, a watched fake-name negative per
+spelling, the sentence perturbed once per ambient file, and the seven
+typed refusals watched firing against a spliced breach.
+
+A STAMPED COPY'S OWN OUTCOME HAS NO REGISTRATION SURFACE, and that is
+the ONE gap the sweep leaves open — found by Go's own
+`TestEveryLiveDispatchArmHasATemplateNodeSibling`, which refuses a live
+dispatch arm with no template-node sibling. A reorderable For's rows ARE
+stamped copies, so `drag_ended` for a row drag arrives keyed (the mac arm
+hands the occurrence the SOURCE's tag), while every binding registers a
+drag handler by WIDGET id: the keyed occurrence matches no registration.
+`dropped` is unaffected — a reorder's landing carries the CONTAINER's
+tag (D8 amended), which is live. Deliberate, and stated rather than
+papered over: an `on_drop_node`/`on_drag_ended_node` pair is the template
+zone's own slice, beside the keyed `set_drag_source` the core refuses
+today. Go's arms therefore carry NO widget/node split at all — one table
+keyed by widget id — because a node arm reading a widget table would be
+the silent drop that test exists to forbid.
+
+WHAT THE OCCURRENCE SIDE COST: the tx records reached every binding
+through the generator, but `dropped` and `drag_ended` were in no
+binding's `parse_occurrence` — every one of the eight listed the two
+kinds and then fell through the click-tag tail, handing the app a drop
+with NO payload. tools/kaya-bindgen grew two DERIVED families for them
+(`dropped_occurrence_names` off the `anchor_len` field,
+`drag_outcome_occurrence_names` off the five-field shape) plus a
+`parse_representation` helper per language, since a drop's clip KIND
+sits four words and a point earlier than its values.
+
 ## §5 — Build order
 
 RULED 2026-09-02 (maintainer): THE TEST INFRASTRUCTURE COMES FIRST —
@@ -503,10 +628,105 @@ the wayland clipboard legs; then iOS.
    The files drop waits on the picked-table redemption's drop route
    (D6) and joins the scene with it.
 5. Breadth: GTK (`GtkDropTargetAsync` for every target, the X11 verb),
+   GTK DONE 2026-09-03: a GtkDragSource over the declared payload and a
+   GtkDropTargetAsync over the accept list per declared widget; the
+   reorder's source and destination on the For's CONTAINER, with the row
+   under the pointer found by hit test, because a For's rows churn on
+   every collection delta and every windowing scroll while the container
+   does not; the drop's bytes read asynchronously and the occurrence
+   emitted when they arrive, which is what D2's no-wait ruling buys on
+   this toolkit; and the `drag` verb as REAL POINTER INPUT on BOTH pools
+   — tools/linux/dragdrive.py now holds the window-origin read and the
+   press-walk-release the pointer proof already used, so the probe and
+   the verb share one copy. tools/scenes/dnd.steps is the dnd-rust leg
+   on x11 and wayland. Found on the way, all three in docs/traps.md: a
+   Step's SECOND Target was never normalized (the mac lane cannot see
+   it, since that interpreter parses the script itself), the x11
+   toplevel X window is bigger than its content by the CSD shadow while
+   sway reports the other side of it, and a widget's box is the one the
+   last frame gave it.
+
    WinUI (the bindgen filter's new types, `DataPackage`, the SendInput
    verb, the OLE route if probe 2 says so), Compose (the two modifiers,
    the `input draganddrop` verb), iOS (the in-process route). The
    wayland legs declared off until the pointer slice.
+   iOS DONE 2026-09-03: `KayaDragDropView` again, this time a `UIView`
+   carrying a `UIDragInteraction` behind any node that declares a payload
+   or is a row of a reorderable For and a `UIDropInteraction` behind any
+   node that declares operations or is such a row — `itemsForBeginning`
+   answering one `UIDragItem` whose provider carries the payload's
+   representations (D5), `sessionDidUpdate` answering the core's verdict as
+   a `UIDropProposal`, `performDrop` starting every load inside the callback
+   (probe 5). `kayaDragSurfaces`, `kayaDragOpMask` and `kayaDriveDrag` take
+   the mac's own names, so `KayaRender.kayaDragDrop` and the `drag` verb
+   arm carry ONE condition and two backgrounds rather than two arms. The
+   verb's route is D10's: real `NSItemProvider`s built from the source's
+   declaration, a `KayaDragSessionDouble` behind `localDragSession` (which
+   also carries the source's declared operation MASK, since iOS reduces it
+   to one `allowsMoveOperation` bool that cannot spell move-without-copy),
+   and the destination's real `canHandle` -> `sessionDidUpdate` ->
+   `performDrop` in UIKit's order — the same three arms the mac verb
+   drives. The gesture recognizer is exercised by nothing here; probe 5
+   drove a real touch through the resident driver into a real
+   `UIDropInteraction`, and the lane leg is the arms' proof. The swiftui/ios
+   depth stub is struck and dnd rides the ios lane's rust-swiftui suite.
+
+   COMPOSE DONE 2026-09-03: `kayaDragAndDropSurface` behind any node that
+   declares a payload, an operation mask, or is a row of a reorderable For
+   — `Modifier.dragAndDropSource` (Compose 1.9's `transferData` overload,
+   whose default start detector IS the long press) plus
+   `Modifier.dragAndDropTarget`, wrapped the way the file already wraps a
+   context catalog so a node that declares nothing composes as it did.
+   Three natives on `KayaPresent` (emitDropped, emitDragEnded,
+   dragVerdict) and the `drag` verb as a RUNNER CHANNEL (D10's Android
+   bullet). tools/scenes/dnd.steps green as the lane's `dnd-compose` leg.
+   FOUR FINDINGS ON THE WAY, all in docs/traps.md: the compose BOM does
+   not decide the compose version here (adaptive 1.2.0 pulls 1.9.0, so the
+   1.7 API spelling does not compile); `input draganddrop` holds no long
+   press while Compose's detector waits 500ms from the DOWN, which decides
+   the injection's duration; an injected touch in a leg's first ~400ms is
+   lost to the launch transition and the splash window, which is what the
+   ack and its bounded re-injection are for; and a `drag` aimed the frame
+   before the layout lands drops a row onto itself. AND ONE DEFECT THAT
+   WAS NOT DND'S: these apps target SDK 35, where Android 15 forces edge
+   to edge, so kaya's first row drew under the status bar and its last
+   under the gesture bar — and that strip is the status bar's own
+   TOUCHABLE region, which is why a reorder aimed at the first row could
+   not reach the app. `KayaRoot` consumes `safeDrawingPadding()` now. No
+   lane could see it: every click on that backend is programmatic and this
+   is the first injected system touch it has ever taken.
+
+   WINUI DONE 2026-09-03: both routes, as probes 1 and 2 measured them.
+   XAML carries every WinRT drag — `CanDrag` + `DragStarting` filling a
+   `DataPackage` (custom ids as `SetData(id, IRandomAccessStream)` over a
+   memory `IStream`, files through `StorageFile.GetFileFromPathAsync`
+   behind the starting deferral), `AllowDrop` + `DragEnter`/`DragOver`
+   answering `wire::drop_verdict` through `AcceptedOperation`, `Drop`
+   reading the chosen representation asynchronously, `DropCompleted`
+   giving the source its outcome — and a kaya-private format whose NAME
+   carries the pid answers local-versus-foreign from the format LIST,
+   since the hover verdict is synchronous and cannot afford a read. The
+   OLE route is armed beside it on the top-level HWND and on the island
+   (`Microsoft.UI.Content.DesktopChildSiteBridge`, after `OleInitialize`),
+   hit-testing by screen rect and reading HGLOBAL then ISTREAM one tymed
+   per `GetData`; it registers on every dnd leg and prints the census, and
+   its own drags are step 7's foreign witness. The `drag` verb is REAL
+   INPUT in drive.ps1's measured shape, and the leg runs alone between
+   drains because the mouse is OS-global. Three findings on the way, all
+   in docs/traps.md: a deferred drop finished OFF the UI thread emits
+   nothing (CORE is a thread_local) and reports `none` to the source; a
+   withdrawn source must keep its identity, since the app withdraws it
+   inside the `dropped` handler and `DropCompleted` comes after; and
+   `Step::targets_mut` normalized only a drag's SOURCE, so every
+   `kind@id[keys]` destination reached a rust-native backend as index 0.
 6. The eight other bindings, then the matrix.
+   DONE 2026-09-03: the §4 table carries every spelling; guests/<lang>/dnd
+   in all nine languages, green on the mac lane first and then on every
+   lane's roster (linux nine legs on both pools, windows six alone-legs
+   since the verb moves the real mouse, android's compose/jvm/go
+   families, iOS's rust-swiftui/swift/go suites). The occurrence side
+   (`dropped`/`drag_ended`) had never been generated in any binding and
+   grew its kaya-bindgen families; a stamped row's own `drag_ended` still
+   reaches no registration (the ledger's open item).
 7. Cross-app witnesses per desktop, and the reorder affordance's own
    insertion indicator on the two backends that must draw it.

@@ -6257,7 +6257,7 @@ one came back byte-identical, because none of them was ever the question.
 
 ## The android guest is staged, so a hand-built APK packages the LAST LANE RUN's copy (2026-08-29)
 
-`android/pyhost/src/main/assets/python/app/portfolio.py` is a STAGED COPY
+`android/pyhost/src/main/assets/python/app/portfolio.py` (built) is a STAGED COPY
 that `tools/android/run-emulator.py` refreshes. Gradle packages from
 there, not from `guests/`. So editing the guest and running
 `gradle :pyhost:assembleDebug` by hand builds an APK containing whatever
@@ -6645,7 +6645,7 @@ node_modules/kaya-gui/kaya/index.ts. Node's type stripping deliberately
 refuses files whose real path is under node_modules (a package is
 expected to ship JavaScript), and it resolves links to their targets —
 which is why the mac and linux lanes never saw this: their
-guests/js/node_modules/kaya-gui is npm's workspace SYMLINK to
+guests/js/node_modules/kaya-gui (built) is npm's workspace SYMLINK to
 bindings/js, a real path outside node_modules. The VM stages the binding
 at C:\kaya\kaya-gui with a directory junction from node_modules. The
 rule: A TYPESCRIPT PACKAGE CONSUMED WITHOUT A BUILD STEP LIVES OUTSIDE
@@ -8037,6 +8037,25 @@ prompt question itself answered no: a foreign drop raises no iOS paste
 prompt (the gesture is the consent), where the same app's
 `UIPasteboard.general.string` parked 26.5 s behind one.
 
+## check-doc-refs was green on BUILD OUTPUT: nine citations resolved only because this checkout had run the build (measured 2026-09-03)
+
+A fresh worktree ran the gate sweep and check-doc-refs went red on four
+references the main checkout resolves every day — `guests/js/node_modules/
+kaya-gui` (written by tools/js-typecheck.py, a gate that runs AFTER this
+one in the same sweep) and `android/pyhost/src/main/assets/python/app`
+(written only by the android lane's staging) — and the clause that now
+refuses that found five more, the generated market CSVs. A path that
+exists because the build wrote it is not a path the tree has, and
+`.gitignore` is the one place that says which is which: the gate asks git
+in one `check-ignore --stdin` call, refuses a good-looking citation of an
+ignored path, and takes a `(built)` marker beside a citation that is
+about the built copy itself — held to the path REALLY being ignored, so
+the marker cannot become the next `(gone)` nobody checks. Watched: N9
+plants a file under a node_modules/ and cites it hot and marked; N10
+marks a tracked path. The rule: A GATE THAT READS THE WORKING TREE IS
+ONLY AS FRESH AS THE TREE IT READS — a green in the maintainer's checkout
+says nothing about a clone until the clause has run in one.
+
 ## The Windows lane's first matrix after a spec change reads ~600s: the regenerated Go binding cold-compiles in four pool slots at once (measured 2026-09-03)
 
 Every Windows Go leg is `go build -o C:\kaya\<scene>_go.exe
@@ -8107,3 +8126,336 @@ call; the string flavour arrives UTF-16 with a NUL, the
 `IRandomAccessStream` flavour byte-exact. Elevation was not measurable:
 the VM runs with `EnableLUA=0`, so every process is high integrity and
 there is no UIPI barrier to observe.
+
+## A MIME-shaped custom id registers verbatim on iOS, and no private mapping is needed — the opposite of the same string on macOS (measured 2026-09-03)
+
+macOS refuses `dev.kaya/note` at ITEM level and only a board-level write
+carries it (the entry above). iOS is the other way round:
+`NSItemProvider.registerDataRepresentation(forTypeIdentifier:
+"dev.kaya/note", visibility: .all)` keeps the string in
+`registeredTypeIdentifiers` and `loadDataRepresentation` reads its bytes
+back. Probe 5 saw that same-app and cross-process
+(docs/probes/dnd-probe-ios-2026-09-03.md) but could not say whether the
+receiving bundle's `UTExportedTypeDeclarations` was load-bearing — its
+DragProbe declared one. The dnd arm settles it: the ios lane's
+`dnd-swiftui` leg reads `note target got dev.kaya/note 5 bytes (move)`
+out of kaya's OWN bundle (tools/ios/Info.plist.in declares no exported
+type at all), byte-identical to the mac leg's verdict. So the two Apple
+arms present ONE id vocabulary, and an iOS arm that invents a private
+per-id UTI would be making a foreign custom drop invisible on one Apple
+platform and visible on the other (docs/dnd-plan.md D9).
+
+## The top 24px of an Android kaya window was the status bar's, and nothing that draws could see it (measured 2026-09-03)
+
+`android/*/build.gradle.kts` declare `targetSdk = 35`, and Android 15
+forces edge to edge at that target: the activity's window spans the
+whole display and the system draws its bars OVER it. `KayaRoot`
+consumed only `imePadding()`, so kaya's own 16dp window inset put the
+first widget at window y=16 on the pool phones, where
+`dumpsys window` reads
+
+    InsetsSource id=61850000 type=statusBars      frame=[0,0][320,24]
+    InsetsSource id=61850006 type=tappableElement frame=[0,0][320,24]
+    InsetsSource id=6270001  type=navigationBars  frame=[0,616][320,640]
+    mSystemGestureExclusion=SkRegion((0,24,320,640))
+
+— so the first row of every scene was drawn under the status bar and the
+last under the gesture bar, and that top strip is the status bar's own
+TOUCHABLE region.
+
+NO LANE COULD SEE IT. Every `click`, `toggle` and `header_click` on this
+backend is programmatic (a semantics action or a direct emit), the `type`
+verb dispatches key events into the app's own window, and `expect_ink`
+photographs the window rather than pressing it. The drag-and-drop slice's
+`adb shell input draganddrop` is the FIRST injected system touch this
+backend has ever taken, and it found the strip immediately: a reorder
+aimed at the first row's upper quarter (y=20) never reached the app, and
+the source label's centre at y=24 sat exactly on the boundary and passed
+in one run and timed out in the next.
+
+The root Box consumes `safeDrawingPadding()` now — the union of system
+bars, IME and display cutout, which keeps the keyboard behaviour the
+`imePadding()` it replaces was added for.
+
+## `input draganddrop` holds no long press, and Compose's drag source starts on one that movement does not cancel (measured 2026-09-03)
+
+Two facts that decide the Android drag verb's numbers.
+
+`adb shell input draganddrop x1 y1 x2 y2 <ms>` costs `ms + ~350` of wall
+time on the pool (100 -> 457ms, 300 -> 543, 600 -> 637, 1000 -> 1039), so
+it does not hold a press before it starts moving: it is a DOWN,
+interpolated moves over `ms`, and an UP.
+
+Compose 1.9's `Modifier.dragAndDropSource(transferData:)` starts through
+`DragAndDropSourceDefaults.DefaultStartDetector`, which disassembles to
+`detectTapGestures(onLongPress = { requestDragAndDropTransfer(it) })` —
+and Compose's `detectTapGestures` cancels a long press on an UP or a
+CONSUMED pointer, never on movement. So the transfer begins exactly
+`longPressTimeoutMillis` (500ms) after the DOWN, wherever the pointer has
+travelled to by then, and the injection's duration decides how much of
+the path is left to drag. At 600ms the transfer started 83% of the way to
+the destination; the verb injects 1500ms, so it starts a third of the way
+along.
+
+## An injected touch in the first ~400ms of an Android leg is lost to the launch transition (measured 2026-09-03)
+
+`am start -W` returns on the app's FIRST FRAME, not on the end of the
+launch. The harness's first steps read the model and pass in
+milliseconds, so a `drag` reached its step 16ms into the run and the
+runner injected at +52ms — recorded by the system as
+`input_interaction: Interaction with: … MainActivity`, and yet no long
+press ever fired in the app. The window took focus at +21ms
+(`input_focus: [Focus entering …MainActivity]`) and the splash screen's
+own window still held an input channel until +355ms
+(`InputManager-JNI: Input channel object 'Splash Screen
+dev.kaya.rusthost (client)' was disposed`). Nothing accepted the
+transfer, so Android sent the window no ACTION_DRAG_ENDED either and the
+verb waited out its whole ceiling.
+
+The remedy is the request/ack shape (docs/dnd-plan.md D10): the app
+prints `KAYA_ACK: draganddrop <seq>` when its own ACTION_DRAG_ENDED
+lands, and tools/android/run-emulator.py re-injects a served request
+that has not been acked, three tries 2s apart. A REFUSED drop acks too —
+the source still reads `none` — so a missing ack means no gesture
+reached the app at all, and a re-injection cannot apply one twice.
+
+## A Compose drag source must be a drop target of its own drag, or a refused drag tells it nothing (measured 2026-09-03)
+
+Android delivers ACTION_DRAG_STARTED to a window's drag listener and
+sends nothing more — no location, no drop, and NO ACTION_DRAG_ENDED —
+unless the listener answers true. Compose's `AndroidDragAndDropManager`
+answers with whether ANY `Modifier.dragAndDropTarget` in the tree
+accepted the transfer, and `Modifier.dragAndDropSource` registers no
+target of its own. So a drag over a scene where every destination
+refuses the offer would end in silence, and the source would never learn
+that the answer was `none`.
+
+kaya's surface therefore gives the SOURCE a target as well, whose
+`shouldStartDragAndDrop` says yes to the session it started (the
+DragEvent's own local state names it) and whose `onDrop` refuses. The
+traced run shows the shape: for one `{ dev.kaya/note text/plain }` offer,
+`accept? node=5 verdict=0 yes=true` (the source), `node=6 verdict=1`,
+`node=7 verdict=2`, `node=8 verdict=0 yes=false`, then `onStarted` on
+5/6/7 alone — acceptance gates every later callback.
+
+WATCHED RED with that one clause cut out of a copy: the dnd-compose leg
+read `label#5 reads "no drag yet", wanted "drag ended copy"` three times
+over, each after the runner had exhausted all three injections, and the
+verb's own counters name the shape exactly — `started=0 entered=2
+dropped=1 ended=false`. THE DROP HAD LANDED and the source still learned
+nothing. The two REORDER drags stayed green through it, because every
+row of a reorderable For is a destination and the source row accepts on
+the ordinary verdict path.
+
+## The compose BOM does not decide the compose version in kaya's Android build (measured 2026-09-03)
+
+`android/kaya/build.gradle.kts` names
+`platform("androidx.compose:compose-bom:2024.10.01")`, which pins
+foundation and ui at 1.7.5 — but
+`gradle :kaya:dependencies --configuration debugCompileClasspath` reads
+`androidx.compose.ui:ui:1.0.1 -> 1.9.0`: the separately versioned
+`androidx.compose.material3.adaptive:*:1.2.0` modules drag the whole
+stack forward and Gradle takes the highest. Anything written against the
+BOM's own API level can fail to compile for a reason the BOM line
+denies — the drag-and-drop arm's first draft used 1.7's
+`dragAndDropSource { detectTapGestures … }` and got an overload
+ambiguity against 1.9's `dragAndDropSource(transferData:)`. Read the
+resolved version out of the dependency report, not the BOM.
+
+## A `drag` aimed the frame before the layout lands drops a row onto itself (measured 2026-09-03)
+
+Every Compose drag-and-drop surface publishes its box from
+`onGloballyPositioned`, which runs in a frame's LAYOUT phase, while
+`expect_order` reads the collection's children off the MODEL and passes
+the instant the batch applies. So the second reorder in
+tools/scenes/dnd.steps — issued in the same millisecond the first one's
+`expect_order` went green — computed its two screen points from the
+PREVIOUS arrangement's boxes: it injected `20 48 20 76`, the rows'
+pre-reorder centres, where the post-reorder ones were 24px lower, and
+dropped the moved row onto ITSELF. `collection_move` of a key after
+itself is a no-op, so the leg read `c|a|b` where it wanted `c|b|a` with
+every drag event delivered and acked.
+
+The verb waits two posted frames before it reads any box: a frame
+callback fires at the START of a frame and the layout follows inside it,
+so one frame is not enough.
+
+## A Step's SECOND Target was never normalized, so `drag <src> to label@row[a]` addressed label#0 on every rust-native backend (measured 2026-09-03)
+
+The GTK drag arm's first lane run. `crates/kaya/src/harness.rs` resolves a
+`kind@id[keys]` target once per step, over `Step::targets_mut`, and that
+function's arm was `Step::Drag(t, _, _) => vec![t]` — the source alone. The
+destination therefore reached the backend exactly as the script's parser had
+left it, `index: 0` with the id still on it, and `try_resolve(0, …)` names
+widget #0 of that kind. The GTK verb refused with what it measured ("the
+destination Target { kind: Label, index: 0, id: Some(\"row\"), keys:
+Some(\"a\") } declares no drop_target and sits in no reorderable For"), which
+is the only reason it took minutes rather than a session.
+
+NO LANE COULD SEE IT. The dnd scene had run green on the mac since the depth
+slice landed, because the SwiftUI interpreter parses the script text itself
+and resolves both ends through `kayaAnyTarget(words[2])` — a different route
+that never consults `targets_mut`. The two rust-native backends are the only
+consumers of the Rust normalizer, and neither had a drag arm until this one.
+
+It is a CLASS, not a typo: any Step with more than one Target field whose arm
+hands over fewer. `tools/check-verbs.py` censuses it now — each variant's
+`Target` fields against the bindings its `targets_mut` pattern hands over —
+with the shipped defect itself as one of two watched negatives.
+
+## The x11 lane's toplevel X window is BIGGER than its content: the CSD shadow is inside it, and sway reports the other side of the same border (measured 2026-09-03)
+
+Driving the `drag` verb's real pointer needs a screen coordinate, so a widget
+box is added to the window's origin — and the two servers answer DIFFERENT
+QUESTIONS about where the window is. `xdotool getwindowgeometry` reports the X
+window, which IS the `GdkSurface`: under bare Xvfb with no window manager GTK4
+still draws client-side decorations, so the shadow lives inside that window
+and the content starts one surface transform in. sway reports the xdg window
+geometry, which GTK sets to the content box, so the shadow is already
+excluded. Measured on the lane with `gtk_native_get_surface_transform`:
+
+    x11      (5.0, 5.0)     window 530x320 for a requested 540x330
+    wayland  (61.0, 55.0)   content origin already past it
+
+So an x11 press computed from the X window origin lands 5px up and left of
+where the verb meant. NOTHING EARLIER COULD SEE IT: the drag scene's plain
+targets are 33-73px wide labels that swallow 5px, and `tools/linux/dragprobe.py`
+drags between 200x100 boxes. A reorderable row's label is EIGHT pixels wide,
+and every press missed it — the container's own `GtkEventControllerLegacy` spy
+saw no event at all, while `core.window.pick()` at the same window point
+answered the right label.
+
+`tools/linux/dragdrive.py` takes the transform from its caller now and adds it
+on the protocol whose origin read answers for the surface; both callers pass
+their toplevel's own.
+
+## A widget's box is the one the LAST FRAME gave it, so a box read straight after a move_child is the box from before the move (measured 2026-09-03)
+
+With the origin fixed, the x11 dnd leg got the first reorder right and the
+second wrong: it read "a|c|b" where the scene wanted "c|b|a". The verb had
+aimed at rows `a` and `b` using the boxes they held BEFORE the first reorder
+displaced them. `ApplyOp::MoveChild` calls `reorder_child_after`, which queues
+a reallocation and nothing more; `compute_bounds` answers from the transform
+GTK set in the last frame's LAYOUT phase, so a box read in the same
+millisecond as the structural change is stale — and `expect_order`, which
+passed one step earlier, reads the children ORDER and is happy either way.
+The wayland leg passed by timing luck.
+
+`while MainContext::iteration(false)` is not enough: it dispatches only
+sources already ready, and the frame clock's next tick can be up to a frame
+away. `GtkStage::await_frames(2)` waits from the harness thread on a tick
+callback installed on the window (which keeps the clock running while it is
+installed), bounded at 500ms: the first frame carries the queued layout, the
+second proves it ran.
+
+## The android drag re-injection raced a slow end: a reorder landed but ACTION_DRAG_ENDED came late, and a fresh injection clobbered it (measured 2026-09-03)
+
+The android `drag` verb is a runner channel: the harness prints a
+KAYA_REQUEST and tools/android/run-emulator.py runs `input draganddrop`,
+re-injecting up to three times when no KAYA_ACK (the app's own
+ACTION_DRAG_ENDED) arrives within two seconds — because a touch injected
+into a leg's first ~400ms is lost to the launch transition and never
+starts. That re-injection was keyed on the ack ALONE, and under the full
+five-lane matrix one short reorder (a onto b, a 28px drag) started,
+entered and DROPPED but its ACTION_DRAG_ENDED was slow; the two-second
+window elapsed, the runner injected two more drags on top, each replacing
+`kayaDragSession`, and the end the verb was waiting on never set on the
+session it held (`started=1 entered=1 dropped=1 ended=false` at the 20s
+ceiling). The lane was green standalone every time — the race needs the
+contention. The fix: the source's `transferData` lambda logs
+KAYA_DRAG_STARTED the moment a gesture actually takes, and the runner
+re-injects a seq ONLY while no start has postdated its first injection —
+a lost touch, the one case re-injection is for. A drag that started is in
+flight and left alone to end within the harness's own 20s. The rule:
+RE-INJECTION IS FOR A GESTURE THAT NEVER STARTED, never for one that is
+merely slow to finish — the two look identical through the ack alone.
+
+## A WinUI host on an MTA thread has no drag and drop, and every OTHER scene hides it (measured 2026-09-03)
+
+WinUI 3 hosts its UI on a single-threaded COM apartment, and so does the
+OLE drag route (docs/dnd-plan.md §5). The C# guest's Main was hand-rolled
+without the `[STAThread]` the framework's own generated Main carries, so
+its main thread — the one `kaya_run` pumps the message loop on — defaulted
+to MTA. `OleInitialize` there returns `RPC_E_CHANGED_MODE` (0x80010106)
+and RegisterDragDrop fails 0x8007000E on both HWNDs, but the whole
+apartment being MTA ALSO kills the XAML drag's own modal loop: a
+SendInput-driven drag injects, the pointer moves, and no drop ever fires.
+NOTHING ELSE ON THE LANE SEES IT — every non-drag C# scene renders and
+answers on the MTA thread, so the C# lane was green for the life of the
+project and only the dnd leg, added 2026-09-03, went red while rust,
+python, js, go and java (none of which pre-set their apartment, so
+OleInitialize sets STA) all passed. The fix is `[STAThread]` on the
+guest's Main; the OLE arm's diagnostic now names the cause when it reads
+that HRESULT. The rule: A WINUI GUEST'S MAIN IS `[STAThread]`, like every
+other WinUI 3 app's — the framework got away without it only because no
+scene needed the apartment until drag and drop.
+
+## A DEFERRED WinUI DROP MUST BE FINISHED ON THE UI THREAD, or it lands and says it did not (measured 2026-09-03)
+
+Building the WinUI drag arm (docs/dnd-plan.md §5 step 5). `Drop` takes a
+`GetDeferral()` and reads the chosen representation asynchronously, and an
+`IAsyncOperation` that has NOT already finished delivers its completion on
+a THREADPOOL thread. Two things break there, both silently:
+
+- `CORE` is a `thread_local`, so it is `None` on that thread and the
+  `dropped` emission is skipped with nothing said. The verdict, the
+  chosen format and the bytes were all right in the log and the app saw
+  no occurrence; whether it happened depended on whether `GetDataAsync`
+  had finished by the time `SetCompleted` was called, so ONE RUN IN TWO
+  passed. The fix is to carry the occurrence SINK (which is `Send`) in
+  the landing rather than reaching for `CORE`, and to hop to the
+  dispatcher for the rest.
+- A deferral completed from a threadpool thread loses the drop for the
+  SOURCE: `DropCompleted.DropResult` reads `None` however the target
+  answered. Measured across four runs — every drop whose completion ran
+  INLINE (an already-finished async, on the UI thread) reported the
+  target's operation, and every drop whose completion ran off-thread
+  reported `None`, with the drop itself landing either way. Calling
+  `DataPackageView.ReportOperationCompleted` from the wrong thread does
+  not rescue it.
+
+So `finish_drop` hops to the DispatcherQueue when it is not already on the
+UI thread. THE HOP CANNOT DEADLOCK against the drag's own modal loop: the
+queue is pumped inside it — the app's own post-drop transactions are seen
+draining there, between the read and `DropCompleted` — which is the same
+fact DESIGN.md's drag paragraph claims when it says app logic keeps
+running inside the platform's modal loops.
+
+AND A WITHDRAWN DRAG SOURCE KEEPS ITS IDENTITY. A same-app move withdraws
+the source INSIDE the `dropped` handler (`tx.draggable(w).declare()` with
+an empty clip), and `DropCompleted` fires after that transaction has
+drained — so a backend that REMOVES its source record on withdrawal has
+no tag left to emit `drag_ended` with, and the source reads nothing at
+all. The winui arm keeps the entry, emptied.
+
+## A Step's SECOND Target was never normalized, so a drag's `kind@id[keys]` destination reached the backend as index 0 (measured 2026-09-03)
+
+`Step::targets_mut` is what turns an authored `kind@id[key]` target into
+the creation index every backend resolves by, and it listed only the
+FIRST target of `Step::Drag(source, destination, reorder)`. The
+destination arrived at the backend carrying its unresolved index — 0 —
+plus the id and keys nobody read, so `drag label@row[c] to label@row[a]`
+aimed at whatever label was created first. The mac arm never saw it: the
+SwiftUI interpreter parses the script itself and the Rust-side
+normalization does not run for it, so the class was invisible until a
+rust-native backend grew the verb — both of them found it the same day.
+`harness::tests::a_drag_normalizes_both_ends` is the runtime guard.
+
+## TWO OF THE SIX WINDOW TILES the windows lane places its legs in are off the VM's screen (measured 2026-09-03)
+
+`KAYA_WIN_SLOT` tiles a pooled leg's window at
+`(6 + (n % 2) * 568, 6 + (n / 2) * 390)` at 556x378 (winui's `setup`), which
+needs 1164 rows; the VM's interactive session is 1280x800, so slots 4 and 5
+sit at y=786 with 98% of the window past the bottom edge. Nothing had ever
+noticed, because no leg read a screen coordinate — until the dnd leg's
+`drag` verb, which aims REAL INPUT at screen pixels: on the lane it read
+the source label at y=842, pressed the taskbar, and the first drag did
+nothing while every later one worked (the window had been pulled back onto
+the desktop by then, at slot 2/3's y).
+
+`deploy-win.py`'s free-slot list is SORTED on release now, so a leg that
+runs alone always gets slot 0 and always lands in the same place; and the
+verb refuses an aim whose box is off the screen, or one that has not read
+the same box twice in a row, instead of injecting blind. The tiling itself
+is left as it is — it is the recorder's, and no pooled leg reads a
+coordinate.

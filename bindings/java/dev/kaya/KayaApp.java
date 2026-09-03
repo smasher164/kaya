@@ -286,6 +286,10 @@ public final class KayaApp {
     private final java.util.Map<Long, BiConsumer<Tx, Representation>> widgetPastes =
             new java.util.HashMap<>();
     private final java.util.Map<Long, PasteHandler> nodePastes = new java.util.HashMap<>();
+    private final java.util.Map<Long, BiConsumer<Tx, Dropped>> widgetDrops =
+            new java.util.HashMap<>();
+    private final java.util.Map<Long, BiConsumer<Tx, Op>> dragEnded =
+            new java.util.HashMap<>();
     private long nextClipboardRead;
     // Undo/redo handlers, keyed by WINDOW because the ledger is. NOT
     // one-shot, unlike the alert's: a history is walked as often as the
@@ -648,6 +652,43 @@ public final class KayaApp {
             }
             default -> null;
         };
+    }
+
+    /** A drag operation (docs/dnd-plan.md D3): copy and move, nothing
+     * else; null is the outcome of a cancelled or refused drag. */
+    public enum Op {
+        COPY(KayaWire.DRAG_OP_COPY),
+        MOVE(KayaWire.DRAG_OP_MOVE);
+
+        final int mask;
+
+        Op(int mask) {
+            this.mask = mask;
+        }
+    }
+
+    /** What a drop delivered (docs/dnd-plan.md D1): the representation a
+     * paste already delivers, the point in the destination's own
+     * coordinates, the operation the core settled on, and — for a
+     * reorder — the anchor row and the side it landed on. */
+    public record Dropped(
+            double x, double y, Op operation, java.util.List<Object> anchor,
+            boolean before, Representation clip) {}
+
+    /** The drag_op word, or null for a cancelled or refused drag. */
+    static Op operation(int mask) {
+        if (mask == KayaWire.DRAG_OP_COPY) {
+            return Op.COPY;
+        }
+        if (mask == KayaWire.DRAG_OP_MOVE) {
+            return Op.MOVE;
+        }
+        return null;
+    }
+
+    static Dropped dropped(KayaWire.DropValues drop) {
+        return new Dropped(drop.x, drop.y, operation(drop.operation), drop.anchor,
+                drop.before, representation(drop.clip));
     }
 
     private static String clipString(java.util.List<Object> values, int i) {
@@ -1137,6 +1178,86 @@ public final class KayaApp {
             }
             tx.emit(KayaWire.txCopy(
                     present, files.size(), custom.size(), values.toArray()));
+        }
+    }
+
+    /** The drag chain: the copy chain's representations plus the
+     * operations the source allows; declare() sends it. An EMPTY chain
+     * withdraws, which is how a same-app move removes its source
+     * (docs/dnd-plan.md D1, D2). */
+    public static final class DragRef {
+        private final Tx tx;
+        private final long widget;
+        private String text;
+        private String html;
+        private byte[] image;
+        private int ops;
+        private final java.util.List<Long> files = new java.util.ArrayList<>();
+        private final java.util.List<Object[]> custom = new java.util.ArrayList<>();
+
+        DragRef(Tx tx, long widget) {
+            this.tx = tx;
+            this.widget = widget;
+        }
+
+        public DragRef text(String value) {
+            this.text = value;
+            return this;
+        }
+
+        public DragRef html(String value) {
+            this.html = value;
+            return this;
+        }
+
+        public DragRef image(byte[] bytes) {
+            this.image = bytes;
+            return this;
+        }
+
+        public DragRef file(PickedFile f) {
+            files.add(f.handle());
+            return this;
+        }
+
+        public DragRef custom(String id, byte[] bytes) {
+            acceptList(id);
+            custom.add(new Object[] {id, bytes});
+            return this;
+        }
+
+        /** Allow this operation (copy, move, or both across two calls). */
+        public DragRef allow(Op op) {
+            ops |= op.mask;
+            return this;
+        }
+
+        public void declare() {
+            int present = 0;
+            java.util.List<Object> values = new java.util.ArrayList<>();
+            for (Object[] pair : custom) {
+                values.add(pair[0]);
+                values.add(new KayaWire.BlobHandle(
+                        KayaRing.blobRegister((byte[]) pair[1])));
+            }
+            for (long handle : files) {
+                values.add(handle);
+            }
+            if (image != null) {
+                present |= KayaWire.CLIP_IMAGE;
+                values.add(new KayaWire.BlobHandle(KayaRing.blobRegister(image)));
+            }
+            if (html != null) {
+                present |= KayaWire.CLIP_HTML;
+                values.add(html);
+            }
+            if (text != null) {
+                present |= KayaWire.CLIP_TEXT;
+                values.add(text);
+            }
+            boolean empty = present == 0 && files.isEmpty() && custom.isEmpty();
+            tx.emit(KayaWire.txSetDragSource(widget, present, files.size(),
+                    custom.size(), empty ? 0 : ops, 0, values.toArray()));
         }
     }
 
@@ -4108,6 +4229,33 @@ public final class KayaApp {
             emit(KayaWire.txSetAccepts(w.id, acceptList(kinds)));
         }
 
+        /** DECLARE what a widget hands over when dragged: a clip in the
+         * copy chain's own shapes plus the operations it allows
+         * (docs/dnd-plan.md D1). declare() sends it; an EMPTY chain
+         * withdraws. */
+        public DragRef draggable(Widget w) {
+            return new DragRef(this, w.id);
+        }
+
+        /** DECLARE that a widget receives drops, performing these
+         * operations; naming NONE withdraws it. WHAT it takes is its
+         * setAccepts list, which must be declared first — a destination
+         * has one vocabulary, not two. */
+        public void setDropTarget(Widget w, Op... ops) {
+            int mask = 0;
+            for (Op op : ops) {
+                mask |= op.mask;
+            }
+            emit(KayaWire.txSetDropTarget(w.id, mask, 0, new Object[] {}));
+        }
+
+        /** Rows of this live For drag within their own collection
+         * (docs/dnd-plan.md D8): the landing arrives at onDrop on the
+         * For's own container and the app confirms with a move. */
+        public void setReorderable(Widget container, boolean enabled) {
+            emit(KayaWire.txSetReorderable(container.id, enabled ? 1 : 0));
+        }
+
         /**
          * REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
          * one packed sRGB hex ({@code 0xRRGGBB}) is the whole call, and
@@ -5125,6 +5273,19 @@ public final class KayaApp {
         widgetPastes.put(w.id, handler);
     }
 
+    /** Take dropped content at a live widget, or a reorderable For's
+     * landings (docs/dnd-plan.md D8). Only fires for a widget that
+     * declared setDropTarget over an accept list. */
+    public void onDrop(Widget w, BiConsumer<Tx, Dropped> handler) {
+        widgetDrops.put(w.id, handler);
+    }
+
+    /** A drag that began at this widget has ended: a null operation is a
+     * cancelled or refused drag, not an error. */
+    public void onDragEnded(Widget w, BiConsumer<Tx, Op> handler) {
+        dragEnded.put(w.id, handler);
+    }
+
     /** A paste onto a stamped copy: the handler also receives the copy's
      * key path, outermost first. */
     public void onPaste(Node n, PasteHandler handler) {
@@ -5648,6 +5809,22 @@ public final class KayaApp {
                 Representation clip = representation(occ.payload);
                 if (handler != null && clip != null) {
                     dispatch(tx -> handler.accept(tx, occ.keys, clip));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DROPPED && occ.keys.isEmpty()) {
+                // A drop rides the same tag with four more words
+                // (docs/dnd-plan.md D1); the template zone is refused, so
+                // a keyed drop reaches no handler.
+                BiConsumer<Tx, Dropped> handler = widgetDrops.get(occ.id);
+                if (handler != null && occ.payload instanceof KayaWire.DropValues drop) {
+                    Dropped answer = dropped(drop);
+                    dispatch(tx -> handler.accept(tx, answer));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DRAG_ENDED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Op> handler = dragEnded.get(occ.id);
+                if (handler != null) {
+                    Op answer = operation(
+                            occ.payload instanceof Integer m ? m : 0);
+                    dispatch(tx -> handler.accept(tx, answer));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_UNDONE
                     || occ.kind == KayaWire.OCC_KIND_REDONE) {

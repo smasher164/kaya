@@ -1461,13 +1461,27 @@ data ClipValues = ClipValues
 -- nothing else on the occurrence channel has ever carried them.
 data ClipPart = CStr String | CI64 Int64 | CBytes BS.ByteString
 
--- Decode a representation at `at`: the clip kind, then its Values
--- block. Blobs are redeemed and RELEASED by `redeem` here.
-parseClip ::
-  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO (ClipValues, Int)
-parseClip redeem rec at = do
-  kind <- peekByteOff rec at :: IO Word32
-  count <- peekByteOff rec (at + 8) :: IO Word32
+-- | What a drop delivered (docs/dnd-plan.md D1): the operation the
+-- core settled on, the point in the destination's own coordinates,
+-- and — for a reorder — the anchor row's key path and whether the
+-- drop landed before it.
+data DropValues = DropValues
+  { dropOperation :: !Word32,
+    dropBefore :: !Bool,
+    dropX :: !Double,
+    dropY :: !Double,
+    dropAnchor :: ![Value],
+    dropClip :: !ClipValues
+  }
+
+-- The VALUES half of a representation at `at`: the count, then that
+-- many values with blobs redeemed and RELEASED by `redeem`. Its own
+-- function because a drop's clip KIND sits four words and a point
+-- earlier (docs/dnd-plan.md D1).
+parseRepresentation ::
+  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO ([ClipPart], Int)
+parseRepresentation redeem rec at = do
+  count <- peekByteOff rec at :: IO Word32
   let go a 0 acc = return (reverse acc, a)
       go a n acc = do
         (v, next) <- parseValue rec a
@@ -1477,7 +1491,15 @@ parseClip redeem rec at = do
           VStr t -> return (CStr t)
           other -> return (CStr (show other))
         go next (n - 1 :: Word32) (part : acc)
-  (parts, at') <- go (at + 16) count []
+  go (at + 8) count []
+
+-- Decode a representation at `at`: the clip kind, then its Values
+-- block. Blobs are redeemed and RELEASED by `redeem` here.
+parseClip ::
+  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO (ClipValues, Int)
+parseClip redeem rec at = do
+  kind <- peekByteOff rec at :: IO Word32
+  (parts, at') <- parseRepresentation redeem rec (at + 8)
   return (ClipValues kind parts, at')
 
 -- Decode one occurrence record at `rec` (header included). Just
@@ -1489,7 +1511,7 @@ parseClip redeem rec at = do
 parseOccurrence ::
   (Word64 -> IO BS.ByteString) ->
   Ptr Word8 ->
-  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, [Value]))
+  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
   if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded
@@ -1500,7 +1522,7 @@ parseOccurrence redeem rec = do
         then do
           -- The alert's one answer: id + u32 choice (alertChoice*).
           choice <- peekByteOff rec 16 :: IO Word32
-          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, []))
+          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, Nothing, []))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,
@@ -1512,21 +1534,21 @@ parseOccurrence redeem rec = do
                 (v, next) <- parseValue rec at
                 readValues (n - 1 :: Int) next (v : acc)
           vals <- readValues (fromIntegral count * 3) 32 []
-          return (Just (kind, ident, vals, Nothing, Nothing, []))
+          return (Just (kind, ident, vals, Nothing, Nothing, Nothing, []))
       else if kind == occKindClipboardResult
         then do
           (clip, _) <- parseClip redeem rec 16
-          return (Just (kind, ident, [], Nothing, Just clip, []))
+          return (Just (kind, ident, [], Nothing, Just clip, Nothing, []))
         -- Surface lifecycle records carry the surface id alone
         -- (derived from the record shapes).
         else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested
-          then return (Just (kind, ident, [], Nothing, Nothing, []))
+          then return (Just (kind, ident, [], Nothing, Nothing, Nothing, []))
         -- Surface-pair records (window, section): the SECOND id
         -- keys the handler; the first rides as the payload.
         else if kind == occKindSectionSelected
           then do
             second <- peekByteOff rec 16 :: IO Word64
-            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, []))
+            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, Nothing, []))
           else do
           pathLen <- peekByteOff rec 16 :: IO Word32
           let go at 0 acc = return (reverse acc, at)
@@ -1540,6 +1562,11 @@ parseOccurrence redeem rec = do
                 col <- peekByteOff rec 20 :: IO Word32
                 return (Just (VI64 (fromIntegral col)))
               else
+            if kind == occKindDragEnded
+              then do
+                op <- peekByteOff rec at' :: IO Word32
+                return (Just (VI64 (fromIntegral op)))
+              else
             if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged
               then do
                 (v, _) <- parseValue rec at'
@@ -1550,6 +1577,27 @@ parseOccurrence redeem rec = do
               then do
                 (c, _) <- parseClip redeem rec at'
                 return (Just c)
+              else return Nothing
+          drop_ <-
+            if kind == occKindDropped
+              then do
+                operation <- peekByteOff rec at' :: IO Word32
+                beforeWord <- peekByteOff rec (at' + 4) :: IO Word32
+                anchorLen <- peekByteOff rec (at' + 8) :: IO Word32
+                clipKind <- peekByteOff rec (at' + 12) :: IO Word32
+                (x, xNext) <- parseValue rec (at' + 16)
+                (y, yNext) <- parseValue rec xNext
+                let keysOf a 0 acc = return (reverse acc, a)
+                    keysOf a n acc = do
+                      (v, next) <- parseValue rec a
+                      keysOf next (n - 1 :: Word32) (v : acc)
+                (anchor, anchorEnd) <- keysOf yNext anchorLen []
+                (parts, _) <- parseRepresentation redeem rec anchorEnd
+                let coord v = case v of VF64 d -> d; _ -> 0
+                return
+                  ( Just
+                      (DropValues operation (beforeWord /= 0) (coord x) (coord y)
+                         anchor (ClipValues clipKind parts)))
               else return Nothing
           -- The canvas asks carry a run of BARE values after
           -- the key path — the assigned size, and a tick's
@@ -1566,4 +1614,4 @@ parseOccurrence redeem rec = do
                           rest next (v : acc)
                 rest at' []
               else return []
-          return (Just (kind, ident, keys, payload, clip, tail_))
+          return (Just (kind, ident, keys, payload, clip, drop_, tail_))

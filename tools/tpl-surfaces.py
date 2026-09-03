@@ -383,7 +383,7 @@ PROP_ZONES = [
     ("haskell", members_haskell, "data TplAttr (bindings/haskell/KayaApp.hs)", 3),
     ("js", members_js,
      "class Handle plus the zone-blind option writers "
-     "(bindings/js/kaya/index.ts)", 8),
+     "(bindings/js/kaya/index.ts)", 12),
 ]
 
 
@@ -1859,10 +1859,10 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 3
+CSHARP_TWIN_FLOOR = 4
 
 
-JAVA_TWIN_FLOOR = 3
+JAVA_TWIN_FLOOR = 5
 
 
 def twins_java():

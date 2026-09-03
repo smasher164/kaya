@@ -188,7 +188,7 @@ and 2026-08-26 it became this app's second screen.
   grown, the fill-and-scroll viewport the window reports its visible
   range from.
 - **The data is derived, never committed**: tools/gen-market.py writes
-  guests/assets/market/transactions.csv from a spelled-out LCG, and
+  guests/assets/market/transactions.csv (built) from a spelled-out LCG, and
   check-assets re-derives every string the scene freezes about it — the
   artifact plus the guest's own POSTED — so retuning the generator
   reddens ONE gate naming this scene instead of three lanes.

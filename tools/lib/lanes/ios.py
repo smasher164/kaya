@@ -29,7 +29,7 @@ SWIFT_ENTRIES = [
     "menus", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table", "canvas", "sizepolicy",
+    "table", "canvas", "sizepolicy", "dnd",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -43,7 +43,7 @@ GO_SCENES = [
     "menus", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table",
+    "table", "dnd",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -62,7 +62,7 @@ RUST_SCENES = [
     "a11y", "a11yrows", "styling", "ranges", "progress",
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
-    "dirty",
+    "dirty", "dnd",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

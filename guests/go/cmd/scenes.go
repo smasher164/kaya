@@ -15,6 +15,7 @@ import (
 	"dev.kaya/guests/go/commands"
 	"dev.kaya/guests/go/confirm"
 	"dev.kaya/guests/go/dirty"
+	"dev.kaya/guests/go/dnd"
 	"dev.kaya/guests/go/editor"
 	"dev.kaya/guests/go/entry"
 	"dev.kaya/guests/go/feed"
@@ -68,6 +69,7 @@ var scenes = map[string]func() *kaya.App{
 	"commands":   commands.App,
 	"confirm":    confirm.App,
 	"dirty":      dirty.App,
+	"dnd":        dnd.App,
 	"editor":     editor.App,
 	"entry":      entry.App,
 	"feed":       feed.App,

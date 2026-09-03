@@ -1699,7 +1699,7 @@ supposed to stay red while half the work is outstanding.
    retained days carry all six tickers, and two tickers' last traded
    price sits days short of the anchor, so a carry-forward series would
    end where the dashboard does not. tools/gen-market.py now writes
-   guests/assets/market/prices.csv beside the ledger, the whole walk,
+   guests/assets/market/prices.csv (built) beside the ledger, the whole walk,
    and refuses a history whose last day is not the book's live prices.
    THE TIE-OUT IS THE LEDGER'S, one screen over: the series' last point
    is label#0's money to the byte, held by the generator, by

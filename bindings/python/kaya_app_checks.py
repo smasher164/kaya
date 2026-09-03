@@ -2320,4 +2320,81 @@ check(
 # other than kaya_capabilities returns 0 and agrees with itself.
 check("this desktop reports auxiliary windows", caps.aux_windows is True)
 
+# --- THE DRAG SURFACE (docs/dnd-plan.md D1, D3, §4) -----------------
+# The template zone is refused BY NAME here, as the size policy is: one
+# handle serves both zones in this binding, so a raise is the only wall.
+app_dnd = kaya.App()
+with app_dnd.build():
+    dnd_items = kaya.collection()
+with app_dnd.build():
+    with kaya.column():
+        with kaya.for_each(dnd_items):
+            for what, call in (
+                    ("drag source",
+                     lambda: kaya.label("x").draggable(text="hi")),
+                    ("drop target",
+                     lambda: kaya.label("x").accepts(kaya.ACCEPT_TEXT)
+                     .drop_target(kaya.OP_COPY)),
+                    ("drop handler",
+                     lambda: kaya.label("x").on_drop(lambda d: None)),
+            ):
+                before_dnd = len(kaya._tx)
+                try:
+                    call()
+                    ok = False
+                except RuntimeError as exc:
+                    ok = "LIVE-ZONE declaration in this slice" in str(exc)
+                _rewind(before_dnd)
+                check(f"a template-node {what} is refused by name", ok)
+            kaya.label("empty")
+
+with app_dnd.build():
+    with kaya.column():
+        # LINK AND ASK ARE REFUSED (docs/dnd-plan.md D3), and the word
+        # that is neither copy nor move is named in the refusal.
+        before_dnd = len(kaya._tx)
+        try:
+            kaya.label("x").draggable(text="hi", operations=("link",))
+            ok = False
+        except ValueError as exc:
+            ok = "link" in str(exc) and "not a drag operation" in str(exc)
+        _rewind(before_dnd)
+        check("an operation outside copy and move is refused by name", ok)
+
+        # AN EMPTY CHAIN WITHDRAWS: no representation, so no operation
+        # mask either — which is what a same-app move's removal sends.
+        before_dnd = len(kaya._tx)
+        kaya.label("x").draggable()
+        withdrawn = [rec for rec in kaya._tx[before_dnd:]
+                     if _rec_kind(rec) == kaya.wire.TX_SET_DRAG_SOURCE]
+        check("an empty drag chain withdraws the declaration",
+              len(withdrawn) == 1
+              and int.from_bytes(withdrawn[0][16:20], "little") == 0
+              and int.from_bytes(withdrawn[0][28:32], "little") == 0)
+
+# THE REORDERABLE FOR: the declaration lands on the For's own container,
+# and so does the landing handler (D8). A record-time scope, because the
+# for-statement tracer traces only there.
+with app_dnd.window():
+    with kaya.column():
+        before_dnd = len(kaya._tx)
+        for _row in dnd_items.rows(reorderable=True,
+                                   on_drop=lambda d: None):
+            kaya.label("row")
+        made = list(kaya._tx[before_dnd:])
+        fors = [rec for rec in made
+                if _rec_kind(rec) == kaya.wire.TX_CREATE_FOR]
+        reord = [rec for rec in made
+                 if _rec_kind(rec) == kaya.wire.TX_SET_REORDERABLE]
+        container = (int.from_bytes(fors[0][8:16], "little") if fors
+                     else None)
+        check("a reorderable For declares set_reorderable on its own "
+              "container",
+              len(reord) == 1 and container is not None
+              and int.from_bytes(reord[0][8:16], "little") == container
+              and int.from_bytes(reord[0][16:20], "little") == 1)
+        check("and its landing handler lands in the widget table",
+              (kaya.wire.OCC_DROPPED, container)
+              in app_dnd._widget_handlers)
+
 sys.exit(1 if failures else 0)
