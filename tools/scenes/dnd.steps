@@ -1,0 +1,21 @@
+# docs/dnd-plan.md D1, D2, D8, D10: the core answers hover and drop from the
+# two declarations; the app's transaction after `dropped` is the visible
+# effect, and the source learns the outcome through `drag_ended`. A refused
+# drop is not a failure of the verb — the source reads `none`.
+expect label#4 "no drop yet"
+expect label#5 "no drag yet"
+drag label#0 to label#1
+expect label#4 "text target got text hello (copy)"
+expect label#5 "drag ended copy"
+expect label#1 "hello"
+drag label#0 to label#3
+expect label#5 "drag ended none"
+drag label#0 to label#2
+expect label#4 "note target got dev.kaya/note 5 bytes (move)"
+expect label#5 "drag ended move"
+expect label#0 "moved out"
+expect_order column#0 "a|b|c"
+drag label@row[c] to label@row[a] before
+expect_order column#0 "c|a|b"
+drag label@row[a] to label@row[b] onto
+expect_order column#0 "c|b|a"

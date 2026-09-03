@@ -1102,6 +1102,7 @@ typedef struct KayaHostApi {
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
+  uint64_t (*blob_count)(void);
   /**
    * The protocol fingerprint (capi::kaya_spec_hash), asserted by the
    * dylib against its own baked copy before pumping: a stale compiled
@@ -1189,6 +1190,21 @@ typedef struct KayaHostApi {
    * verbatim, plus the 0-based column index (docs/tables-plan.md).
    */
   void (*emit_sort_requested)(const uint8_t*, uintptr_t, uint32_t);
+  /**
+   * The drag arms (docs/dnd-plan.md D1, D2): a drop's occurrence with
+   * its point, verdict and anchor; a drag's end; and the pure verdict.
+   */
+  void (*emit_dropped)(const uint8_t*,
+                       uintptr_t,
+                       double,
+                       double,
+                       uint32_t,
+                       const uint8_t*,
+                       uintptr_t,
+                       uint32_t,
+                       const struct KayaRepresentation*);
+  void (*emit_drag_ended)(const uint8_t*, uintptr_t, uint32_t);
+  uint32_t (*drag_verdict)(const char*, uint32_t, uint32_t, const char*, uint32_t, uint32_t);
   /**
    * The latched fault's sentence into a caller buffer, returning its
    * true length; 0 for none. A READ, riding the vtable for the
@@ -1358,7 +1374,13 @@ uintptr_t kaya_asset_why_not(const uint8_t *name, uintptr_t name_len, uint8_t *o
  * batch already superseded). The pointer borrows core memory and is
  * valid until the next kaya_next_commands call — fetch and decode
  * within the batch.
+ * How many blobs the current batch's table holds: pump handles are
+ * 1..=count, so a pump prefetches THE WHOLE TABLE and no record layout
+ * decides what it fetched (docs/traps.md: A BLOB HANDLE DIES WITH ITS
+ * BATCH).
  */
+uint64_t kaya_blob_count(void);
+
 const uint8_t *kaya_blob_data(uint64_t handle, uintptr_t *len);
 
 /**

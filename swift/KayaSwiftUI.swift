@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x2f008874cf6b2370
+let kayaSpecHash: UInt64 = 0x4f5c2121bd4d241a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -298,6 +298,17 @@ final class KayaNode: Identifiable {
     var inset: Double = 0
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
+    /// The drag declarations (docs/dnd-plan.md D1, D8): what this widget hands
+    /// over and allows, what it performs as a destination, and whether its
+    /// rows reorder within their collection.
+    var dragPayload: KayaDragPayload?
+    var dragOps: UInt32 = 0
+    var dropOps: UInt32 = 0
+    var reorderable = false
+    /// The identity the dnd apply twins carry for a kind whose create
+    /// tag is empty (docs/dnd-plan.md D1): what the emits hand back.
+    var dndTag: [UInt8] = []
+    var identityTag: [UInt8] { dndTag.isEmpty ? tag : dndTag }
     var checked = false
     var value = 0.0
     var minValue = 0.0
@@ -991,6 +1002,321 @@ func kayaParseAcceptList(_ list: String) -> (kinds: UInt32, custom: [String]) {
     return (kinds, custom)
 }
 
+/// A drag source's declared payload: the copy record's representations
+/// (docs/dnd-plan.md D1).
+struct KayaDragPayload {
+    var text: String?
+    var html: String?
+    var image: Data?
+    var files: [String] = []
+    var custom: [(String, Data)] = []
+}
+
+#if os(macOS)
+    /// Every live drag-and-drop surface's view, by widget id — main thread
+    /// only, like every registry here; the `drag` verb drives the real arms
+    /// through it (docs/dnd-plan.md D10).
+    nonisolated(unsafe) var kayaDragSurfaces: [UInt64: KayaDragDropView] = [:]
+
+    /// kaya's row payload for a reorder (docs/dnd-plan.md D8): the moved
+    /// row's key path, dot-joined, under a kaya-private id.
+    let kayaRowDragType = "dev.kaya/row"
+
+    func kayaDragOpMask(_ op: NSDragOperation) -> UInt32 {
+        var mask: UInt32 = 0
+        if op.contains(.copy) { mask |= kayaDragOpCopy }
+        if op.contains(.move) { mask |= kayaDragOpMove }
+        return mask
+    }
+
+    func kayaNSDragOperation(_ mask: UInt32) -> NSDragOperation {
+        var op: NSDragOperation = []
+        if mask & kayaDragOpCopy != 0 { op.insert(.copy) }
+        if mask & kayaDragOpMove != 0 { op.insert(.move) }
+        return op
+    }
+
+    /// Write a payload onto a board AT BOARD LEVEL — the clipboard arm's route
+    /// and the only one that carries a MIME-shaped id (docs/traps.md: A
+    /// MIME-shaped id is not a UTI on macOS).
+    func kayaWriteDragPayload(_ board: NSPasteboard, _ payload: KayaDragPayload) {
+        let urls = payload.files.compactMap { URL(string: $0) }
+        board.clearContents()
+        var types: [NSPasteboard.PasteboardType] = payload.custom.map { .init($0.0) }
+        if !urls.isEmpty { types.append(.fileURL) }
+        if payload.image != nil { types.append(.png) }
+        if payload.html != nil { types.append(.html) }
+        if payload.text != nil || !urls.isEmpty { types.append(.string) }
+        board.declareTypes(types, owner: nil)
+        for (id, bytes) in payload.custom {
+            board.setData(bytes, forType: NSPasteboard.PasteboardType(id))
+        }
+        if let url = urls.first { board.setString(url.absoluteString, forType: .fileURL) }
+        if let image = payload.image { board.setData(image, forType: .png) }
+        if let html = payload.html { board.setString(html, forType: .html) }
+        if let text = payload.text {
+            board.setString(text, forType: .string)
+        } else if !urls.isEmpty {
+            board.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+        }
+    }
+
+    /// What a board offers, in kaya's vocabulary: the closed kinds as a mask
+    /// and the custom ids among `accepted` it carries.
+    func kayaBoardOffer(_ board: NSPasteboard, customAccepted: [String]) -> (UInt32, [String]) {
+        let types = board.types?.map(\.rawValue) ?? []
+        var mask: UInt32 = 0
+        if types.contains(kayaClipUTI("text")) || types.contains(NSPasteboard.PasteboardType.string.rawValue) {
+            mask |= kayaClipText
+        }
+        if types.contains(kayaClipUTI("html")) { mask |= kayaClipHtml }
+        if types.contains(kayaClipUTI("image")) || types.contains(NSPasteboard.PasteboardType.tiff.rawValue) {
+            mask |= kayaClipImage
+        }
+        if types.contains(kayaClipUTI("files")) { mask |= kayaClipFiles }
+        return (mask, customAccepted.filter { types.contains($0) })
+    }
+
+    /// The one AppKit view behind a drag-and-drop widget: a SOURCE when its
+    /// node declares a payload, a DESTINATION when its node declares
+    /// operations, and BOTH for a row of a reorderable For (docs/dnd-plan.md
+    /// D7, D8). The verdict is the core's one pure function; nothing here
+    /// decides.
+    final class KayaDragDropView: NSView, NSDraggingSource {
+        weak var node: KayaNode?
+        weak var reorderIn: KayaNode?
+        private var pressedAt: NSPoint?
+
+        override var acceptsFirstResponder: Bool { false }
+
+        func refreshRegistration() {
+            guard let node else { return }
+            var types: [NSPasteboard.PasteboardType] = []
+            if node.dropOps != 0 {
+                let (kinds, custom) = kayaParseAcceptList(node.accepts)
+                types += custom.map { .init($0) }
+                if kinds & kayaClipText != 0 { types.append(.string) }
+                if kinds & kayaClipHtml != 0 { types.append(.html) }
+                if kinds & kayaClipImage != 0 { types += [.png, .tiff] }
+                if kinds & kayaClipFiles != 0 { types.append(.fileURL) }
+            }
+            if reorderIn != nil { types.append(.init(kayaRowDragType)) }
+            if types.isEmpty { unregisterDraggedTypes() } else { registerForDraggedTypes(types) }
+        }
+
+        // ---- the source half
+        private var sourcePayload: KayaDragPayload? {
+            if let node, let payload = node.dragPayload { return payload }
+            if let node, reorderIn != nil, let stamp = kayaTableStamp(node.tag) {
+                var payload = KayaDragPayload()
+                payload.custom = [(kayaRowDragType, Data(stamp.keys.joined(separator: ".").utf8))]
+                return payload
+            }
+            return nil
+        }
+
+        private var sourceOps: UInt32 {
+            if let node, node.dragPayload != nil { return node.dragOps }
+            return reorderIn != nil ? kayaDragOpMove : 0
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            pressedAt = sourcePayload == nil ? nil : convert(event.locationInWindow, from: nil)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start = pressedAt, sourcePayload != nil else { return }
+            let now = convert(event.locationInWindow, from: nil)
+            guard hypot(now.x - start.x, now.y - start.y) >= 4 else { return }
+            pressedAt = nil
+            let item = NSDraggingItem(pasteboardWriter: NSPasteboardItem())
+            item.setDraggingFrame(bounds, contents: nil)
+            beginDraggingSession(with: [item], event: event, source: self)
+        }
+
+        func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+            kayaNSDragOperation(sourceOps)
+        }
+
+        func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+            // The payload goes on the SESSION's own board, at board level
+            // (probe 3): the item writer above carries nothing.
+            if let payload = sourcePayload { kayaWriteDragPayload(session.draggingPasteboard, payload) }
+        }
+
+        func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+            guard let node else { return }
+            KayaHost.emitDragEnded(node.identityTag, kayaDragOpMask(operation))
+        }
+
+        // ---- the destination half
+        private func verdict(_ sender: NSDraggingInfo) -> NSDragOperation {
+            guard let node else { return [] }
+            let board = sender.draggingPasteboard
+            let sourceOps = kayaDragOpMask(sender.draggingSourceOperationMask)
+            let local = sender.draggingSource != nil
+            if let container = reorderIn, board.types?.contains(.init(kayaRowDragType)) == true {
+                // A row of a reorderable For onto another row of the same For:
+                // move, or nothing (docs/dnd-plan.md D8).
+                guard local, let stamp = kayaTableStamp(node.tag),
+                    let own = kayaTableStamp(container.children.first?.tag ?? []),
+                    stamp.node == own.node
+                else { return [] }
+                return .move
+            }
+            guard node.dropOps != 0 else { return [] }
+            let (_, custom) = kayaParseAcceptList(node.accepts)
+            let (offered, offeredCustom) = kayaBoardOffer(board, customAccepted: custom)
+            let mask = KayaHost.dragVerdict(
+                accepts: node.accepts, targetOps: node.dropOps, offered: offered,
+                custom: offeredCustom, sourceOps: sourceOps, local: local)
+            return kayaNSDragOperation(mask)
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { verdict(sender) }
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { verdict(sender) }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            guard let node else { return false }
+            let op = verdict(sender)
+            guard op != [] else { return false }
+            let where_ = convert(sender.draggingLocation, from: nil)
+            let board = sender.draggingPasteboard
+            if let container = reorderIn, let keys = board.string(forType: .init(kayaRowDragType)) {
+                // The anchor is THIS row; before when the pointer is in its
+                // upper half (AppKit's origin is bottom-left).
+                let before = where_.y > bounds.midY
+                let value = KayaClipValue(clip: kayaClipCustom, id: kayaRowDragType, bytes: Data(keys.utf8))
+                KayaHost.emitDropped(
+                    container.identityTag, CGPoint(x: where_.x, y: bounds.height - where_.y),
+                    kayaDragOpMove, anchor: node.identityTag, before: before, value)
+                return true
+            }
+            guard let value = kayaReadBoardValue(board, accepting: node.accepts) else { return false }
+            KayaHost.emitDropped(
+                node.identityTag, CGPoint(x: where_.x, y: bounds.height - where_.y),
+                kayaDragOpMask(op), anchor: [], before: false, value)
+            return true
+        }
+    }
+
+    struct KayaMacDragDropSurface: NSViewRepresentable {
+        let node: KayaNode
+        let reorderIn: KayaNode?
+
+        func makeNSView(context: Context) -> KayaDragDropView {
+            let view = KayaDragDropView()
+            view.node = node
+            view.reorderIn = reorderIn
+            view.refreshRegistration()
+            kayaDragSurfaces[node.id] = view
+            return view
+        }
+
+        func updateNSView(_ view: KayaDragDropView, context: Context) {
+            view.node = node
+            view.reorderIn = reorderIn
+            view.refreshRegistration()
+            kayaDragSurfaces[node.id] = view
+        }
+
+        static func dismantleNSView(_ view: KayaDragDropView, coordinator: ()) {
+            if let id = view.node?.id, kayaDragSurfaces[id] === view {
+                kayaDragSurfaces.removeValue(forKey: id)
+            }
+        }
+    }
+
+    /// An NSDraggingInfo the `drag` verb hands to the real destination arms:
+    /// a real pasteboard, the source's mask, a non-nil source (local), and
+    /// the destination's centre as the location (docs/dnd-plan.md D10).
+    final class KayaDragInfo: NSObject, NSDraggingInfo {
+        let board: NSPasteboard
+        let mask: NSDragOperation
+        let location: NSPoint
+        weak var window: NSWindow?
+        init(board: NSPasteboard, mask: NSDragOperation, location: NSPoint, window: NSWindow?) {
+            self.board = board
+            self.mask = mask
+            self.location = location
+            self.window = window
+        }
+        var draggingDestinationWindow: NSWindow? { window }
+        var draggingSourceOperationMask: NSDragOperation { mask }
+        var draggingLocation: NSPoint { location }
+        var draggedImageLocation: NSPoint { location }
+        var draggedImage: NSImage? { nil }
+        var draggingPasteboard: NSPasteboard { board }
+        var draggingSource: Any? { self }
+        var draggingSequenceNumber: Int { 0 }
+        func slideDraggedImage(to screenPoint: NSPoint) {}
+        func enumerateDraggingItems(
+            options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?,
+            classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+            using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+        ) {}
+        var animatesToDestination: Bool {
+            get { false }
+            set {}
+        }
+        var numberOfValidItemsForDrop: Int {
+            get { 1 }
+            set {}
+        }
+        var draggingFormation: NSDraggingFormation {
+            get { .default }
+            set {}
+        }
+        var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+        func resetSpringLoading() {}
+    }
+
+    /// Drive one drag in-process (docs/dnd-plan.md D10): the source's
+    /// declaration on a real named pasteboard, the destination's real
+    /// arms called in AppKit's order, the source told the outcome. nil when
+    /// it ran (a refusal included — the source reads `none`), else the
+    /// sentence naming what stopped it. Main thread.
+    func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?) -> String? {
+        guard let view = kayaDragSurfaces[destination.id] else {
+            return "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
+        }
+        let payload: KayaDragPayload
+        let ops: UInt32
+        if reorder != nil {
+            guard let stamp = kayaTableStamp(source.tag) else {
+                return "the source is not a stamped row, and a reorder drags rows"
+            }
+            payload = KayaDragPayload(custom: [(kayaRowDragType, Data(stamp.keys.joined(separator: ".").utf8))])
+            ops = kayaDragOpMove
+        } else {
+            guard let declared = source.dragPayload else {
+                return "the source declares no drag payload (set_drag_source)"
+            }
+            payload = declared
+            ops = source.dragOps
+        }
+        let board = NSPasteboard(name: .init("dev.kaya.drag.\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        kayaWriteDragPayload(board, payload)
+        // A reorder lands where the scene says: before is the upper half.
+        let point: NSPoint
+        if let before = reorder {
+            point = NSPoint(x: view.bounds.midX, y: before ? view.bounds.maxY - 1 : view.bounds.minY + 1)
+        } else {
+            point = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
+        }
+        let inWindow = view.convert(point, to: nil)
+        let info = KayaDragInfo(board: board, mask: kayaNSDragOperation(ops), location: inWindow, window: view.window)
+        var op = view.draggingEntered(info)
+        if op != [] { op = view.draggingUpdated(info) }
+        if op != [] {
+            if !view.performDragOperation(info) { op = [] }
+        }
+        KayaHost.emitDragEnded(source.identityTag, kayaDragOpMask(op))
+        return nil
+    }
+#endif
+
 /// Put one clip on the system clipboard. SEVERAL FILES MEANS SEVERAL ITEMS
 /// here: item 0 carries every single-valued representation plus the first file.
 /// A file list's text rendition is DERIVED HERE, only when the clip offers none.
@@ -1311,8 +1637,17 @@ func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
     // The consumption both triggers share, so the witness sits here once.
     kayaClipWitness("the read of [\(accepting)]")
     #if os(macOS)
+        return kayaReadBoardValue(NSPasteboard.general, accepting: accepting)
+    #else
+        return kayaReadPlatformClipboardValue(accepting: accepting)
+    #endif
+}
+
+#if os(macOS)
+/// The mac read over ANY board — the general one for a paste or a read, a
+/// drag session's own for a drop — richest accepted representation first.
+func kayaReadBoardValue(_ board: NSPasteboard, accepting: String) -> KayaClipValue? {
         let (kinds, custom) = kayaParseAcceptList(accepting)
-        let board = NSPasteboard.general
         var answer: KayaClipValue?
 
         for id in custom {
@@ -1347,7 +1682,11 @@ func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
         return kayaClipNote(
             answer, accepting: accepting,
             offered: board.types?.map(\.rawValue) ?? [])
-    #else
+}
+#endif
+
+#if !os(macOS)
+func kayaReadPlatformClipboardValue(accepting: String) -> KayaClipValue? {
         let (kinds, custom) = kayaParseAcceptList(accepting)
         let board = UIPasteboard.general
         var answer: KayaClipValue?
@@ -1401,8 +1740,8 @@ func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
             answer = KayaClipValue(clip: kayaClipText, text: text)
         }
         return kayaClipNote(answer, accepting: accepting, offered: Array(offered))
-    #endif
 }
+#endif
 
 /// What a child tool DID, not merely what it printed. A TOOL THAT FAILED AND A
 /// TOOL THAT SUCCEEDED SILENTLY ARE THE SAME EMPTY STRING, so the status and
@@ -2970,6 +3309,41 @@ enum KayaHost {
         }
     }
 
+    /// A drop on the tagged destination (docs/dnd-plan.md D1): the point in
+    /// its own coordinates, the verdict, the anchor row's tag for a reorder.
+    static func emitDropped(
+        _ tag: [UInt8], _ point: CGPoint, _ op: UInt32, anchor: [UInt8], before: Bool,
+        _ value: KayaClipValue
+    ) {
+        kayaWithRepresentation(value) { rep in
+            tag.withUnsafeBufferPointer { t in
+                anchor.withUnsafeBufferPointer { a in
+                    api.emit_dropped(
+                        t.baseAddress, UInt(t.count), point.x, point.y, op,
+                        a.baseAddress, UInt(a.count), before ? 1 : 0, rep)
+                }
+            }
+        }
+    }
+
+    static func emitDragEnded(_ tag: [UInt8], _ op: UInt32) {
+        tag.withUnsafeBufferPointer { t in
+            api.emit_drag_ended(t.baseAddress, UInt(t.count), op)
+        }
+    }
+
+    /// The core's one pure verdict (docs/dnd-plan.md D2).
+    static func dragVerdict(
+        accepts: String, targetOps: UInt32, offered: UInt32, custom: [String],
+        sourceOps: UInt32, local: Bool
+    ) -> UInt32 {
+        accepts.withCString { a in
+            custom.joined(separator: " ").withCString { c in
+                api.drag_verdict(a, targetOps, offered, c, sourceOps, local ? 1 : 0)
+            }
+        }
+    }
+
     /// Blocks until the next transaction resolves, then borrows out that
     /// batch's records: the core owns the bytes and they die at the next
     /// call. 0 (pointer NULLed) is shutdown.
@@ -2980,6 +3354,8 @@ enum KayaHost {
     /// Fetch a blob's bytes by the handle an apply record carried, copied out
     /// of core memory. Handles are batch-local, so callers fetch on the pump
     /// thread, within the batch. Nil for a dead handle.
+    static func blobCount() -> UInt64 { api.blob_count() }
+
     static func blobData(_ handle: UInt64) -> Data? {
         var length: UInt = 0
         guard let bytes = api.blob_data(handle, &length) else { return nil }
@@ -3001,7 +3377,7 @@ func kayaStartCommandPump() {
             // Blob handles are batch-local: the next nextCommands call
             // replaces the core's table and the main-queue apply may run after
             // that, so every referenced blob is fetched here.
-            let blobs = kayaCollectBlobs(batch)
+            let blobs = kayaCollectBlobs()
             DispatchQueue.main.async {
                 kayaApply(batch, blobs)
             }
@@ -3010,87 +3386,16 @@ func kayaStartCommandPump() {
     thread.start()
 }
 
-/// Pre-fetch the batch's blob payloads (SET_PROP values of type blob)
-/// through the host's blob_data, keyed by wire handle. Runs on the pump
-/// thread, before the next nextCommands call invalidates the handles.
-private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
+/// Every blob the batch registered, fetched on the pump thread before the
+/// next nextCommands call invalidates the handles: the table is the whole
+/// truth, so no record layout decides what arrives (docs/traps.md: A BLOB
+/// HANDLE DIES WITH ITS BATCH).
+private func kayaCollectBlobs() -> [UInt64: Data] {
     var blobs: [UInt64: Data] = [:]
-    batch.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-        var at = 0
-        while at + 8 <= raw.count {
-            let size = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
-            let kind = raw.loadUnaligned(fromByteOffset: at + 4, as: UInt16.self)
-            // SET_PROP and SET_MENU_PROP share the { u64 id; u32 prop;
-            // u32 pad; value } layout, so one scan serves both blob
-            // carriers (widget source, menu icon).
-            if kind == applySetProp || kind == applySetMenuProp {
-                let valueType = raw.loadUnaligned(fromByteOffset: at + 24, as: UInt32.self)
-                if valueType == valueBlob {
-                    let handle = raw.loadUnaligned(fromByteOffset: at + 32, as: UInt64.self)
-                    blobs[handle] = KayaHost.blobData(handle)
-                }
-            }
-            // COPY carries blobs too — an image, and every custom format's
-            // bytes. Its Values block is walked generically: the header says
-            // how many, and a non-blob is skipped by the same arithmetic.
-            if kind == applyCopy {
-                let slots = Int(raw.loadUnaligned(fromByteOffset: at + 8 + 16, as: UInt32.self))
-                var vat = at + 8 + 24
-                for _ in 0..<slots {
-                    let valueType = raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self)
-                    let len = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
-                    if valueType == valueBlob {
-                        let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
-                        blobs[handle] = KayaHost.blobData(handle)
-                    }
-                    vat += 8 + len
-                    if vat % 8 != 0 { vat += 8 - vat % 8 }
-                }
-            }
-            // SET_TYPEFACE's font blob (apply 33). Its slot sits after two
-            // variable-length fields: skip mask+reserved, skip the family
-            // value, skip the pair list, and the font is what is left.
-            if kind == applySetTypeface {
-                var vat = at + 8 + 8
-                func skip() {
-                    let len = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
-                    vat += 8 + len
-                    if vat % 8 != 0 { vat += 8 - vat % 8 }
-                }
-                skip()  // family
-                let pairCount = Int(raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self))
-                vat += 8
-                for _ in 0..<pairCount { skip() }
-                if raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self) == valueBlob {
-                    let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
-                    blobs[handle] = KayaHost.blobData(handle)
-                }
-            }
-            // SET_DRAWING's pixels: { u64 id; u32 width; u32 height; Value
-            // scale; Value pixels }, so the blob's value header sits one
-            // 16-byte f64 value past the fixed part.
-            if kind == applySetDrawing {
-                let vat = at + 8 + 16 + 16
-                if raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self) == valueBlob {
-                    let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
-                    blobs[handle] = KayaHost.blobData(handle)
-                }
-            }
-            // SET_APP_IDENTITY's icon blob (apply 34), after mask+reserved
-            // and the name. HERE rather than in the apply arm: the handle dies
-            // with the batch, and the icon would arrive as no bytes at all
-            // with no error on any side.
-            if kind == applySetAppIdentity {
-                var vat = at + 8 + 8
-                let nameLen = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
-                vat += 8 + nameLen
-                if vat % 8 != 0 { vat += 8 - vat % 8 }
-                if raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self) == valueBlob {
-                    let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
-                    blobs[handle] = KayaHost.blobData(handle)
-                }
-            }
-            at += size
+    let count = KayaHost.blobCount()
+    if count > 0 {
+        for handle in 1...count {
+            blobs[handle] = KayaHost.blobData(handle)
         }
     }
     return blobs
@@ -3703,12 +4008,66 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 if parentKind == kindSelect || parentKind == kindRadio {
                     kayaScene.labels.removeAll { $0.id == child }
                 }
-            case applySetDragSource, applySetDropTarget, applySetReorderable:
-                #if os(macOS)
-                    kayaDepthStub("dnd", on: "macos")
-                #else
+            case applySetDragSource:
+                // { u64 id; u32 present; u32 file_count; u32 custom_count;
+                // u32 operations; u32 tag_len; u32 reserved; Values reps; tag }
+                // — the copy record's values in the canonical order.
+                #if !os(macOS)
                     kayaDepthStub("dnd", on: "ios")
                 #endif
+                let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let spresent = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let sfileCount = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
+                let scustomCount = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self))
+                let sops = raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self)
+                var sat = body + 40
+                func nextDragValue() -> (UInt32, Range<Int>) {
+                    let type = raw.loadUnaligned(fromByteOffset: sat, as: UInt32.self)
+                    let len = Int(raw.loadUnaligned(fromByteOffset: sat + 4, as: UInt32.self))
+                    let payload = (sat + 8)..<(sat + 8 + len)
+                    sat += 8 + len
+                    if sat % 8 != 0 { sat += 8 - sat % 8 }
+                    return (type, payload)
+                }
+                func nextDragString() -> String {
+                    String(decoding: raw[nextDragValue().1], as: UTF8.self)
+                }
+                func nextDragBytes() -> Data {
+                    let handle = raw.loadUnaligned(
+                        fromByteOffset: nextDragValue().1.lowerBound, as: UInt64.self)
+                    return blobs[handle] ?? Data()
+                }
+                var payload = KayaDragPayload()
+                for _ in 0..<scustomCount { payload.custom.append((nextDragString(), nextDragBytes())) }
+                for _ in 0..<sfileCount { payload.files.append(nextDragString()) }
+                if spresent & kayaClipImage != 0 { payload.image = nextDragBytes() }
+                if spresent & kayaClipHtml != 0 { payload.html = nextDragString() }
+                if spresent & kayaClipText != 0 { payload.text = nextDragString() }
+                let stagLen = Int(raw.loadUnaligned(fromByteOffset: body + 24, as: UInt32.self))
+                if let snode = kayaScene.nodes[sid] {
+                    let empty = spresent == 0 && payload.files.isEmpty && payload.custom.isEmpty
+                    snode.dragPayload = empty ? nil : payload
+                    snode.dragOps = empty ? 0 : sops
+                    snode.dndTag = Array(raw[sat..<(sat + stagLen)])
+                }
+            case applySetDropTarget:
+                // { u64 id; u32 operations; u32 tag_len; tag }
+                let tid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let tops = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let ttagLen = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
+                if let tnode = kayaScene.nodes[tid] {
+                    tnode.dropOps = tops
+                    tnode.dndTag = Array(raw[(body + 16)..<(body + 16 + ttagLen)])
+                }
+            case applySetReorderable:
+                // { u64 id; u32 enabled; u32 tag_len; tag }
+                let rid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let renabled = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let rtagLen = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
+                if let rnode = kayaScene.nodes[rid] {
+                    rnode.reorderable = renabled != 0
+                    rnode.dndTag = Array(raw[(body + 16)..<(body + 16 + rtagLen)])
+                }
             case applyFold:
                 // The stacked fold (D7). Order is the core's emission
                 // order — the row's declaration order — so append holds
@@ -5671,6 +6030,34 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "drag":
+                // drag <source> to <destination> [before|onto] — the platform's
+                // own arms driven in-process (docs/dnd-plan.md D10). A refused
+                // drop is not this verb's failure: the source reads `none`.
+                var words = Array(parts[1...])
+                var reorder: Bool? = nil
+                if words.last == "before" {
+                    reorder = true
+                    words.removeLast()
+                } else if words.last == "onto" {
+                    reorder = false
+                    words.removeLast()
+                }
+                if words.count != 3 || words[1] != "to" {
+                    failures.append("drag wants `<source> to <destination> [before|onto]`")
+                    break
+                }
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard let src = kayaAnyTarget(words[0]) else { return "no such source \(words[0])" }
+                    guard let dst = kayaAnyTarget(words[2]) else { return "no such destination \(words[2])" }
+                    #if os(macOS)
+                        return kayaDriveDrag(source: src, destination: dst, reorder: reorder)
+                    #else
+                        _ = (src, dst, reorder)
+                        return "drag is a depth slice on ios (docs/dnd-plan.md §5)"
+                    #endif
+                }
+                if let off { failures.append("drag: \(off)") }
             case "scroll_to_row":
                 // The core maps the KEY to an index in the collection's current
                 // order and the tier scrolls that row to the viewport's TOP. An
@@ -11170,6 +11557,9 @@ struct KayaRender: View {
     /// and stretch (ruled 2026-09-02), and center and end position it.
     var flexAlign: Int64 = alignStart
     var flexStretch = false
+    /// The reorderable For this node is a stamped row of, if any
+    /// (docs/dnd-plan.md D8): its surface then drags and takes rows.
+    var reorderIn: KayaNode? = nil
     /// Grouped section header/footer dress (KayaGroupedSections.kayaBare).
     @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
 
@@ -11179,10 +11569,25 @@ struct KayaRender: View {
         // the attach). The accessibility props ride EVERY kind, applied where
         // every node's view passes through (tools/check-universal-props.py).
         if kayaScene.contextRoots[node.id]?.isEmpty == false {
-            kayaA11y(widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }, node)
+            kayaA11y(kayaDragDrop(widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }), node)
         } else {
-            kayaA11y(widget, node)
+            kayaA11y(kayaDragDrop(widget), node)
         }
+    }
+
+    /// The drag-and-drop surface behind a node that declares a payload, an
+    /// operation mask, or is a row of a reorderable For (macOS; the phone
+    /// arms are a depth slice, docs/dnd-plan.md §5).
+    @ViewBuilder private func kayaDragDrop(_ view: some View) -> some View {
+        #if os(macOS)
+            if node.dragPayload != nil || node.dropOps != 0 || reorderIn != nil {
+                view.background(KayaMacDragDropSurface(node: node, reorderIn: reorderIn))
+            } else {
+                view
+            }
+        #else
+            view
+        #endif
     }
 
     /// The stock-stack path's children, both axes: frame BEFORE the
@@ -11192,7 +11597,8 @@ struct KayaRender: View {
         ForEach(node.laidOut) { child in
             KayaRender(
                 node: child, flexVertical: vertical,
-                flexStretch: node.align == alignStretch
+                flexStretch: node.align == alignStretch,
+                reorderIn: node.reorderable ? node : nil
             )
             .frame(
                 maxWidth: vertical && node.align == alignStretch ? .infinity : nil,
@@ -11250,7 +11656,8 @@ struct KayaRender: View {
                                 KayaRender(
                                     node: child, flexVertical: vertical,
                                     flexAlign: node.align,
-                                    flexStretch: node.align == alignStretch)
+                                    flexStretch: node.align == alignStretch,
+                                    reorderIn: node.reorderable ? node : nil)
                                     // The grower renders AT its track, leaf or
                                     // container, and stretch spans the cross
                                     // (the 2026-08-22 breadth ruling; grow.steps

@@ -1376,7 +1376,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
             payload: None,
             doc: "Create a widget; tag_len bytes follow (padded to 8): the \
-                  click tag an interactive widget emits verbatim.",
+                  identity tag the widget's occurrences carry verbatim. A \
+                  live widget carries one where its kind reports; a STAMPED \
+                  copy of any kind carries (template node, keys), which is \
+                  what a keyed harness target and a reorder's row identity \
+                  read.",
         },
         Record {
             kind: 2,
@@ -2005,15 +2009,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             fields: &[
                 f("widget_id", FieldTy::U64),
                 f("enabled", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("tag_len", FieldTy::U32),
             ],
             payload: None,
             doc: "Rows of this live For container become drag sources and \
                   destinations within the collection, in the platform's own \
-                  reorder idiom (docs/dnd-plan.md D8). The backend reports a \
-                  landing through kaya_emit_dropped with the moved row's tag \
-                  as the identity and the row it landed on as the anchor; \
-                  the model does not move until the app's collection_move.",
+                  reorder idiom (docs/dnd-plan.md D8). The container's \
+                  identity tag rides after the header, 8-aligned, and is the \
+                  identity of every landing the backend reports through \
+                  kaya_emit_dropped: the moved row's key rides as the clip's \
+                  custom representation under the kaya-private id, the row it \
+                  landed on as the anchor (its own create tag — every stamped \
+                  copy carries one), and the model does not move until the \
+                  app's collection_move.",
         },
     ],
     occurrence: &[

@@ -1124,6 +1124,30 @@ def unit_tests_on_windows():
 unit_tests_on_windows()
 timing("unit-tests")
 
+
+def go_warm():
+    """ONE cgo COMPILE, ALONE, BEFORE THE POOL OPENS: every Go leg builds
+    the same package (dev.kaya/guests/go/cmd) and shares Go's build cache,
+    so a regenerated binding had the first four legs compile it at once
+    and read 105/96/84/74s (docs/traps.md: The Windows lane's first
+    matrix after a spec change). The verdict is the build's own exit."""
+    run_ssh('cmd /c "del C:\\kaya\\out_gowarm.txt 2>nul & exit /b 0"')
+    rc = run_ssh("cmd /c C:\\kaya\\go-warm.cmd")
+    out = (run_ssh_out("cmd /c type C:\\kaya\\out_gowarm.txt")
+           or "").replace("\r", "")
+    m = re.search(r"EXIT=(\d+)", out)
+    if rc != 0 or not m or m.group(1) != "0":
+        print("deploy-win: the Go warm-up build failed (go-warm.cmd); what "
+              "it wrote:", file=sys.stderr)
+        print(out, file=sys.stderr)
+        sys.exit(1)
+    print("== go warm (dev.kaya/guests/go/cmd built once, alone) ==")
+
+
+if SUITE == "all" or SUITE.endswith("_go") or SUITE == "go":
+    go_warm()
+timing("go-warm")
+
 # THE CAPTION TITLE'S AIM. NO SCENE CAN SEE IT: every harness read of a
 # title goes through the string, the same whether the TextBlock sits on
 # the centre line or 63 DIP left of it. THE COUNT RULES, because a probe

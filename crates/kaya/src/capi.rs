@@ -1331,6 +1331,15 @@ unsafe fn borrowed_str(ptr: *const u8, len: usize) -> Option<String> {
 /// batch already superseded). The pointer borrows core memory and is
 /// valid until the next kaya_next_commands call — fetch and decode
 /// within the batch.
+/// How many blobs the current batch's table holds: pump handles are
+/// 1..=count, so a pump prefetches THE WHOLE TABLE and no record layout
+/// decides what it fetched (docs/traps.md: A BLOB HANDLE DIES WITH ITS
+/// BATCH).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_blob_count() -> u64 {
+    blobs().lock().unwrap().out.len() as u64
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_blob_data(handle: u64, len: *mut usize) -> *const u8 {
     let table = blobs().lock().unwrap();

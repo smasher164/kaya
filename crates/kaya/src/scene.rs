@@ -729,7 +729,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Acceptance is scoped to what can RECEIVE a paste: the text
         // kinds, which are the ones with native paste behaviour to
         // override.
-        Prop::Accepts => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
+        // Paste reaches only the editable kinds, but a DROP target is any
+        // widget (docs/dnd-plan.md D1) and shares the list.
+        Prop::Accepts => true,
         // The hint is the ONE accessibility prop that is not universal, and
         // the reason is the platforms' own: a hint says what ACTIVATING the
         // control does, and Android carries it as the click ACTION's label
@@ -1473,6 +1475,7 @@ impl Scene {
     /// foreign source is always answered copy so no other app deletes on
     /// kaya's behalf; a local one gets move where both sides allow it.
     /// A reorderable For's own rows are answered move onto the container.
+    #[allow(dead_code)] // the GTK and WinUI arms call this in the breadth phase (docs/dnd-plan.md §5 step 5)
     pub fn drop_verdict(
         &self,
         target: WidgetId,
@@ -1492,6 +1495,7 @@ impl Scene {
 
     /// A reorderable For's rows drop onto rows of the same For, and
     /// nothing else: the container answers whether it is one.
+    #[allow(dead_code)] // the breadth phase's reorder arms read it (docs/dnd-plan.md §5 step 5)
     pub fn is_reorderable(&self, container: WidgetId) -> bool {
         self.reorderable.contains(&container)
     }
@@ -1619,9 +1623,9 @@ impl Scene {
                     let clash = self.widgets.insert(id, kind).is_some();
                     assert!(!clash, "kaya: widget id {id:?} already exists");
                     created.push(id);
-                    // Interactive widgets carry their identity tag. The
-                    // predicate is shared with the STAMPING site below —
-                    // see WidgetKind::carries_tag.
+                    // A live widget is addressed by id; only the kinds that
+                    // report carry a tag (WidgetKind::carries_tag). A STAMPED
+                    // copy of any kind carries one, below.
                     let tag = kind
                         .carries_tag()
                         .then(|| Self::button_tag(id.0, &vec![]))
@@ -2770,7 +2774,11 @@ impl Scene {
                     } else {
                         self.reorderable.insert(container);
                     }
-                    out.push(ApplyOp::SetReorderable { id: container, enabled });
+                    out.push(ApplyOp::SetReorderable {
+                        id: container,
+                        enabled,
+                        tag: crate::wire::click_tag(container.0, &[]),
+                    });
                 }
                 TxOp::SetDrawing { widget, viewbox, path, ops } => {
                     // The drawing's three addressings, spec doc order
@@ -5398,12 +5406,11 @@ impl Scene {
                     let id = self.alloc_internal();
                     node_map.insert(*node, id);
                     stamp.widgets.push(id);
-                    // The same predicate the live create reads. These two
-                    // sites are the pair that had drifted.
-                    let tag = kind
-                        .carries_tag()
-                        .then(|| Self::button_tag(*node, copy_path))
-                        .flatten();
+                    // EVERY stamped copy carries (template node, keys): a
+                    // keyed harness target and a reorder's row identity read
+                    // it whatever the kind (docs/dnd-plan.md D8). A kind that
+                    // reports carries the same tag live.
+                    let tag = Self::button_tag(*node, copy_path);
                     out.push(ApplyOp::Create {
                         id,
                         kind: *kind,
@@ -7138,8 +7145,8 @@ mod tests {
         assert_eq!(
             creates(&ops),
             vec![
-                (WidgetKind::Column, false),
-                (WidgetKind::Label, false),
+                (WidgetKind::Column, true),
+                (WidgetKind::Label, true),
                 (WidgetKind::Column, false),
             ]
         );
@@ -7149,14 +7156,17 @@ mod tests {
         )));
     }
 
-    /// A STAMPED COPY IS TAGGED EXACTLY WHERE A LIVE WIDGET IS. The two
-    /// `button_tag` callsites had already drifted: Textarea, Select and Radio
-    /// were tagged live and untagged when stamped, so a stamped select aborted
-    /// GTK and WinUI and reported to nobody on mac and iOS
-    /// (docs/sugar-pass-plan.md D1). EXHAUSTIVE OVER THE KIND ENUM rather than
-    /// checking a list.
+    /// A STAMPED COPY IS TAGGED WHEREVER A LIVE WIDGET IS, AND EVERYWHERE
+    /// ELSE TOO. The two `button_tag` callsites had drifted once: Textarea,
+    /// Select and Radio were tagged live and untagged when stamped, so a
+    /// stamped select aborted GTK and WinUI and reported to nobody on mac and
+    /// iOS (docs/sugar-pass-plan.md D1). Since the reorder slice every stamped
+    /// copy carries its (node, keys) identity — a keyed target and a
+    /// reorder's row read it for a label as for a button (docs/dnd-plan.md
+    /// D8) — so the invariant is: live tagged where the kind reports, stamped
+    /// tagged always. EXHAUSTIVE OVER THE KIND ENUM rather than a list.
     #[test]
-    fn a_stamped_copy_is_tagged_exactly_where_a_live_one_is() {
+    fn a_stamped_copy_is_tagged_wherever_a_live_one_is() {
         for kind in WidgetKind::ALL {
             // The live half: create one, read its Create op's tag.
             let mut scene = Scene::new();
@@ -7193,11 +7203,16 @@ mod tests {
                 .unwrap_or_else(|| panic!("kaya: no stamped Create for {kind:?}"));
 
             assert_eq!(
-                live_tagged, stamped_tagged,
-                "kaya: {kind:?} is tagged {live_tagged} live and {stamped_tagged} \
-                 when stamped — the two button_tag callsites disagree, so a \
-                 stamped {kind:?} either aborts a backend that unwraps the tag \
-                 or reports to nobody. Both sites read carries_tag()."
+                live_tagged,
+                kind.carries_tag(),
+                "kaya: {kind:?} is tagged {live_tagged} live — the live create \
+                 reads carries_tag()"
+            );
+            assert!(
+                stamped_tagged,
+                "kaya: a stamped {kind:?} carries no tag — every stamped copy \
+                 carries its (node, keys) identity, or a keyed target and a \
+                 reorder cannot name it"
             );
         }
     }
@@ -7908,13 +7923,14 @@ mod tests {
         let ops = scene.apply(vec![insert(2, vec![v("g1")], "a", "send report")]);
         assert_eq!(
             creates(&ops),
-            vec![(WidgetKind::Label, false), (WidgetKind::Button, true)]
+            vec![(WidgetKind::Label, true), (WidgetKind::Button, true)]
         );
-        // The button's tag names (node 31, [g1, a]).
+        // The button's tag names (node 31, [g1, a]); the label's, one
+        // create earlier, names node 30 with the same keys.
         let tag = ops
             .iter()
             .find_map(|op| match op {
-                ApplyOp::Create { tag: Some(t), .. } => Some(t.clone()),
+                ApplyOp::Create { kind: WidgetKind::Button, tag: Some(t), .. } => Some(t.clone()),
                 _ => None,
             })
             .unwrap();
@@ -7975,7 +7991,7 @@ mod tests {
             id: SignalId(1),
             value: Value::Bool(true),
         }]);
-        assert_eq!(creates(&ops), vec![(WidgetKind::Label, false)]);
+        assert_eq!(creates(&ops), vec![(WidgetKind::Label, true)]);
         let ops = scene.apply(vec![TxOp::WriteSignal {
             id: SignalId(1),
             value: Value::Bool(false),
@@ -8348,7 +8364,7 @@ mod tests {
         ]);
         assert_eq!(
             creates(&ops),
-            vec![(WidgetKind::Column, false), (WidgetKind::Label, false)]
+            vec![(WidgetKind::Column, false), (WidgetKind::Label, true)]
         );
     }
 
@@ -12442,18 +12458,18 @@ AddChild { parent: WidgetId(4), child: WidgetId(9223372036854775810) }
 Create { id: WidgetId(9223372036854775811), kind: Column, tag: None }
 SetColumnHeaders { id: WidgetId(9223372036854775811), sorted: 4294967295, direction: 0, titles: ["Ticker", "Qty"], tag: [20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 51, 0, 0, 0, 0, 0, 0] }
 AddChild { parent: WidgetId(4), child: WidgetId(9223372036854775811) }
-Create { id: WidgetId(9223372036854775812), kind: Row, tag: None }
-Create { id: WidgetId(9223372036854775813), kind: Label, tag: None }
+Create { id: WidgetId(9223372036854775812), kind: Row, tag: Some([21, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 49, 0, 0, 0, 0, 0, 0]) }
+Create { id: WidgetId(9223372036854775813), kind: Label, tag: Some([22, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 49, 0, 0, 0, 0, 0, 0]) }
 SetProp { id: WidgetId(9223372036854775813), prop: Text, value: Str("AAPL") }
-Create { id: WidgetId(9223372036854775814), kind: Label, tag: None }
+Create { id: WidgetId(9223372036854775814), kind: Label, tag: Some([23, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 49, 0, 0, 0, 0, 0, 0]) }
 SetProp { id: WidgetId(9223372036854775814), prop: Text, value: Str("10") }
 AddChild { parent: WidgetId(9223372036854775812), child: WidgetId(9223372036854775813) }
 AddChild { parent: WidgetId(9223372036854775812), child: WidgetId(9223372036854775814) }
 AddChild { parent: WidgetId(9223372036854775810), child: WidgetId(9223372036854775812) }
-Create { id: WidgetId(9223372036854775815), kind: Row, tag: None }
-Create { id: WidgetId(9223372036854775816), kind: Label, tag: None }
+Create { id: WidgetId(9223372036854775815), kind: Row, tag: Some([21, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 50, 0, 0, 0, 0, 0, 0]) }
+Create { id: WidgetId(9223372036854775816), kind: Label, tag: Some([22, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 50, 0, 0, 0, 0, 0, 0]) }
 SetProp { id: WidgetId(9223372036854775816), prop: Text, value: Str("MSFT") }
-Create { id: WidgetId(9223372036854775817), kind: Label, tag: None }
+Create { id: WidgetId(9223372036854775817), kind: Label, tag: Some([23, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 50, 0, 0, 0, 0, 0, 0]) }
 SetProp { id: WidgetId(9223372036854775817), prop: Text, value: Str("20") }
 AddChild { parent: WidgetId(9223372036854775815), child: WidgetId(9223372036854775816) }
 AddChild { parent: WidgetId(9223372036854775815), child: WidgetId(9223372036854775817) }

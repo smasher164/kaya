@@ -83,8 +83,7 @@ pub use app::{
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
-    props,
-};
+    props, Dropped, Op};
 
 /// The canvas surface (docs/canvas-plan.md §2.2).
 pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};

@@ -1632,7 +1632,7 @@ pub enum ApplyOp {
     /// Rows of this live For reorder within their collection in the
     /// platform's own idiom; a landing reports through kaya_emit_dropped
     /// with the row's tag and the anchor row's tag.
-    SetReorderable { id: WidgetId, enabled: u32 },
+    SetReorderable { id: WidgetId, enabled: u32, tag: Vec<u8> },
     /// THE RASTER a canvas's declaration produced (docs/canvas-plan.md
     /// §1.1): `width` x `height` PREMULTIPLIED RGBA8 device pixels at
     /// `scale`, so the logical size is width/scale by height/scale. The

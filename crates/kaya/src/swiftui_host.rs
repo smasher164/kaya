@@ -10,7 +10,7 @@
 use std::ffi::{CString, c_char, c_int, c_void};
 
 use crate::capi::{
-    kaya_blob_data, kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled,
+    kaya_blob_count, kaya_blob_data, kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled,
     kaya_emit_value_changed, kaya_next_commands,
 };
 
@@ -118,6 +118,7 @@ pub struct KayaHostApi {
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
+    pub blob_count: unsafe extern "C" fn() -> u64,
     /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
     /// dylib against its own baked copy before pumping: a stale compiled
     /// dylib bypasses every source gate and would decode wire records with
@@ -192,6 +193,28 @@ pub struct KayaHostApi {
     /// A column-header click: the sort tag delivered with SET_COLUMNS,
     /// verbatim, plus the 0-based column index (docs/tables-plan.md).
     pub emit_sort_requested: unsafe extern "C" fn(*const u8, usize, u32),
+    /// The drag arms (docs/dnd-plan.md D1, D2): a drop's occurrence with
+    /// its point, verdict and anchor; a drag's end; and the pure verdict.
+    pub emit_dropped: unsafe extern "C" fn(
+        *const u8,
+        usize,
+        f64,
+        f64,
+        u32,
+        *const u8,
+        usize,
+        u32,
+        *const crate::capi::KayaRepresentation,
+    ),
+    pub emit_drag_ended: unsafe extern "C" fn(*const u8, usize, u32),
+    pub drag_verdict: unsafe extern "C" fn(
+        *const std::os::raw::c_char,
+        u32,
+        u32,
+        *const std::os::raw::c_char,
+        u32,
+        u32,
+    ) -> u32,
     /// The latched fault's sentence into a caller buffer, returning its
     /// true length; 0 for none. A READ, riding the vtable for the
     /// reason `stalled_ms` does. The harness asks once per step, so a
@@ -316,6 +339,7 @@ pub(crate) fn run() -> i32 {
         emit_toggled: kaya_emit_toggled,
         emit_value_changed: kaya_emit_value_changed,
         blob_data: kaya_blob_data,
+        blob_count: kaya_blob_count,
         spec_hash: crate::capi::kaya_spec_hash,
         emit_close_requested: crate::capi::kaya_emit_close_requested,
         emit_window_closed: crate::capi::kaya_emit_window_closed,
@@ -337,6 +361,9 @@ pub(crate) fn run() -> i32 {
         note_native_undo: crate::capi::kaya_note_native_undo,
         stalled_ms: crate::capi::kaya_stalled_ms,
         emit_sort_requested: crate::capi::kaya_emit_sort_requested,
+        emit_dropped: crate::capi::kaya_emit_dropped,
+        emit_drag_ended: crate::capi::kaya_emit_drag_ended,
+        drag_verdict: crate::capi::kaya_drag_verdict,
         fault: crate::capi::kaya_fault,
         fault_watch: crate::capi::kaya_fault_watch,
         window_moved: crate::capi::kaya_window_moved,

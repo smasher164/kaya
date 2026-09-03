@@ -10340,8 +10340,8 @@ binding's surface moves. Close it by rewriting the encoder against the
 probe's output bytes as the oracle, with bindings/js/kaya_app_checks.ts's
 byte-equality negatives held, and record the new batch time here.
 
-## DRAG AND DROP — the depth slice is under way (2026-09-03): spec and core landed, every backend arm a depth stub
-KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md
+## DRAG AND DROP — the depth slice is under way (2026-09-03): spec, core, the mac arm, the `drag` verb, the Rust sugar and the dnd scene landed; four backend arms and eight bindings are depth stubs
+KEY: set_drag_source, set_drop_target, set_reorderable, dropped, drag_ended, drag_op, kaya_drag_verdict, dnd scene, docs/dnd-plan.md, KayaDragDropView, kayaDriveDrag, identityTag, kaya_blob_count
 
 The design pass is docs/dnd-plan.md; the maintainer ruled it first among
 the video editor's features (2026-09-03). LANDED: the three transaction
@@ -10350,14 +10350,34 @@ the core's live-widget declarations with the hover verdict as one pure
 function (`wire::drop_verdict`, exposed as `kaya_drag_verdict` so every
 backend answers a hover from the declarations it already holds), the
 emit entries, and the regenerated bindings. The template zone is refused
-by name until the bindings sweep lands it (docs/dnd-plan.md §4). What
-survives, each a stub the runner reads (tools/check-stubs.py):
-  - **DEPTH STUB: dnd on swiftui/macos** — the AppKit-floor destination
-    and source in the SwiftUI interpreter, the in-process `drag` verb
-    and the gate that drives the real AppKit arms (docs/dnd-plan.md D7,
-    D10, §5 step 3). Probe 3 (docs/probes/dnd-probe-mac-2026-09-03.md)
-    decides the pasteboard route: a MIME-shaped custom id is not a UTI,
-    so the arm writes the drag pasteboard at board level.
+by name until the bindings sweep lands it (docs/dnd-plan.md §4).
+LANDED THE SAME DAY (§5 steps 3 and 4): the mac arm, the `drag` verb,
+`Tx::draggable`/`drop_target`/`reorderable` with `Msgs::on_drop` and
+`on_drag_ended` in the Rust binding, and tools/scenes/dnd.steps green on
+the mac lane's dnd-rust leg — a text drop, a refused type reading
+`none`, a custom-id MOVE that withdraws the source, and two reorders
+asserted with expect_order. THREE RULES THE LEG FORCED: every STAMPED
+copy carries its (template node, keys) tag whatever its kind (a keyed
+`label@row[c]` target had never resolved, and a reorder's row had no
+identity), set_reorderable's apply twin carries the CONTAINER's tag so a
+landing's identity is the For the app registered on (the moved key in
+the clip, the landed row's own tag as the anchor), and `accepts` is
+legal on every kind since a drop target is any widget. AND TWO WALLS:
+the pump prefetches the batch's WHOLE blob table through
+`kaya_blob_count` on both interpreters instead of walking records by
+kind (docs/traps.md: A BLOB HANDLE DIES WITH ITS BATCH — the fourth
+record to arrive as no bytes), and tools/run-leg.py builds and stages
+a Rust guest every run, since the example links the core statically
+and the two verified dylibs vouched for nothing it ran. What survives,
+each a stub the runner reads (tools/check-stubs.py):
+  - ~~**DEPTH STUB: dnd on swiftui/macos**~~ — LANDED 2026-09-03: the
+    AppKit-floor `KayaDragDropView` (NSDraggingSource + destination,
+    board-level pasteboard write per probe 3), `kayaDriveDrag` behind the
+    `drag` verb calling the real destination arms with a real named
+    pasteboard (D10), the dnd-rust leg green. The gate §5 step 3 named is
+    the leg itself: the verb drives the same arms a session does, and
+    the source's real gesture (mouseDown/mouseDragged into
+    beginDraggingSession) is witnessed only by hand in step 7.
   - **DEPTH STUB: dnd on swiftui/ios** — the UIDropInteraction route with
     a session double (D10), after the mac arm; probe 5's answer on the
     paste prompt lands here.

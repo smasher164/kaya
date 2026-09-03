@@ -43,6 +43,9 @@ command and env, from tools/lib/lanes/mac.py), and REFUSES a stale
 libkaya or SwiftUI interpreter first, naming the build — a hand-spelled
 env line once ran the interpreter from before the edit and spent a
 failure on it (docs/traps.md). `--build` rebuilds both before running.
+A Rust leg's example is built and restaged on EVERY run, --build or not:
+it links the core statically, so the two dylibs vouch for nothing it
+runs (docs/traps.md: A hand-run leg uses whatever interpreter).
 
 A hand run that fails can keep its verb trace: `KAYA_VERB_TRACE=<file>
 tools/run-leg.py <scene> <lang>` appends the harness's attempt-by-attempt

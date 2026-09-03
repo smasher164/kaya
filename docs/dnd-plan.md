@@ -249,6 +249,16 @@ row the drop landed on plus a before/onto bit; the app confirms with
 the existing `collection_move`, the core reorders, `move_child` runs.
 Nothing new on the apply side.
 
+AMENDED 2026-09-03, on the mac arm: the landing's IDENTITY is the For
+container the app registered `on_drop` on — set_reorderable's apply
+twin carries the container's tag for it — the moved row's key rides as
+the clip's custom representation under `dev.kaya/row`, and the anchor
+is the landed row's own create tag. Which is why EVERY stamped copy now
+carries its (template node, keys) tag whatever its kind: a label row had
+no identity, and the keyed `label@row[c]` target had never resolved
+either (crates/kaya/src/scene.rs run_body; the test
+`a_stamped_copy_is_tagged_wherever_a_live_one_is`).
+
 - GTK and WinUI lower it through their drag frameworks with a per-row
   source and target; WinUI's `CanReorderItems` is declined because it
   writes the model (and its insertion indicator and auto-scroll with
@@ -466,10 +476,32 @@ the wayland clipboard legs; then iOS.
 3. mac depth: the AppKit-floor destination and source in the SwiftUI
    interpreter, the in-process drag verb, and the gate that drives the
    real AppKit arms.
+   DONE 2026-09-03: `KayaDragDropView` (NSDraggingSource and
+   destination in one NSView behind any node that declares a payload,
+   an operation mask, or is a row of a reorderable For), the pasteboard
+   written at board level (probe 3), `kayaDriveDrag` behind the `drag`
+   verb calling draggingEntered/Updated/performDragOperation with a
+   real named NSPasteboard and a KayaDragInfo whose source is non-nil
+   (local). THE GATE IS THE LEG: the verb drives the same arms a
+   session does; the source's real gesture is step 7's hand witness.
+   Found on the way: `accepts` widened to every kind (a drop target is
+   any widget); the apply twins' tags read into `identityTag`; the
+   blob prefetch made generic (`kaya_blob_count`, docs/traps.md: A BLOB
+   HANDLE DIES WITH ITS BATCH) after the custom payload arrived as no
+   bytes; and tools/run-leg.py building the Rust guest every run, since
+   the example links the core statically.
 4. Rust binding and the scene: a `dnd` scene under tools/scenes — a text drop
    between two widgets, a custom-id drop, a files drop redeemed through
    the picked table, a refused type, and a reorder asserted with
    `expect_order`; green on the mac lane.
+   DONE 2026-09-03 but for the files drop: `Tx::draggable(w)` builder
+   (text/html/image/file/custom/allow/declare), `Tx::drop_target(w,
+   ops)`, `Tx::reorderable(container, on)`, `Msgs::on_drop` handing a
+   `Dropped { point, operation, anchor, before, clip }`, `Msgs::on_drag_ended`
+   handing `Option<Op>`; guests/rust/dnd.rs and tools/scenes/dnd.steps,
+   wired as the mac lane's dnd-rust leg (alone between drains).
+   The files drop waits on the picked-table redemption's drop route
+   (D6) and joins the scene with it.
 5. Breadth: GTK (`GtkDropTargetAsync` for every target, the X11 verb),
    WinUI (the bindgen filter's new types, `DataPackage`, the SendInput
    verb, the OLE route if probe 2 says so), Compose (the two modifiers,

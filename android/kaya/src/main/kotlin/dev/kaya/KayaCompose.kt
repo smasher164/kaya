@@ -976,7 +976,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x2f008874cf6b2370uL
+    private const val SPEC_HASH: ULong = 0x4f5c2121bd4d241auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1538,116 +1538,25 @@ object KayaCompose {
                 // apply may run after that. Fetch every referenced blob
                 // here, on the pump thread, within the batch; the bytes
                 // travel with it.
-                val blobs = collectBlobs(batch)
+                val blobs = collectBlobs()
                 mainThread.post { apply(batch, blobs) }
             }
         }
     }
 
     /**
-     * Pre-fetch the batch's blob payloads (SET_PROP values of type
-     * blob) through [KayaPresent.blobData], keyed by wire handle. Runs
-     * on the pump thread, before the next nextCommands call
-     * invalidates the handles.
+     * Every blob the batch registered, fetched on the pump thread before
+     * the next nextCommands call invalidates the handles: the table is the
+     * whole truth, so no record layout decides what arrives (docs/traps.md:
+     * A BLOB HANDLE DIES WITH ITS BATCH).
      */
-    private fun collectBlobs(batch: ByteArray): Map<Long, ByteArray> {
+    private fun collectBlobs(): Map<Long, ByteArray> {
         val blobs = HashMap<Long, ByteArray>()
-        val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
-        while (b.remaining() >= 8) {
-            val start = b.position()
-            val size = b.int
-            val kind = b.short.toInt()
-            b.short // flags
-            // SET_PROP and SET_MENU_PROP share the body shape (u64 id,
-            // u32 prop, u32 pad, value); a menu item's icon rides the
-            // same batch-local blob table as an image source.
-            if (kind == APPLY_SET_PROP || kind == APPLY_SET_MENU_PROP) {
-                b.long // widget or menu item id
-                b.int // prop
-                b.int // pad
-                val type = b.int
-                b.int // len
-                if (type == VALUE_BLOB) {
-                    val handle = b.long
-                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
-                }
-            }
-            // SET_DRAWING's pixels are a blob, and a blob handle dies
-            // with the batch: without this the raster arrives as no
-            // bytes at all, with no error on any side. Body is
-            // { u64 id; u32 width; u32 height; Value scale; Value
-            // pixels }, so the blob's value header sits one 16-byte f64
-            // value past the fixed part. Absolute reads, so the record
-            // cursor is untouched.
-            if (kind == APPLY_SET_DRAWING) {
-                val body = start + 8
-                if (b.getInt(body + 32) == VALUE_BLOB) {
-                    val handle = b.getLong(body + 40)
-                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
-                }
-            }
-            // COPY CARRIES BLOBS TOO — the image and every custom
-            // format's bytes — and WITHOUT THIS ARM THE MISS IS SILENT:
-            // the handles resolve to null on the UI thread and the copy
-            // ships text and html only. Walked GENERICALLY off the
-            // header's slot count, with absolute reads.
-            if (kind == APPLY_COPY) {
-                val body = start + 8
-                val slots = b.getInt(body + 16)
-                var at = body + 24
-                repeat(slots) {
-                    val type = b.getInt(at)
-                    val len = b.getInt(at + 4)
-                    if (type == VALUE_BLOB) {
-                        val handle = b.getLong(at + 8)
-                        KayaPresent.blobData(handle)?.let { blobs[handle] = it }
-                    }
-                    // Values self-pad to 8 (wire.rs, write_value).
-                    at += 8 + len
-                    if (at % 8 != 0) at += 8 - at % 8
-                }
-            }
-            // SET_TYPEFACE CARRIES A BLOB TOO — the font file's bytes.
-            // Without this arm the handle resolves to null on the UI
-            // thread and the app silently falls back to the NAME.
-            //
-            // The slot sits after two variable-length fields: skip
-            // mask+stamp, skip the family, skip the pair list. Absolute
-            // reads, so the record cursor is untouched.
-            if (kind == APPLY_SET_TYPEFACE) {
-                var at = start + 8 + 8
-                fun skipAt() {
-                    val len = b.getInt(at + 4)
-                    at += 8 + len
-                    if (at % 8 != 0) at += 8 - at % 8
-                }
-                skipAt() // the default family
-                val pairs = b.getInt(at)
-                at += 8
-                repeat(pairs) { skipAt() } // tag, family, tag, family …
-                if (b.getInt(at) == VALUE_BLOB) {
-                    val handle = b.getLong(at + 8)
-                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
-                }
-            }
-            // SET_APP_IDENTITY CARRIES A BLOB TOO — the app's mark.
-            // Without this arm the read says the identity carried no
-            // icon, a true sentence about a false state.
-            //
-            // { u32 mask; u32 reserved } then the name, then the icon
-            // slot — always written, the mask says whether it means
-            // anything (wire.rs's write_app_identity). Absolute reads.
-            if (kind == APPLY_SET_APP_IDENTITY) {
-                var at = start + 8 + 8
-                val len = b.getInt(at + 4) // the name
-                at += 8 + len
-                if (at % 8 != 0) at += 8 - at % 8
-                if (b.getInt(at) == VALUE_BLOB) {
-                    val handle = b.getLong(at + 8)
-                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
-                }
-            }
-            b.position(start + size)
+        val count = KayaPresent.blobCount()
+        var handle = 1L
+        while (handle <= count) {
+            KayaPresent.blobData(handle)?.let { blobs[handle] = it }
+            handle += 1
         }
         return blobs
     }
@@ -5759,6 +5668,11 @@ object KayaCompose {
                         } else {
                             failures.add("no such target ${parts[1]}")
                         }
+                    }
+                    "drag" -> {
+                        // docs/dnd-plan.md D10; the Compose arms are the
+                        // breadth slice (§5).
+                        failures.add("drag is a depth slice on android (docs/dnd-plan.md §5)")
                     }
                     "scroll_to_row" -> {
                         // The core maps the KEY to an index in the

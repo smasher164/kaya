@@ -6670,6 +6670,16 @@ the id, tagged copies). The rule: A HAND RUN GOES THROUGH THE RUNNER'S
 OWN VERIFICATION; the env line typed from memory is where a stale
 artifact hides.
 
+AND A RUST GUEST CARRIES ITS OWN CORE (measured 2026-09-03): the
+examples link the kaya crate statically, so `build-id --verify` on
+libkaya and the interpreter vouches for nothing a Rust leg runs. Six
+mac legs died of SIGTRAP after a KayaHostApi field was added — the
+staged dnd binary passed the OLD struct to a freshly built interpreter,
+which read a spec hash of zero out of the shifted layout — with both
+verified dylibs current. run-leg now runs `cargo build --locked -p kaya
+--example <stem>` and restages the binary on every Rust leg, --build or
+not; cargo's no-op is the verification.
+
 ## The caption-centre probe's "honest under-run" was the guest's 45s settle against a contended probe (measured 2026-09-02)
 
 The windows lane's caption-centre phase read `planned 11 measurements
@@ -8026,6 +8036,56 @@ the item every time. A cross-app drag on the lane needs that form. The
 prompt question itself answered no: a foreign drop raises no iOS paste
 prompt (the gesture is the consent), where the same app's
 `UIPasteboard.general.string` parked 26.5 s behind one.
+
+## The Windows lane's first matrix after a spec change reads ~600s: the regenerated Go binding cold-compiles in four pool slots at once (measured 2026-09-03)
+
+Every Windows Go leg is `go build -o C:\kaya\<scene>_go.exe
+dev.kaya/guests/go/cmd` on the guest — one package, one binary, the
+scene picked by KAYA_SELFTEST — so the legs share Go's build cache and a
+warm cache costs each of them a link (median 12s). A spec change
+regenerates bindings/go/kaya_wire.go, the deploy ships it, and the cache
+is cold for the cgo package: the first four Go legs, one per pool slot,
+each compiled the whole package at once and read 105, 96, 84 and 74s
+with the harness's own steps inside 130ms. The matrix figures agree:
+the two matrices that followed spec-hash changes on 2026-09-03 read 619
+and 606 (the second flagged against the 600 ceiling), the one between
+them on an unchanged spec read 431. Nothing was added to every leg; the
+lane's shape changed for four legs.
+
+The remedy is deploy-win's `go-warm` phase: one `go build` of that
+package over ssh after the tree is staged and before the pool opens,
+so the cgo compile happens once, alone, and every leg links against a
+warm cache whatever the spec did. MEASURED on the lane standalone with
+`go clean -cache` run first: go-warm 13s, then the first five Go legs
+6/5/4/4/4s and suites 157s — the compile alone is 13s, and the 105s
+was four copies of it sharing the VM's cores with the other four lanes.
+A duration reading that lands on the first matrix after a spec change
+and not the next is this class.
+
+## A BLOB HANDLE DIES WITH ITS BATCH, and a per-record prefetch misses every record nobody added to it — with no error on any side (measured 2026-09-03)
+
+A blob's bytes ride an apply batch as a 1-based handle into the core's
+batch-local table, valid until the next `kaya_next_commands`, so both
+interpreters fetched the batch's blobs on the pump thread before the UI
+thread applied it. Until 2026-09-03 the fetch WALKED THE RECORDS BY
+KIND, one hand-written arm per blob-carrying record, and each arm was
+added after the record it serves had shipped without one: set_drawing's
+pixels, set_typeface's font, set_app_identity's mark, copy's image and
+custom bytes each arrived as NO BYTES AT ALL — a null lookup on the UI
+thread, no error anywhere, the app quietly falling back (the font's
+NAME, an identity with no icon, a copy shipping text and html only).
+The fourth sighting was set_drag_source on the mac: the drag scene's
+custom payload read `dev.kaya/note 0 bytes` where 5 were declared, with
+every other step green. NO GATE CAN CENSUS THIS from the spec — seventeen
+apply records carry a Value or Values field and every encoder takes the
+blob table, so "which records carry blobs" is a fact about what the core
+puts in them, not about their layout.
+
+So the walk is gone. `kaya_blob_count()` says how many blobs the current
+batch's table holds, the pump fetches handles `1...count`
+(`kayaCollectBlobs`, `collectBlobs`), and a new blob-carrying record is
+covered before it exists. A record layout decides nothing about what
+arrives; the table is the whole truth.
 
 ## WinUI's `AllowDrop` registers no OLE drop target, so an Explorer drop never reaches it; custom formats cross to Win32 only as one stream per GetData (measured 2026-09-03)
 

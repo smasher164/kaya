@@ -2478,11 +2478,15 @@ impl Writer {
                     }
                 })
             }
-            ApplyOp::SetReorderable { id, enabled } => {
+            ApplyOp::SetReorderable { id, enabled, tag } => {
                 self.record(APPLY_SET_REORDERABLE, |b, _blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     b.extend_from_slice(&enabled.to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+                    b.extend_from_slice(tag);
+                    while b.len() % 8 != 0 {
+                        b.push(0);
+                    }
                 })
             }
             ApplyOp::SetColumnHeaders { id, sorted, direction, titles, tag } => {

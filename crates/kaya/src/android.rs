@@ -413,6 +413,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_blob_data as *mut _,
             },
             NativeMethod {
+                name: "blobCount".into(),
+                sig: "()J".into(),
+                fn_ptr: present_blob_count as *mut _,
+            },
+            NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
                 fn_ptr: crate::jvm::ring_spec_hash as *mut _,
@@ -1221,6 +1226,12 @@ extern "system" fn present_emit_sort_requested(
     unsafe {
         crate::capi::kaya_emit_sort_requested(bytes.as_ptr(), bytes.len(), column as u32)
     };
+}
+
+/// KayaPresent.blobCount: how many blobs the current batch's table holds
+/// (handles 1..=count), so the pump prefetches the whole table.
+extern "system" fn present_blob_count(_env: JNIEnv, _class: JClass) -> jlong {
+    unsafe { crate::capi::kaya_blob_count() as jlong }
 }
 
 /// KayaPresent.blobData: a blob's bytes by the handle an apply record

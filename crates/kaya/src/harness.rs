@@ -184,6 +184,11 @@ pub enum Step {
     /// like a realized one, and the top placement is what makes the first
     /// visible row deterministic on the corrected path.
     ScrollToRow(Target, String),
+    /// Drag the source onto the destination through the platform's own
+    /// drag arms, in-process where real input is refused (docs/dnd-plan.md
+    /// D10). `Some(before)` marks a REORDER: the destination is a row of
+    /// the source's own For and the bit says before or onto it.
+    Drag(Target, Target, Option<bool>),
     /// Click the table's column header at the 0-based index through
     /// the platform's real header path, so it emits sort_requested
     /// (select_section's drive-and-emit precedent).
@@ -510,6 +515,7 @@ impl Step {
             | Step::ExpectRows(t, _)
             | Step::ExpectColumnEdges(t, _)
             | Step::ScrollToRow(t, _)
+            | Step::Drag(t, _, _)
             | Step::HeaderClick(t, _)
             | Step::ExpectShares(t, _)
             | Step::ExpectAligned(t, _)
@@ -602,6 +608,7 @@ impl Step {
             Step::ExpectColumnEdges { .. } => true,
             Step::ExpectWindow { .. } => true,
             Step::ScrollToRow { .. } => false,
+            Step::Drag { .. } => false,
             Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
@@ -741,6 +748,15 @@ pub trait Stage: Send + 'static {
     /// row. The empty string when it happened; otherwise a sentence
     /// naming what stopped it, which the step turns into its failure.
     fn scroll_to_row(&self, target: Target, key: &str) -> String;
+    /// Drag `source` onto `destination` through this backend's own drag
+    /// arms (docs/dnd-plan.md D10); `reorder` is Some(before) for a row
+    /// landing on a row of its own For. The empty string when it ran,
+    /// otherwise the sentence naming what stopped it. Defaulted, so a
+    /// backend that has not grown its arms says so by name.
+    fn drag(&self, source: Target, destination: Target, reorder: Option<bool>) -> String {
+        let _ = (source, destination, reorder);
+        "drag is a depth slice on this backend (docs/dnd-plan.md §5)".to_owned()
+    }
     /// The creation index of the FIRST widget of `kind` carrying the
     /// authored a11y_id `id`, and (when present) whose table sort tag
     /// carries `keys`, or None while no such widget exists — how a
@@ -1611,6 +1627,27 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     key.to_owned()
                 };
                 Step::ScrollToRow(parse_target(target)?, key)
+            }
+            "drag" => {
+                // drag <source> to <destination> [before|onto]
+                let mut words: Vec<&str> = rest.split_whitespace().collect();
+                let reorder = match words.last().copied() {
+                    Some("before") => {
+                        words.pop();
+                        Some(true)
+                    }
+                    Some("onto") => {
+                        words.pop();
+                        Some(false)
+                    }
+                    _ => None,
+                };
+                if words.len() != 3 || words[1] != "to" {
+                    return Err(format!(
+                        "drag wants `<source> to <destination> [before|onto]`: {line:?}"
+                    ));
+                }
+                Step::Drag(parse_target(words[0])?, parse_target(words[2])?, reorder)
             }
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
@@ -3068,6 +3105,18 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     None
                 } else {
                     Some(Err(format!("scroll_to_row {key:?}: {off}")))
+                }
+            }
+            Step::Drag(source, destination, reorder) => {
+                // An action; the guest's own writes after `dropped` and
+                // `drag_ended` are the observables. A refused drop is not
+                // a failure here: the source learns `none` through
+                // drag_ended and the scene reads that.
+                let off = stage.drag(*source, *destination, *reorder);
+                if off.is_empty() {
+                    None
+                } else {
+                    Some(Err(format!("drag: {off}")))
                 }
             }
             Step::HeaderClick(t, column) => {

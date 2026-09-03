@@ -1010,6 +1010,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This widget receives drops with these operations; declare
+    /// [`Self::accepts`] first, that list is what it takes.
+    pub fn drop_target(self, ops: &[Op]) -> Self {
+        self.tx.drop_target(self.id, ops);
+        self
+    }
+
     /// This widget's spoken accessibility label — [`Tx::a11y_label`]
     /// chained.
     pub fn a11y_label(self, label: impl Into<LiveSource<StrKind>>) -> Self {
@@ -1856,6 +1863,28 @@ impl<'a> Tx<'a> {
     /// pastes — the platform inserts and the change handler reports it.
     pub fn accepts(&mut self, widget: WidgetId, list: &str) {
         self.set(widget, Prop::Accepts, list);
+    }
+
+    /// Declare what this widget hands over when dragged: a clip chain in
+    /// the copy chain's shape plus the operations it allows
+    /// (docs/dnd-plan.md D1). An empty chain withdraws the declaration.
+    pub fn draggable(&mut self, widget: WidgetId) -> DragRef<'_, 'a> {
+        DragRef { tx: self, widget, clip: crate::protocol::Clip::default(), operations: 0 }
+    }
+
+    /// Declare that this widget receives drops, performing these
+    /// operations; what it TAKES is its accept list ([`Tx::accepts`]),
+    /// which must be declared first. Empty withdraws it.
+    pub fn drop_target(&mut self, widget: WidgetId, ops: &[Op]) {
+        let operations = ops.iter().fold(0, |m, op| m | op.mask());
+        self.ops.push(TxOp::SetDropTarget { widget, operations, path: Vec::new() });
+    }
+
+    /// Rows of this live For drag within their own collection
+    /// (docs/dnd-plan.md D8); the drop reports the anchor row and the app
+    /// confirms with a move.
+    pub fn reorderable(&mut self, container: WidgetId, enabled: bool) {
+        self.ops.push(TxOp::SetReorderable { container, enabled: u32::from(enabled) });
     }
 
     /// This widget's accessibility LABEL: what an assistive client speaks
@@ -3750,6 +3779,41 @@ impl<M> Messages<M> {
         );
     }
 
+    /// Content DROPPED on this widget (docs/dnd-plan.md D1): the paste's
+    /// payload with the point, the operation the core settled on, and a
+    /// reorder's anchor. The transaction this message causes is the
+    /// visible effect; a same-app move removes its original in it.
+    pub fn on_drop(&self, w: WidgetId, f: impl Fn(Dropped) -> M + 'static) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::Dropped { point, operation, anchor, before, clip, .. } => {
+                    Some(f(Dropped {
+                        point: *point,
+                        operation: Op::from_mask(*operation),
+                        anchor: anchor.clone(),
+                        before: *before,
+                        clip: clip.clone(),
+                    }))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A drag that began on this widget ended: `Some(op)` for what the
+    /// destination did, `None` for cancelled or refused. A move that
+    /// landed outside this app removes its original here.
+    pub fn on_drag_ended(&self, w: WidgetId, f: impl Fn(Option<Op>) -> M + 'static) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::DragEnded { operation, .. } => Some(f(Op::from_mask(*operation))),
+                _ => None,
+            }),
+        );
+    }
+
     /// Bind the undone handler to ONE window: fires each time kaya routes an
     /// undo there, with the group's label (EMPTY for a typing episode) and
     /// what the core put back. Not one-shot, and per window because the
@@ -4057,6 +4121,101 @@ impl CopyRef<'_, '_> {
 
     pub fn send(self) {
         self.tx.ops.push(TxOp::Copy(self.clip));
+    }
+}
+
+/// A drag operation (docs/dnd-plan.md D3): copy and move, nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+    Copy,
+    Move,
+}
+
+impl Op {
+    fn mask(self) -> u32 {
+        match self {
+            Op::Copy => crate::wire::DRAG_OP_COPY,
+            Op::Move => crate::wire::DRAG_OP_MOVE,
+        }
+    }
+
+    fn from_mask(m: u32) -> Option<Op> {
+        match m {
+            crate::wire::DRAG_OP_COPY => Some(Op::Copy),
+            crate::wire::DRAG_OP_MOVE => Some(Op::Move),
+            _ => None,
+        }
+    }
+}
+
+/// What a drop delivered (docs/dnd-plan.md D1): the representation, the
+/// point in the destination's own coordinates, the operation the core
+/// settled on, and — for a reorder — the anchor row's key path and
+/// whether the drop landed before it.
+#[derive(Debug, Clone)]
+pub struct Dropped {
+    pub point: (f64, f64),
+    pub operation: Option<Op>,
+    pub anchor: crate::protocol::Path,
+    pub before: bool,
+    pub clip: crate::protocol::Representation,
+}
+
+/// The drag chain: the copy chain's representations plus the operations
+/// the source allows; `.declare()` sends it. An empty chain withdraws.
+#[must_use = "a drag chain declares nothing until .declare()"]
+pub struct DragRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    widget: WidgetId,
+    clip: crate::protocol::Clip,
+    operations: u32,
+}
+
+impl DragRef<'_, '_> {
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.clip.text = Some(text.into());
+        self
+    }
+
+    pub fn html(mut self, html: impl Into<String>) -> Self {
+        self.clip.html = Some(html.into());
+        self
+    }
+
+    pub fn image(mut self, bytes: impl Into<std::sync::Arc<[u8]>>) -> Self {
+        self.clip.image = Some(crate::protocol::Blob(bytes.into()));
+        self
+    }
+
+    pub fn file(mut self, handle: crate::protocol::PickedId) -> Self {
+        self.clip.files.push(handle);
+        self
+    }
+
+    pub fn custom(
+        mut self,
+        id: impl Into<String>,
+        bytes: impl Into<std::sync::Arc<[u8]>>,
+    ) -> Self {
+        self.clip
+            .custom
+            .push((id.into(), crate::protocol::Blob(bytes.into())));
+        self
+    }
+
+    /// Allow this operation (copy, move, or both across two calls).
+    pub fn allow(mut self, op: Op) -> Self {
+        self.operations |= op.mask();
+        self
+    }
+
+    pub fn declare(self) {
+        self.tx.ops.push(TxOp::SetDragSource {
+            widget: self.widget,
+            clip: self.clip,
+            operations: self.operations,
+            path: Vec::new(),
+        });
     }
 }
 

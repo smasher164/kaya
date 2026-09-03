@@ -18,6 +18,7 @@ dev_shell_or_die()
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 
 import os
+import shutil
 import subprocess
 
 from lanes import mac as lane
@@ -75,6 +76,19 @@ def hs_bin(name):
                          encoding="utf-8", errors="replace")
     return got.stdout.strip()
 
+
+# A RUST GUEST CARRIES ITS OWN CORE: the example links the crate statically,
+# so the two verified artifacts above vouch for nothing it runs. Build it
+# and stage it the lane's way, every run — cargo's no-op is the verify.
+if lang == "rust":
+    stem = lane.guest_stem(scene)
+    build = ["cargo", "build", "--locked", "-p", "kaya", "--example", stem]
+    if subprocess.run(build, cwd=ROOT).returncode != 0:
+        print(f"run-leg: build failed: {' '.join(build)}", file=sys.stderr)
+        sys.exit(1)
+    staged = ROOT / lane.RUST_GUESTS / stem
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / f"target/debug/examples/{stem}", staged)
 
 argv = lane.leg_argv(scene, lang, hs_bin)
 env = dict(os.environ)
