@@ -228,7 +228,7 @@ RULES = {
     ],
 }
 
-# EXEMPT, EACH WITH ITS REASON — the gates.sh EXCLUDED pattern. The
+# EXEMPT, EACH WITH ITS REASON — the gates.py EXCLUDED pattern. The
 # anti-vacuity check below fires only when this is non-empty, so an entry
 # whose path stops matching fails rather than sitting unread.
 EXEMPT = {}

@@ -176,7 +176,7 @@ def interpreting(text):
     return None
 
 
-# Generated surfaces are excluded because gen-bindings.sh/gen-header.sh
+# Generated surfaces are excluded because gen-bindings.py/gen-header.py
 # regenerate and diff them: they cannot drift from the spec, and
 # listing them here would be a second, weaker copy of that gate.
 GENERATED = {
@@ -269,7 +269,7 @@ def check(root):
         if name not in ACCESS:
             bad.append(
                 f'{SPEC}: file_mode declares "{name}", which '
-                f"tools/check-file-modes.sh has no semantics for — a "
+                f"tools/check-file-modes.py has no semantics for — a "
                 f"new mode must be given its access and truncation "
                 f"rule HERE and then pinned at every site, or it ships "
                 f"meaning one thing in the core and another in each "
@@ -461,7 +461,7 @@ def check(root):
             if rel not in PASSTHROUGH:
                 bad.append(
                     f"{rel}: redeems a picked file but is in neither "
-                    f"table of tools/check-file-modes.sh — say whether "
+                    f"table of tools/check-file-modes.py — say whether "
                     f"it INTERPRETS the mode number (then pin its arms "
                     f"against the spec, like {SWIFTUI} is) or takes it "
                     f"BY NAME and passes it through (then say so here, "
@@ -479,7 +479,7 @@ def check(root):
     for rel in sorted(PASSTHROUGH):
         if rel not in seen:
             bad.append(
-                f"{rel}: is named by tools/check-file-modes.sh but no "
+                f"{rel}: is named by tools/check-file-modes.py but no "
                 f"longer redeems a picked file at all — either it "
                 f"moved (fix the table) or the entry is dead (delete "
                 f"it)")
@@ -607,7 +607,7 @@ s = fresh("census")
     "fn f() { kaya_open_picked(); }\n", encoding="utf-8")
 g.negative("a new file that redeems a handle and is in no table",
            lambda: check(s),
-           want="is in neither table of tools/check-file-modes.sh")
+           want="is in neither table of tools/check-file-modes.py")
 
 # N8 — a PASS-THROUGH claim that stopped being true must fail. Go is
 # the victim because it is the plainest of them: one call, no branch.
@@ -626,7 +626,7 @@ doctor_shadow("the fourth-mode perturbation", s,
               "crates/kaya/src/spec.rs", r'\("read_write", 2\)\]',
               '("read_write", 2), ("create", 3)]')
 g.negative("a fourth file mode nobody pinned", lambda: check(s),
-           want='declares "create", which tools/check-file-modes.sh '
+           want='declares "create", which tools/check-file-modes.py '
                 'has no semantics for')
 
 # N10 — a table entry whose file stopped redeeming anything must fail,

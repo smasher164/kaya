@@ -75,7 +75,7 @@ type picked_file = { handle : int64; name : string; local_path : string }
    can find it (docs/assets-plan.md). [asset "fonts/sora-wght.ttf"]
    opens one; the name is a relative path under a root the CORE
    resolves, and no guest reads an asset environment variable or carries
-   a repo-relative default (tools/check-assets.sh).
+   a repo-relative default (tools/check-assets.py).
 
    A MISS RAISES [Failure] carrying the core's sentence and nothing
    added, so an OCaml guest and a Java guest name the fault in the same

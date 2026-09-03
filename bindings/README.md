@@ -5,7 +5,7 @@ Every binding is the same three layers; only the taste differs.
 **Layer 1 — the wire vocabulary (generated).** Constants, record
 packers, and the occurrence parser, emitted into each language by
 tools/kaya-bindgen from `kaya::spec` (Rust is the root; run
-tools/gen-bindings.sh, and `--check` gates the validation scripts).
+tools/gen-bindings.py, and `--check` gates the validation scripts).
 Nothing hand-written lives here, which is what keeps eight languages
 current when the protocol grows: a new property or record kind is a
 spec edit, not eight edits.

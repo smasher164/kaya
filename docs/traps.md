@@ -761,7 +761,7 @@ the same patterns return through interpreter drop-downs
   line), which is why tools/guest/desk-warm.ps1 and wait-exit.ps1 have
   carried em-dashes for months and work; the rule is therefore code lines,
   not all lines. Nothing else looks: check-shell walks tools/ for `.sh`
-  and `.cmd` and never `.ps1`. Guard: tools/flightrec-selftest.sh clause
+  and `.cmd` and never `.ps1`. Guard: tools/flightrec-selftest.py clause
   N5, with a watched negative that puts an em-dash back into a literal.
   Measured 2026-08-27 building the flight recorder.
 
@@ -806,7 +806,7 @@ the same patterns return through interpreter drop-downs
   per-leg one (the foreground is machine-wide, so per-leg was always the
   wrong unit), a spooled journal (a bash `printf` builtin per leg, one
   python3 per lane), and nothing bundle-shaped created on a pass. After:
-  0.130ms per leg, n=200. Guard: tools/flightrec-selftest.sh N6, which
+  0.130ms per leg, n=200. Guard: tools/flightrec-selftest.py N6, which
   runs a PASSING leg and refuses a bundle, a surviving spool, or a
   `flightrec_leg` body naming python3/run_ssh/scp/mkdir. A lane ceiling
   caught this after a whole matrix; the clause catches it in seconds.
@@ -844,7 +844,7 @@ the same patterns return through interpreter drop-downs
 - **"Apply-op landed everywhere but the observation missed one
   string-matched layer"** hit repeatedly (GTK child_texts, Kotlin
   expect_order). Guards: no-default Stage methods (compile-forced) and
-  tools/check-verbs.sh (interpreters).
+  tools/check-verbs.py (interpreters).
 - **Bare `wait` in a suite deadlocks** on unrelated background children
   (headless Weston never exits) — always `wait "${pids[@]}"`.
 - **A verdict can print OK while the leg fails** — the process didn't
@@ -883,7 +883,7 @@ the same patterns return through interpreter drop-downs
   three former copies (validate-mac, swift-typecheck, build-dylib) now
   route through it; any new Swift build should too, instead of
   re-deriving the dance. For an iOS `cargo build` (not a direct swiftc),
-  use tools/ios/run-sim.sh's build path rather than a bare
+  use tools/ios/run-sim.py's build path rather than a bare
   `cargo build --target *-apple-ios*`.
 - **Observation captures orphan the app process and can grab the user's
   screen.** A non-selftest launch blocks forever on `recv` (correct app
@@ -908,7 +908,7 @@ the same patterns return through interpreter drop-downs
   system toolchain) stamp sdk 26.5 with minos 14.0 and exercise the
   MODERN generation, while the vendor-stamped hosts (python 14.4,
   .NET 14.4, zulu JDK 11.3) keep the COMPAT generation covered —
-  observed coverage, held by tools/check-design-generation.sh rather
+  observed coverage, held by tools/check-design-generation.py rather
   than by this paragraph. In the compat generation `Button.sizeThatFits` answers borderless metrics while
   the renderer draws the bezel (caption truncates to "t…"). Guard:
   macOS controls that own chrome are bridged to AppKit
@@ -1006,7 +1006,7 @@ the same patterns return through interpreter drop-downs
   while a runner that has since gained the scene's legs will die on
   the stub at suite time (the GTK scroll materialization was
   believed applied while the stub survived; the linux suite was the
-  first to notice, 2026-07-22). Guard: tools/check-stubs.sh
+  first to notice, 2026-07-22). Guard: tools/check-stubs.py
   cross-checks every runner's wired scenes against its backend's
   stubs. A STUB IS A CALL, NOT A SENTENCE, since 2026-08-05:
   `depth_stub("<scene>")` in Rust, `depthStub` in Kotlin,
@@ -1025,7 +1025,7 @@ the same patterns return through interpreter drop-downs
   (and would have installed the PREVIOUS apk had one leg still
   queued) — the stale-artifact class inside the runner itself. All
   four build lines now fail the run loudly, and KayaCompose.kt has a
-  mac-side compile gate at last (tools/check-compose.sh — the
+  mac-side compile gate at last (tools/check-compose.py — the
   swift-typecheck sibling; the emulator used to be the FIRST
    compiler to see the Kotlin layer). When reading suite results,
    check verdict COUNTS, never just exit codes — pipeline wrappers
@@ -1156,7 +1156,7 @@ the same patterns return through interpreter drop-downs
   must assert output freshness itself.
 
 - **...and that freshness assert can be made UNSATISFIABLE by a
-  regeneration that changes nothing.** `tools/gen-bindings.sh` without
+  regeneration that changes nothing.** `tools/gen-bindings.py` without
   `--check` rewrites the binding sources with byte-identical content
   and fresh mtimes. dune is CONTENT-based, so it correctly declines to
   relink; the assert above is MTIME-based, so it demands a relink that
@@ -1296,7 +1296,7 @@ measure stamps the generation it wrote under and `expect_column_edges`
 refuses a stamp older than the current one, in its own sentence. This
 is SwiftUI's rule arriving on the second interpreter — "a
 generation-keyed reporter republishes even after a same-size resize"
-(tools/check-table-tier.sh) — and the shape of the miss is the usual
+(tools/check-table-tier.py) — and the shape of the miss is the usual
 one: the two interpreters re-implement the harness and only one of
 them had learned.
 
@@ -1322,7 +1322,7 @@ selftest only at the completed apply-batch boundary after any surface
 has mounted content. A node-bearing batch with no mount arms one
 five-second grace period instead, so the unmounted-scene diagnosis above
 still runs; a later mount wins immediately and a stale timer cannot
-start a second harness. `tools/check-steps.sh` holds the all-surface
+start a second harness. `tools/check-steps.py` holds the all-surface
 route and the one-shot transition, including a compiled truth table and
 watched-red shadows.
 
@@ -1395,7 +1395,7 @@ are not errors yet. Warnings are where a build tells you it is about to
 break. Read the output, check the status, filter nothing.
 
 The related guard that does work: a gate for the diagnostics the
-compiler CANNOT produce (tools/check-detekt.sh — K2 moved the UNUSED_*
+compiler CANNOT produce (tools/check-detekt.py — K2 moved the UNUSED_*
 diagnostics into IDE inspections, KT-69698).
 
 ## iOS materializes no accessibility tree until automation is enabled
@@ -1573,7 +1573,7 @@ state. So every REMAINING leg hit the same 300s wall; at 110 legs that
 is hours of silence, and the lane looked hung rather than failing.
 A timeout without a recovery path is not a guard, it is a slower hang.
 
-Guard (deploy-win.sh): `guests_wedged` fingerprints the contradiction —
+Guard (deploy-win.py): `guests_wedged` fingerprints the contradiction —
 tasklist lists an image AND taskkill reports "no running instance" — and
 on a leg timeout escalates to `vm_restart` (stop --kill, wait stopped,
 start, wait for sshd, grace for the /it console session). Once per run:
@@ -1880,7 +1880,7 @@ of the three signals.
 
 ## Editing a script a lane is CURRENTLY EXECUTING corrupts that run
 
-A negative test doctored tools/validate-mac.sh and restored it seconds
+A negative test doctored tools/validate-mac.py and restored it seconds
 later, while a matrix run was executing that same file. The mac lane
 died with `line 96: ls/check-compose.sh: No such file or directory` —
 "tools/" with three bytes missing. bash does not read a script into
@@ -1899,7 +1899,7 @@ makes it worth writing down.
 
 ## `$?` after an `if` that took no branch is 0, not the command's status
 
-tools/keyed.sh wrapped each gate as `if "$@"; then store; fi; status=$?`
+tools/keyed.py wrapped each gate as `if "$@"; then store; fi; status=$?`
 — and a FAILING gate came back as a pass. An `if` compound whose
 condition is false and which has no `else` exits 0 itself, so `$?`
 reads the `if`, not the command inside it. Under KAYA_FAST=1 every
@@ -1930,7 +1930,7 @@ own gate found it on its first run, because that gate asserts a FAILING
 task is never cached — an assertion about the failure path, which is
 the path nobody exercises by accident. And the same gate then failed a
 SECOND way: its "KAYA_FAST unset consults no cache" clause ran inside a
-lane launched with `KAYA_FAST=1 tools/validate-mac.sh`, inherited the
+lane launched with `KAYA_FAST=1 tools/validate-mac.py`, inherited the
 exported variable, and was quietly testing the opposite of what it
 claimed. A self-test has to CONSTRUCT its environment (`env -u`), never
 inherit one — an inherited variable turns an assertion into a
@@ -1941,7 +1941,7 @@ check.
 
 check-pins grew a clause requiring `--disable-automatic-resolution` on
 SwiftPM invocations, self-tested by deleting the flag from
-gen-guests.sh — and the gate reported OK. The invocation is
+gen-guests.py — and the gate reported OK. The invocation is
 backslash-continued: `swift run \` on one line, `--package-path` on the
 next. The scanner matched both tokens on ONE physical line, found no
 line carrying both, and concluded there was no SwiftPM invocation to
@@ -2078,7 +2078,7 @@ reproduce a single leg by hand, which is exactly what you do when
 chasing it.
 
 Fixed two ways, deliberately. `-nostdin` is what ffmpeg ships for this
-and `tools/check-shell.sh` now requires it on every invocation. But
+and `tools/check-shell.py` now requires it on every invocation. But
 the loop ALSO reads from fd 3 (`done 3< <(grep …)`), because -nostdin
 only fixes the command someone already thought about — the fd makes
 the loop immune to the next stdin-reader added inside it. Same shape
@@ -2143,7 +2143,7 @@ mismatch survives a fix that looks like it worked. RENAME THROUGH A
 TEMP PATH, then `git add` the lowercase name and confirm with
 `git diff --cached --name-only`.
 
-Gated since, by tools/check-case.sh: git already stores the exact bytes
+Gated since, by tools/check-case.py: git already stores the exact bytes
 of every tracked path, so the check compares them against the directory
 listing case-sensitively. It is self-tested both directions and it
 reproduces this exact defect.
@@ -2307,7 +2307,7 @@ android would have shipped exactly that. check-verbs now reads every
 `$TOKEN` out of tools/scenes/*.steps and requires an expansion in both
 interpreters, the same way it requires the verbs.
 
-The second one is about the gate cache. tools/keyed.sh skips a gate
+The second one is about the gate cache. tools/keyed.py skips a gate
 whose declared inputs have not moved, so a file a gate READS but does
 not DECLARE is a false-PASS generator that misfires exactly when that
 file is what changed. check-steps was declared `["guests"]` from the day
@@ -2459,7 +2459,7 @@ and the published identifiers when it cannot.
 ### The browser EXISTS BEFORE ITS CONTENTS DO, and one blocked hop eats the retry
 
 Rotating that preference across the filedialog legs — which is what
-`tools/validate-mac.sh` now does, so columns mode runs on every mac lane
+`tools/validate-mac.py` now does, so columns mode runs on every mac lane
 — turned up a live race the tree had never exercised.
 `filedialog-rust-swiftui` failed every time in columns mode with
 
@@ -3115,14 +3115,14 @@ no second reveal and the picker never moved. The property is read when
 the remote view controller is configured and never again.
 
 **So the runner owns the aim**: after the exact prior-run cleanup below,
-`picker_warm` in tools/ios/run-sim.sh launches the system's own Files app
+`picker_warm` in tools/ios/run-sim.py launches the system's own Files app
 on each pool phone before any leg
 (same DocumentManager, same file provider), waits for
 `com.apple.FileProvider` to carry a pid — it carries none until
 something on that boot has used the document stack, which is exactly the
 cold/warm edge — settles, and terminates it. 5.2s on a cold device,
 0.23s on a warm one. The export-health trap below is a distinct state of
-the same provider; tools/check-steps.sh holds both walls on the
+the same provider; tools/check-steps.py holds both walls on the
 per-device preparation path.
 
 ## A live iOS FileProvider can have a stale LocalStorage item index
@@ -3167,7 +3167,7 @@ cancellation or a contemporaneous FP -1005/out-of-sync log re-seeds only
 that simulator, warms it and runs the export once more; anything else, or
 a second health failure, refuses before a leg. The probe attests the
 provider route and its own clean container; cleanup makes prior guest
-containers unable to poison the run. tools/check-steps.sh holds the exact
+containers unable to poison the run. tools/check-steps.py holds the exact
 cleanup scope/emitter/postcondition, bounded destructive surface,
 per-phone call, two attempts, one-device erase, recording/clipboard
 ordering and probe semantics; its real-source perturbations are watched
@@ -3183,7 +3183,7 @@ nothing, and the check failed anyway.
 The check compared each built exe's MTIME against the newest binding
 source's. Dune keys targets on source HASHES. Those two rules disagree
 in one direction that matters: a source rewritten with IDENTICAL BYTES —
-which is what `tools/gen-bindings.sh` does to every generated file on
+which is what `tools/gen-bindings.py` does to every generated file on
 every run — moves the mtime and not the hash. Dune correctly rebuilds
 nothing, the exe keeps its old timestamp, and the check declares it
 stale forever. Measured 2026-07-31: `bindings/ocaml/kaya_wire.ml`
@@ -3233,7 +3233,7 @@ What caught it was the stale-artifact guard, doing exactly its job:
       but core in this tree is 5f34bf2e3fa43428
 
 So the ritual gains a sixth step: after copying the backup back, TOUCH
-the file (or copy without metadata), rebuild, and `tools/build-id.sh
+the file (or copy without metadata), rebuild, and `tools/build-id.py
 --verify` the artifact. The source hash is not the thing the next run
 executes.
 
@@ -3287,23 +3287,23 @@ looked like a decode bug in the new arm. Neither had the arm at all —
 says so, because stale generated code COMPILES. The guest builds, the
 scene runs, the dialog opens, and the answer is silently empty.
 
-`tools/gen-bindings.sh --check` is the authoritative detector and every
+`tools/gen-bindings.py --check` is the authoritative detector and every
 lane runs it. That is one run too late for someone iterating by hand,
 and a gate you have to remember is not a guard.
 
 So the BUILD refuses. `crates/kaya/build.rs` stamps and compares a hash
 of `tools/kaya-bindgen/src/*.rs` against `bindings/.generator-id`, which
-`gen-bindings.sh` writes on a real generation. Everything downstream
+`gen-bindings.py` writes on a real generation. Everything downstream
 compiles this crate first, so the refusal is the earliest possible
 answer and the one nobody can skip: `cargo build` fails naming the fix.
 
 TWO EXEMPTIONS, both necessary rather than convenient. A published
 dependency has no `tools/` and nothing to be out of date with. And
-`gen-bindings.sh` sets `KAYA_REGENERATING`, because the generator
+`gen-bindings.py` sets `KAYA_REGENERATING`, because the generator
 DEPENDS on the kaya crate — without it a generator edit would deadlock,
 the build of the tool that fixes the staleness being the thing the
 staleness stops. Negative-tested in all three directions: a moved
-generator fails the build, `gen-bindings.sh` still runs while it is
+generator fails the build, `gen-bindings.py` still runs while it is
 failing, and the build passes again once it has.
 
 Content, not timestamps, on both sides — the shell hashes the sorted
@@ -3412,7 +3412,7 @@ Start menu as "the usual cause", which was true of the 2026-07-25
 incident but not of this one, so a screenshot showing an idle desktop
 read as ruling nothing out.
 
-THE FIX IS A SETTING THE DEPLOY OWNS. tools/deploy-win.sh writes
+THE FIX IS A SETTING THE DEPLOY OWNS. tools/deploy-win.py writes
 ForegroundLockTimeout=0 and VERIFIES it — the third setting in that file
 to exist because the desktop can quietly refuse a window the foreground,
 after HideFileExt and toasts. Any settings visit, or any reboot, can put
@@ -3476,7 +3476,7 @@ nowhere else. Measured: the console session still read
 `ForegroundLockTimeout = 2147483647` after every deploy that day, while
 the registry check beside it passed on the 0 it had just written.
 
-THE GUARD IS NOW THE LEGS' OWN QUESTION, ASKED ONCE. tools/deploy-win.sh
+THE GUARD IS NOW THE LEGS' OWN QUESTION, ASKED ONCE. tools/deploy-win.py
 runs a desktop warm-up before the suites (`desk_warm`, with
 tools/guest/desk-warm.ps1 doing the work inside an interactive scheduled
 task): it names the input desktop, applies the foreground-lock setting
@@ -3765,7 +3765,7 @@ while the same binary passed standalone.
 
 ## On linux, GTK and the harness find the session bus by DIFFERENT means
 
-MEASURED 2026-08-27. `KAYA_ONLY=canvas tools/validate-linux.sh` failed both
+MEASURED 2026-08-27. `KAYA_ONLY=canvas tools/validate-linux.py` failed both
 legs with `ax "<not in the accessibility tree>", wanted "image/Portfolio
 value"`, the wayland one behind `Gtk-WARNING: Unable to acquire session
 bus: Cannot autolaunch D-Bus without X11 $DISPLAY`.
@@ -3813,7 +3813,7 @@ NODE, so it read as a lowering bug and sent the reader to the widget — and
 the canvas ax read does not diverge at all: it is a `gtk4::Picture`, so
 `atspi_role_of` gives it `Role::Image` and it walks the same
 `atspi_rank` (in-process) then `atspi_collect` (bus) path as every other
-widget. `tools/check-steps.sh`'s `ax_bus()` holds the rule now: a scene
+widget. `tools/check-steps.py`'s `ax_bus()` holds the rule now: a scene
 asserting any ax-family verb has every linux leg launched through
 a11y-leg.sh, and the bus-reading gtk.rs methods are pinned so a sixth one
 cannot ship outside the rule.
@@ -3962,7 +3962,7 @@ passed.
 WHO THE SECOND PRINCIPAL IS was not proven. Ruled out by measurement:
 the mac lane (its clipboard legs are drain-bracketed), the android
 pool (§7 finding 4, bridge severed, `-no-window`), the iOS lane
-(Simulator.app not running, and run-sim.sh refuses a live relay per §8
+(Simulator.app not running, and run-sim.py refuses a live relay per §8
 finding 7). Left standing: this machine's Windows VM is configured
 `/Sharing/ClipboardSharing = True` with the SPICE vdagent channel on
 its running qemu command line, and the windows lane runs five
@@ -4141,8 +4141,8 @@ The Haskell guests link against libkaya, which is not on any default
 search path: `guests/haskell/kaya-guests.cabal` declares
 `extra-libraries: kaya` and every caller supplies the directory —
 `--extra-lib-dirs="$ROOT/target/debug"` plus the matching `-L` and
-`-rpath` in `--ghc-options` (tools/validate-mac.sh's `build_haskell`,
-tools/check-abort.sh).
+`-rpath` in `--ghc-options` (tools/validate-mac.py's `build_haskell`,
+tools/check-abort.py).
 
 Run `cabal build <target>` WITHOUT those flags — the obvious thing to
 type when checking one guest compiles — and it fails immediately with
@@ -4168,7 +4168,7 @@ rm -rf guests/haskell/dist-newstyle
 
 The habit that avoids it: when compile-checking one Haskell guest by
 hand, either pass the same three flags the lane passes, or send the
-output to a private `--builddir` (what tools/check-abort.sh does, for
+output to a private `--builddir` (what tools/check-abort.py does, for
 its own reason — it wants a guaranteed relink). Never a bare `cabal
 build` in that directory.
 
@@ -4608,8 +4608,8 @@ diff). The next comments pass starts from these, not from scratch:
   census route: cut, run the gate, watch the red, restore.
 - TWO GENERATORS PUNISH THE CUT ITSELF. tools/kaya-bindgen sources are
   whole-file-hashed by crates/kaya/build.rs — any comment byte moved
-  there reddens every cargo run until tools/gen-bindings.sh restamps
-  (the panic names the fix). tools/gen-guests.sh --check REGENERATES
+  there reddens every cargo run until tools/gen-bindings.py restamps
+  (the panic names the fix). tools/gen-guests.py --check REGENERATES
   unconditionally, so a cut made in a generated guest silently reverts
   and the gate exits 0 — cut generators, never their outputs.
 - CITATIONS SHRINK-BREAK AND MEANING-DRIFT. check-doc-refs holds
@@ -4783,7 +4783,7 @@ regular arm; the table pad leg has no such literal available, because
 the design deliberately made the tiers indistinguishable. When a
 design removes the discriminator on purpose, the only remaining proof
 that a device took the arm you think it took is a ONE-ARM PERTURBATION
-with the other device's leg watched staying green — — GATED SINCE 2026-08-21: tools/check-table-tier.sh compiles the
+with the other device's leg watched staying green — — GATED SINCE 2026-08-21: tools/check-table-tier.py compiles the
 interpreter's own source with a probe that drives the extracted
 routing function through its whole truth table, and a static clause
 holds KayaTableSurface as the routing's only caller. What no gate can
@@ -4849,7 +4849,7 @@ tree is clean, `git status` is empty, the source hash matches — and the
 binary still holds the perturbation. The next leg then measures the
 perturbed build and is believed.
 
-Caught by `tools/build-id.sh --verify` inside the build step, which is
+Caught by `tools/build-id.py --verify` inside the build step, which is
 the wall nobody can walk around: "STALE — carries 43093e27a31a1da0, but
 core in this tree is b1893d607e72a221". Without it the "restored
 baseline" run would have been the perturbed one.
@@ -4875,9 +4875,9 @@ therefore lives under ignored `target/`, which is outside both the fixture's
 declared inputs and every shipped artifact's source set; `check-keyed` refuses
 any other root before it creates the file.
 
-## A deep worktree MADE deploy-win.sh unreachable, and the error named ssh
+## A deep worktree MADE deploy-win.py unreachable, and the error named ssh
 
-`tools/deploy-win.sh` multiplexes over
+`tools/deploy-win.py` multiplexes over
 `ControlPath=$ROOT/target/.ssh-mux-%r@%h`, and `$ROOT` comes from `$0`. From
 a `.claude/worktrees/wf_<id>` checkout that socket path is EXACTLY 104 bytes —
 one over the unix-socket limit — and every ssh in the lane refuses with
@@ -5094,7 +5094,7 @@ concurrently, keeps the stable four-phone Android default and the 310s
 ceiling, and waits for Android's recorded pid before starting the one gate
 sweep at niceness 10 while longer lanes continue. The 350s all-at-t0
 measurement means the Android duration anomaly remains open; there is no
-final matrix pass on this scheduler. `tools/check-gates.sh` must reject a
+final matrix pass on this scheduler. `tools/check-gates.py` must reject a
 future platform launch moved behind Android admission as well as drift in
 pool width, pid provenance, single-sweep shape or niceness.
 
@@ -5396,7 +5396,7 @@ and clear letting the ground through) are the tinted pair; every
 snapshotted `Color(nsColor:)` is one of the untinted values the dump
 printed. THE RULE: where a SwiftUI fill has to agree with what AppKit
 draws beside it, name a SHAPESTYLE, not a `Color(nsColor:)`.
-tools/check-table-card.sh's "mac apron resolved in the hierarchy" holds
+tools/check-table-card.py's "mac apron resolved in the hierarchy" holds
 the apron's own spelling.
 
 AND THE OBVIOUS FIX IS WORSE: an `NSViewRepresentable` filling
@@ -5446,7 +5446,7 @@ standalone probe that never narrows draws the same string in full at
 the same 92.5pt. THE RULE: after moving a column's width, set the cell's
 root view again (`KayaTableDriver.represent`) — nothing else makes
 SwiftUI decide over, and NO observable can see it, because the
-difference is ink. `tools/check-table-tier.sh` holds the call statically
+difference is ink. `tools/check-table-tier.py` holds the call statically
 for that reason.
 
 ## A canvas ink read crosses the display's colour space, and the frozen
@@ -5726,7 +5726,7 @@ pages, `mprotect` the second `PROT_NONE`, and place the buffer so that
 FAULT rather than a redzone heuristic, the fault is byte-exact rather than
 granular, and there is no sanitizer runtime involved, so the same probe
 runs on any POSIX lane. tools/checks/c-tx-cap.c is that shape and
-tools/check-c-bounds.sh reads the child's exit status — 138 (SIGBUS) or
+tools/check-c-bounds.py reads the child's exit status — 138 (SIGBUS) or
 139 (SIGSEGV) is the smash, 0 with a sentence on stderr is the refusal.
 ASan is the companion beside it (that gate's `heap`/`heap-many` modes), for
 the shape a wall cannot take: a plain malloc whose next byte is another
@@ -5763,7 +5763,7 @@ only the first clause goes green.
 `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=...` AFTER your arguments; `-D_FORTIFY_SOURCE=0`
 and `-U_FORTIFY_SOURCE` were both measured making no difference. The
 whitelist is the only lever: `NIX_HARDENING_ENABLE="" <cc> -fsanitize=address ...`,
-which is what tools/check-c-bounds.sh's `asan_build` does and says.
+which is what tools/check-c-bounds.py's `asan_build` does and says.
 
 And the rule the shape argues for: a sanitizer clause's own NEGATIVE is the
 only liveness proof it has. If the pre-cap build does not produce a report,
@@ -5997,7 +5997,7 @@ on both appearance legs.
 ## A one-shot `ime set` is dropped by a freshly restored emulator (2026-08-28)
 
 The android lane installs the clipboard helper and makes its IME the
-default before any leg runs (tools/android/run-emulator.sh
+default before any leg runs (tools/android/run-emulator.py
 cliphelper_prepare). On a pool freshly restored from snapshot, the
 `ime enable` took ("already enabled" on inspection minutes later) but
 the one-shot `ime set` on its heels was DROPPED by the still-settling
@@ -6077,7 +6077,7 @@ HOW TO INSTRUMENT IT AGAIN (twenty minutes, not a session): two
 `kayaDiag` lines in `KayaTableWindow` — one in `publish` when
 `first`/`total` move, one where `visible = measured` is assigned,
 carrying `drawnFirst`, `scrollTop`, `placement.bandTop` and `anchorRow` —
-and the park's three decisions. Then loop `tools/ios/run-sim.sh python`,
+and the park's three decisions. Then loop `tools/ios/run-sim.py python`,
 which is two legs and 35 seconds, not the seven-minute lane. Both lines
 were removed again once the fix landed: they print once per band change,
 which during a scroll is every pass.
@@ -6106,9 +6106,9 @@ sentence is identical to the one a real breakpoint bug would print.
 THE CAUSE IS AN ABSENT KEY. The bundle template declared no
 `UISupportedInterfaceOrientations`, and an iPhone app without it inherits
 whatever orientation the device is in. The pool's device TYPE is pinned
-in run-sim.sh (it refuses a stale kaya-sim-pad of the wrong type, for
+in run-sim.py (it refuses a stale kaya-sim-pad of the wrong type, for
 exactly this class of reason); its GEOMETRY was not. Both families
-declare portrait now, and `tools/check-staging.sh` holds it — one
+declare portrait now, and `tools/check-staging.py` holds it — one
 orientation per key, with the missing-key branch and the two-orientation
 branch each watched refusing.
 
@@ -6121,7 +6121,7 @@ same sentence every single run, which is what told us the sentence means
 "the latched width was at or above the threshold" and not "the report
 never arrived".
 
-AND THE LOOP THAT FOUND IT WAS VACUOUS FIRST: run-sim.sh's cut block
+AND THE LOOP THAT FOUND IT WAS VACUOUS FIRST: run-sim.py's cut block
 prints the PREFIX and the runner appends the leg's extra itself, so a
 harness that ran only the block's output asserted the scene minus its
 one interesting step — 78 green runs that tested nothing. The pad, which
@@ -6153,13 +6153,13 @@ inside an already-backgrounded shell. The launching shell returned
 immediately, the harness reported the command COMPLETE WITH EXIT 0, and
 the log it wrote held three lines — so it read exactly like a lane that
 had finished. The process was reparented to init and kept running. The
-tell is `ps -Ao pid,ppid,etime` showing a `validate-all.sh` with PPID 1
+tell is `ps -Ao pid,ppid,etime` showing a `validate-all.py` with PPID 1
 and an elapsed time longer than the run you think you started.
 
 THE RULE: never wrap a lane or matrix in `nohup … &` inside a background
 shell. Start it as the shell's own foreground command and let the harness
 background it, so its lifetime is the task's lifetime. And before
-starting any matrix, count the trees — one `validate-all.sh` root, no
+starting any matrix, count the trees — one `validate-all.py` root, no
 PPID 1.
 
 THE SAME EVENT ALSO EXPLAINS A FALSE GREEN one file over: a lane whose
@@ -6258,7 +6258,7 @@ one came back byte-identical, because none of them was ever the question.
 ## The android guest is staged, so a hand-built APK packages the LAST LANE RUN's copy (2026-08-29)
 
 `android/pyhost/src/main/assets/python/app/portfolio.py` is a STAGED COPY
-that `tools/android/run-emulator.sh` refreshes. Gradle packages from
+that `tools/android/run-emulator.py` refreshes. Gradle packages from
 there, not from `guests/`. So editing the guest and running
 `gradle :pyhost:assembleDebug` by hand builds an APK containing whatever
 the last LANE run staged — and `--rerun-tasks` does not help, because the
@@ -6463,7 +6463,7 @@ HANGS instead (60s to the step ceiling), which is the same cause
 wearing a different failure. `Command::output()` was never affected: it
 sets all three descriptors itself, which is why every reader and the
 typing tools passed on the same legs. The rule: a spawn in the core sets
-stdin, stdout and stderr EXPLICITLY, never inherits — tools/check-targets.sh
+stdin, stdout and stderr EXPLICITLY, never inherits — tools/check-targets.py
 holds it (the `.spawn()` census) — because the host a libkaya addon
 lives in is not kaya's to configure. And a refusal about a child's
 exit that does not carry the child's stderr is a sentence nobody can
@@ -6593,7 +6593,7 @@ of leg times DOWN (285s against 495s the matrix before) — the anomaly
 was entirely in "core-build+gates" (535s). It went unnoticed while the
 ladder was followed to the letter, because a standalone sweep on the
 same tree minutes before the matrix leaves the artifacts current. Fixed:
-validate-all runs `gates.sh --build` (the sweep's own BUILD list) before
+validate-all runs `gates.py --build` (the sweep's own BUILD list) before
 taking the token. The rule: A FINGERPRINT OVER ARTIFACT BYTES IS TAKEN
 AFTER THE BUILD, or it attests the run before.
 
@@ -6629,7 +6629,7 @@ version of the command failed instead of echoing. Probed to be sure:
 -Command \"Write-Output probe-ran; exit 3\""` printed `Write-Output
 probe-ran; exit 3` and returned 0. The rule: A POWERSHELL SCRIPT SHIPPED
 TO THE VM RUNS AS A FILE (`-File C:\kaya\fetch-zip.ps1 -Url ... -Sha256
-... -Dest ...`), never as a nested -Command string; tools/check-pins.sh
+... -Dest ...`), never as a nested -Command string; tools/check-pins.py
 refuses the nested shape by name and holds every zip the VM fetches to
 a version and a sha256 recorded beside it, compared before expansion.
 The direct `ssh host 'powershell -Command "..."'` with no cmd in
@@ -6892,3 +6892,27 @@ scroll's breadth from the ScrollView's own box (`scrollViewportW`),
 never from its cell. Watched both ways: doctored arms failing with
 `spans 68pt of its parent's 508pt breadth` (mac) and `spans 84px of its
 parent's 498px breadth` (GTK), and the pan witness moving 288pt after.
+
+## A word sweep renames citations, not composed names: three lanes died at their first step after the shim removal (measured 2026-09-02)
+
+The sweep that removed the 61 two-line `.sh` shims renamed 1,405
+citations in 272 files by word (`\bcheck-steps\.sh\b` and its kin), the
+53-gate sweep passed, and the matrix went green on mac and linux while
+windows, iOS and android died at 3–83s with a FileNotFoundError naming
+`tools/gen-header.sh` (gone). Five shapes a word sweep cannot see, all found by
+hand afterwards: the COMPOSED name (an f-string appending `.sh` to a
+generator's name in the mobile and windows runners' startup check, and
+to a gate's name in tools/lib/keyed-inputs.py), the REGEX-ESCAPED name (`gates\.sh` in six
+of check-gates' own clauses, `build-id\.sh` in
+tools/lib/android-leg-order.py), the INTERPRETER-PREFIXED call
+(crates/kaya/build.rs ran the script through `bash`, so the python file
+was parsed as shell and every `cargo build` failed), the GLOB
+(`tools/**/*.sh` as the prelude self-test's population, `check-*.sh`
+in HACKING.md), and the literal name inside a shape the sweep skipped.
+The guard is check-python's rule 9: a script a body names must exist,
+and no `.sh` name may be composed at run time (a self-test's deliberate
+fake is exempt by name with its reason). For the next rename, grep the
+escaped, composed and interpreter-prefixed shapes by hand BEFORE the
+matrix — `git grep -nE 'name\\\.ext'`, `'\{[^}]*\}\.ext'`,
+`'(bash|sh) +[^ ]*name'` — because the lanes that reach a composed name
+are the ones that take longest to tell you.

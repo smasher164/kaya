@@ -46,7 +46,7 @@
 # dirty stretch is therefore a byte comparison that cannot hold on five
 # lanes at once. dirty.steps carries the same sentence and the same
 # discipline; this scene is the first to need it four times, which is
-# why the sentence stopped being prose: tools/check-steps.sh now refuses
+# why the sentence stopped being prose: tools/check-steps.py now refuses
 # any expect_title standing between an `expect_dirty true` and the next
 # `expect_dirty false`. It caught three of the four lines below on the
 # first run that worked — written after their save, where the app was
@@ -135,7 +135,7 @@ expect label#0 "saved, 15 bytes"
 # which is what expect_title reads there, so a title read is only a
 # five-lane byte comparison once the scene has CLAIMED the window clean.
 # Every expect_title below therefore stands behind an expect_dirty
-# false. tools/check-steps.sh enforces the shape now; it caught this
+# false. tools/check-steps.py enforces the shape now; it caught this
 # exact stretch written the other way round.
 expect_dirty false
 # AND THE WINDOW TOOK THE FILE'S NAME. The destination moved, so the
@@ -184,7 +184,7 @@ expect_title "notes"
 # the document came back four bytes long and every byte count below it
 # failed. Wayland's `wtype -d 1` coalesced and passed. Same scene, same
 # backend, two cadences, two answers — which is exactly what the rule
-# says will happen. tools/check-steps.sh now refuses the shape.
+# says will happen. tools/check-steps.py now refuses the shape.
 expect_focused textarea#0
 type "z"
 expect_dirty true

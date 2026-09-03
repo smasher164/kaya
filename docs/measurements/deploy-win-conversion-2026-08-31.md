@@ -2,7 +2,7 @@
 
 Tranche three, stage one of docs/runner-conversion-plan.md: the windows
 runner's tables became tools/lib/lanes/win.py, the body became
-tools/deploy-win.py (tools/deploy-win.sh is the pinned two-line shim),
+tools/deploy-win.py (tools/deploy-win.py is the pinned two-line shim),
 and the eight gates that parsed the shell body's text were re-taught in
 the same slice. This file records what was measured, because the plan
 ratified the schema against the enumeration and the enumeration found
@@ -23,16 +23,16 @@ line of the module was written. Corrections to the received map:
   sweep_guests' second SCENES read (a bare `if m:`), both of
   sweep_c_floor's patterns, and wired()'s deploy-win arm.
 - check-staging's `words()` existed for exactly one line —
-  deploy-win.sh:401's `${KAYA_WIN_DEPTH_SCENES:-…}` default-unwrap.
+  deploy-win.py:401's `${KAYA_WIN_DEPTH_SCENES:-…}` default-unwrap.
   Its runners loop matched ZERO deploy-win lines (both regexes were
   vacuous on that file, guarded by nothing).
-- check-gates' keyed.sh detector never applied to deploy-win; its
+- check-gates' keyed.py detector never applied to deploy-win; its
   deploy-win facts were the verdict spelling, `flightrec_start
   windows`, and the wrapper-journal read through flightrec.sh's
   `flightrec_win_leg` body (N17 doctors the library, and nothing
   perturbed deploy-win's own bytes).
-- check-build-id:86-87 demanded `build-id.sh" --verify` or
-  `build-id.sh --verify` as substrings — no negative, no floor, and a
+- check-build-id:86-87 demanded `build-id.py" --verify` or
+  `build-id.py --verify` as substrings — no negative, no floor, and a
   python argv spelling matched neither. The one clause that would have
   drifted silently.
 - check-appearance N10 and check-assets N4 would have died LOUDLY

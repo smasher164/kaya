@@ -266,7 +266,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * untouched, so neither the measure nor the position reader ran
      * again and every later expect_column_edges answered "no live table
      * viewport geometry" (docs/traps.md). SwiftUI's generation-keyed
-     * reporter is the same rule (tools/check-table-tier.sh).
+     * reporter is the same rule (tools/check-table-tier.py).
      */
     var tableGeometryGeneration by mutableLongStateOf(0L)
 
@@ -631,8 +631,8 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
 
 // NO depth-stub helper lives here: it comes back as a CALL, never a
-// sentence, the next time a scene lands mac-first. tools/check-stubs.sh
-// and tools/check-steps.sh both read the call, and neither can see a
+// sentence, the next time a scene lands mac-first. tools/check-stubs.py
+// and tools/check-steps.py both read the call, and neither can see a
 // backend that refuses in its own words.
 
 /**
@@ -1004,7 +1004,7 @@ val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
  * instrument, no recording). A RELATIVE name resolves under the app's
  * own files directory, the one place a runner can read back with
  * `run-as`. Three line shapes and the failure-only rule, held level with
- * the Rust ring and the SwiftUI one by tools/check-verbs.sh.
+ * the Rust ring and the SwiftUI one by tools/check-verbs.py.
  */
 object KayaVTrace {
     const val CAP = 2048
@@ -1535,7 +1535,7 @@ object KayaCompose {
      * `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance.
      *
      * UNSET INSTALLS NOTHING — the platform default, byte for byte
-     * (tools/check-appearance.sh's inert clause). A value that is neither
+     * (tools/check-appearance.py's inert clause). A value that is neither
      * word dies here rather than being ignored, which would run the whole
      * leg under the host's palette and freeze a wrong string.
      *
@@ -1585,7 +1585,7 @@ object KayaCompose {
      * it up for free, but this half is per-WINDOW and a re-created one
      * carries the manifest theme's background again — so `kayaRecreate`
      * reads this back, which is the only witness there is (no scene can
-     * see a window background, tools/check-appearance.sh holds the rest).
+     * see a window background, tools/check-appearance.py holds the rest).
      */
     private var appearanceAppliedTo: ComponentActivity? = null
 
@@ -1609,7 +1609,7 @@ object KayaCompose {
         mountedActivity = activity
         // PER WINDOW, so it runs on every attach: the override's second
         // half is a window-background write and the new window has the
-        // manifest theme's again (tools/check-appearance.sh).
+        // manifest theme's again (tools/check-appearance.py).
         applyAppearanceOverride(activity)
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
         // (KayaHarnessAccessibility.dismiss): a dialog activity on top
@@ -3903,7 +3903,7 @@ object KayaCompose {
      * Perform an undo/redo role on the focused surface. Answers whether
      * it WAS one, so a plain action falls through to its own dispatch.
      * A SEPARATE FUNCTION from [kayaPerformClipboardRole];
-     * tools/check-roles.sh takes the UNION of the `kayaPerform*Role`
+     * tools/check-roles.py takes the UNION of the `kayaPerform*Role`
      * functions as its perform anchor.
      *
      * ROUTING IS KAYA'S HERE, all of it (docs/undo-plan.md §1). Android
@@ -4431,7 +4431,7 @@ object KayaCompose {
      * byte-exact assertion.
      *
      * harness.rs and KayaSwiftUI.swift carry their own copies of this
-     * number; tools/check-verbs.sh holds the three equal and pinned at
+     * number; tools/check-verbs.py holds the three equal and pinned at
      * the ruled 1.
      */
     private const val INK_TOLERANCE = 1
@@ -4831,7 +4831,7 @@ object KayaCompose {
             // Every kind is addressable for accessibility — that is what
             // makes a universal prop universal — so this table is the
             // core's parse_target_kind list, not the subset of kinds some
-            // verb happens to reach (tools/check-verbs.sh censuses it).
+            // verb happens to reach (tools/check-verbs.py censuses it).
             "canvas" -> KayaSceneModel.canvases
             else -> return null
         }
@@ -5632,7 +5632,7 @@ object KayaCompose {
      * held equal by tools/scenes/assets.steps.
      *
      * A `"` toggles, so a statement must have BALANCED QUOTES;
-     * tools/check-steps.sh refuses one that does not.
+     * tools/check-steps.py refuses one that does not.
      */
     private fun kayaSplitStatements(line: String): List<String> {
         val out = ArrayList<String>()
@@ -5680,7 +5680,7 @@ object KayaCompose {
     /**
      * THE CEILING ON ONE STEP, HOP INCLUDED — harness.rs's
      * STEP_CEILING, the same number in all three harnesses
-     * (tools/check-harness-ceiling.sh). The retry deadline above is read only
+     * (tools/check-harness-ceiling.py). The retry deadline above is read only
      * AFTER a step returns and every step blocks in `onUi`'s
      * `done.await()`, so a saturated UI thread answers nothing and the
      * leg prints no verdict at all until the runner kills it. Measured
@@ -5710,7 +5710,7 @@ object KayaCompose {
      * it as an intent extra beside KAYA_SELFTEST_SCRIPT.
      *
      * The statement it fired after is LOGGED WITH ITS TEXT, and
-     * tools/android/run-emulator.sh greps for that exact sentence: a
+     * tools/android/run-emulator.py greps for that exact sentence: a
      * scene edit that shifts the count then fails naming both sides
      * instead of silently recreating somewhere harmless.
      */
@@ -8179,7 +8179,7 @@ object KayaCompose {
                     // reason. So a failure is printed the moment it is FINAL:
                     // an expect past its deadline, or any action, which never
                     // retries. Spelled and placed as in harness.rs and
-                    // KayaSwiftUI.swift; check-verbs.sh holds the three level.
+                    // KayaSwiftUI.swift; check-verbs.py holds the three level.
                     for (i in failuresBefore until failures.size) {
                         Log.i("kaya", "KAYA_HARNESS: step-failed ${failures[i]}")
                     }
@@ -8278,9 +8278,9 @@ object KayaCompose {
  * GTK arms hand it over unnormalized too.
  */
 // THIS BACKEND STUBS NOTHING TODAY, so it carries no depthStub: an
-// unused private function fails tools/check-detekt.sh. The next depth
+// unused private function fails tools/check-detekt.py. The next depth
 // slice writes it back in as a CALL, never a sentence —
-// tools/check-stubs.sh reads the call, and its silence is bought by an
+// tools/check-stubs.py reads the call, and its silence is bought by an
 // OPEN entry in docs/deferred.md (tools/lib/stub-ledger.py):
 //
 //     private fun depthStub(scene: String): Nothing =
@@ -8297,7 +8297,7 @@ object KayaCompose {
  *
  * null for a zero-sized or short buffer, which is the declared-and-empty
  * case; the render keeps the node present either way
- * (tools/check-empty-child.sh).
+ * (tools/check-empty-child.py).
  */
 private fun kayaDrawingBitmap(bytes: ByteArray?, width: Int, height: Int): ImageBitmap? {
     if (bytes == null || width <= 0 || height <= 0) return null
@@ -8664,7 +8664,7 @@ internal fun kayaNativeUndo(redo: Boolean) {
 //
 // This host's spelling of KayaHostApi's undo rows, declared in
 // KayaPresent.kt and registered by `register_present_natives` in
-// crates/kaya/src/android.rs. tools/check-jni.sh pins both directions.
+// crates/kaya/src/android.rs. tools/check-jni.py pins both directions.
 //
 // THE WINDOW IS 0 EVERYWHERE HERE: Android is one Activity and one
 // surface.
@@ -9293,7 +9293,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
  *
  * PLAIN MODIFIERS, NOT SegmentedListItem: compose-bom 2024.10.01 pins
  * material3 1.3.1 and that API arrived in 1.5.0-alpha23
- * (android/kaya/build.gradle.kts, tools/check-pins.sh).
+ * (android/kaya/build.gradle.kts, tools/check-pins.py).
  */
 private val KAYA_TABLE_SEGMENT_OUTER = 16.dp
 private val KAYA_TABLE_SEGMENT_INNER = 4.dp
@@ -9330,7 +9330,7 @@ private val KAYA_TABLE_CARD_PAD_Y = 8.dp
 
 /**
  * ONE SEGMENT'S FILL: filled, borderless, elevation 0. The grouped idiom
- * draws no stroke anywhere — tools/check-table-card.sh refuses one here.
+ * draws no stroke anywhere — tools/check-table-card.py refuses one here.
  */
 @Composable
 private fun KayaTableSegment(shape: RoundedCornerShape) {
@@ -9509,7 +9509,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         // the declared arity, so the % below cannot skew), the bottom
         // spacer, then the two segment fills. NO HEADER RULE — the 2dp gap
         // between the segments IS the separator in the grouped idiom
-        // (ruled 2026-08-26; tools/check-table-card.sh pins its absence).
+        // (ruled 2026-08-26; tools/check-table-card.py pins its absence).
         val padX = KAYA_TABLE_CARD_PAD_X.roundToPx()
         val padY = KAYA_TABLE_CARD_PAD_Y.roundToPx()
         val gap = KAYA_TABLE_SEGMENT_GAP.roundToPx()
@@ -9688,7 +9688,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
  * the windowed scene stays green (measured 2026-08-25 — expect_window
  * reads the row at the viewport's top, and a tier whose rows are laid
  * out at the wrong y is internally consistent about which one that is).
- * tools/check-verbs.sh holds the call site instead, with that
+ * tools/check-verbs.py holds the call site instead, with that
  * perturbation as its self-test.
  */
 internal fun kayaWindowSpacers(offset: Double, extent: Double, band: Int, tail: Int):
@@ -10419,7 +10419,7 @@ private fun KayaRenderCore(
             // The placeholder takes no fill — a decode that produced
             // nothing has no box to render at its track, and a 0x0 slot
             // is a smaller lie than a track-wide blank. Its two lines are
-            // also verbatim: tools/check-empty-child.sh perturbs them for
+            // also verbatim: tools/check-empty-child.py perturbs them for
             // its watched negative and reads an unchanged copy as a
             // BROKEN self-test.
             val bitmap = node.imageBitmap
@@ -10499,7 +10499,7 @@ private fun KayaRenderCore(
             //
             // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
             // ABSENT — the image arm's rule verbatim, for its reason
-            // (tools/check-empty-child.sh).
+            // (tools/check-empty-child.py).
             val drawing = node.drawing
             val canvasDensity = LocalDensity.current.density.toDouble()
             Layout(
@@ -12004,7 +12004,7 @@ fun KayaRoot() {
     LaunchedEffect(presentationScale, presentationDark) {
         KayaSceneModel.presentationDark = presentationDark
         // ONE LINE PER REPORT, and the recreation leg COUNTS THEM
-        // (tools/android/run-emulator.sh): a relaunch builds a fresh
+        // (tools/android/run-emulator.py): a relaunch builds a fresh
         // composition, and if this effect did not run again the core
         // would keep rasterizing at the OLD scale and appearance after a
         // rotation. Nothing observable would move — the core latches the

@@ -55,7 +55,7 @@ transcripts — the findings below are the durable record):
 
 DEPTH-SLICE RESOLUTIONS (2026-08-20, the macOS slice landing these
 amendments; swift/KayaSwiftUI.swift KayaSplitRoot3 and
-tools/check-pane-ladder.sh are the code):
+tools/check-pane-ladder.py are the code):
 - THE ONE-PANE RUNG IS UNREACHABLE ON MACOS, BY ARITHMETIC, AND THE
   BARE INVARIANT IS WHAT FORCES THAT. D4's bare form promises a regular
   window never stacks — so kaya's minimums are chosen with
@@ -86,7 +86,7 @@ tools/check-pane-ladder.sh are the code):
   shipped scene ends "regular/0" — with only the root on the stack, the
   wide window shows the root pane and two EMPTY slots (D1). The sketch
   line was a draft slip, not a design change.
-- THE MIDDLE RUNG'S LIVE OBSERVATION lives in tools/check-pane-ladder.sh
+- THE MIDDLE RUNG'S LIVE OBSERVATION lives in tools/check-pane-ladder.py
   (the real NSSplitView walked 1400 -> 700 -> 1400 in a real NSWindow),
   because no shared scene may sample any width inside the panes band —
   the platforms legitimately disagree across all of 400..1400 for three
@@ -361,7 +361,7 @@ Arguments:
   regeneration, and invariant 7 makes that mechanical.
 - **The binding cost is generation, not code.** A window prop reaches
   all eight guest languages through the generated window-prop surface,
-  and `tools/check-sugar-surface.sh`'s window-prop clause already
+  and `tools/check-sugar-surface.py`'s window-prop clause already
   requires a sugar spelling in all eight **[REPO]**. This is the
   strongest practical argument against every container-shaped
   alternative: a new KIND would need constructors in eight languages in
@@ -503,7 +503,7 @@ Two lane consequences fall straight out:
   1280dp, only 80dp above Material's 1200 **[REPO+DOC]**, and inside
   whatever floor the other three force. A larger AVD or a
   desktop-windowing profile is likely, and
-  `run-emulator.sh`'s `assert_outside_band` needs the new band.
+  `run-emulator.py`'s `assert_outside_band` needs the new band.
 
 ### D5 — the scenes: the same two-scene shape, and the collapse observable is the POP
 

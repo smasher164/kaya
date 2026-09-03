@@ -160,11 +160,11 @@ relies on to stay compat. That is a risk to name, not to quantify here.
 
 ## 3. THE LEGS' MAIN EXECUTABLES (measured)
 
-`tools/validate-mac.sh` launches each leg as shown; the **main executable** is
+`tools/validate-mac.py` launches each leg as shown; the **main executable** is
 what `dyld` treats as the program, and it is the binary whose `LC_BUILD_VERSION`
 the OS reads. Stamps read with `vtool -arch arm64 -show-build`.
 
-| leg | launch line (validate-mac.sh) | main executable | minos | **sdk** | whose SDK controls it |
+| leg | launch line (validate-mac.py) | main executable | minos | **sdk** | whose SDK controls it |
 |---|---|---|---|---|---|
 | **rust** | `run rust-swiftui "$RUST_GUESTS"/milestone2` | `target/rust-guests/milestone2` (staged from `target/debug/examples`) | 14.0 | **14.4** | **ours (flake stdenv)** |
 | **go** | `run go-swiftui target/go-guests/kaya-go` | `target/go-guests/kaya-go` | 14.0 | **14.4** | **ours** (cgo links via the nix clang wrapper) |
@@ -285,15 +285,15 @@ CLAUDE.md invariant 3 rejects: a guard you have to remember to check.
    comment naming which legs are modern, which are compat, and that the compat
    side is vendor-host-derived and therefore *observed*, not *chosen*.
 3. **Put the constraint on a path nobody can avoid**: a new gate,
-   `tools/check-design-generation.sh`, that stamps each mac leg's main executable
+   `tools/check-design-generation.py`, that stamps each mac leg's main executable
    with `vtool -show-build` and compares against a declared table — failing if
    the modern set is empty, if the compat set is empty, or if any leg has moved
    sides without the table moving. It must clear `DEVELOPER_DIR`/`SDKROOT` (the
    trap in §1) and must refuse a verdict if it read fewer legs than declared
-   (the census rule `tools/check-gates.sh` and `tools/tpl-surfaces.py` already
-   set the precedent for). Register it in `tools/gates.sh` and
-   `tools/check-gates.sh`'s census, and in CLAUDE.md/AGENTS.md's prose list —
-   `tools/check-mirror.sh` and `check-gates.sh` will otherwise fail, which is the
+   (the census rule `tools/check-gates.py` and `tools/tpl-surfaces.py` already
+   set the precedent for). Register it in `tools/gates.py` and
+   `tools/check-gates.py`'s census, and in CLAUDE.md/AGENTS.md's prose list —
+   `tools/check-mirror.py` and `check-gates.py` will otherwise fail, which is the
    system working.
    Its negative test: perturb a copy of a guest binary's stamp with
    `vtool -set-build-version macos 26.0 26.0 -replace -output <copy>` and watch
@@ -510,8 +510,8 @@ Not a bug; budget for the confusion.
    stating the generation split, why the spelling matters, and that the compat
    side is vendor-derived.
 4. Re-enter the shell; rebuild; verify stamps moved (§5.3).
-5. Add `tools/check-design-generation.sh` + register it in `gates.sh`,
-   `check-gates.sh`'s census, and the CLAUDE.md/AGENTS.md prose list (§4).
+5. Add `tools/check-design-generation.py` + register it in `gates.py`,
+   `check-gates.py`'s census, and the CLAUDE.md/AGENTS.md prose list (§4).
    Watch its negative test fail.
 6. Fix the stale `docs/traps.md:619-621` clause (§3).
 7. Full matrix.

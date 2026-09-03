@@ -94,7 +94,7 @@ docs recommend, which silently no-ops.
 
 ## 6. GATES
 - cargo test -p kaya --features harness --locked: 351 + 3 + 13, all green
-- tools/gates.sh: declared 31, ran 31, passed 31
+- tools/gates.py: declared 31, ran 31, passed 31
 - check-verbs: OK (60 verbs, 86 constants + CLIP_* + spec hash × 2)
 - check-steps / check-stubs / check-targets / swift-typecheck /
   check-compose: OK
@@ -136,7 +136,7 @@ validate-mac's SCENES/leg lines, both granted.
   kayaDepthStub("typeface", on: "ios") so no iOS leg can pass vacuously.
 
 ## 10. THE MAC LANE (rung 3), FULL RUN
-`tools/validate-mac.sh` — 287 legs, 0 FAIL, `validate-mac: ALL PASS`,
+`tools/validate-mac.py` — 287 legs, 0 FAIL, `validate-mac: ALL PASS`,
 with `typeface-rust-swiftui: PASS (0s)` among them. Log:
 scratchpad/styling/validate-mac.log (gone) (TIMING core-build+gates 145s,
 guest-builds+bench 18s, legs 233s).
@@ -157,6 +157,6 @@ crates/kaya/include/kaya.h, bindings/* (all 8, generated),
 swift/KayaSwiftUI.swift,
 android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt,
 tools/scenes/typeface.steps (new), guests/rust/typeface.rs (new),
-tools/validate-mac.sh, tools/lib/scene-features.py, docs/deferred.md.
+tools/validate-mac.py, tools/lib/scene-features.py, docs/deferred.md.
 docs/styling-plan.md's Slice 2b section arrived from the coordinator,
 not from me. NO COMMITS — the tree is dirty and staged for review.

@@ -13,7 +13,7 @@
 // constraint imposed on all five platforms for one platform's benefit.
 // The cost of the tag is the hole android.go names: nothing compiles
 // this file until somebody cross-builds for Android. That hole is closed
-// by tools/check-targets.sh, which cross-compiles this package for
+// by tools/check-targets.py, which cross-compiles this package for
 // android/arm64 AND LINKS a single-main fixture against it on every gate
 // sweep — a real compile of the real arm, which is more than type
 // checking would have given.
@@ -31,5 +31,5 @@ func mainMain()
 // guestMain hands the attach entry the app's own main to run when no
 // guest registered one; its `!android` twin answers nil. Deleting this
 // file is a build failure ("undefined: guestMain"), which is the
-// property tools/check-targets.sh's go-android clause watches.
+// property tools/check-targets.py's go-android clause watches.
 func guestMain() func() { return mainMain }

@@ -79,7 +79,7 @@ extent of the existing guard, and it is dimension-level, not byte-level.
 3. **`tools/guest/minimal-resources.pri (gone)`** (1040 B) — an opaque Windows
    MRT package resource index, committed as a blob, not regenerable from
    anything in-tree, no provenance file, mode `-rw----r-x`. Shipped by
-   tools/deploy-win.sh and hashed into the deploy stamp.
+   tools/deploy-win.py and hashed into the deploy stamp.
 
 Only #1 has ever been called an asset. #2 and #3 have every property of one.
 
@@ -91,7 +91,7 @@ Only #1 has ever been called an asset. #2 and #3 have every property of one.
 | Windows | `scp` every run, deliberately OUTSIDE the deploy stamp, into a repo-mirror path (tools/deploy-win.py:466-486) | no |
 | Linux | nothing — repo bind-mounted at `/work` | n/a |
 | macOS | nothing — runs from the repo root | n/a |
-| **iOS** | **no file-push route for assets exists.** The only host→guest binary channel is a base64-over-container-file bridge in tools/ios/run-sim.sh, which is the clipboard/dialog protocol, not an asset installer | — |
+| **iOS** | **no file-push route for assets exists.** The only host→guest binary channel is a base64-over-container-file bridge in tools/ios/run-sim.py, which is the clipboard/dialog protocol, not an asset installer | — |
 
 [MEASURED] `grep -c typeface`: validate-mac 5, linux/run-suites 19,
 deploy-win 15, android/run-emulator (gone) 21, **ios/run-sim 0**. The iOS scene
@@ -111,7 +111,7 @@ Blob stays for genuinely app-specific art."
 Measured gap, out of scope for this brief but worth a ledger line: no
 gate pins the four tables to one another. Only two Rust `const _: () =
 assert!` length/order pins exist (gtk.rs, winui/mod.rs). **[MEASURED]
-`tools/check-symbols.sh` does not exist** — the SwiftUI table's own
+`tools/check-symbols.py` does not exist** — the SwiftUI table's own
 comment names it as the intended gate.
 
 ## 7. The wire's existing blob channel [REPO]

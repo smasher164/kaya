@@ -320,7 +320,7 @@ appears only inside `mint_caption_titlebar`.
 ## 10. THE SUITES, AND THE GATES
 
 **Eleven legs, on the final tree**, each run through the lane's own runner
-(`tools/deploy-win.sh akhil@192.168.64.2 <leg>`; logs in
+(`tools/deploy-win.py akhil@192.168.64.2 <leg>`; logs in
 `scratchpad/chrome/gap/suites/ (gone)`):
 
 ```
@@ -354,12 +354,12 @@ all 11 legs PASS with byte-identical verdicts against lane2.log
 **Gates, on the final tree:**
 
 ```
-tools/check-targets.sh      ALL OK  (native/ios/android/windows/go-android, BOTH feature configurations)
-tools/check-verbs.sh        OK
-tools/check-shell.sh        OK
-tools/check-steps.sh        OK
-tools/check-stubs.sh        OK
-tools/check-diagnostics.sh  OK
+tools/check-targets.py      ALL OK  (native/ios/android/windows/go-android, BOTH feature configurations)
+tools/check-verbs.py        OK
+tools/check-shell.py        OK
+tools/check-steps.py        OK
+tools/check-stubs.py        OK
+tools/check-diagnostics.py  OK
 ```
 
 **One honest note about sequencing.** I edited `mod.rs` (the
@@ -379,7 +379,7 @@ being behaviour-preserving.
   `schtasks /delete` answering `ERROR: The system cannot find the file
   specified.`, then five `schtasks /query` answering the same, then a full
   `schtasks /query` grepped for `kaya_gap` returning nothing. (The ~190
-  `kaya_<leg>` tasks that remain are `deploy-win.sh`'s own per-leg launchers
+  `kaya_<leg>` tasks that remain are `deploy-win.py`'s own per-leg launchers
   and predate this session; deleting them would make the next lane
   re-provision.)
 - **VM processes**: `record-win.exe`, `toolbar.exe`, `menus.exe`,

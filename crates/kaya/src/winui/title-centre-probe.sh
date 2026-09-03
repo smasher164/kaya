@@ -10,15 +10,15 @@
 # which the probe measures.
 #
 #   crates/kaya/src/winui/title-centre-probe.sh akhil@192.168.64.2
-#   tools/deploy-win.sh akhil@192.168.64.2 caption-centre
+#   tools/deploy-win.py akhil@192.168.64.2 caption-centre
 #
-# deploy-win.sh's caption-centre phase calls this with KAYA_TCP_NO_DEPLOY=1,
+# deploy-win.py's caption-centre phase calls this with KAYA_TCP_NO_DEPLOY=1,
 # having already built and shipped what this would rebuild; run by hand it
 # deploys first, so either way it measures THIS tree.
 #
 # Exit status: 0 only if the probe wrote a measurement. Everything the
 # lane ASSERTS about that measurement it asserts itself, off the AIMV/
-# AIMPLAN lines this prints — see deploy-win.sh's caption_centre phase.
+# AIMPLAN lines this prints — see deploy-win.py's caption_centre phase.
 set -u
 
 HOST="${1:?usage: title-centre-probe.sh user@host}"
@@ -38,7 +38,7 @@ mkdir -p "$WORK/scenes"
 # The guest exe and libkaya, built from THIS tree. Skipped when the lane
 # is the caller: it has just built and shipped them.
 if [ -z "${KAYA_TCP_NO_DEPLOY:-}" ]; then
-    ( cd "$ROOT" && tools/deploy-win.sh "$HOST" toolbar_rust ) > "$WORK/deploy.log" 2>&1
+    ( cd "$ROOT" && tools/deploy-win.py "$HOST" toolbar_rust ) > "$WORK/deploy.log" 2>&1
     rc=$?
     if [ "$rc" -ne 0 ]; then
         echo "title-centre-probe: the toolbar_rust leg failed (rc=$rc); nothing was measured."

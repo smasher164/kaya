@@ -22,7 +22,7 @@ app-identity-research.md, 2026-08-18), [REPO] (read from this tree),
 before relying on it).
 
 Every path and line this document cites is checked by the tree's own
-gate, `tools/check-doc-refs.sh`, which reads every tracked document
+gate, `tools/check-doc-refs.py`, which reads every tracked document
 including this one.
 
 Two of the four research arms overturned assumptions the draft started
@@ -230,7 +230,7 @@ regenerates one and not the other, and the failure is the quiet kind:
 the launcher shows last month's icon, the running window shows this
 month's, and every test still passes. The gate belongs where invariant 3
 puts guards, which is on a path nobody can avoid: the packaging step
-itself refuses, and the gate in `tools/gates.sh` is the backstop for
+itself refuses, and the gate in `tools/gates.py` is the backstop for
 platforms whose packaging step does not exist yet.
 
 ### Which reader exists today, and which is later
@@ -247,8 +247,8 @@ readers are real and their legs are green on their lanes; the four
 
 | where the icon shows | the reader that puts it there | where that reader lives | today or later |
 |---|---|---|---|
-| **Android launcher** | the APK build | android/build.gradle.kts reads the declaration at configuration time and copies the mark into each module's generated `mipmap`; the three app manifests name `@mipmap/kaya_mark` and `${kayaAppLabel}`; tools/android/run-emulator.sh unzips the packaged entry back out and refuses on a hash mismatch | **BUILT 2026-08-18** — declared, generated and in-APK bytes share one sha256, `aapt2 dump badging` reads `application-label:'Aurora Notes'` |
-| **iOS Home Screen** | the bundle assembly | tools/ios/run-sim.sh's `make_bundle` takes a fourth argument that copies the declared mark in verbatim and fills tools/ios/Info.plist.in's `@IDENTITY@` slot with `CFBundleDisplayName` plus the `CFBundleIcons` keys | **BUILT 2026-08-18** — opt-in per bundle; every other bundle's plist payload is byte-unchanged |
+| **Android launcher** | the APK build | android/build.gradle.kts reads the declaration at configuration time and copies the mark into each module's generated `mipmap`; the three app manifests name `@mipmap/kaya_mark` and `${kayaAppLabel}`; tools/android/run-emulator.py unzips the packaged entry back out and refuses on a hash mismatch | **BUILT 2026-08-18** — declared, generated and in-APK bytes share one sha256, `aapt2 dump badging` reads `application-label:'Aurora Notes'` |
+| **iOS Home Screen** | the bundle assembly | tools/ios/run-sim.py's `make_bundle` takes a fourth argument that copies the declared mark in verbatim and fills tools/ios/Info.plist.in's `@IDENTITY@` slot with `CFBundleDisplayName` plus the `CFBundleIcons` keys | **BUILT 2026-08-18** — opt-in per bundle; every other bundle's plist payload is byte-unchanged |
 | **macOS Dock and Cmd-Tab** | the running app | the SwiftUI backend sets the Dock icon from the wire bytes, under the `regular` policy of ruling 2 | **TODAY** (runtime) — the Dock tile only; Cmd-Tab needs the `.app` row below |
 | **macOS before launch** (Finder, Spotlight, Launchpad) | a `.app` bundle | there is no bundle in the tree; mac guests run as bare executables | later — and it is also the only route to `CFBundleName`, so the Cmd-Tab label waits on it |
 | **Windows taskbar, alt-tab and caption** | the running app | the WinUI backend sets the window icon and, on windows with a custom caption, the caption's icon | **TODAY** (runtime) |
@@ -657,7 +657,7 @@ conversion in the lowering) and I7 (packaging is a separate slice)
 rather than inheriting the font's answer.
 
 **The eight-language fan-out is one line.** The `check_styling_point`
-function in tools/check-sugar-surface.sh is already parameterised over
+function in tools/check-sugar-surface.py is already parameterised over
 eight regexes, already has `brand_accent` and `brand_typeface` as rows,
 and already carries its own watched negative (a fake point that must
 fail in all eight). A new identity verb is one added call, not a new

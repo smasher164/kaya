@@ -1,5 +1,5 @@
 // THE INK VERB'S PER-MODE COMPARE, measured — compiled INTO the
-// interpreter's own module by tools/check-canvas-blit.sh and run as an
+// interpreter's own module by tools/check-canvas-blit.py and run as an
 // executable.
 //
 // WHY A PROBE AND NOT A LEG. `expect_ink`'s answer names the appearance

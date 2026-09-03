@@ -353,7 +353,7 @@ pub extern "C" fn kaya_spec_hash() -> u64 {
 
 /// The identity of the SOURCES this core was compiled from, readable
 /// without loading or running anything:
-/// `tools/build-id.sh --verify libkaya.so`. The spec hash above answers
+/// `tools/build-id.py --verify libkaya.so`. The spec hash above answers
 /// "do the guest and the library agree on the protocol"; this answers
 /// "is the file I am about to test built from the code I just edited".
 ///
@@ -3191,7 +3191,7 @@ pub unsafe extern "C" fn kaya_rows_measured(
 ///
 /// TWO ENTRIES, ONE PER KEY TYPE, because `protocol::Key` is exactly
 /// I64|Str and a `kind` integer beside the payload is the file-modes trap
-/// (tools/check-file-modes.sh): five hand-written sites decoding a number
+/// (tools/check-file-modes.py): five hand-written sites decoding a number
 /// nobody re-checks. The type is in the name instead.
 ///
 /// # Safety
@@ -3409,7 +3409,7 @@ fn drive_frame(time: f64) {
 /// The harness clock's rate. ONE NUMBER, in the core, and that is the
 /// point: three harnesses keeping three counters is the
 /// hand-copied-constant class one surface over
-/// (tools/check-file-modes.sh's trap), and a leg's frame count is part
+/// (tools/check-file-modes.py's trap), and a leg's frame count is part
 /// of the scene.
 pub const KAYA_HARNESS_FRAME_HZ: f64 = 60.0;
 static HARNESS_FRAMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

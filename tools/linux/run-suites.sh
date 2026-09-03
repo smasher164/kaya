@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the container (see tools/validate-linux.sh): builds kaya
+# Runs inside the container (see tools/validate-linux.py): builds kaya
 # against the container's GTK and runs the validations under both
 # display protocols — X11 (Xvfb) and Wayland (headless sway). The repo
 # is mounted at /work; Linux artifacts go to target-linux so they never
@@ -12,7 +12,7 @@ set -uo pipefail
 if [ ! -d /work ]; then
     echo "$0: this runs INSIDE the linux container, where the repo is" \
         "mounted at /work. From the host use: nix develop -c" \
-        "tools/validate-linux.sh (it builds the image and runs this)." >&2
+        "tools/validate-linux.py (it builds the image and runs this)." >&2
     exit 1
 fi
 cd /work || exit 1
@@ -118,7 +118,7 @@ CARGO_PROFILE_DEV_DEBUG=0 cargo build -j6 --locked --features harness --lib \
     "${BUILD_EXAMPLES[@]}" || exit 1
 # The library every non-Rust guest here dlopens must be the one this
 # build produced, not a survivor of a build that failed.
-tools/build-id.sh --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
+tools/build-id.py --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
 timing core-build
 
 # The Rust backends resolve a scene NAME to tools/scenes/<name>.steps.
@@ -605,7 +605,7 @@ build_ocaml() {
     fi
     # Freshness assert, BY CONTENT AND NOT BY MTIME: dune keys targets on
     # source HASHES, so a source rewritten with identical bytes — which
-    # every gen-bindings.sh run does — produces no new artifact and no new
+    # every gen-bindings.py run does — produces no new artifact and no new
     # mtime. An mtime rule reported "stale" forever and failed the lane on
     # a run where every leg passed (measured 2026-07-31). A stamp of the
     # sources' CONTENT tracks what dune tracks.
@@ -681,7 +681,7 @@ fi
 #
 # THE PATH IS READ FROM THE DECLARATION, never retyped — the identity is
 # written down once in guests/assets/identity.toml
-# (docs/app-identity-plan.md ruling 4), and tools/check-app-identity.sh
+# (docs/app-identity-plan.md ruling 4), and tools/check-app-identity.py
 # fails a tools/ script that names the mark without reading it.
 identity_icon="$(python3 -c 'import tomllib; print(tomllib.load(open("guests/assets/identity.toml","rb"))["icon"])' 2>&1)"
 identity_rc=$?

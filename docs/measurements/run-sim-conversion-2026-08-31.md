@@ -19,7 +19,7 @@ What stage 2 measured beyond stage 1's map:
 
 - A NINTH PARSER the enumeration missed: tools/swift-typecheck.sh —
   the gate tier's one deliberate shell survivor — reads IOS_MIN and
-  IOS_SWIFT_SCENES out of run-sim.sh to know which guests reach a
+  IOS_SWIFT_SCENES out of run-sim.py to know which guests reach a
   phone. Its own floor REFUSED A VERDICT loudly on the first sweep
   ("cannot read IOS_MIN/IOS_SWIFT_SCENES … REFUSING A VERDICT"), the
   correct failure mode, and it imports the lane module for the roster
@@ -44,7 +44,7 @@ What stage 2 measured beyond stage 1's map:
   reds demanded. scene-features and check-stubs now IMPORT lanes/
   rows through a wired_scenes() floor, closing the two readers the
   enumeration flagged as silently-vacuous-on-a-shim.
-- 18 doc line-anchors into run-sim.sh re-anchored (the module for
+- 18 doc line-anchors into run-sim.py re-anchored (the module for
   scene-list citations, the python body for behaviour).
 - The deleted-scene red watched live: the nav family removed from
   lanes/ios.py reddened check-steps with `scene "nav" has no leg in

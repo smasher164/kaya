@@ -33,7 +33,7 @@ import (
 // because runtime.GOOS is a compile-time constant — every arm is compiled
 // and vetted on the mac lane.
 //
-// kaya.Env AND NOT os.Getenv — tools/check-go-env.sh's header carries the
+// kaya.Env AND NOT os.Getenv — tools/check-go-env.py's header carries the
 // measurement and the rule, and this is a file it caught.
 func sceneRoot() string {
 	switch runtime.GOOS {

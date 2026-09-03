@@ -172,7 +172,7 @@ the pure-Python kaya binding and the guest scenes in the app tree
 Android). iOS extension modules go through the artifact's own
 "Process Python libraries" phase — the `.fwork` conversion and
 per-module codesign are its job, not ours. THE SIMULATOR LANE IS
-EXEMPT from that shape: tools/ios/run-sim.sh builds hand-rolled
+EXEMPT from that shape: tools/ios/run-sim.py builds hand-rolled
 bundles with swiftc (no Xcode project), and the frameworks-only rule is an App
 Store submission rule, not a simulator runtime rule — so the depth
 slice stages the stdlib and lib-dynload as plain directories,
@@ -215,7 +215,7 @@ precedent for simulator-only proof).
    C host tools/ios/pyhost.c owns the process entry and boots CPython
    on a signal-free worker, ONE bundle carries every python scene
    behind tools/pyhost-main.py's KAYA_SELFTEST dispatch (the
-   Android APK pattern), and run-sim.sh's python suite wires
+   Android APK pattern), and run-sim.py's python suite wires
    `portfolio-python` AND `varied-python` — varied turned out
    phone-clean from birth, so the iOS half of the fan-out collapsed
    into this step. Suite green through the real lane: portfolio 11s,

@@ -97,7 +97,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // fixed ByteBuffer it replaces capped EVERY java record at 4096
     // bytes; the measured ceilings and why a wrapper rather than an
     // ensure() per site are in docs/deferred.md's java-record-ceiling
-    // entry. tools/java-typecheck.sh runs the negative.
+    // entry. tools/java-typecheck.py runs the negative.
     c.line("    private static final class Enc {");
     c.line("        private ByteBuffer b;");
     c.line("");

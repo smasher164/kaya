@@ -243,7 +243,7 @@ pub(crate) const TEXT_BASELINE_BOTTOM: i64 = 3;
 /// that has to say WHICH op or role it could not accept. Not in the spec
 /// hash; held level with the spec by
 /// `spec::tests::canvas_names_match_the_spec_enums`, and against the
-/// three hand-copied surfaces by tools/check-symbol-parity.sh —
+/// three hand-copied surfaces by tools/check-symbol-parity.py —
 /// check-file-modes' hand-copied-numbers trap, one surface over.
 pub(crate) const DRAW_OPS: &[(i64, &str)] = &[
     (DRAW_MOVE_TO, "move_to"),

@@ -53,7 +53,7 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 GUEST_STEM = {"listdetail": "split"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
-# lane re-run (tools/check-appearance.sh holds the leg here): canvas's
+# lane re-run (tools/check-appearance.py holds the leg here): canvas's
 # script and binary under KAYA_APPEARANCE=dark.
 DARK_LEG = ("canvasdark-rust-swiftui", "canvas", "rust")
 

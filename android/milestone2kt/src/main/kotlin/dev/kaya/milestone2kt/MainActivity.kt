@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
         KayaCompose.mount(this)
         // A SCENE IS REGISTERED HERE AS SOON AS ITS GUEST EXISTS, even
         // when no leg runs it yet: whether a leg runs is the Compose
-        // arm's question (tools/check-stubs.sh reads the backend, not
+        // arm's question (tools/check-stubs.py reads the backend, not
         // this selector), and an unregistered name silently runs
         // milestone2 against the other scene's script.
         val scene = when (System.getenv("KAYA_SELFTEST")) {

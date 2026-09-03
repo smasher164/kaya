@@ -106,7 +106,7 @@ _lib.kaya_asset_why_not.restype = ctypes.c_size_t
 
 # THE HOST CAPABILITY WORD (kaya.capabilities() is the sugar over it).
 # CAP_AUX_WINDOWS IS THE CORE'S NUMBER WRITTEN AGAIN — ctypes has no
-# header to read it out of. tools/check-sugar-surface.sh holds this line
+# header to read it out of. tools/check-sugar-surface.py holds this line
 # to crates/kaya/src/scene.rs.
 _lib.kaya_capabilities.restype = ctypes.c_uint64
 CAP_AUX_WINDOWS = 1
@@ -254,7 +254,7 @@ def asset_release(handle):
 
 
 # NAMED FOR THE CARRYING, not for the answering, and deliberately not
-# `asset_why_not`: tools/check-diagnostics.sh reads any *why_not by that
+# `asset_why_not`: tools/check-diagnostics.py reads any *why_not by that
 # name and holds it to the measured-branch rule, which the function that
 # EARNED the name satisfies (crates/kaya/src/assets.rs). This copies
 # that sentence's bytes into a str and observes nothing.

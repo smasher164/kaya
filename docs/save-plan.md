@@ -42,12 +42,12 @@ fixed in this milestone, as D3 says:**
    (`swift/KayaSwiftUI.swift`) while Rust pins them by test. Nothing
    checked the two agreed, and renumbering a mode would silently open
    files the wrong way on Apple platforms. FIXED by a gate:
-   `tools/check-file-modes.sh` holds every hand-written decoder against
+   `tools/check-file-modes.py` holds every hand-written decoder against
    the spec's numbers, with a census so a new decoder cannot hide.
 3. **The only test of `kaya_open_picked` was unix-gated** and passed
    READ, so the API's write half was untested everywhere and unrun on
    Windows. FIXED: the gate is gone and the windows lane runs
-   `capi::picked_tests` on the guest (tools/deploy-win.sh).
+   `capi::picked_tests` on the guest (tools/deploy-win.py).
 
 **The save dialog per platform** (all measured against the open
 picker's existing machinery):

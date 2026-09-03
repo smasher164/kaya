@@ -86,7 +86,7 @@ harness::poll only consults its deadline AFTER the closure returns. So the
 scene cannot fail by retry-window expiry while the UI thread is busy: it
 waits, and something outside has to end it. On the real lane that something
 is wait-exit.ps1's 290s leg deadline (run_one_suite in
-tools/deploy-win.sh); here it is my 120s cap.
+tools/deploy-win.py); here it is my 120s cap.
 
 There is no harness failure sentence to quote, because the harness never
 got to write one. The verbatim tail of every capped transcript is the step
@@ -171,7 +171,7 @@ ON THE VM
   kaya-guests/WerFault
     -> 0 matching processes                     (no guest, no corpse, no WER)
   The ~210 other kaya_* scheduled tasks listed on the guest are the lane's
-  own (deploy-win.sh creates one per leg); none of them is mine.
+  own (deploy-win.py creates one per leg); none of them is mine.
 
 THE SHARED STATE IS EXACTLY AS FOUND
   C:\kaya\deploy.stamp        3d25b238e979a795      (same as before my runs)

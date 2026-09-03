@@ -3,7 +3,7 @@
 Charter: docs/save-plan.md D1-D5, docs/probes/save-depth.md §8 FROZEN
 CONTRACT, docs/probes/save-probe-windows.md.
 
-Files this arm owns: `crates/kaya/src/winui/mod.rs`, `tools/deploy-win.sh`.
+Files this arm owns: `crates/kaya/src/winui/mod.rs`, `tools/deploy-win.py`.
 
 Progressive log; verdict at the bottom.
 
@@ -38,7 +38,7 @@ Progressive log; verdict at the bottom.
   `Occurrence::FileDialogResult`.
 - Starting state of my files: `winui/mod.rs` carries the depth arm's
   `ApplyOp::PresentSaveDialog(spec) => crate::depth_stub("save")` at
-  6063; `deploy-win.sh` untouched.
+  6063; `deploy-win.py` untouched.
 
 ## 1. THE BACKEND — written, compiles both feature configurations
 
@@ -80,7 +80,7 @@ because the shared scene cannot reach it.
 
 - `tools/guest/run_save_rust.cmd` — new, the checked-in launcher
   check-steps demands for every windows leg.
-- `tools/deploy-win.sh`: `DEPTH_SCENES` default `save` (was empty),
+- `tools/deploy-win.py`: `DEPTH_SCENES` default `save` (was empty),
   `save_rust` accepted as a single-suite argument, and
   `run_suite save_rust` between `drain_suites` in the depth block — the
   filedialog rule, not a new one: `live_dialog` walks the DESKTOP for a
@@ -153,7 +153,7 @@ Logs: `save-win-flipA.log`, `save-win-flipC.log`. Restores verified
 against `winui-pristine.sha256` (`shasum -c` OK on all three files).
 
 NOTE ON RESTORING IN A FAN-OUT: a sibling arm is editing
-`tools/deploy-win.sh` at the same time (the `unit_tests_on_windows` phase,
+`tools/deploy-win.py` at the same time (the `unit_tests_on_windows` phase,
 D3's third defect, arrived mid-session). Every flip and restore here was a
 TARGETED python substitution with the count printed and a zero refused —
 never a checkout — so no sibling's work could be clobbered. The sha256
@@ -211,14 +211,14 @@ running a lane during this fan-out should expect it and simply re-run.
    end the signatures with `;`", and `tools/lib/stage-coverage.py` then
    holds them like every other observation). WinUI is done; mac was done
    by the depth arm.
-2. **`tools/check-steps.sh`'s serial-leg clause should grow `save`.** It
+2. **`tools/check-steps.py`'s serial-leg clause should grow `save`.** It
    pins `run_suite (menus|filedialog)_` legs to run alone between
    `drain_suites`; the save dialog is the same OS-global `#32770` found by
-   the same desktop walk, so it needs the same rule. `deploy-win.sh`
+   the same desktop walk, so it needs the same rule. `deploy-win.py`
    already runs it that way — the gate just cannot see that it must. One
    token: `(menus|filedialog|save)` at check-steps.py:2424, plus a
    self-test line beside the two already there. NOT DONE HERE because
-   check-steps.sh is a shared gate file and this is a concurrent fan-out.
+   check-steps.py is a shared gate file and this is a concurrent fan-out.
 3. **The first-post-is-discarded finding is not Windows trivia.** Any arm
    whose harness types into a freshly created dialog with POSTED input
    should post-and-verify rather than post-and-hope; the shared scene

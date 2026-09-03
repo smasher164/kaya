@@ -1,7 +1,7 @@
 # Block until C:\kaya\<File> carries EXIT= or <Seconds> pass, then print
 # the file. One resident process per leg in place of a host-driven ssh
 # poll — the why and the measurements live at run_one_suite in
-# tools/deploy-win.sh.
+# tools/deploy-win.py.
 #
 # THE VERDICT OUTRANKS THE CORPSE: EXIT= is written by cmd.exe only
 # after the guest process fully terminates, and a terminating process

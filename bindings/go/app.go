@@ -493,7 +493,7 @@ func (tx *Tx) alive() {
 // spell it the same (python's _require_app_thread, ocaml's
 // require_app_thread, haskell's requireAppThread); the handle bindings
 // check it here AND at Build, since a Build with no records reaches no
-// chokepoint. tools/check-tx-liveness.sh holds both halves.
+// chokepoint. tools/check-tx-liveness.py holds both halves.
 func requireAppThread() {
 	owner := appThread.Load()
 	if owner == 0 {
@@ -1312,7 +1312,7 @@ func (tx *Tx) DrawAt(n Node, keys []any, vb Viewbox, body func(d *Draw)) {
 // something about the drawing rather than providing a capability: the
 // content is not a function of the assigned track. That buys an
 // intrinsic size from the viewbox, a strictly 1:1 blit
-// (tools/check-canvas-blit.sh) and NO promise of raster-once — a
+// (tools/check-canvas-blit.py) and NO promise of raster-once — a
 // display-scale or appearance change re-runs the same display list.
 //
 // The other two policies are HANDLERS (OnDraw, OnTick), and a canvas
@@ -1328,7 +1328,7 @@ func (w Widget) Fixed() Widget {
 // out for the width instead of scaling its old pixels.
 //
 // THE BINDING OPENS THE TRANSACTION, not the guest
-// (tools/check-ambient-tx.sh): Serve answers the request and keeps
+// (tools/check-ambient-tx.py): Serve answers the request and keeps
 // looping, so it never surfaces as an occurrence.
 //
 // LATEST-WINS: a size the guest never caught up with is dropped rather
@@ -4170,7 +4170,7 @@ func (a *App) Serve() {
 		// (docs/canvas-plan.md §3.2.1): the guest registered a
 		// drawing-as-a-function-of-size, so this draws it, submits the
 		// one record and keeps looping. The transaction is the binding's
-		// (tools/check-ambient-tx.sh), and an unclaimed ask drops like
+		// (tools/check-ambient-tx.py), and an unclaimed ask drops like
 		// any other.
 		case kind == occDrawRequested || kind == occTick:
 			a.answerCanvasAsk(kind, id, keys, tail)

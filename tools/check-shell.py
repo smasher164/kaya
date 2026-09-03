@@ -15,10 +15,10 @@ dev_shell_or_die()
 # 2026-08-27 ruling). A converted gate is a two-line `exec python3` shim
 # over a tools/check-*.py, so it is still walked here and passes every
 # clause vacuously — there is no shell in it to get wrong. The rules
-# that DO apply to its body are check-python.sh's, and the shim's exact
+# that DO apply to its body are check-python.py's, and the shim's exact
 # bytes are pinned there too, so it can never grow logic this file would
 # then have to hold. What stays here is what shell is still for: the
-# runners, keyed.sh, the generators and tools/lib/*.sh. The four
+# runners, keyed.py, the generators and tools/lib/*.sh. The four
 # per-command rules (--locked, javac -encoding, sed/awk, ffmpeg
 # -nostdin) follow the commands into the converted bodies as
 # check-python's rule 11 — for four days after the conversion they
@@ -57,7 +57,7 @@ status = 0
 # census rule: shims hold the .sh count roughly constant through the
 # python conversion, so a walk that finds almost none read nothing.
 scripts = sorted(p for p in (ROOT / "tools").rglob("*.sh") if p.is_file())
-if len(scripts) < 40:
+if len(scripts) < 30:
     print(f"check-shell: walked only {len(scripts)} .sh files under "
           f"tools/ — a census that reads nothing agrees with everything",
           file=sys.stderr)

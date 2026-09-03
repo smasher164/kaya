@@ -53,7 +53,7 @@
           # PATH-ordering accident, and a probe that compiled with 21.1.8
           # would HANG for its whole ceiling instead of failing. So
           # `clang` keeps meaning this shell's 21.1.8, nothing kaya ships
-          # moves, and tools/check-c-bounds.sh asks for this name.
+          # moves, and tools/check-c-bounds.py asks for this name.
           asanClang = pkgs.runCommand "kaya-asan-clang" { } ''
             mkdir -p "$out/bin"
             ln -s ${pkgs.llvmPackages_22.clang}/bin/clang "$out/bin/kaya-asan-clang"
@@ -95,7 +95,7 @@
           cpythonAndroidAarch64 = cpythonAndroid "aarch64" "sha256-fW+yimk2iEFlb5GaCBQbDjcgg3rGeYc4gDfunSpcVJI=";
           cpythonAndroidX86_64 = cpythonAndroid "x86_64" "sha256-8Ej1xgtTjvxk5MJjmaCiEgLOQwlJ1bLBA2nWJFSKXcM=";
           # Node's type declarations for the JS typecheck gate
-          # (tools/js-typecheck.sh): nixpkgs carries no @types/node, so
+          # (tools/js-typecheck.py): nixpkgs carries no @types/node, so
           # the two npm tarballs are pinned HERE like the CPython
           # archives above — the store's content addressing is the hash
           # check, the dev-shell fingerprint moves when the pin moves,
@@ -140,7 +140,7 @@
           # whose main executable is a vendor-stamped host kaya does
           # not link — python (14.4), C#/.NET (14.4), java/zulu (11.3)
           # — OBSERVED coverage, not chosen, so the gate
-          # (tools/check-design-generation.sh) verifies both sides
+          # (tools/check-design-generation.py) verifies both sides
           # non-empty on every sweep rather than trusting this comment.
           buildInputs = [ pkgs.apple-sdk_26 ];
           packages = with pkgs; [
@@ -165,7 +165,7 @@
             cargo-xwin
             cargo-ndk
             # Validation-suite languages (function floor + direct ring tier).
-            # hatchling + build serve tools/check-wheel.sh: the kaya-gui
+            # hatchling + build serve tools/check-wheel.py: the kaya-gui
             # wheel builds offline (--no-isolation) from the flake's
             # pinned python, never from whatever pip resolves that day.
             (python3.withPackages (ps: [ ps.hatchling ps.build ]))
@@ -190,7 +190,7 @@
             # sources inside what it strips — and libkaya itself is the
             # N-API addon (crates/kaya/src/node.rs), so no node-gyp, no
             # node headers, no second artifact. tsc is the typecheck
-            # gate (tools/js-typecheck.sh); npm rides in with node and
+            # gate (tools/js-typecheck.py); npm rides in with node and
             # links the workspaces offline.
             nodejs_24
             typescript
@@ -209,9 +209,9 @@
             # check-pins has nothing to hold.
             ruff
             # AddressSanitizer's compiler (see asanClang above):
-            # tools/check-c-bounds.sh's companion mode, by that name.
+            # tools/check-c-bounds.py's companion mode, by that name.
             asanClang
-            # The Kotlin layer's dead-code gate (tools/check-detekt.sh).
+            # The Kotlin layer's dead-code gate (tools/check-detekt.py).
             # The compiler cannot serve here: K2 moved the UNUSED_*
             # diagnostics into IDE inspections (KT-69698), so a dead
             # local compiles clean.

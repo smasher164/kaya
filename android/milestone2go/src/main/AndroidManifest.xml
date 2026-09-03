@@ -27,7 +27,7 @@
              app never carries an accessibility service it did not ask
              for. The reasoning is spelled once, in milestone2kt's
              manifest. Declared here even though the go suite runs one
-             scene that needs no picker: tools/android/run-emulator.sh
+             scene that needs no picker: tools/android/run-emulator.py
              enables and WAITS FOR this service on every leg it runs,
              and an app that does not declare it fails the bind wait
              three arms and a reboot later, saying the picker never

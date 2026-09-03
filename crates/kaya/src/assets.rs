@@ -29,7 +29,7 @@ pub(crate) const RESERVED_PREFIX: &str = "kaya/";
 /// failed, in an app that ships no assets at all.
 pub(crate) const DEFAULT_FONT: &str = "kaya/default-font";
 
-/// The vendored Sora, compiled in. It rides tools/build-id.sh's
+/// The vendored Sora, compiled in. It rides tools/build-id.py's
 /// artifact id, so a font swap that did not rebuild is a build-id
 /// refusal rather than a drawing that changed on one lane. The OFL
 /// permits embedding, and embedding is not modification.

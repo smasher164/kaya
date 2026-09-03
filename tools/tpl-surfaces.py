@@ -1995,7 +1995,7 @@ def twins_csharp():
 
 
 # THE FAÇADES THAT ARE NOT HERE, on the record rather than merely absent
-# (gates.sh's EXCLUDED rule, one file over):
+# (gates.py's EXCLUDED rule, one file over):
 #
 #   go — `type Row struct{ *Tpl }` EMBEDS the zone, so the pair cannot
 #     drift. Its two sealed surfaces are checked by

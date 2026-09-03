@@ -7,7 +7,7 @@ Files this arm owns:
 `bindings/csharp/KayaApp.cs`, `guests/csharp/RangesScene.cs`, plus the
 two one-line registrations a C# guest cannot exist without —
 `guests/csharp/Program.cs` (the selector switch check-steps reads) and
-the `run ranges-csharp-swiftui` leg in `tools/validate-mac.sh` (added
+the `run ranges-csharp-swiftui` leg in `tools/validate-mac.py` (added
 after seeing the python and C arms had already added theirs in the same
 block).
 
@@ -116,7 +116,7 @@ Two things it does that the Rust guest does not need to:
   — the selector is what check-steps reads (`SELECTORS`, :631), and a
   guest class the switch never dispatches is exactly as broken as a
   missing file.
-- `tools/validate-mac.sh`: `run ranges-csharp-swiftui …`, in the ranges
+- `tools/validate-mac.py`: `run ranges-csharp-swiftui …`, in the ranges
   block beside the rust, python and C legs. Without it the leg is
   something someone has to REMEMBER to run — CLAUDE.md invariant 3's
   named failure — and check-steps only demands legs for scenes in
@@ -223,16 +223,16 @@ Fixed and both cases pinned above.
 
 | gate | result |
 | --- | --- |
-| `tools/check-sugar-surface.sh` | **OK** — and it is now GREEN OUTRIGHT (0 "has no sugar" lines), re-run against the final bytes: the csharp clause of `check_range_verb` passes, and the other six binding arms landed theirs while this arm ran. The gate the depth arm left red by design is closed. |
-| `tools/check-tx-liveness.sh` | OK (the three new verbs go through `Records`, raw-field count still 2) |
-| `tools/check-ambient-tx.sh` | OK (every handler uses the transaction it was handed) |
-| `tools/check-stubs.sh` | OK (mac's backend does not stub ranges, so a mac leg is allowed) |
-| `tools/check-shell.sh` | OK (after the validate-mac.sh leg addition) |
-| `tools/check-case.sh` | OK |
-| `tools/gen-bindings.sh --check` | OK (KayaApp.cs is hand-written; nothing regenerates over it) |
-| `tools/gen-guests.sh --check` | OK |
+| `tools/check-sugar-surface.py` | **OK** — and it is now GREEN OUTRIGHT (0 "has no sugar" lines), re-run against the final bytes: the csharp clause of `check_range_verb` passes, and the other six binding arms landed theirs while this arm ran. The gate the depth arm left red by design is closed. |
+| `tools/check-tx-liveness.py` | OK (the three new verbs go through `Records`, raw-field count still 2) |
+| `tools/check-ambient-tx.py` | OK (every handler uses the transaction it was handed) |
+| `tools/check-stubs.py` | OK (mac's backend does not stub ranges, so a mac leg is allowed) |
+| `tools/check-shell.py` | OK (after the validate-mac.py leg addition) |
+| `tools/check-case.py` | OK |
+| `tools/gen-bindings.py --check` | OK (KayaApp.cs is hand-written; nothing regenerates over it) |
+| `tools/gen-guests.py --check` | OK |
 | `dotnet build guests/csharp/kaya-guests.csproj` | rc=0, 0 errors, 39 warnings — all pre-existing CS8632 nullable-annotation warnings, none from this arm's files |
-| `tools/check-steps.sh` | **FAILS, and NOT from this arm**: `scene "ranges" has no live legs in tools/linux/run-suites.sh` / `tools/android/run-emulator.sh`. The gtk and Compose arms removed `depth_stub("ranges")` from gtk.rs and KayaCompose.kt at 21:38 (mtimes), which is what makes the gate demand those runners' legs. It was green before those edits and is theirs to close. |
+| `tools/check-steps.py` | **FAILS, and NOT from this arm**: `scene "ranges" has no live legs in tools/linux/run-suites.sh` / `tools/android/run-emulator.py`. The gtk and Compose arms removed `depth_stub("ranges")` from gtk.rs and KayaCompose.kt at 21:38 (mtimes), which is what makes the gate demand those runners' legs. It was green before those edits and is theirs to close. |
 
 ---
 
@@ -248,7 +248,7 @@ scalar bindings each need a conversion, and each will have named it
 something.** C# named the type `TextRange` and the conversion
 `TextRange.In(text, index, length)`. The semantics is fixed by the
 protocol (a pair of UTF-8 byte offsets) so any spelling is conformant,
-but `tools/check-sugar-surface.sh` currently sweeps only the four VERBS
+but `tools/check-sugar-surface.py` currently sweeps only the four VERBS
 — nothing demands the conversion exists at all, and a binding that
 shipped `HighlightRanges(Widget, long, long)` would pass every gate in
 the tree while inviting the exact defect this arm's flip 1 produced.
@@ -284,7 +284,7 @@ stray processes:      none. `dotnet build-server shutdown` run; the
                       "VBCSCompiler|kaya-guests|dotnet exec|MSBuild"`
                       prints nothing.
 repo files perturbed: none — the three C# files sha256-match the
-                      baseline; `tools/validate-mac.sh` carries only the
+                      baseline; `tools/validate-mac.py` carries only the
                       one intended leg addition
 windows left up:      none (every leg exits through the harness; the
                       120s timeout ceiling was never reached)
@@ -301,6 +301,6 @@ scratchpad delta:     +224 KB, final. The throwaway conversion-check
   (`TextRange`; `Tx.HighlightRanges` / `Tx.SelectRange` / `Tx.RevealRange`)
 - `/Users/akhilindurti/Projects/kaya/guests/csharp/RangesScene.cs` (new)
 - `/Users/akhilindurti/Projects/kaya/guests/csharp/Program.cs` (one case)
-- `/Users/akhilindurti/Projects/kaya/tools/validate-mac.sh` (one leg)
+- `/Users/akhilindurti/Projects/kaya/tools/validate-mac.py` (one leg)
 - harness: `scratchpad/ranges-cs-leg.sh (gone)`, `scratchpad/cs-flip.sh (gone)`,
   `scratchpad/cs-perturb.py (gone)`, `scratchpad/cs-baseline/ (gone)`

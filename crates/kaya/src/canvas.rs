@@ -47,7 +47,7 @@ pub(crate) const CANONICAL_MODE: Mode = Mode::Light;
 /// the two backends written in Rust.
 ///
 /// UNSET RETURNS None AND NOTHING IS INSTALLED — the platform default, byte
-/// for byte (tools/check-appearance.sh's inert clause). A value that is
+/// for byte (tools/check-appearance.py's inert clause). A value that is
 /// neither word panics rather than being ignored: a typo would otherwise
 /// run a whole leg under the host's palette and freeze a wrong string.
 ///

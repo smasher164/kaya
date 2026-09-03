@@ -1937,7 +1937,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   a scale report, or an appearance flip. A width or height of \
                   0 means the drawing is declared and empty — the node stays \
                   present with no picture, never absent \
-                  (tools/check-empty-child.sh's rule).",
+                  (tools/check-empty-child.py's rule).",
         },
         Record {
             kind: 37,

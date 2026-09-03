@@ -71,7 +71,7 @@ Pins, read from the module build files:
 There IS a real `.app` bundle with a real `Info.plist`, assembled by
 the lane script rather than by Xcode:
 
-- `/Users/akhilindurti/Projects/kaya/tools/ios/run-sim.sh:93-106`,
+- `/Users/akhilindurti/Projects/kaya/tools/ios/run-sim.py:93-106`,
   `make_bundle(name, bundle_id, executable_path)`: `mkdir` the
   `<name>.app`, substitute `@EXECUTABLE@`/`@BUNDLE_ID@`/`@NAME@` into
   `tools/ios/Info.plist.in` with a python3 one-liner, copy the
@@ -86,7 +86,7 @@ the lane script rather than by Xcode:
   `UILaunchScreen {}`.
   **No `CFBundleDisplayName`. No `CFBundleIconName`. No
   `CFBundleIcons`. No `CFBundleAlternateIcons`.** [REPO]
-- `tools/check-steps.sh:2274-2277 (gone)` already gates two of those keys
+- `tools/check-steps.py:2274-2277 (gone)` already gates two of those keys
   (`UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace`) —
   i.e. there is a precedent in this tree for a gate that reads
   `Info.plist.in` and refuses on a missing key.
@@ -462,7 +462,7 @@ https://developer.apple.com/documentation/bundleresources/information-property-l
 .../cfbundlename
 Both are Info.plist keys. There is no runtime setter for either.
 kaya's `tools/ios/Info.plist.in` sets `CFBundleName` (to `@NAME@`, which
-run-sim.sh feeds the same string as the executable name) and does not
+run-sim.py feeds the same string as the executable name) and does not
 set `CFBundleDisplayName` at all — so today the iOS home-screen name is
 the scene binary's name. [REPO]
 
@@ -626,7 +626,7 @@ not even `CFBundleDisplayName`. If kaya is to have a declared identity at
 all, the work is in `tools/ios/Info.plist.in` + an `actool` step in
 `tools/ios/run-sim.py:219` (`make_bundle`), and in the android module
 manifests + a generated resource — and the guard belongs where invariant
-3 wants it: `tools/check-steps.sh:2274 (gone)` already refuses on a missing
+3 wants it: `tools/check-steps.py:2274 (gone)` already refuses on a missing
 `Info.plist.in` key, so the same clause extends to the identity keys for
 free.
 

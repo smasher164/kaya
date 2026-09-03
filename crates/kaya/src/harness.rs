@@ -40,7 +40,7 @@
 //! `kind#index` is HARNESS grammar and nothing else: app code never
 //! addresses positionally and no binding exposes an index lookup. Leaf
 //! kinds index stably because body order is screen order in every
-//! language; container creation order is not, so tools/check-steps.sh
+//! language; container creation order is not, so tools/check-steps.py
 //! rejects every container target except `column#0`/`row#0`.
 
 use crate::vtrace;
@@ -81,7 +81,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
 /// One widget, named by kind and creation order (`index`; -1 is
 /// `#last`) — or by AUTHORED KEY (`kind@id`, the a11y_id the guest
 /// declared), which dissolves the creation-order instability that
-/// makes container indices per-language (tools/check-steps.sh's
+/// makes container indices per-language (tools/check-steps.py's
 /// container lint). `kind@id[key.path]` adds the stamped copy's
 /// outermost-first string keys. When `id` is Some, `index` is
 /// meaningless until the runner normalizes through `Stage::resolve_id`.
@@ -105,13 +105,13 @@ pub enum TargetKind {
     Column,
     /// Rows are targetable under the columns convention: only index 0,
     /// only in a scene that keeps exactly one row, because container
-    /// creation order differs per language (tools/check-steps.sh).
+    /// creation order differs per language (tools/check-steps.py).
     Row,
     Image,
     Progress,
     /// Scroll viewports are targetable under the same convention as
     /// columns: only index 0, only in a scene that keeps exactly one
-    /// scroll (tools/check-steps.sh holds the line).
+    /// scroll (tools/check-steps.py holds the line).
     Scroll,
     Select,
     /// The radio group: the choice contract in its inline
@@ -119,7 +119,7 @@ pub enum TargetKind {
     Radio,
     /// Grids are targetable under the container convention: only
     /// index 0, only in a scene that keeps exactly one grid
-    /// (tools/check-steps.sh holds the line).
+    /// (tools/check-steps.py holds the line).
     Grid,
     /// The multi-line entry: same set_text/read_text/focus verbs as
     /// the entry, its own registry.
@@ -964,8 +964,8 @@ pub trait Stage: Send + 'static {
     /// visible row is a fact about the viewport either way (measured
     /// 2026-08-25 on the GTK lane — windowed.steps passed with the range
     /// report removed). The report loop's links are held statically
-    /// instead, per backend: tools/check-table-tier.sh for the mac tier,
-    /// tools/check-gtk.sh's census for GTK.
+    /// instead, per backend: tools/check-table-tier.py for the mac tier,
+    /// tools/check-gtk.py's census for GTK.
     ///
     /// A BACKEND THAT DOES NOT WINDOW YET ANSWERS A SENTENCE naming what
     /// it does not do. It cannot equal the pair, so the leg reddens
@@ -1459,7 +1459,7 @@ pub trait Stage: Send + 'static {
 /// named "x"; the package carries ...`.
 ///
 /// A `"` TOGGLES, so a statement must have balanced quotes;
-/// `tools/check-steps.sh` refuses one that does not, because an odd
+/// `tools/check-steps.py` refuses one that does not, because an odd
 /// quote would move every following `;` across the rule.
 ///
 /// ALL THREE INTERPRETERS SPLIT IDENTICALLY (this,
@@ -2805,7 +2805,7 @@ fn record_linger() {
 /// construction; this verb's job is liveness and approximate colour.
 ///
 /// Both interpreters carry their own copy of this number, and
-/// tools/check-verbs.sh holds the three equal AND pinned at the ruled 1.
+/// tools/check-verbs.py holds the three equal AND pinned at the ruled 1.
 const INK_TOLERANCE: i32 = 1;
 
 /// The half of a PER-MODE expectation that names `mode`, out of
@@ -4403,7 +4403,7 @@ pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
 /// the log with it, so the harness's own sentence has to beat it.
 ///
 /// `KAYA_STEP_CEILING_MS` overrides it; the default is censused in all
-/// three harnesses by tools/check-harness-ceiling.sh.
+/// three harnesses by tools/check-harness-ceiling.py.
 pub const STEP_CEILING: Duration = Duration::from_secs(60);
 
 /// The other half: once a verdict is published the process leaves
@@ -4423,7 +4423,7 @@ pub const EXIT_GRACE: Duration = Duration::from_secs(3);
 /// falsified). TerminateProcess skips that shutdown, which is the
 /// invariant's own sentence; the SwiftUI arm's `_exit(` is this same
 /// choice. `win_exit_tests` proves both halves on the windows guest
-/// (tools/deploy-win.sh's unit phase).
+/// (tools/deploy-win.py's unit phase).
 ///
 /// UNIX IS `_exit` TOO (2026-09-01): libc's `exit` runs the HOST's
 /// atexit handlers and static destructors, and a Node host's are V8's
@@ -7188,7 +7188,7 @@ mod tests {
     }
 }
 
-/// Runs ONLY on the windows guest (tools/deploy-win.sh's unit phase, a
+/// Runs ONLY on the windows guest (tools/deploy-win.py's unit phase, a
 /// guest_unit_module census); no unix build compiles it. The wedge is
 /// teardown that never returns, armed on a hook `ExitProcess` RUNS and
 /// `TerminateProcess` skips. NOT atexit: Rust's `std::process::exit`
@@ -7210,7 +7210,7 @@ mod win_exit_tests {
 
     fn arm_wedge() {
         // Function scope: a module-level extern ships into kaya.h
-        // (gates.sh's stale-header refusal caught exactly that).
+        // (gates.py's stale-header refusal caught exactly that).
         unsafe extern "system" {
             fn FlsAlloc(
                 cb: Option<unsafe extern "system" fn(*mut core::ffi::c_void)>,

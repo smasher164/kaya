@@ -10,7 +10,7 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# The automated LocalStorage admission probe used by run-sim.sh.
+# The automated LocalStorage admission probe used by run-sim.py.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

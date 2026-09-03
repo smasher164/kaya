@@ -89,7 +89,7 @@ capabilityBits :: IO Word64
 capabilityBits = c_kaya_capabilities
 
 -- | The core's @KAYA_CAP_AUX_WINDOWS@ written again: a plain .hs has no
--- header to read it from. tools/check-sugar-surface.sh fails if this
+-- header to read it from. tools/check-sugar-surface.py fails if this
 -- disagrees with crates/kaya/src/scene.rs.
 capAuxWindows :: Word64
 capAuxWindows = 1

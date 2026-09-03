@@ -10,21 +10,21 @@ dev_shell_or_die()
 
 # THE THREE LISTS OF GATES MUST BE ONE LIST.
 #
-#   what tools/gates.sh RUNS   — the executable list
-#   what tools/validate-mac.sh RUNS — exactly the above, by DELEGATION
+#   what tools/gates.py RUNS   — the executable list
+#   what tools/validate-mac.py RUNS — exactly the above, by DELEGATION
 #                              and not by copy
 #   what CLAUDE.md DOCUMENTS   — rung 2, the list a session with no
 #                              context reads and believes
 #
 # Plus the CENSUS clause: every gate script ON DISK is either in the
-# list or in gates.sh's EXCLUDED table WITH A REASON. A gate in neither
+# list or in gates.py's EXCLUDED table WITH A REASON. A gate in neither
 # is a gate nobody runs, and nothing else in the tree can see that.
 # Plus the matrix launch: all five platform lanes are queued together,
 # then the niced gate sweep starts after Android exits; the runner/probe
 # agree on Android's four-phone pool.
 #
 # CLAUDE.md alone, not AGENTS.md: the two are true mirrors and
-# check-mirror.sh is what holds that.
+# check-mirror.py is what holds that.
 
 import json
 import re
@@ -44,8 +44,11 @@ def fail(msg):
 # A GATE'S SCRIPT PATH IS ITS NAME EVERYWHERE, so one pattern serves all
 # three readers. The naming clause below FORCES every gate into a shape
 # this pattern can see, or the prose scan goes quietly blind.
-SHELL_GATE = (r"tools/(?:check-[a-z0-9-]+|gen-[a-z0-9-]+|swift-typecheck"
-              r"|java-typecheck|js-typecheck)\.sh")
+# The gates are python since the 2026-08-31 conversion and their .sh
+# shims went 2026-09-02; swift-typecheck is the one gate still written
+# in shell (an in-toolchain launcher shape).
+SHELL_GATE = (r"tools/(?:(?:check-[a-z0-9-]+|gen-(?:header|bindings|guests)"
+              r"|java-typecheck|js-typecheck)\.py|swift-typecheck\.sh)")
 PY_GATE = r"bindings/(?:python/[a-z0-9_]+\.py|js/[a-z0-9_]+\.ts)"
 TOKEN = re.compile(f"{SHELL_GATE}|{PY_GATE}")
 
@@ -57,7 +60,7 @@ def rung2(text):
     also be the shape a vacuous scan takes."""
     try:
         start = text.index("2. Fast gates")
-        end = text.index("3. `tools/validate-mac.sh`", start)
+        end = text.index("3. `tools/validate-mac.py`", start)
     except ValueError:
         return None
     return text[start:end]
@@ -86,10 +89,10 @@ def drift(listed, doc):
 def drift_lines(only_listed, only_doc):
     out = []
     if only_listed:
-        out.append("in tools/gates.sh's list (run or excluded) but NOT named in "
+        out.append("in tools/gates.py's list (run or excluded) but NOT named in "
                    "CLAUDE.md rung 2: " + " ".join(only_listed))
     if only_doc:
-        out.append("named in CLAUDE.md rung 2 but NOT in tools/gates.sh's list: "
+        out.append("named in CLAUDE.md rung 2 but NOT in tools/gates.py's list: "
                    + " ".join(only_doc))
     return out
 
@@ -101,14 +104,14 @@ def code_lines(text):
 
 
 def direct_invocations(text):
-    """Gate scripts validate-mac runs itself, plus any keyed.sh call.
+    """Gate scripts validate-mac runs itself, plus any keyed.py call.
     Both are the same defect: a second place that decides what the
     sweep is."""
     hits = set()
     for line in code_lines(text):
         hits.update(TOKEN.findall(line))
-        if re.search(r"(?:^|[\s;&|(])tools/keyed\.sh\b", line):
-            hits.add("tools/keyed.sh")
+        if re.search(r"(?:^|[\s;&|(])tools/keyed\.py\b", line):
+            hits.add("tools/keyed.py")
     return hits
 
 
@@ -121,13 +124,13 @@ def census(on_disk, listed, excluded):
 # its exact launch spellings (the linux launch spans two lines — its
 # env rider — and is matched as a prefix).
 PLATFORM_LAUNCHES = [
-    'run_lane("mac", ["tools/validate-mac.sh"])',
-    'run_lane("linux", ["tools/validate-linux.sh"],',
-    'run_lane("windows", ["tools/deploy-win.sh", HOST, "all"])',
-    'run_lane("ios", ["tools/ios/run-sim.sh"])',
-    'run_lane("android", ["tools/android/run-emulator.sh"])',
+    'run_lane("mac", ["tools/validate-mac.py"])',
+    'run_lane("linux", ["tools/validate-linux.py"],',
+    'run_lane("windows", ["tools/deploy-win.py", HOST, "all"])',
+    'run_lane("ios", ["tools/ios/run-sim.py"])',
+    'run_lane("android", ["tools/android/run-emulator.py"])',
 ]
-GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.sh"])'
+GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])'
 ANDROID_PID = "android_lane_proc = lane_procs[-1]"
 ANDROID_WAIT = "android_lane_proc.wait()"
 # The runners are python since the runner conversion; the probe stays
@@ -177,12 +180,12 @@ def matrix_parallel_problem(text):
         "lane_procs.append(proc)", "lane_names.append(name)")):
         return ("tools/validate-all.py's run_lane no longer backgrounds and "
                 "records every concurrent matrix unit")
-    gate_lines = [line for line in lines if "tools/gates.sh" in line]
+    gate_lines = [line for line in lines if "tools/gates.py" in line]
     # The build LEADS the fingerprint: the keyed keys carry the
     # artifacts' real bytes, and a token over the previous build's
     # made the mac lane sweep twice (docs/traps.md, 2026-09-01).
-    build = 'if subprocess.run(["tools/gates.sh", "--build"]).returncode != 0:'
-    fingerprint = 'got = subprocess.run(["tools/gates.sh", "--fingerprint"],'
+    build = 'if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:'
+    fingerprint = 'got = subprocess.run(["tools/gates.py", "--fingerprint"],'
     if gate_lines != [build, fingerprint, GATE_LAUNCH]:
         return ("tools/validate-all.py must invoke gates only for the "
                 "artifact build, the same-tree fingerprint taken after it, "
@@ -311,10 +314,10 @@ def lane_contract_problems(texts, lib, pylib):
 
 # ---------------------------------------------------------------- data
 
-out = subprocess.run([str(root / "tools" / "gates.sh"), "--list"],
+out = subprocess.run([str(root / "tools" / "gates.py"), "--list"],
                      cwd=root, stdout=subprocess.PIPE, text=True, check=False)
 if out.returncode != 0:
-    print("check-gates: tools/gates.sh --list failed — the list is unreadable, "
+    print("check-gates: tools/gates.py --list failed — the list is unreadable, "
           "so nothing below could be checked", file=sys.stderr)
     sys.exit(1)
 listing = json.loads(out.stdout)
@@ -337,13 +340,14 @@ probe_text = (root / "tools" / "probe-env.sh").read_text(encoding="utf-8")
 block = rung2(claude_text)
 if block is None:
     print("check-gates: could not find CLAUDE.md's rung-2 block (the anchors "
-          "'2. Fast gates' and '3. `tools/validate-mac.sh`' moved). Fix the "
+          "'2. Fast gates' and '3. `tools/validate-mac.py`' moved). Fix the "
           "anchors here or the ladder there — do not let this gate go quiet.",
           file=sys.stderr)
     sys.exit(1)
 
 on_disk = sorted(
-    f"tools/{p.name}" for p in (root / "tools").glob("*.sh")
+    f"tools/{p.name}"
+    for p in list((root / "tools").glob("*.py")) + list((root / "tools").glob("*.sh"))
     if re.fullmatch(SHELL_GATE, f"tools/{p.name}")
 )
 
@@ -360,8 +364,9 @@ if None in listed_scripts:
         if script_of(g["cmd"]) is None:
             fail(f"gate {g['name']!r} runs {' '.join(g['cmd'])}, which names no "
                  f"gate-shaped script. Every gate must be spelled so the prose "
-                 f"scan can see it (tools/check-*.sh, tools/gen-*.sh, "
-                 f"tools/*-typecheck.sh, or bindings/python/*.py) — or teach "
+                 f"scan can see it (tools/check-*.py, tools/gen-*.py, "
+                 f"tools/*-typecheck.py, tools/swift-typecheck.sh, or "
+                 f"bindings/python/*.py) — or teach "
                  f"this gate's TOKEN the new shape, deliberately.")
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)
     sys.exit(1)
@@ -391,7 +396,7 @@ else:
             fail(f"self-test N1: {victim} was deleted from the prose and the "
                  f"comparison did not report it — the prose scan is vacuous")
         lines = drift_lines(only_listed, only_doc)
-        if not any("CLAUDE.md" in ln and "gates.sh" in ln for ln in lines):
+        if not any("CLAUDE.md" in ln and "gates.py" in ln for ln in lines):
             fail("self-test N1: the drift message does not name both lists")
 
     # N2 — the other side: a gate dropped from the EXECUTABLE list must
@@ -412,16 +417,16 @@ else:
 # perturbation plants one into validate-mac.py's real text (the python
 # spelling: an argv naming the gate's path).
 planted, n = re.subn(
-    r'(?m)^(\s*)if run\(\[str\(ROOT / "tools/gates\.sh"\)\]\)',
-    '\\1run([str(ROOT / "tools/check-mirror.sh")])\n'
-    '\\1if run([str(ROOT / "tools/gates.sh")])', mac_text)
+    r'(?m)^(\s*)if run\(\[str\(ROOT / "tools/gates\.py"\)\]\)',
+    '\\1run([str(ROOT / "tools/check-mirror.py")])\n'
+    '\\1if run([str(ROOT / "tools/gates.py")])', mac_text)
 print(f"check-gates: self-test N3 planted a direct gate call in "
       f"validate-mac.py, {n} substitution(s)")
 if n < 1:
     fail("self-test N3 applied NO substitution — validate-mac.py does not "
-         "invoke tools/gates.sh where this clause looks, so the delegation "
+         "invoke tools/gates.py where this clause looks, so the delegation "
          "clause below is measuring nothing")
-elif "tools/check-mirror.sh" not in direct_invocations(planted):
+elif "tools/check-mirror.py" not in direct_invocations(planted):
     fail("self-test N3: a planted direct gate call was not seen — the "
          "delegation clause is vacuous")
 
@@ -433,7 +438,7 @@ if not census(on_disk + ["tools/check-invented-by-selftest.sh"],
 
 # N5 — every one of the five platform lanes must be queued.
 doctored, n = re.subn(
-    r'(?m)^    run_lane\("ios", \["tools/ios/run-sim\.sh"\]\)\n', "",
+    r'(?m)^    run_lane\("ios", \["tools/ios/run-sim\.py"\]\)\n', "",
     matrix_text, count=1)
 print("check-gates: self-test N5 removed one concurrent platform launch, "
       f"{n} substitution(s)")
@@ -445,7 +450,7 @@ elif matrix_parallel_problem(doctored) is None:
 
 # N6 — no barrier may split the five platform launches.
 doctored, n = re.subn(
-    r'(?m)^(    run_lane\("mac", \["tools/validate-mac\.sh"\]\))$',
+    r'(?m)^(    run_lane\("mac", \["tools/validate-mac\.py"\]\))$',
     "\\1\n    lane_procs[-1].wait()", matrix_text, count=1)
 print("check-gates: self-test N6 inserted a barrier after the mac launch, "
       f"{n} substitution(s)")
@@ -533,8 +538,8 @@ elif matrix_parallel_problem(doctored) is None:
 
 # N12 — the sweep's lower priority is part of the measured schedule.
 doctored, n = re.subn(
-    re.escape('["nice", "-n", "10", "tools/gates.sh"]'),
-    '["tools/gates.sh"]', matrix_text, count=1)
+    re.escape('["nice", "-n", "10", "tools/gates.py"]'),
+    '["tools/gates.py"]', matrix_text, count=1)
 print("check-gates: self-test N12 removed gate niceness, "
       f"{n} substitution(s)")
 if n != 1:
@@ -546,7 +551,7 @@ elif matrix_parallel_problem(doctored) is None:
 # N12b — a token taken over the previous build's artifacts is the
 # duplicate mac sweep measured 2026-09-01.
 doctored, n = re.subn(
-    r'(?m)^    if subprocess\.run\(\["tools/gates\.sh", "--build"\]\)'
+    r'(?m)^    if subprocess\.run\(\["tools/gates\.py", "--build"\]\)'
     r'\.returncode != 0:\n        sys\.exit\(1\)\n', "", matrix_text,
     count=1)
 print("check-gates: self-test N12b removed the pre-token build, "
@@ -602,12 +607,12 @@ only_listed, only_doc = drift(known, doc_names)
 for line in drift_lines(only_listed, only_doc):
     fail(line)
 if only_listed or only_doc:
-    fail("the three lists must be one list — add the gate to tools/gates.sh's "
+    fail("the three lists must be one list — add the gate to tools/gates.py's "
          "GATES (or its EXCLUDED table, with a reason) and name it in rung 2 "
          "of BOTH CLAUDE.md and AGENTS.md")
 
 for script in census(on_disk, listed_scripts, EXCLUDED):
-    fail(f"{script} exists but is in no list — tools/gates.sh neither runs it "
+    fail(f"{script} exists but is in no list — tools/gates.py neither runs it "
          f"nor excludes it, so nothing in this repo runs it and nothing says "
          f"why not")
 
@@ -625,14 +630,14 @@ direct = direct_invocations(mac_text)
 if direct:
     fail("tools/validate-mac.py invokes gates itself: "
          + " ".join(sorted(direct))
-         + " — the lane must DELEGATE to tools/gates.sh, or the sweep has two "
+         + " — the lane must DELEGATE to tools/gates.py, or the sweep has two "
            "lists again and the count in one of them means nothing")
 # The delegation sits inside the matrix-handshake conditional
 # (ratified 2026-08-20); the clause's real quarry is DIRECT gate
 # invocations, held above. Python since the runner conversion, so the
 # spelling is the argv path.
-if not re.search(r'ROOT / "tools/gates\.sh"', mac_text):
-    fail("tools/validate-mac.py does not call tools/gates.sh — the lane runs "
+if not re.search(r'ROOT / "tools/gates\.py"', mac_text):
+    fail("tools/validate-mac.py does not call tools/gates.py — the lane runs "
          "no gate sweep at all")
 
 problem = matrix_parallel_problem(matrix_text)
@@ -717,11 +722,11 @@ else:
 
 # The driver's own arithmetic: an under-run, a failing gate and a
 # missing script must each come back red, watched on every run.
-proof = subprocess.run([str(root / "tools" / "gates.sh"), "--selftest"],
+proof = subprocess.run([str(root / "tools" / "gates.py"), "--selftest"],
                        cwd=root, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, text=True, check=False)
 if proof.returncode != 0:
-    fail("tools/gates.sh --selftest FAILED — the sweep's count does not refuse "
+    fail("tools/gates.py --selftest FAILED — the sweep's count does not refuse "
          "an under-run, so a sweep that ran nothing could print OK:\n"
          + proof.stdout)
 

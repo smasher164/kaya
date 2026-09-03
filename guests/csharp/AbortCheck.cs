@@ -2,7 +2,7 @@
 // see (menu record emission, the undo group's head-of-batch rule, the
 // mirror fold an undone/redone payload drives, the nested table's three
 // spellings and the generated row façade's two routes to them). Run by
-// tools/check-abort.sh.
+// tools/check-abort.py.
 //
 // Runs headless: the library loads (KAYA_LIB) and records submit, but
 // Run() is never entered. The bindings compile into this assembly, so

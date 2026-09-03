@@ -784,7 +784,7 @@ construction. The scene cannot be reshaped to reach it either — that
 would assert frontier granularity, which invariant 6 forbids across five
 lanes with five keystroke cadences.
 
-So the wall is static: `tools/check-native-undo.sh` (fast-gate set,
+So the wall is static: `tools/check-native-undo.py` (fast-gate set,
 keyed) reads the two-line pairing out of each backend file — a backend
 that takes the core's sample marks the emission its walk provokes, that
 mark is consumed WHERE THE EDIT IS REPORTED, and a ClearUndo arm calls

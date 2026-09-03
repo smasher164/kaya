@@ -1345,7 +1345,7 @@ nothing had walked before.
   (API 31+), and the failure would be a loud IOException at the
   paste, caught by this leg.
 
-  The guard is tools/check-jni.sh (keyed, in validate-mac's gate
+  The guard is tools/check-jni.py (keyed, in validate-mac's gate
   block): every native/external declaration in KayaRing.kt,
   KayaPresent.kt, Kaya.kt and KayaRing.java must have a
   registration entry or a Java_dev_kaya_* export on ITS tier's
@@ -1502,7 +1502,7 @@ synchronous and visible to other processes before the spawn exits
 ONE macOS pasteboard out of a lane that runs beside validate-mac's
 clipboard legs under validate-all, a collision the pbsync shape had
 built in. check-steps' iOS clause pins the absence: a live
-pbcopy/pbpaste/pbsync/`set the clipboard` line in run-sim.sh is a
+pbcopy/pbpaste/pbsync/`set the clipboard` line in run-sim.py is a
 failure, self-tested with the perturbation proven applied.
 
 ### 7. THE DEVICE BOARD IS SIMULATOR.APP'S TOO (measured 2026-08-03, the matrix-only empty read)
@@ -1559,7 +1559,7 @@ own types).
 
 The lane cannot make itself immune: a shared board with a live writer
 has no read that cannot be clobbered, and the scene's whole design
-needs one clipboard it owns. So `tools/ios/run-sim.sh` MEASURES the
+needs one clipboard it owns. So `tools/ios/run-sim.py` MEASURES the
 isolation before any leg (`clip_relay_check`: two devices, two
 different clips, each must keep its own; types only, which is
 prompt-free, and no host pasteboard write — the mac lane is using
@@ -1667,7 +1667,7 @@ later.
 Ruled out by measurement or by the record: the mac lane itself (its
 clipboard legs are drain-bracketed), the android pool (§7 finding 4,
 bridge severed both ways, `-no-window`), the iOS lane (Simulator.app not
-running, and run-sim.sh refuses a live relay — §8 finding 7). Left
+running, and run-sim.py refuses a live relay — §8 finding 7). Left
 standing: this machine's Windows VM carries `/Sharing/ClipboardSharing
 = True` with the SPICE vdagent channel live on its qemu command line
 (UTM 4.7.5 drives `NSPasteboard` from CocoaSpice's `CSSession`), and the

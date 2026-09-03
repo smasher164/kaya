@@ -14,7 +14,7 @@ rem plain existence check reads corpses as ALIVE. This probe waits out
 rem WerFault before rendering a verdict.
 rem
 rem Shipped like every guest script — never rebuilt on the VM by
-rem echoing escaped text over ssh; see the deploy-win.sh header.
+rem echoing escaped text over ssh; see the deploy-win.py header.
 cd /d C:\kaya
 del C:\kaya\out_probe.txt 2>nul
 del C:\kaya\out_probe_app.txt 2>nul

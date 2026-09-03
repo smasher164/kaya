@@ -2,7 +2,7 @@
 the runner executes and the gates census (the runner-conversion
 ruling, docs/runner-conversion-plan.md §2: the leg tables become an
 importable data module, the runner consumes it, and the parsers
-that read tools/deploy-win.sh's TEXT become imports of these same
+that read tools/deploy-win.py's TEXT become imports of these same
 tables).
 
 Plain data on build-id.py's GATES model: no I/O at import, no

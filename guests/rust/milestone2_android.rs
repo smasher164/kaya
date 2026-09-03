@@ -115,7 +115,7 @@ mod sizepolicy;
 mod adaptive;
 
 /// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
-/// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
+/// A LEG NEEDS ITS ARM HERE — tools/check-stubs.py and the panic below
 /// hold that.
 #[cfg(target_os = "android")]
 fn app(ctx: kaya::AppCtx) {

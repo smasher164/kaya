@@ -26,7 +26,7 @@
          pre-asset-catalog spelling and the only one available here: there
          is no asset catalog in this tree and no `actool` in the dev
          shell, and the declared mark is copied in VERBATIM because
-         tools/check-app-identity.sh C5 holds every app-icon resource in
+         tools/check-app-identity.py C5 holds every app-icon resource in
          the tree byte-identical to the declaration. -->
     @IDENTITY@
     <key>CFBundlePackageType</key>
@@ -73,7 +73,7 @@
          (docs/deferred.md's ios-flaky entry) and no rerun could say why,
          because the verdict was correct both times and only the premise
          moved. The pool's device TYPE is pinned a few lines up in
-         run-sim.sh for the same reason; its geometry was not.
+         run-sim.py for the same reason; its geometry was not.
          BOTH FAMILIES, deliberately: the pad leg reads a REGULAR width
          and portrait iPad (1032) is regular, so one rule serves both. -->
     <key>UISupportedInterfaceOrientations</key>

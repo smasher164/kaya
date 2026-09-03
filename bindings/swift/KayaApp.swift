@@ -182,7 +182,7 @@ struct KayaViewbox {
 /// The paint ROLE an op names. Never RGB: the roles resolve in the core
 /// per appearance (docs/canvas-plan.md §3.4). The numbers come from the
 /// core's own header rather than a fourth hand-written copy of them
-/// (tools/check-symbol-parity.sh's trap, one surface over).
+/// (tools/check-symbol-parity.py's trap, one surface over).
 enum KayaPaint {
     /// The line.
     case series
@@ -461,7 +461,7 @@ struct KayaWidget {
     /// ONE act — a registered handler nothing could reach is unspellable.
     ///
     /// The binding answers the ask inside a transaction of its own
-    /// (tools/check-ambient-tx.sh); it never reaches the guest.
+    /// (tools/check-ambient-tx.py); it never reaches the guest.
     @discardableResult
     func onDraw(_ handler: @escaping (KayaDraw, KayaViewbox) -> Void) -> KayaWidget {
         // WIDENED HERE, not at dispatch: one stored shape means the
@@ -1099,7 +1099,7 @@ struct KayaAssetMiss: Error, CustomStringConvertible, LocalizedError {
 /// can find it (docs/assets-plan.md). `try KayaAsset("fonts/x.ttf")`
 /// opens one; the name is a relative path under a root the CORE
 /// resolves, and no guest reads an asset environment variable or carries
-/// a repo-relative default (tools/check-assets.sh).
+/// a repo-relative default (tools/check-assets.py).
 ///
 /// A MISS THROWS `KayaAssetMiss` carrying the core's sentence and
 /// nothing added — `tools/scenes/assets.steps` freezes it THROUGH THE
@@ -1351,7 +1351,7 @@ final class KayaApp {
     /// cannot see a Task continuation writing through a transaction that
     /// is still open, nor a background build opening one of its own —
     /// both race the app thread's mirror.
-    /// tools/check-tx-liveness.sh holds it.
+    /// tools/check-tx-liveness.py holds it.
     static func requireAppThread() {
         guard let owner = appThread else { return }
         let here = Thread.current
@@ -1921,7 +1921,7 @@ final class KayaApp {
             // drawing-as-a-function-of-size, so this draws it, submits the
             // one record and keeps looping. The transaction is the
             // binding's — a guest opening its own inside a handler is the
-            // camouflage tools/check-ambient-tx.sh refuses.
+            // camouflage tools/check-ambient-tx.py refuses.
             //
             // ONE CALL SHAPE, decided at registration rather than here: a
             // tick canvas is a redraw canvas too and is asked once, as a
@@ -2199,7 +2199,7 @@ final class KayaAppTx {
     // too. A check spread over callsites is a check that gets forgotten,
     // and the failure it guards is SILENT: a write through a Tx that
     // outlived its build vanishes with no error
-    // (tools/check-tx-liveness.sh).
+    // (tools/check-tx-liveness.py).
     private var storage = KayaTx()
     private var closed = false
     /// Whether undoable() has already named this batch — one name per
@@ -3829,7 +3829,7 @@ final class KayaTpl {
 
     /// The raw Text write on a node — PRIVATE, and that is the point. The
     /// live zone's `setText` is a WIDGET VERB the sugar sweep requires of
-    /// every binding (tools/check-sugar-surface.sh's check_range_verb);
+    /// every binding (tools/check-sugar-surface.py's check_range_verb);
     /// this one is the floor spelling of a prop, and only the receiver's
     /// type tells them apart, which no sweep can see. Hiding it means the
     /// floor spelling stops existing (docs/tpl-props-plan.md F3).

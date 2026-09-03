@@ -890,7 +890,7 @@ public final class KayaApp {
     /**
      * The core's number written again — there is no header on this tier
      * to read {@code KAYA_CAP_AUX_WINDOWS} out of, the way Go's cgo and
-     * Swift's bridging header do. tools/check-sugar-surface.sh reads the
+     * Swift's bridging header do. tools/check-sugar-surface.py reads the
      * authoritative value out of crates/kaya/src/scene.rs and fails if
      * this line disagrees, so the copy cannot go stale in silence.
      */
@@ -913,7 +913,7 @@ public final class KayaApp {
      * with {@code /} — {@code KayaApp.asset("fonts/sora-wght.ttf")}. The
      * root is kaya's problem and not an app's; no guest reads an asset
      * environment variable or carries a repo-relative default
-     * (tools/check-assets.sh).
+     * (tools/check-assets.py).
      *
      * <p>A MISS THROWS, with the core's sentence and nothing added, so
      * every language names the same fault in the same words. An
@@ -2343,7 +2343,7 @@ public final class KayaApp {
          * registered handler the core would never ask for is unspellable.
          *
          * <p>THE BINDING OPENS THE TRANSACTION, not the guest
-         * (tools/check-ambient-tx.sh): the ask is answered inside the
+         * (tools/check-ambient-tx.py): the ask is answered inside the
          * dispatch loop and never surfaces as an occurrence.
          *
          * <p>LATEST-WINS: a size the guest never caught up with is dropped
@@ -3150,7 +3150,7 @@ public final class KayaApp {
          * THE ONE CHOKEPOINT: the only place that appends to a
          * transaction, so the liveness check cannot be forgotten at a
          * new callsite. A write through a Tx that outlived its build
-         * vanishes with no error (tools/check-tx-liveness.sh).
+         * vanishes with no error (tools/check-tx-liveness.py).
          */
         private void emit(byte[] record) {
             alive();
@@ -3162,7 +3162,7 @@ public final class KayaApp {
          * {@code records} rather than inserted at index 0, because
          * {@link #emit} must stay the one and only append (a second
          * append would skip the liveness check — see
-         * tools/check-tx-liveness.sh). Prepended by {@link #submitIfAny}.
+         * tools/check-tx-liveness.py). Prepended by {@link #submitIfAny}.
          */
         private byte[] undoGroup;
 
@@ -5890,7 +5890,7 @@ public final class KayaApp {
      * closed} cannot see a thread spawned inside a handler writing
      * through the transaction the handler still holds, nor a background
      * build opening one of its own — both race the app thread's model.
-     * tools/check-tx-liveness.sh holds it.
+     * tools/check-tx-liveness.py holds it.
      */
     static void requireAppThread() {
         Thread owner = appThread;

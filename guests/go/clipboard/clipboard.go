@@ -47,7 +47,7 @@ var noteBytes = []byte("note=1")
 // own Documents directory is the one place both halves can look
 // (tools/ios/Info.plist.in is what makes it browsable).
 //
-// kaya.Env AND NEVER os.Getenv — tools/check-go-env.sh's header carries
+// kaya.Env AND NEVER os.Getenv — tools/check-go-env.py's header carries
 // the measurement and the rule.
 func sceneRoot() string {
 	if runtime.GOOS == "ios" {
@@ -56,7 +56,7 @@ func sceneRoot() string {
 	// Android uses the SHARED collection, and must: the outside reader
 	// is another app, which cannot see this one's cache — and
 	// os.TempDir falls back to /data/local/tmp here because $TMPDIR is
-	// empty under the JNI attach (tools/check-go-env.sh), a directory
+	// empty under the JNI attach (tools/check-go-env.py), a directory
 	// this app cannot even create. The JVM guest draws the same line.
 	if runtime.GOOS == "android" {
 		ext := kaya.Env("EXTERNAL_STORAGE")

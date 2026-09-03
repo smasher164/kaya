@@ -22,7 +22,7 @@ func init() {
 
 func main() {
 	// kaya.Env AND NEVER os.Getenv, uniformly with the Android tail even
-	// though Go's own copy is correct on this host (tools/check-go-env.sh).
+	// though Go's own copy is correct on this host (tools/check-go-env.py).
 	scene := kaya.Env("KAYA_SELFTEST")
 	if scene == "" {
 		// AN EMPTY NAME IS MILESTONE2 HERE AND A PANIC ON ANDROID: on a

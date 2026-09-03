@@ -176,7 +176,7 @@ def check(gtk, winui, swiftui, compose):
                 f"vocabulary list. This interpreter BLITS and never "
                 f"interprets an op (docs/canvas-plan.md §1.1); the "
                 f"constant copies exist so a drifted NUMBER fails "
-                f"tools/check-verbs.sh rather than a lane, not so an "
+                f"tools/check-verbs.py rather than a lane, not so an "
                 f"arm can switch on one")
 
     # --- 2. THE PIXEL FORMAT EACH BACKEND DECLARES. -------------------
@@ -669,7 +669,7 @@ if platform.system() == "Darwin":
     if not (ROOT / "target" / "debug" / "libkaya.dylib").is_file():
         print("check-canvas-blit: target/debug/libkaya.dylib is not "
               "built — the ink probe links against it. Run "
-              "tools/gates.sh, which builds what its gates read.",
+              "tools/gates.py, which builds what its gates read.",
               file=sys.stderr)
         raise SystemExit(1)
     # The probe compiles the interpreter's OWN source, so there is no

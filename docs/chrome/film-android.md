@@ -13,7 +13,7 @@ Charge: a short film of the editor's byte-frozen scene running on the
 Android emulator, the `editor-go` leg. RUN-ONLY: no repo edits.
 Device: emulator-5554 ONLY. Boot nothing, kill nothing.
 
-## 0. What the leg is (read out of tools/android/run-emulator.sh)
+## 0. What the leg is (read out of tools/android/run-emulator.py)
 
 - Leg name `editor-go`, lines 1748-1752. APK
    ```
@@ -51,7 +51,7 @@ scratchpad/chrome/films/adb-before-editor.txt (gone).
 ## 2. The script that was filmed
 
 `scene_script_cut` was not retyped — the runner's own python body was
-extracted from tools/android/run-emulator.sh by locating the function and
+extracted from tools/android/run-emulator.py by locating the function and
 its `<<'PY'` heredoc, and run with the leg's arguments
 (`editor close_window expect_dirty`). Output:
 scratchpad/chrome/films/scene_script_cut.py (gone) (the extract),
@@ -73,11 +73,11 @@ leg runs — no more, no less — plus the trailing settle.
 
 ## 3. Artifacts were verified before anything ran
 
-    tools/build-id.sh --verify --component compose \
+    tools/build-id.py --verify --component compose \
    ```
       android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk   rc=0
    ```
-    tools/build-id.sh --verify \
+    tools/build-id.py --verify \
    ```
       android/milestone2go/src/main/jniLibs/arm64-v8a/libkaya.so            rc=0
    ```
@@ -85,7 +85,7 @@ leg runs — no more, no less — plus the trailing settle.
 Both carry the id of the CURRENT sources (tree clean at 0254879), so no
 rebuild was needed and none was done — this is a RUN-ONLY charge and the
 lane's own staleness guard says the artifact on disk is the right one.
-(The Go guest .so carries no marker by design; run-emulator.sh:1558-1565
+(The Go guest .so carries no marker by design; run-emulator.py:1558-1565
 says why. It was written in the same build as the two above, 15:42.)
 
 ## 4. Dry run (timing, before committing to a recording window)
@@ -116,7 +116,7 @@ IN the recording, several seconds inside the file.
     raw: 320x640, h264, 21.60s, 2,514,468 bytes, 429 frames
 
 Device geometry is the lane's, unchanged by me: `wm size` 320x640 at
-density 160 — run-emulator.sh:72 ("every pool device is 320dp wide, an
+density 160 — run-emulator.py:72 ("every pool device is 320dp wide, an
 unambiguously COMPACT width").
 
 VERDICT (the filmed run's own line, in full):

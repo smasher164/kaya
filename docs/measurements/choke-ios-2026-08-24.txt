@@ -20,7 +20,7 @@ guest:    SWIFT. The lane runs the `table` scene from three guests
 guest src: choke-ios-guest-2026-08-24.swift (beside this report) — guests/swift/table.swift's
           shape with a 4-field record (Date, Ticker, Side, Total),
           strings from a counter, row count from KAYA_ROWS, no asset
-          reads. Compiled exactly as run-sim.sh compiles a swift-suite
+          reads. Compiled exactly as run-sim.py compiles a swift-suite
           leg (same bindings, same libkaya.a, same interpreter dylib;
           all three build-id --verify'd before use).
 script:   inline via SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT, ONE step:

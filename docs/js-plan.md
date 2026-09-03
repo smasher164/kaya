@@ -215,7 +215,7 @@ accepts plain objects.
 
 ## §5 Gates and lanes
 
-`tools/js-typecheck.sh` (strict tsc over bindings/js and guests/js,
+`tools/js-typecheck.py` (strict tsc over bindings/js and guests/js,
 with a printed census and floors; makes the workspace link) and
 `js-app-checks` (`node bindings/js/kaya_app_checks.ts`, the negatives,
 run in a worker so the import does not surrender the main thread) join
@@ -232,7 +232,7 @@ carries a js leg beside every python leg (node pinned into the docker
 image by sha256). THE WINDOWS LANE TOO, since 2026-09-01: node 24.19.0
 provisioned on the VM by version and by bytes through
 tools/guest/fetch-zip.ps1 (the nodejs.org SHASUMS256 hash recorded in
-tools/deploy-win.py beside the version; tools/check-pins.sh holds it),
+tools/deploy-win.py beside the version; tools/check-pins.py holds it),
 the binding staged as C:\kaya\kaya-gui behind a directory junction at
 C:\kaya\node_modules\kaya-gui — node's bare-specifier resolution looks
 there from a flat C:\kaya\<scene>.ts, and node REFUSES to strip types
@@ -244,9 +244,9 @@ the guests shipped flat beside the python ones (deploy-win's
 SCENE_TSS). Thirty-eight js legs mirror the python ones leg for leg in
 tools/lib/lanes/win.py's ORDER (pooled where python is pooled, alone
 where python is alone), each with a checked-in generated launcher
-tools/guest/run_<scene>_js.cmd of one shape that tools/check-steps.sh
+tools/guest/run_<scene>_js.cmd of one shape that tools/check-steps.py
 holds (CRLF, the pinned node on PATH, KAYA_LIB, the flat guest, the
-leg's own out file); tools/check-staging.sh derives the shipped .ts
+leg's own out file); tools/check-staging.py derives the shipped .ts
 from each launcher.
 
 ## §6 Open

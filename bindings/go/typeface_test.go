@@ -367,7 +367,7 @@ func runTypefaceTrap(t *testing.T, trap string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTheRootIsTheTypefaceWall$")
-	// cmd.Environ() rather than os.Environ(): tools/check-go-env.sh.
+	// cmd.Environ() rather than os.Environ(): tools/check-go-env.py.
 	cmd.Env = append(cmd.Environ(), "KAYA_TYPEFACE_TRAP="+trap)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {

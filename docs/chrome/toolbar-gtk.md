@@ -421,7 +421,7 @@ effect with zero new styling vocabulary in the protocol.**
   `name=''` **[MEASURED]**, and the plan's own `expect_toolbar_item i
   "label"` would then compare against the empty string on GTK while every
   other platform reads a real name. A promotion lowering that forgets the
-  a11y label is invisible to `check-universal-props.sh`'s current shape
+  a11y label is invisible to `check-universal-props.py`'s current shape
   (that gate covers declared a11y props on widget kinds, not chrome). The
   wall wants to be on the path: the GTK promotion helper takes the label
   and writes both tooltip and `AccessibleProperty::Label`, with the

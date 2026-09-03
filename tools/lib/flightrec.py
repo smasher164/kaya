@@ -97,7 +97,7 @@ def host_metrics():
 
 def tree_ids(root):
     ids = {}
-    script = pathlib.Path(root) / "tools" / "build-id.sh"
+    script = pathlib.Path(root) / "tools" / "build-id.py"
     if not script.is_file():
         return ids
     for component in ("core", "swiftui", "compose"):

@@ -1,7 +1,7 @@
 package kaya
 
 // The capability query's guards (crates/kaya/src/app.rs carries the
-// canonical note). These run with no GUI: tools/check-abort.sh runs
+// canonical note). These run with no GUI: tools/check-abort.py runs
 // `go test dev.kaya/bindings/go` on every desktop lane.
 //
 // The re-exec shape is identity_test.go's, for its reason: a root
@@ -85,7 +85,7 @@ func TestTheCapabilityAnswerAndTheWallAgree(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0],
 		"-test.run=^TestTheCapabilityAnswerAndTheWallAgree$")
-	// cmd.Environ() rather than os.Environ(): tools/check-go-env.sh.
+	// cmd.Environ() rather than os.Environ(): tools/check-go-env.py.
 	cmd.Env = append(cmd.Environ(), "KAYA_CAPS_TRAP=aux-window")
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {

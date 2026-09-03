@@ -125,7 +125,7 @@ class KayaHarnessAccessibility : AccessibilityService() {
         /**
          * DocumentsUI's package, BOTH SPELLINGS: AOSP images carry
          * `com.android.documentsui`, google_apis images (what
-         * run-emulator.sh creates) carry the google one
+         * run-emulator.py creates) carry the google one
          * (docs/traps.md).
          */
         val PICKER_PACKAGES = listOf(

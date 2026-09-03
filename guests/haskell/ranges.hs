@@ -6,7 +6,7 @@
    scalars and is SIX SHORT on this document, which opens with a CJK
    word. The search therefore runs over the UTF-8 encoding, with
    'BS.breakSubstring'. The frozen numbers and what a UTF-16 counter
-   would say instead are in tools/validate-mac.sh.
+   would say instead are in tools/validate-mac.py.
 
    Canonical semantics in guests/rust/ranges.rs; the byte-frozen
    contract in tools/scenes/ranges.steps. -}

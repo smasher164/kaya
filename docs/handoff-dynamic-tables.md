@@ -57,8 +57,8 @@ same day (docs/tables-plan.md "BREADTH CLOSED 2026-08-24").
 
 - `cargo test -p kaya --features harness --locked`: 405 unit tests, 4
   runnable docs and 14 compile-fail docs passed.
-- Direct `tools/validate-mac.sh`: all 329 legs passed.
-- Final `tools/gates.sh`: 42/42 passed after the staging-census fix and
+- Direct `tools/validate-mac.py`: all 329 legs passed.
+- Final `tools/gates.py`: 42/42 passed after the staging-census fix and
   documentation updates.
 - The 2026-08-24 all-at-t0 matrix passed every one of its 1,318 real scene
   legs and the gate sweep: mac 320s/329, Linux 474s/580, Windows 533s/191,
@@ -130,7 +130,7 @@ Relevant files:
   viewport/cell/track observations, and `expect_fills` /
   `expect_column_edges` handling.
 - `tools/checks/swiftui-table-tier.swift` and
-  `tools/check-table-tier.sh`: the compiled native-table probe and its
+  `tools/check-table-tier.py`: the compiled native-table probe and its
   watched mutations.
 - `guests/python/portfolio.py` and `tools/scenes/portfolio.steps`: the
   forcing dashboard and its shared assertions.

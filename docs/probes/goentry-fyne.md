@@ -460,7 +460,7 @@ Confirmed:
 | UI | one EGL surface, framework draws every pixel itself | Jetpack Compose widgets |
 | soft keyboard / file picker / a11y | framework hand-writes Java into its fixed Activity (663 lines) and calls it by JNI name with soft failure | Compose and the platform provide them |
 | custom Activity / intent filter / Android library | not possible; escape hatch is a *different* tool, `gomobile bind` (`doc.go:44-56`) | already how it works |
-| env vars at startup | gomobile patches `TMPDIR`/`PATH`/`LD_LIBRARY_PATH` from C `getenv` in `callMain` (`android.go:81-85`) — same underlying problem | `kaya.Env` reads C `getenv`; guarded by `tools/check-go-env.sh` and a runtime panic (`guests/go/milestone2/main_android.go (gone)`) |
+| env vars at startup | gomobile patches `TMPDIR`/`PATH`/`LD_LIBRARY_PATH` from C `getenv` in `callMain` (`android.go:81-85`) — same underlying problem | `kaya.Env` reads C `getenv`; guarded by `tools/check-go-env.py` and a runtime panic (`guests/go/milestone2/main_android.go (gone)`) |
 
 ### 5.2 The conclusion I would defend
 
@@ -488,7 +488,7 @@ spelling in the guest, leaving the build-tag split inside
 does not remove the second entry, it moves it one file down, and it does
 **not** remove the real Android-specific facts a Go guest still has to
 know — `kaya.Env` instead of `os.Getenv` (a whole milestone, and the
-reason `tools/check-go-env.sh` exists), the one-APK-many-scenes library
+reason `tools/check-go-env.py` exists), the one-APK-many-scenes library
 split that forced 30 scenes out of `main` packages
 (`guests/go/milestone2/main_android.go (gone)`), and the re-attach panic on
 configuration change (`bindings/go/android.go:150-160 (gone)`). gomobile pays

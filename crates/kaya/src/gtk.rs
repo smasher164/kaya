@@ -1724,7 +1724,7 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
 /// `kind#index` space and the candidate list a `kind@id[key.path]`
 /// target resolves over. HARNESS ONLY, like its two callers: shipped
 /// 2026-09-01 ungated, so the backend's non-harness build did not
-/// compile for a day and only tools/check-gtk.sh, which the sweep
+/// compile for a day and only tools/check-gtk.py, which the sweep
 /// excludes, could see it (found 2026-09-02).
 #[cfg(feature = "harness")]
 fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4::Widget> {
@@ -6385,7 +6385,7 @@ fn read_stream_to_end(
 /// §3.2.1, ruling 2): `fixed` rasters at the viewbox whatever the track
 /// is, so the blit has to be strictly 1:1, and no member of
 /// `GtkContentFit` means that (docs/traps.md, "A canvas sized by its own
-/// blit NEVER STARTS", second half). tools/check-canvas-blit.sh refuses
+/// blit NEVER STARTS", second half). tools/check-canvas-blit.py refuses
 /// that vocabulary by name.
 mod canvas_view {
     use gtk4::glib;
@@ -6471,7 +6471,7 @@ mod canvas_view {
     impl KayaCanvas {
         /// The blit and the points it covers. `None` is PRESENT AND EMPTY,
         /// never absent — the image arm's rule verbatim
-        /// (tools/check-empty-child.sh).
+        /// (tools/check-empty-child.py).
         pub fn set_blit(
             &self,
             paintable: Option<&gtk4::gdk::Paintable>,
@@ -8956,7 +8956,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // ships no portal and no gsettings value, so Adwaita's default IS
         // light). Every `StyleManager::is_dark()` reading in this file then
         // answers the forced scheme, including the one presentation_report
-        // sends (tools/check-appearance.sh).
+        // sends (tools/check-appearance.py).
         if let Some(mode) = crate::canvas::appearance_override() {
             adw::StyleManager::default().set_color_scheme(match mode {
                 crate::canvas::Mode::Dark => adw::ColorScheme::ForceDark,

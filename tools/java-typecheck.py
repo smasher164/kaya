@@ -95,7 +95,7 @@ import dev.kaya.KayaRecords;
 
 /** A table per row: the header bar declared on a nested For, one sort
  * handler for every stamped copy, and a re-declaration that names ONE
- * copy by its keys. Compiled by tools/java-typecheck.sh, never run. */
+ * copy by its keys. Compiled by tools/java-typecheck.py, never run. */
 public final class NestedTableCheck {
     private static final String[] TITLES = { "Symbol", "Value" };
 
@@ -419,7 +419,7 @@ if wire_after != wire_before:
 import dev.kaya.KayaApp;
 
 /** A second App in one process is refused, and the sentence says why.
- * Compiled and RUN by tools/java-typecheck.sh. */
+ * Compiled and RUN by tools/java-typecheck.py. */
 public final class BuildOnceCheck {
     private static void check(boolean ok, String what) {
         if (!ok) {

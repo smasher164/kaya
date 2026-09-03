@@ -7,7 +7,7 @@
 #
 # EVERY WIDGET KIND is asserted, because the two props are universal:
 # thirteen working kinds and one forgotten is exactly the shape that
-# ships (tools/check-universal-props.sh greps for the lowering; this is
+# ships (tools/check-universal-props.py greps for the lowering; this is
 # where the runtime agrees or does not).
 #
 # No opening settle: the first expect's bounded retry IS the

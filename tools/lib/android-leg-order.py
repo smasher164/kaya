@@ -613,7 +613,7 @@ def main() -> int:
     doctored, inserted = doctor(
         "early stage (insertion)",
         doctored,
-        r"(?m)^(    if run\(\[str\(ROOT / \"tools/build-id\.sh\"\), "
+        r"(?m)^(    if run\(\[str\(ROOT / \"tools/build-id\.py\"\), "
         r"\"--verify\",\n)",
         "    if not apk_icon_verify(apk):\n        return False\n\\1",
     )

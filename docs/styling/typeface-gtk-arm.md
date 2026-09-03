@@ -249,13 +249,13 @@ run "$proto" typeface-rust env KAYA_SELFTEST=typeface \
 | gate | result |
 |---|---|
 | `cargo test -p kaya --features harness --locked --lib` (mac) | 352 passed |
-| `tools/check-gtk.sh` (both feature configs, in the image) | OK |
-| `tools/check-targets.sh` | ALL OK |
-| `tools/check-pins.sh` | OK |
-| `tools/check-diagnostics.sh` | OK |
-| `tools/check-shell.sh`, `tools/check-case.sh` | OK |
-| `tools/check-steps.sh` | RED, expected: `scene "typeface" has no live legs in tools/linux/run-suites.sh` (also deploy-win.sh and run-emulator.sh, i.e. the winui and compose arms are in the same state). This is the blocker above, and it is the gate doing its job. |
-| `tools/check-stubs.sh` | RED, **and not from this arm** — see below |
+| `tools/check-gtk.py` (both feature configs, in the image) | OK |
+| `tools/check-targets.py` | ALL OK |
+| `tools/check-pins.py` | OK |
+| `tools/check-diagnostics.py` | OK |
+| `tools/check-shell.py`, `tools/check-case.py` | OK |
+| `tools/check-steps.py` | RED, expected: `scene "typeface" has no live legs in tools/linux/run-suites.sh` (also deploy-win.py and run-emulator.py, i.e. the winui and compose arms are in the same state). This is the blocker above, and it is the gate doing its job. |
+| `tools/check-stubs.py` | RED, **and not from this arm** — see below |
 
 ### check-stubs is red on somebody else's prose
 

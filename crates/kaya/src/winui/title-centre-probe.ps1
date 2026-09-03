@@ -25,8 +25,8 @@
 #
 #     crates/kaya/src/winui/title-centre-probe.sh akhil@192.168.64.2
 #
-# THE LANE CARRIES IT: `tools/deploy-win.sh`'s caption-centre phase runs
-# this on every full windows lane, and `tools/deploy-win.sh <host>
+# THE LANE CARRIES IT: `tools/deploy-win.py`'s caption-centre phase runs
+# this on every full windows lane, and `tools/deploy-win.py <host>
 # caption-centre` runs it alone. The wall that runs on every lane LEG is the
 # post-condition inside `center_caption_title`; this script is the
 # measurement that says by how much, in physical pixels, off UIA — at widths
@@ -194,7 +194,7 @@ function Aim($tag) {
   if ($menuR -ne $null -and $t.X -lt $menuR) { Say ("AIM  {0,-10} *** THE TITLE OVERLAPS THE MENU: title starts at {1}, the menu ends at {2} ***" -f $tag, [int]$t.X, [int]$menuR) }
   if ($cmdL -ne $null -and ($t.X + $t.Width) -gt $cmdL) { Say ("AIM  {0,-10} *** THE TITLE OVERLAPS THE COMMANDS: title ends at {1}, the commands start at {2} ***" -f $tag, [int]($t.X + $t.Width), [int]$cmdL) }
   # THE MACHINE-READABLE TWIN of the row above, for the lane phase that
-  # reads this output (tools/deploy-win.sh's caption-centre phase). It
+  # reads this output (tools/deploy-win.py's caption-centre phase). It
   # carries the one distinction a reader has to make and a `grep DRIFT=0`
   # cannot: a row is CLAMPED when the window's own centre would put the
   # title across a header, and a clamped row's drift is the rule WORKING.

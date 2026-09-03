@@ -58,7 +58,7 @@ val kayaIdentity = kayaReadIdentity(rootDir.parentFile)
  * The asset root the APK carries, and the subdirectory of `assets/` it
  * carries it in (docs/assets-plan.md; docs/deferred.md on the `kaya/`
  * prefix). The prefix string is also in KayaAssets.kt's `ROOT` and in
- * tools/check-assets.sh's APK clause; that gate holds the three equal.
+ * tools/check-assets.py's APK clause; that gate holds the three equal.
  */
 val kayaAssetRoot = File(rootDir.parentFile, "guests/assets")
 val kayaAssetPrefix = "kaya"
@@ -74,7 +74,7 @@ if (!kayaAssetRoot.isDirectory) {
 subprojects {
     plugins.withId("com.android.application") {
         // Copied VERBATIM: the lane's byte-equality check after
-        // assembleDebug (tools/android/run-emulator.sh) compares hashes.
+        // assembleDebug (tools/android/run-emulator.py) compares hashes.
         val generatedAssets = layout.buildDirectory.dir("generated/kaya-assets").get().asFile
         val packagedAssets = File(generatedAssets, kayaAssetPrefix)
         // Deleted first, or a stale asset stays in the APK and the

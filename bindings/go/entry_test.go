@@ -5,7 +5,7 @@ package kaya
 // androidEntry decides which function is the app. Both are invisible to
 // every compiler and unreachable from the matrix, which ends in
 // App.Serve rather than App.Run. The structural half — the android arm
-// compiling and the linkname resolving — is tools/check-targets.sh.
+// compiling and the linkname resolving — is tools/check-targets.py.
 
 import (
 	"runtime"

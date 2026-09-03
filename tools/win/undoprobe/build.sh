@@ -26,7 +26,7 @@ TARGET="$ROOT/target/aarch64-pc-windows-msvc/release"
 cd "$ROOT"
 cargo xwin build --locked --features harness --release \
     --target aarch64-pc-windows-msvc --lib --example undoprobe >&2
-"$ROOT/tools/build-id.sh" --verify "$TARGET/kaya.dll" || exit 1
+"$ROOT/tools/build-id.py" --verify "$TARGET/kaya.dll" || exit 1
 
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c if not exist C:\kaya\undoprobe mkdir C:\kaya\undoprobe'
 # A live guest holds kaya.dll and scp then fails unhelpfully.

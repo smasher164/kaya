@@ -70,7 +70,7 @@ func App() *kaya.App {
 		// phone the reader is the installed package's own label
 		// (docs/app-identity-plan.md ruling 3), so the runner drops the
 		// one step that reads the window instead
-		// (tools/android/run-emulator.sh's scene_script_drop).
+		// (tools/android/run-emulator.py's scene_script_drop).
 		// tools/scenes/identity.steps is byte-frozen and shared verbatim
 		// — the cut belongs to the runner, never to the scene.
 		if kaya.Capabilities().AuxWindows {

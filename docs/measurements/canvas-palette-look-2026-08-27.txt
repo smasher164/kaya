@@ -68,7 +68,7 @@ still the one thing a dark machine could overturn — but it no longer
 needs a dark machine. `KAYA_APPEARANCE=dark` on the mac canvas leg
 produces a real dark window on this light desk, so §3's open question is
 answerable by a capture whenever the maintainer wants to look at it. The
-knob is held by tools/check-appearance.sh and exercised by the
+knob is held by tools/check-appearance.py and exercised by the
 `canvasdark-*` leg on all five lanes.
 
 THE NUMBERS (WCAG contrast ratios, palette values read out of
@@ -111,7 +111,7 @@ WHAT I SEE, AND THE ONE THING THAT IS NOT SETTLED
    reading, at the weakest separation in the table (1.07). Whether that
    is right is a taste question AND a consistency question, because the
    tables next to the chart draw their card in the PLATFORM's own token
-   (tools/check-table-card.sh) while the canvas draws in kaya's palette
+   (tools/check-table-card.py) while the canvas draws in kaya's palette
    — so on a dark host the chart could sit visibly darker than the
    cards it is beside. NOT DECIDABLE HERE: it needs a dark machine, one
    capture, and the maintainer's eye on whether a chart well should read

@@ -8,7 +8,7 @@
 # EVERY LEDGER STRING BELOW IS ARITHMETIC, not an observation:
 # tools/gen-market.py writes guests/assets/market/transactions.csv
 # byte-stably, the guest formats integer cents dollars-dot-cents, the
-# tick posts POSTED on top, and tools/check-assets.sh re-derives the
+# tick posts POSTED on top, and tools/check-assets.py re-derives the
 # frozen halves from the CSV and that same posting rule on every run —
 # so regenerating the artifact without moving this file fails at a
 # gate, naming this file, instead of on three lanes.

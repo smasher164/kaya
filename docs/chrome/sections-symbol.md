@@ -248,11 +248,11 @@ differently.
 
 | lane | sections legs | lane verdict |
 |---|---|---|
-| mac (`validate-mac.sh`) | 8/8 PASS (rust, python, go, csharp, ocaml, haskell, swift, java) | `gates: OK — 34/34`, `TIMING legs 226s`, **validate-mac: ALL PASS** |
-| linux (`validate-linux.sh`, both protos) | 7/7 PASS each (x11 + wayland) | **run-suites: ALL PASS**, `validate-linux rc=0` |
-| windows (`deploy-win.sh … all`) | 5/5 PASS (rust, python, go, csharp, java) | `windows rc=0`; guest-side unit tests 8/8 |
-| android (`run-emulator.sh all`) | sections-compose / -jvm / -go PASS | `rc=0` |
-| iOS (`run-sim.sh all`) | sections-swift / sections-go PASS | `ios rc=0` |
+| mac (`validate-mac.py`) | 8/8 PASS (rust, python, go, csharp, ocaml, haskell, swift, java) | `gates: OK — 34/34`, `TIMING legs 226s`, **validate-mac: ALL PASS** |
+| linux (`validate-linux.py`, both protos) | 7/7 PASS each (x11 + wayland) | **run-suites: ALL PASS**, `validate-linux rc=0` |
+| windows (`deploy-win.py … all`) | 5/5 PASS (rust, python, go, csharp, java) | `windows rc=0`; guest-side unit tests 8/8 |
+| android (`run-emulator.py all`) | sections-compose / -jvm / -go PASS | `rc=0` |
+| iOS (`run-sim.py all`) | sections-swift / sections-go PASS | `ios rc=0` |
 
 `cargo test -p kaya --features harness --locked`: **360 passed** (+2:
 `section_symbol_spellings`, `section_symbol_expects_poll_the_real_switcher`),
@@ -308,8 +308,8 @@ crates/kaya/src/winui/mod.rs                   the Stage arm
 swift/KayaSwiftUI.swift                        KayaSectionLabel, the mac + iOS reads, the trace, the step arm, the decode comment
 android/.../dev/kaya/KayaCompose.kt            SECTION_TAG_PREFIX, kayaSectionTag, the testTag, the unmerged read, the step arm
 tools/scenes/sections.steps                    two assertions
-tools/ios/run-sim.sh                           the cut's keep argument is a LIST
-tools/android/run-emulator.sh                  the same, same words
+tools/ios/run-sim.py                           the cut's keep argument is a LIST
+tools/android/run-emulator.py                  the same, same words
 docs/deferred.md                               entry struck + 2 new entries
 ```
 

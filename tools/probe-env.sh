@@ -12,7 +12,7 @@ fi
 # One place that knows how to ask whether each test surface is ready.
 # Nothing here mutates state except `--warm`, which boots independently
 # warmable surfaces. The coupled Android phone+tablet pool is reported here
-# and owned by tools/android/run-emulator.sh, including its snapshot identity.
+# and owned by tools/android/run-emulator.py, including its snapshot identity.
 #
 #   tools/probe-env.sh          report readiness of every surface
 #   tools/probe-env.sh --warm   also boot independent simulator / VM
@@ -122,7 +122,7 @@ case "$ax_trusted" in
 esac
 
 # --- iOS simulator ---------------------------------------------------
-# Same fallback run-sim.sh uses: the nix xcrun stub and the
+# Same fallback run-sim.py uses: the nix xcrun stub and the
 # CommandLineTools default both lack simctl; only Xcode has it.
 if ! xcrun simctl help >/dev/null 2>&1; then
     for app in /Applications/Xcode.app /Applications/Xcode-*.app; do
@@ -132,9 +132,9 @@ if ! xcrun simctl help >/dev/null 2>&1; then
         fi
     done
 fi
-# THE SAME DEFAULT tools/ios/run-sim.sh USES. It read 2 against the
+# THE SAME DEFAULT tools/ios/run-sim.py USES. It read 2 against the
 # runner's 3 from 2026-07-17 (28b48c5) until 2026-08-24: the probe called
-# a two-sim pool warm and run-sim.sh then created and booted the third
+# a two-sim pool warm and run-sim.py then created and booted the third
 # inside whatever run followed. check-gates holds this agreement for the
 # Android pool and not yet for this one.
 IOS_POOL="${KAYA_IOS_SIMS:-3}"
@@ -143,7 +143,7 @@ if xcrun simctl list devices >/dev/null 2>&1; then
     if [ "$booted" -ge "$IOS_POOL" ]; then
         report ios OK "sim pool warm ($booted/$IOS_POOL kaya-sims booted)"
     elif [ "$WARM" = 1 ]; then
-        # Same creation logic run-sim.sh uses.
+        # Same creation logic run-sim.py uses.
         dtype=$(xcrun simctl list devicetypes 2>/dev/null | grep -E "iPhone [0-9]+ Pro \(" \
             | tail -1 | grep -oE 'com.apple.CoreSimulator.SimDeviceType[^)]*')
         runtime=$(xcrun simctl list runtimes 2>/dev/null | grep -m1 -oE 'com.apple.CoreSimulator.SimRuntime.iOS[0-9-]+')
@@ -179,13 +179,13 @@ fi
 # Simulator.app relays the macOS pasteboard into and out of every booted
 # simulator by default (docs/clipboard-plan.md:1502), so the clipboard
 # legs would share one board with the mac lane. Early warning only —
-# run-sim.sh MEASURES the relay per run and refuses. It names the APP,
+# run-sim.py MEASURES the relay per run and refuses. It names the APP,
 # not the pref: a running Simulator.app ignores a `defaults write` and
 # the pref can read NO while the relay is live.
 if pgrep -qx Simulator; then
     pref=$(defaults read com.apple.iphonesimulator PasteboardAutomaticSync 2>/dev/null || echo unset)
     report ios-clip CHECK \
-        "Simulator.app is running (stored PasteboardAutomaticSync=$pref) — quit it or turn off Edit > Automatically Sync Pasteboard; run-sim.sh measures the relay and refuses"
+        "Simulator.app is running (stored PasteboardAutomaticSync=$pref) — quit it or turn off Edit > Automatically Sync Pasteboard; run-sim.py measures the relay and refuses"
 else
     report ios-clip OK "Simulator.app not running — device clipboards are the devices' own"
 fi
@@ -225,7 +225,7 @@ case "$ANDROID_POOL" in
                         fi
                         if [ -n "$android_snapshot_stale" ]; then
                             warm_skip android
-                            report android COLD "$android_snapshot_stale snapshot stale — tools/android/run-emulator.sh reseeds both before readers"
+                            report android COLD "$android_snapshot_stale snapshot stale — tools/android/run-emulator.py reseeds both before readers"
                         else
                             android_phone_up=0
                             i=0
@@ -250,9 +250,9 @@ case "$ANDROID_POOL" in
                                 report android OK "current phone pool ($android_phone_up/$ANDROID_POOL) and tablet (1/1)"
                             elif [ "$WARM" -eq 1 ]; then
                                 warm_skip android
-                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — --warm does NOT boot this coupled pool; tools/android/run-emulator.sh owns it"
+                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — --warm does NOT boot this coupled pool; tools/android/run-emulator.py owns it"
                             else
-                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — tools/android/run-emulator.sh owns the coupled pool"
+                                report android COLD "phone $android_phone_up/$ANDROID_POOL, tablet $android_tablet_up/1 current — tools/android/run-emulator.py owns the coupled pool"
                             fi
                         fi
                         ;;
@@ -313,7 +313,7 @@ fi
 # --- what --warm did not do ------------------------------------------
 # `--warm` USED TO BOOT THE ANDROID POOL and cannot any more: the pool is
 # coupled (phones + the tablet + a snapshot identity) and
-# tools/android/run-emulator.sh owns it. Until this refusal, --warm
+# tools/android/run-emulator.py owns it. Until this refusal, --warm
 # reported the pool COLD and still exited 0, so a standalone benchmark
 # warmed first and paid 60-90s of emulator boot inside the number it was
 # measuring, with nothing saying the warm had not happened.

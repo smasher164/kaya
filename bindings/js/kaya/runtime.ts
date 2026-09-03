@@ -71,7 +71,7 @@ if (lib.specHash() !== wire.SPEC_HASH) {
 
 // THE HOST CAPABILITY WORD (kaya.capabilities() is the sugar over it).
 // CAP_AUX_WINDOWS IS THE CORE'S NUMBER WRITTEN AGAIN — there is no header
-// to read it out of. tools/check-sugar-surface.sh holds this line to
+// to read it out of. tools/check-sugar-surface.py holds this line to
 // crates/kaya/src/scene.rs.
 export const CAP_AUX_WINDOWS = 1;
 
@@ -163,7 +163,7 @@ export function assetRelease(handle: number): void {
 }
 
 // NAMED FOR THE CARRYING, not for the answering, and deliberately not
-// `assetWhyNot`: tools/check-diagnostics.sh reads any *why_not/*WhyNot by
+// `assetWhyNot`: tools/check-diagnostics.py reads any *why_not/*WhyNot by
 // that name and holds it to the measured-branch rule, which the function
 // that EARNED the name satisfies (crates/kaya/src/assets.rs). This copies
 // that sentence's bytes and observes nothing.

@@ -84,7 +84,7 @@ if run(["cargo", "build", "--locked", "--lib",
 # The library the legs load must be the one this build produced — a
 # build whose failure went unnoticed leaves the previous one in place
 # and every verdict below is then about stale code.
-if run([str(ROOT / "tools/build-id.sh"), "--verify",
+if run([str(ROOT / "tools/build-id.py"), "--verify",
         "target/debug/libkaya.dylib"]).returncode != 0:
     sys.exit(1)
 
@@ -152,21 +152,21 @@ print(f"assets: the root resolves by the repo-relative default "
 # validate-all run, a hand-run of this script sees no token and runs
 # everything, and a MISMATCH falls through to the full sweep. The
 # interpreter still gets built and verified on the skip path: the legs
-# run it, and gates.sh was the builder this lane relied on.
+# run it, and gates.py was the builder this lane relied on.
 _token = os.environ.get("KAYA_MATRIX_GATES_TOKEN", "")
-if _token and out_of([str(ROOT / "tools/gates.sh"),
+if _token and out_of([str(ROOT / "tools/gates.py"),
                       "--fingerprint"]).strip() == _token:
     print(f"gates: skipped — validate-all ran the sweep in this matrix "
           f"run and the tree's gate fingerprint still matches "
           f"({_token})")
     if run([str(ROOT / "tools/swiftui/build-dylib.sh")]).returncode != 0:
         sys.exit(1)
-    if run([str(ROOT / "tools/build-id.sh"), "--verify",
+    if run([str(ROOT / "tools/build-id.py"), "--verify",
             "--component", "swiftui",
             "target/swiftui/libkaya_swiftui.dylib"]).returncode != 0:
         sys.exit(1)
 else:
-    if run([str(ROOT / "tools/gates.sh")]).returncode != 0:
+    if run([str(ROOT / "tools/gates.py")]).returncode != 0:
         sys.exit(1)
 timing("core-build+gates")
 
@@ -851,7 +851,7 @@ timing("guest-builds+bench")
 
 # Every guest against the SwiftUI backend, the one macOS backend. The
 # interpreter build's exit status was load-bearing enough to move into
-# gates.sh/build-dylib above; KAYA_SWIFTUI_LIB is what every leg
+# gates.py/build-dylib above; KAYA_SWIFTUI_LIB is what every leg
 # loads.
 os.environ["KAYA_SWIFTUI_LIB"] = str(
     ROOT / "target/swiftui/libkaya_swiftui.dylib")

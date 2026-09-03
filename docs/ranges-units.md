@@ -407,7 +407,7 @@ binding should ship the conversion so no app hand-rolls it —
 Python: `len(s[:i].encode())`. Java/C#: `getBytes(UTF_8).length` of the
 prefix. Swift: `s.utf8.distance(...)` / `String.Index.utf8Offset`.
 Haskell: `BS.length . TE.encodeUtf8 . T.take i`. All one-liners, all
-stdlib. `tools/check-sugar-surface.sh` is the natural home for the
+stdlib. `tools/check-sugar-surface.py` is the natural home for the
 "all 8 have it" clause.
 
 ---
@@ -487,7 +487,7 @@ platforms do, and the measurements show snapping is *not one behavior*
 highlight that did not appear and blames the backend.
 **Uniformity note (invariant 1):** the refusal must be spelled in each
 language's idiom and be observable in all 8 — this is the shape
-`tools/check-abort.sh` already enforces for abort, and the ranges
+`tools/check-abort.py` already enforces for abort, and the ranges
 milestone should extend that gate rather than invent a new one.
 
 **WHAT IT DOES NOT REFUSE.** A grapheme split (carve-out, §VERDICT.3);
@@ -543,10 +543,10 @@ strings:**
    that KayaSwiftUI.swift and KayaCompose.kt contain no byte→unit
    conversion for range offsets (they receive native units). Negative
    test: add a `utf8` count in one of them and watch the gate fail.
-   This belongs beside `tools/check-verbs.sh`, which already knows
+   This belongs beside `tools/check-verbs.py`, which already knows
    both files are the historic miss layer.
 6. **Every binding ships the conversion helper** — a clause in
-   `tools/check-sugar-surface.sh`, which already enforces "all 8 have
+   `tools/check-sugar-surface.py`, which already enforces "all 8 have
    it" for constructors and window props.
 
 **In the scenes (shared verbatim, invariant 6):**
@@ -559,7 +559,7 @@ strings:**
    over the ZWJ family whole. **Depth-arm caveat to confirm first:**
    all three step interpreters must decode the .steps file as UTF-8 —
    only the Rust one is proven (`harness.rs:95 read_to_string`) — and
-   `check-steps.sh`'s own lint opens the file with Python's *default*
+   `check-steps.py`'s own lint opens the file with Python's *default*
    encoding, which is locale-dependent.
 8. **The CRLF leg on linux**, the one that would otherwise ship: paste
    (or `set_text` with `\r\n` — the escape exists for exactly this,

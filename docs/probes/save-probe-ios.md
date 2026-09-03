@@ -119,7 +119,7 @@ single most important harness fact for part B — see B.4.
 Probe: a throwaway iOS-simulator app that `dlopen`s the shipped
 `libkaya_swiftui_ios.dylib` and calls the production
 `kaya_swiftui_open_picked` directly, for every mode. The dylib was
-`tools/build-id.sh --verify --component swiftui`'d first (rc=0), so what was
+`tools/build-id.py --verify --component swiftui`'d first (rc=0), so what was
 driven is the artifact built from the current sources, not a stale one.
 
 Run on `kaya-sim-0` (iOS 26.5 simulator), 2026-08-09. ALL MEASURED:

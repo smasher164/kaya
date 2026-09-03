@@ -160,7 +160,7 @@ RULES A PORT MUST KEEP:
   Restored and sha256-verified (`protocol-pristine.sha256`).
 - `validate-mac-legs.log` — the full mac lane, **259 legs PASS, ALL PASS,
   rc=0**, `save-rust-swiftui: PASS (36s)`. To get past the designed-red
-  gate the lane's `tools/gates.sh || exit 1` was temporarily made
+  gate the lane's `tools/gates.py || exit 1` was temporarily made
   non-fatal (substitution count printed: 1); restored and sha256-verified
   (`vm-pristine.sha256`). `validate-mac-save.log` is the unmodified run,
   which stops at `gates: FAILED: check-verbs`.

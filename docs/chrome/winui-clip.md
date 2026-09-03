@@ -1,7 +1,7 @@
 # THE CAPTION BAND'S TWO SUSPECTED CLIPS: the dots and the hover box
 
 Progressive report. Tree at start: **ba33458**, clean.
-MY FILES: `crates/kaya/src/winui/**`, `tools/deploy-win.sh` (the carry-item),
+MY FILES: `crates/kaya/src/winui/**`, `tools/deploy-win.py` (the carry-item),
 scratchpad. VM `akhil@192.168.64.2`.
 
 The maintainer's report (2026-08-18, verbatim): *"is it just me or are the
@@ -303,13 +303,13 @@ editor_go                              PASS  verdicts=1  IDENTICAL=True
 
 `crates/kaya/src/winui/title-centre-probe.sh` had no home
 (`winui-title-center.md` §11.1). It has one now, and the driver is REUSED
-rather than copied: `tools/deploy-win.sh` gained a `caption_centre_probe`
+rather than copied: `tools/deploy-win.py` gained a `caption_centre_probe`
 phase that calls it with `KAYA_TCP_NO_DEPLOY=1` (the lane has just built and
 shipped what it would rebuild). It runs FIRST in the `all` arm, alone,
 before anything is submitted to the suite pool — the probe drives a real
 border drag and a width sweep on the one window it finds by class, so it
 needs the desktop to itself, the same reason the menus legs sit between
-drains. `tools/deploy-win.sh <host> caption-centre` runs it alone.
+drains. `tools/deploy-win.py <host> caption-centre` runs it alone.
 
 **The count rules, so the phase cannot pass having measured nothing:**
 
@@ -324,7 +324,7 @@ drains. `tools/deploy-win.sh <host> caption-centre` runs it alone.
   having proved nothing), and every unclamped row's drift must be 0;
 - no row may report the title OVERLAPPING a header, at any width.
 
-**And a second census clause in deploy-win.sh**, because the existing one
+**And a second census clause in deploy-win.py**, because the existing one
 audits `run_suite` legs and cannot see a PHASE: every function the `all`
 arm calls as `name || status=1` must also be callable from an arm of its
 own. It carries the same regret the leg census was written for — a phase you
@@ -369,10 +369,10 @@ which draws its own band.
 
 ```
 cargo test -p kaya --features harness --locked   360 + 3 + 13 passed, 0 failed
-tools/gates.sh                                   declared 34, ran 34, passed 34 — OK
-tools/check-targets.sh                           ALL OK (native/ios/android/windows/
+tools/gates.py                                   declared 34, ran 34, passed 34 — OK
+tools/check-targets.py                           ALL OK (native/ios/android/windows/
                                                  go-android, BOTH feature configurations)
-tools/deploy-win.sh <host> caption-centre        OK (11 widths, 6 unclamped, DRIFT 0)
+tools/deploy-win.py <host> caption-centre        OK (11 widths, 6 unclamped, DRIFT 0)
 11 windows legs                                  PASS, verdicts byte-identical to ba33458
 ```
 
@@ -431,7 +431,7 @@ in both trees, and the band at x5.
   session scratchpad **94 MB**; host free **417 GB**.
 - **Repo**: `git status` shows exactly four paths —
   `crates/kaya/src/winui/mod.rs`, `crates/kaya/src/winui/title-centre-probe.ps1`,
-  `crates/kaya/src/winui/title-centre-probe.sh`, `tools/deploy-win.sh`
+  `crates/kaya/src/winui/title-centre-probe.sh`, `tools/deploy-win.py`
   (+584 / −20). The temporary in-process instrument used for §2 is gone;
   `mod.rs` was restored from a saved COPY and `shasum -c`'d each time,
   never `git checkout`. Nothing committed; nothing pushed.

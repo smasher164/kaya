@@ -108,7 +108,7 @@ object KayaRing {
      * across as bytes; empty means the name resolves.
      *
      * NAMED FOR THE CARRYING, and deliberately NOT `assetWhyNot`:
-     * tools/check-diagnostics.sh reads any *WhyNot by that name alone.
+     * tools/check-diagnostics.py reads any *WhyNot by that name alone.
      * The function that earned the name is `asset_why_not` in
      * crates/kaya/src/assets.rs (docs/deferred.md).
      */

@@ -1,4 +1,4 @@
-# validate-mac.sh -> python (runner conversion, stage 4, first item)
+# validate-mac.py -> python (runner conversion, stage 4, first item)
 
 The fourth runner crossing under docs/runner-conversion-plan.md §4 —
 the mac lane, the largest roster (349 legs) and the runner that also
@@ -127,7 +127,7 @@ haskell self-tests and the monitor killed it. Standalone
 reproduction immediately after: clean at normal speed; the rerun
 sweep with a stall sampler armed: 50/50 with no stall. RESOLVED: the
 laptop lid was closed and the machine slept — the same silence
-recurred at check-keyed during the gates.sh conversion's sweep, and
+recurred at check-keyed during the gates.py conversion's sweep, and
 the maintainer's morning message supplied the cause
 (docs/measurements/gates-conversion-2026-09-01.md). Not a code
 finding.

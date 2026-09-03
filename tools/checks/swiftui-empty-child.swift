@@ -1,5 +1,5 @@
 // The SwiftUI layout negative, compiled INTO the interpreter's own
-// module by tools/check-empty-child.sh and run as an executable: the
+// module by tools/check-empty-child.py and run as an executable: the
 // reproduction of docs/deferred.md's half-decoded-image crash.
 //
 // WHAT IT DRIVES IS THE REAL THING: the real `kayaDecodeImage`, the real

@@ -13,7 +13,7 @@ android {
     defaultConfig {
         applicationId = "dev.kaya.pyhost"
         // THE NDK API LEVEL FOLLOWS THIS NUMBER (milestone2go's rule):
-        // tools/android/run-emulator.sh reads minSdk out of this file
+        // tools/android/run-emulator.py reads minSdk out of this file
         // and picks aarch64-linux-android<minSdk>-clang for the shim.
         minSdk = 26
         targetSdk = 35
@@ -40,7 +40,7 @@ android {
 
 // THE GUEST SOURCES ARE STAGED BY THE BUILD, not by whoever last ran the
 // lane. `src/main/assets/python/app/` used to be filled only by
-// tools/android/run-emulator.sh, so a hand-built APK packaged the file
+// tools/android/run-emulator.py, so a hand-built APK packaged the file
 // that runner last copied — and `--rerun-tasks` did not help, because the
 // staged copy IS the packaging task's input and it was unchanged. A
 // three-state bisect over one guest then returned identical results for
@@ -50,7 +50,7 @@ android {
 // launch rather than silently.
 //
 // THE SCENE LIST IS THE RUNNER'S — keep it equal to the tuple in
-// run-emulator.sh's python staging block, or the APK carries a scene the
+// run-emulator.py's python staging block, or the APK carries a scene the
 // lane does not expect and apk_assets_verify says so.
 val kayaRepoRoot = rootProject.projectDir.parentFile
 val kayaPythonScenes = listOf("portfolio", "varied")

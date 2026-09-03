@@ -175,7 +175,7 @@ private let alignStretch: Int64 = 3
 private let alignBaseline: Int64 = 4
 // THE CANVAS VOCABULARIES (spec enums "draw_op", "paint", "fill_rule",
 // "text_align", "text_baseline"). APPEND-ONLY wire values, hand-copied
-// here and held against the core's by tools/check-verbs.sh — the
+// here and held against the core's by tools/check-verbs.py — the
 // check-file-modes trap, one surface over. This backend BLITS and never
 // interprets an op (docs/canvas-plan.md §1.1), so nothing below is read
 // by the render; they exist so a drifted number fails a gate rather than
@@ -257,7 +257,7 @@ private let valueBlob: UInt32 = 5
 /// floor, so the assertion that looks like the guard is vacuous
 /// everywhere it is run. The only thing that can answer is Apple's own
 /// `name_availability.plist` — every name's introduction year against
-/// the declared floor — which is tools/check-symbols.sh: it reads the
+/// the declared floor — which is tools/check-symbols.py: it reads the
 /// `sf` column out of this table and self-tests by perturbing
 /// doc.on.doc to the macOS-15 rename on every run.
 ///
@@ -375,7 +375,7 @@ final class KayaNode: Identifiable {
     // as a CGImage over premultiplied RGBA8, with the scale it was drawn
     // at so the blit is 1:1 at the window's density. nil is the
     // declared-and-empty case, which stays PRESENT — never absent
-    // (tools/check-empty-child.sh).
+    // (tools/check-empty-child.py).
     var drawing: CGImage?
     var drawingScale: CGFloat = 1
     // The scroll observations (scroll viewports only), recorded by the
@@ -821,7 +821,7 @@ func kayaDiag(_ msg: String) {
 /// kayaTempDir() — the app's Documents on iOS — so a runner that cannot
 /// know the container path can still name the file. Three line shapes
 /// and the failure-only rule, held level with the Rust ring and the
-/// Compose one by tools/check-verbs.sh.
+/// Compose one by tools/check-verbs.py.
 enum KayaVTrace {
     static let cap = 2048
     private static let lock = NSLock()
@@ -1010,7 +1010,7 @@ func kayaRangeSpelling(_ text: String, _ ranges: [NSRange]) -> String {
         .joined(separator: "|")
 }
 
-// A depth stub is a CALL, never a sentence — tools/check-stubs.sh reads
+// A depth stub is a CALL, never a sentence — tools/check-stubs.py reads
 // it; the platform argument exists because this one file serves mac AND iOS.
 func kayaDepthStub(_ scene: String, on platform: String) -> Never {
     fatalError(
@@ -2307,7 +2307,7 @@ func kayaExpandPath(_ path: String) -> String {
     /// COLLAPSED form is the default and publishes no ListView/IconView/
     /// ColumnView at all, and whether a box is collapsed is the machine-wide
     /// `NSNavPanelExpandedStateForSaveMode`, which no gate reads
-    /// (tools/validate-mac.sh). So the rows are never read here, either state.
+    /// (tools/validate-mac.py). So the rows are never read here, either state.
     func kayaSavePanelState() -> (String, String)? {
         guard kayaLiveSavePanel != nil else { return nil }
         let app = kayaPanelAxApp()
@@ -2563,7 +2563,7 @@ func kayaPresentSaveDialog(
         // ARMED BY file_dialog_goto AND MEASURED NOT TO TAKE. The OPEN picker
         // honours `directoryURL` here; the EXPORT sheet does not — it resumes
         // wherever the Files browser last was, and that memory outlives the
-        // process (docs/traps.md; tools/ios/run-sim.sh). So what
+        // process (docs/traps.md; tools/ios/run-sim.py). So what
         // `expect_save_dialog`'s directory half reads on this platform is the
         // BROWSER's location, not this line, and the scene's own `file_choose`
         // is what puts the browser there. The line stays because it is the
@@ -3844,7 +3844,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaDiag(
                         "app identity \(identityName): iOS has no runtime route to the "
                             + "Home Screen icon, so this declaration reaches the platform "
-                            + "through tools/ios/run-sim.sh's make_bundle; "
+                            + "through tools/ios/run-sim.py's make_bundle; "
                             + "\(identityIcon?.count ?? 0) icon bytes kept for the "
                             + "bundle read")
                 #endif
@@ -4398,7 +4398,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
         // is recomputed at every batch tail — a walk over REALIZED nodes
         // only, virtualization's gift, and never on macOS, which has no
         // grouped tier to consult it. BEFORE the admission drive, whose
-        // pinned tail is the batch boundary (tools/check-steps.sh).
+        // pinned tail is the batch boundary (tools/check-steps.py).
         kayaRecomputeGroupedSurfaces()
     #endif
     if menusTouched {
@@ -4560,7 +4560,7 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     /// `kayaAxFind` returning the first match was measured lying (2026-08-11):
     /// two stamped copies shared a const template a11y id, `expect_ax entry#2`
     /// resolved through the id, and the verb reported the FIRST copy's label
-    /// as the second's (tools/check-diagnostics.sh's rule, one verb over).
+    /// as the second's (tools/check-diagnostics.py's rule, one verb over).
     private func kayaAxFindAll(
         _ element: AXUIElement, _ identifier: String, _ depth: Int = 0,
         _ out: inout [AXUIElement]
@@ -5638,7 +5638,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
 /// NICETY: an expected string is whatever the app puts on screen, and kaya's own
 /// asset miss sentence carries a semicolon. Same rule as `split_statements` in
 /// crates/kaya/src/harness.rs and `kayaSplitStatements` in KayaCompose.kt, held
-/// equal by tools/scenes/assets.steps; tools/check-steps.sh refuses a statement
+/// equal by tools/scenes/assets.steps; tools/check-steps.py refuses a statement
 /// with unbalanced quotes.
 private func kayaSplitStatements(_ line: String) -> [String] {
     var out: [String] = []
@@ -5661,7 +5661,7 @@ private func kayaSplitStatements(_ line: String) -> [String] {
 
 /// THE CEILING ON ONE STEP, HOP INCLUDED — harness.rs's STEP_CEILING,
 /// the same number in all three harnesses
-/// (tools/check-harness-ceiling.sh). The
+/// (tools/check-harness-ceiling.py). The
 /// retry deadline below is read only AFTER a step returns, and every
 /// step here is a `DispatchQueue.main.sync`: a saturated main thread
 /// answers none of them, so the leg prints NOTHING — no verdict, no
@@ -6524,7 +6524,7 @@ private func kayaRunScript(_ script: String) {
                 // iOS's read is the applied prop instead, a stated carve-out
                 // rather than a shortcut (D4) — see kayaWindowDirtyState for
                 // why that is still an observation. The phone lane runs this
-                // scene's PHONE-EXPRESSIBLE PREFIX (tools/ios/run-sim.sh's
+                // scene's PHONE-EXPRESSIBLE PREFIX (tools/ios/run-sim.py's
                 // `cut` argument states that with its reasons).
                 #if os(macOS)
                     let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
@@ -8729,7 +8729,7 @@ func kayaInvalidateTableGeometry() {
 /// keystroke, the platform undo, and the harness verbs that stand in for
 /// them. A write nobody batched stales the table observations the way a
 /// batch does, scene-wide because a sibling can move a table it is not
-/// inside of. tools/check-table-tier.sh holds every model write here.
+/// inside of. tools/check-table-tier.py holds every model write here.
 func kayaUserWrite(_ write: () -> Void) {
     kayaInvalidateTableGeometry()
     write()
@@ -8740,7 +8740,7 @@ func kayaUserWrite(_ write: () -> Void) {
 /// NEVER derived from the model — that cost 41% of the mac main thread at
 /// 100k rows and bought nothing the epoch did not already have
 /// (docs/traps.md, "A main-queue resize is not a completed SwiftUI layout
-/// turn"). tools/check-table-tier.sh refuses a walk here.
+/// turn"). tools/check-table-tier.py refuses a walk here.
 func kayaTableGeometryGeneration(_ table: KayaNode) -> Int {
     table.tableGeometryEpoch
 }
@@ -9032,7 +9032,7 @@ enum KayaTableWidth {
 /// Which tier a host takes, from its inputs alone — PURE, because the
 /// two tiers present identical bytes and no scene can name the one that
 /// drew it (docs/traps.md, "An observable with no discriminator").
-/// tools/check-table-tier.sh drives this truth table and holds
+/// tools/check-table-tier.py drives this truth table and holds
 /// KayaTableSurface as its only caller.
 ///
 /// `dynamicColumns` is TableColumnForEach's floor (macOS 14.4 / iOS
@@ -9177,7 +9177,7 @@ struct KayaTableSurface: View {
 /// different colours in dark aqua — measured 2026-08-26, a 5pt #1E1E1E
 /// bar under every table whose interior rendered #24292C
 /// (docs/traps.md). Light hid it: both are #FFFFFF there.
-/// tools/check-table-card.sh holds the spelling.
+/// tools/check-table-card.py holds the spelling.
 private var kayaNativeTableApron: some View {
     #if os(macOS)
         return Rectangle().fill(.background)
@@ -9229,7 +9229,7 @@ private struct KayaNativeTable: View {
                 alignment: .top)
             // THE FLOOR STAYS A FLOOR (ruling A, 2026-08-26): a hugging
             // container widens to the table's content, which
-            // tools/check-table-tier.sh holds with a runtime probe. The
+            // tools/check-table-tier.py holds with a runtime probe. The
             // WRAPPER that would make this scrollable — the web's own
             // answer, a too-wide table inside an overflow-x container —
             // needs the viewport observation to move with it, because
@@ -9453,7 +9453,7 @@ private struct KayaNativeTable: View {
     /// One recycled cell: an NSHostingView over the stamped cell's own
     /// KayaRender. A row outside the band keeps its cell and shows
     /// nothing rather than dropping out of the table's geometry — one
-    /// node is one widget (tools/check-empty-child.sh), one tier over.
+    /// node is one widget (tools/check-empty-child.py), one tier over.
     final class KayaTableCellView: NSTableCellView {
         private let host = NSHostingView(rootView: AnyView(Color.clear))
 
@@ -10101,7 +10101,7 @@ private struct KayaGeometryStamp: Equatable {
 /// THE ONE WRITER of a table's cell geometry, for BOTH tiers: SwiftUI's
 /// reporter below on the synthesized one, NSTableView's own frames on the
 /// mac native one. One writer because one displacement has to move both —
-/// tools/check-table-tier.sh's displaced-cells negative perturbs here.
+/// tools/check-table-tier.py's displaced-cells negative perturbs here.
 func kayaRecordTableCell(
     _ node: KayaNode, _ key: String, _ generation: Int, _ frame: CGRect
 ) {
@@ -10818,7 +10818,7 @@ let kayaFoldSeamGap: CGFloat = 16
 ///
 /// The GROUPED CELL background and NO STROKE — iOS parts a card from its
 /// page by background contrast, not by an outline. Semantic colours, so dark
-/// mode is free. tools/check-table-card.sh holds the layer as well as the
+/// mode is free. tools/check-table-card.py holds the layer as well as the
 /// look.
 /// THE GROUPED-SCREEN RULE, derived and general: a screen containing a
 /// table is a grouped screen (iOS's own reading — Settings, Health —
@@ -11686,7 +11686,7 @@ func kayaRegisterFont(_ bytes: Data) -> String? {
 // while the app runs. iOS has no runtime call that takes picture bytes at all —
 // the whole SDK surface is supportsAlternateIcons/setAlternateIconName/
 // alternateIconName, typed BOOL and NSString — so its identity is the BUNDLE's,
-// written by tools/ios/run-sim.sh's make_bundle.
+// written by tools/ios/run-sim.py's make_bundle.
 
 /// The four quadrant CENTRES of a decoded picture, as
 /// `RRGGBB/RRGGBB/RRGGBB/RRGGBB` in reading order: top-left, top-right,
@@ -11884,7 +11884,7 @@ private struct KayaCanvasReader: View {
 /// `expect_drawing_hash` keeps the byte-exact assertion.
 ///
 /// harness.rs and KayaCompose.kt carry their own copies of this number;
-/// tools/check-verbs.sh holds the three equal and pinned at the ruled 1.
+/// tools/check-verbs.py holds the three equal and pinned at the ruled 1.
 let kayaInkTolerance = 1
 
 /// The half of a PER-MODE expectation that names `mode`, out of
@@ -12023,7 +12023,7 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
         // `ink light 16181C/2B3B4F`, the dark palette reported as light,
         // stable across a boot rather than flickering per read.
         // The window's own `traitCollection` is a TOOLKIT read-back, so the
-        // dark leg stays a real proof (tools/check-appearance.sh's
+        // dark leg stays a real proof (tools/check-appearance.py's
         // self-fulfilling clause) rather than an echo of the variable.
         guard let window = kayaHarnessWindow() else {
             return "<no window to read an appearance from>"
@@ -12054,7 +12054,7 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
 /// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance.
 ///
 /// UNSET RETURNS nil AND NOTHING IS INSTALLED — the platform default, byte
-/// for byte (tools/check-appearance.sh's inert clause). A value that is
+/// for byte (tools/check-appearance.py's inert clause). A value that is
 /// neither word is a typo in a lane, and a silently ignored one would run
 /// the whole leg under the wrong palette and freeze a wrong string, so it
 /// dies here naming both accepted spellings.
@@ -12245,7 +12245,7 @@ func kayaIconQuadrants(_ image: CGImage) -> String? {
     /// WHY THIS READ CANNOT REPORT QUADRANT SAMPLES, or nil when it can.
     ///
     /// EVERY ANSWER IS A SENTENCE THIS PROCESS WENT AND MEASURED (CLAUDE.md
-    /// invariant 3, tools/check-diagnostics.sh), and the second one is the
+    /// invariant 3, tools/check-diagnostics.py), and the second one is the
     /// whole reason this function exists: reading `NSApp.applicationIconImage`
     /// back is NOT an echo — AppKit stores a re-rendered snapshot — but it
     /// STILL CANNOT TELL "stored" FROM "SHOWN". In the accessory arm this exact
@@ -12382,7 +12382,7 @@ private struct KayaButtonStyle: PrimitiveButtonStyle {
 }
 
 /// THE IMAGE DECODE, in one function so the layout negative
-/// (tools/check-empty-child.sh) drives the platform's real decoder and not a
+/// (tools/check-empty-child.py) drives the platform's real decoder and not a
 /// copy of this arm. A failed decode — or a handle the pump never prefetched —
 /// is the placeholder class, never a crash: the image slot goes nil and
 /// `imageSize` reads "0x0", which is what the byte-frozen gallery scene asserts
@@ -12410,7 +12410,7 @@ func kayaDecodeImage(_ data: Data?, into node: KayaNode) {
 ///
 /// nil for a zero-sized or short buffer, which is the declared-and-empty
 /// case; the render keeps the node present either way
-/// (tools/check-empty-child.sh).
+/// (tools/check-empty-child.py).
 func kayaDrawingImage(_ data: Data?, _ width: Int, _ height: Int) -> CGImage? {
     guard let data, width > 0, height > 0, data.count >= width * height * 4 else { return nil }
     guard let provider = CGDataProvider(data: data as CFData) else { return nil }
@@ -12916,7 +12916,7 @@ struct KayaRender: View {
             // is owned here.
             //
             // STRICTLY 1:1, NEVER STRETCHED (§3.2.1, ruling 2, and
-            // tools/check-canvas-blit.sh's clause): the image is NOT
+            // tools/check-canvas-blit.py's clause): the image is NOT
             // `.resizable()` and its size is the buffer's own pixels over
             // the scale they were drawn at, so a track bigger than the
             // buffer leaves MARGIN rather than a rescale. Whether the
@@ -12926,7 +12926,7 @@ struct KayaRender: View {
             //
             // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
             // ABSENT — the image arm's rule verbatim, for its reason
-            // (tools/check-empty-child.sh).
+            // (tools/check-empty-child.py).
             Group {
                 if let buffer = node.drawing {
                     #if os(macOS)
@@ -16533,7 +16533,7 @@ func kayaSplitArm(_ windowId: UInt64) -> Bool {
 // content+detail stays UNDER 600, the compact threshold: below 600 the
 // window leaves the split arm entirely, so the two-pane rung is this
 // ladder's floor and the bare expect_panes invariant — a regular window
-// never stacks — holds at every regular width. tools/check-pane-ladder.sh
+// never stacks — holds at every regular width. tools/check-pane-ladder.py
 // pins the arithmetic and that ordering.
 let kayaPaneMinSidebar: Double = 200
 let kayaPaneMinContent: Double = 270

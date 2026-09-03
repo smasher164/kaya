@@ -258,8 +258,8 @@ def check_rules_fire(scenes: dict, bad: list) -> None:
 def check_backend_table(root: pathlib.Path, bad: list) -> None:
     """The backend roster here and in the two sibling helpers must agree.
 
-    FIVE copies of this table exist (check() in check-stubs.sh, the
-    runner list in check-steps.sh, BACKENDS in hand-rolled-stubs.py,
+    FIVE copies of this table exist (check() in check-stubs.py, the
+    runner list in check-steps.py, BACKENDS in hand-rolled-stubs.py,
     BACKENDS in stub-ledger.py, RUNNERS here); the three python ones at
     least pin each other.
     """

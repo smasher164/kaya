@@ -213,7 +213,7 @@ either.
   path and truncates rather than appending.
 - **Where the cost multiplies**: `Stage` (harness.rs:596) would gain a method,
   which means GtkStage (gtk.rs:5730), WinUiStage (winui/mod.rs:7520) and three
-  mock stages in harness.rs; and tools/check-verbs.sh requires every harness
+  mock stages in harness.rs; and tools/check-verbs.py requires every harness
   verb to appear in BOTH interpreter files (swift/KayaSwiftUI.swift and
   android/.../KayaCompose.kt (gone)), where the save panel has to be driven again in
   Swift and in Kotlin.
@@ -242,8 +242,8 @@ milestone is everything the invariants make mandatory:
    (`ActivityResultContracts.CreateDocument`). Each answers a different object;
    each has to register a source the core can redeem.
 4. **Eight bindings plus the C floor**, with sugar in all of them
-   (check-sugar-surface.sh) — invariant 2 forbids scoping this to Go.
-5. **Both interpreters** carry the new verb and constants (check-verbs.sh), so
+   (check-sugar-surface.py) — invariant 2 forbids scoping this to Go.
+5. **Both interpreters** carry the new verb and constants (check-verbs.py), so
    the save panel is driven a third and fourth time in Swift and Kotlin.
 6. **One new shared scene** (tools/scenes/*.steps, byte-identical strings
    across languages — invariant 6), run on five lanes.

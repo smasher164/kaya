@@ -25,7 +25,7 @@ dev_shell_or_die()
 # concept added to five of six files fails nowhere at build time and
 # renders as a missing glyph on the sixth platform only.
 #
-# check-symbols.sh (the OS-floor gate) is this gate's sibling: that one
+# check-symbols.py (the OS-floor gate) is this gate's sibling: that one
 # asks whether the Swift table's names EXIST at the floor, this one asks
 # whether the six tables are THE SAME table.
 

@@ -54,7 +54,7 @@ part worth having:
 | Exit | Refusal |
 |---|---|
 | 2 | Not a bench platform, or an argument it does not know. |
-| 3 | A matrix is live. Either this shell carries `KAYA_MATRIX_GATES_TOKEN` (so `tools/validate-all.sh` started it) or a lane runner is in the process table. |
+| 3 | A matrix is live. Either this shell carries `KAYA_MATRIX_GATES_TOKEN` (so `tools/validate-all.py` started it) or a lane runner is in the process table. |
 | 4 | The platform's environment is absent, in the terms `tools/probe-env.sh` uses. |
 | 5 | The environment is fine but this script does not drive that rig yet; the recipe is below. |
 
@@ -183,7 +183,7 @@ like a miracle for the wrong reason. From `docs/deferred.md`, all struck:
 | Swift binding's linear `modelSet` | 32,000 inserts 15,135 ms to 18 ms |
 | Python binding's per-mutation rollback snapshot | Growth `9.7-12.6x` to `0.97-1.01x` |
 | The 64 KiB pump cap | The N=161 one-transaction wall is gone |
-| The wedged-main-thread silence | A step now has a ceiling and publishes a verdict; `tools/check-harness-ceiling.sh` holds it |
+| The wedged-main-thread silence | A step now has a ceiling and publishes a verdict; `tools/check-harness-ceiling.py` holds it |
 
 Row windowing landed after all of these, which moves the whole shape
 again. **Re-measure before quoting any number in this file as current.**
@@ -201,7 +201,7 @@ somewhere already; these are pointers, not second copies.
   tree's clean/dirty state into every record's header for this reason.
 - **No `KAYA_FAST`.** The bench never sets it and neither should you.
   The rule and its reasoning are in CLAUDE.md's environment section and
-  `tools/keyed.sh`; a run that goes on the record consults no cache.
+  `tools/keyed.py`; a run that goes on the record consults no cache.
 - **Host contention.** Every 2026-08-24 number was taken with the other
   four lanes' pools live on one machine. The mac report puts the
   run-to-run spread at roughly +/- 50% for that reason, which is why
@@ -264,7 +264,7 @@ process dying, or to the cap. Memory from `dumpsys meminfo`.
 
 **iOS.** Swift guest, source kept beside this file as
 `choke-ios-guest-2026-08-24.swift`, compiled exactly as
-`tools/ios/run-sim.sh` compiles a swift-suite leg, all three artifacts
+`tools/ios/run-sim.py` compiles a swift-suite leg, all three artifacts
 `build-id --verify`'d first. Simulator from the standing pool, launched
 under `timeout 120 xcrun simctl launch --console-pty`, script passed as
 `SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT`. `KAYA_CHUNK=0` selects the natural

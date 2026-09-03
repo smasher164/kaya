@@ -165,7 +165,7 @@ def check(harness, swiftui, compose):
         arm_pat, publish_pat, leave_pat = SHAPES[label]
         arms = re.findall(arm_pat, body)
         # A LITERAL argument names every step the same, which is the
-        # step-failed rule one file over (tools/check-verbs.sh): the
+        # step-failed rule one file over (tools/check-verbs.py): the
         # sentence has to say which step it was inside. The
         # interpreters also arm their verdict's OWN reads, with an
         # <angle-bracketed> literal, so the rule is that at least one

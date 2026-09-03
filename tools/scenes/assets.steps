@@ -26,7 +26,7 @@
 # rather than the one file it happens to need (docs/assets-plan.md A5.1,
 # "the root moves as a unit"). Nothing else in the tree observes that
 # property at run time; adding an asset reddens this line, and
-# tools/check-assets.sh holds the frozen string equal to the root's own
+# tools/check-assets.py holds the frozen string equal to the root's own
 # listing so the red arrives from a gate, naming this file, before any
 # lane runs.
 #

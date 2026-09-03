@@ -28,7 +28,7 @@ answer it REPLACED), §0e and §1b (what the probes measured), §1-§3
   and both interpreters (Compose refused with `depthStub` when this was
   written; its arm landed 2026-08-03).
 - tools/scenes/clipboard.steps + guests/rust/clipboard.rs, run as
-  `clipboard-rust-swiftui` (DEPTH_SCENES in validate-mac.sh).
+  `clipboard-rust-swiftui` (DEPTH_SCENES in validate-mac.py).
 - Probes: tools/mac/clipprobe, tools/linux/clipprobe, tools/ios/clipprobe.
 
 ## What remained, in the order it was done
@@ -112,7 +112,7 @@ Each needed: the copy arm, the read arm answering exactly once, the
 - **GTK/wayland — ARM WRITTEN 2026-08-02/03, measured first (docs/
   clipboard-plan.md §5b).** The compositor is sway (Weston has NO
   clipboard at all — §0e finding 1). The foreign reader/writer for the
-  harness verbs is wl-copy/wl-paste. `check-gtk.sh` needs docker and is
+  harness verbs is wl-copy/wl-paste. `check-gtk.py` needs docker and is
   the only gate that compiles gtk.rs.
   The probe settled the copy arm's
   structure (a union provider advertises all four representations), the
@@ -174,7 +174,7 @@ Each needed: the copy arm, the read arm answering exactly once, the
   caller. The fix rode a measured charge — ART's FileDescriptor int
   field is `descriptor`, not `fd` (tools/android/clipprobe
   FdReceiver; admitted on API 35) — and the guard is
-  tools/check-jni.sh: every native/external declaration registered
+  tools/check-jni.py: every native/external declaration registered
   on its tier's attach path, both directions, statically, four
   negative self-tests. THE LANE IS GREEN: 50 legs, both clipboard
   legs PASS, 2026-08-03.
@@ -204,7 +204,7 @@ Each needed: the copy arm, the read arm answering exactly once, the
   the sweep verdict), phones only, one leg per device slot, NO
   drain (per-device pasteboards, §8 finding 5), and check-steps'
   iOS clause pins the shape both ways with five self-tests —
-  including that no live run-sim.sh line touches a pasteboard tool
+  including that no live run-sim.py line touches a pasteboard tool
   (the validate-all cross-lane hazard, closed structurally).
 
 ### 3. The Android helper APK
@@ -222,7 +222,7 @@ There is one system clipboard per session, so clipboard legs cannot run
 concurrently with each other on ANY lane — they would be eight
 processes writing one variable. validate-mac gives each leg its own
 `drain`; the linux (tools/linux/run-suites.sh) and windows
-(tools/deploy-win.sh) runners now serialise theirs the same way, each
+(tools/deploy-win.py) runners now serialise theirs the same way, each
 in its own vocabulary and each pinned by check-steps' barrier clause
 (docs/clipboard-plan.md §0d, the 2026-08-02 correction, has the
 measurement: six of eight failed concurrently, 8/8 serially).

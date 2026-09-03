@@ -80,7 +80,7 @@ byte-identical restore. `perturb.py` now uses `copyfile` + `os.utime`.
 
 ## ITEM 4 — THE C FLOOR IN check-steps (BUILT)
 
-`tools/check-steps.sh`, new `sweep_c_floor` beside `sweep_guests`. NOT a
+`tools/check-steps.py`, new `sweep_c_floor` beside `sweep_guests`. NOT a
 row in the existing sweep, and the comment says why: that sweep demands a
 MAC leg for every scene in mac's SCENES whose guest file exists, and the
 C floor deliberately carries a different scene set per lane (it is the
@@ -101,7 +101,7 @@ Three clauses, from the two declarations the floor actually has
 ### Watched failing, each restored by sha256
 | # | perturbation | subs | rc | message |
 |---|---|---|---|---|
-| N-C1 | `run undo-c-swiftui …` deleted from validate-mac.sh | 1 | **1** | clause 1 (`guests/c/undo.c … no lane runs it`) AND clause 2 (`builds the C "undo" guest (SCENES=undo) but runs no leg`) |
+| N-C1 | `run undo-c-swiftui …` deleted from validate-mac.py | 1 | **1** | clause 1 (`guests/c/undo.c … no lane runs it`) AND clause 2 (`builds the C "undo" guest (SCENES=undo) but runs no leg`) |
 | N-C2 | `run "$proto" todos-c …` deleted from linux/run-suites.sh | 1 | **1** | clause 1 for todos |
 | N-C3 | linux leg re-pointed at `c-guests/todoss` | 1 | **1** | clause 3, plus clause 1 for the orphaned todos |
 | — | restored | — | **0** | `check-steps: OK` |
@@ -151,7 +151,7 @@ Edit>Redo consumes the command rather than falling through to the
 platform's redo, so the native tier does not quietly cover for it.
 
 ### The mac leg (rust guest, the leg validate-mac runs)
-Build: `cargo build --locked --lib --example undo`, `build-id.sh
+Build: `cargo build --locked --lib --example undo`, `build-id.py
 --verify target/debug/libkaya.dylib` (rc=0), `swiftui/build-dylib.sh`
 (rc=0). Leg env `KAYA_SWIFTUI_LIB=target/swiftui/libkaya_swiftui.dylib`,
 `KAYA_SELFTEST_SCRIPT` = the scene with comments stripped, exactly as
@@ -333,12 +333,12 @@ resolved-by-evidence with the citations above.
 
 ## ITEM 5 — THE F1/F2 PAIRING CLAUSE (BUILT)
 
-New gate `tools/check-native-undo.sh`, wired into the fast-gate set
-(`tools/validate-mac.sh` beside check-roles, keyed like it) with its
-input set declared in `tools/build-id.sh`'s GATES
+New gate `tools/check-native-undo.py`, wired into the fast-gate set
+(`tools/validate-mac.py` beside check-roles, keyed like it) with its
+input set declared in `tools/build-id.py`'s GATES
 (`["crates", "swift", "android"]` — the same four backend files, and no
 binding sits between the core seam and the arm that calls it).
-`check-keyed.sh` re-run: OK (19 gates keyed).
+`check-keyed.py` re-run: OK (19 gates keyed).
 
 Three clauses per backend, over the four files that carry five arms
 (KayaSwiftUI.swift serves mac AND iOS, whose brackets differ in spelling
@@ -436,14 +436,14 @@ is core routing plus each backend's existing `role_enabled`.
 | gate / suite | result |
 |---|---|
 | `cargo test -p kaya --features harness --locked` | 268 passed, 0 failed (+13 compile-fail doctests, +3 doctests) |
-| `tools/check-steps.sh` | OK (with the new C-floor sweep) |
-| `tools/check-native-undo.sh` | OK, four clauses watched failing |
-| `tools/check-stubs.sh` / `check-verbs.sh` / `check-roles.sh` | OK |
-| `tools/check-keyed.sh` | OK (19 gates keyed) |
-| `tools/check-shell.sh` / `check-mirror.sh` | OK |
-| `tools/gen-header.sh|gen-bindings.sh|gen-guests.sh --check` | OK (nothing regenerates — no spec change) |
-| `tools/check-sugar-surface.sh` / `check-universal-props.sh` / `check-tx-liveness.sh` / `check-abort.sh` / `check-ambient-tx.sh` | OK |
-| `tools/check-targets.sh` | ALL OK (every cfg'd backend, both feature configs) |
+| `tools/check-steps.py` | OK (with the new C-floor sweep) |
+| `tools/check-native-undo.py` | OK, four clauses watched failing |
+| `tools/check-stubs.py` / `check-verbs.py` / `check-roles.py` | OK |
+| `tools/check-keyed.py` | OK (19 gates keyed) |
+| `tools/check-shell.py` / `check-mirror.py` | OK |
+| `tools/gen-header.py|gen-bindings.py|gen-guests.py --check` | OK (nothing regenerates — no spec change) |
+| `tools/check-sugar-surface.py` / `check-universal-props.py` / `check-tx-liveness.py` / `check-abort.py` / `check-ambient-tx.py` | OK |
+| `tools/check-targets.py` | ALL OK (every cfg'd backend, both feature configs) |
 | mac legs | undo-rust-swiftui ×2 green + flip proof; undo-python-swiftui, undo-c-swiftui green |
 
 ## FILES
@@ -451,10 +451,10 @@ is core routing plus each backend's existing `role_enabled`.
 - `crates/kaya/src/scene.rs` — the banking arm + its doc, two unit tests.
 - `tools/scenes/undo.steps` — the redo pin (7 steps, 30 lines with the
   reasoning).
-- `tools/check-steps.sh` — `sweep_c_floor`.
-- `tools/check-native-undo.sh` — NEW gate (item 5).
-- `tools/validate-mac.sh` — one line wiring the gate into the fast set.
-- `tools/build-id.sh` — the gate's keyed input set.
+- `tools/check-steps.py` — `sweep_c_floor`.
+- `tools/check-native-undo.py` — NEW gate (item 5).
+- `tools/validate-mac.py` — one line wiring the gate into the fast set.
+- `tools/build-id.py` — the gate's keyed input set.
 - `docs/deferred.md`, `docs/undo-plan.md` — the ledger and the plan.
 
 ## DEVIATIONS, stated
@@ -464,8 +464,8 @@ is core routing plus each backend's existing `role_enabled`.
    universal rule, so the charge's wording could not be satisfied as
    written. Unit test attached to the rule.
 2. Two files outside the charge's ownership list were touched, both
-   because a gate nobody runs is not a guard: `tools/validate-mac.sh`
-   (one line) and `tools/build-id.sh` (a GATES entry). CLAUDE.md/AGENTS.md
+   because a gate nobody runs is not a guard: `tools/validate-mac.py`
+   (one line) and `tools/build-id.py` (a GATES entry). CLAUDE.md/AGENTS.md
    enumerate the fast-gate set in their validation ladder and now lag by
    one gate — left alone deliberately (they are mirrors, and the ladder is
    the maintainer's doctrine text), flagged here as the one-line follow-up.
@@ -483,7 +483,7 @@ is core routing plus each backend's existing `role_enabled`.
   session leaves 51.0 KB in the scratchpad — the report (21 KB), the six
   leg logs, and perturb.py.
 - The repo's own `target/` stands at 38 GB, of which ~3.5 GB was
-  rewritten in this session — almost all of it `check-targets.sh`
+  rewritten in this session — almost all of it `check-targets.py`
   cross-compiling every backend into the tree every lane builds from.
   Not deleted, deliberately: it is the project's canonical build
   directory, not agent scratch, and clearing it would cost the next lane
@@ -491,6 +491,6 @@ is core routing plus each backend's existing `role_enabled`.
 
 ### One more run, on the FINAL tree
 The green-twice runs above were made before a comment-only edit to a
-`#[cfg(test)]` block, so the build id moved. Rebuilt, `build-id.sh
+`#[cfg(test)]` block, so the build id moved. Rebuilt, `build-id.py
 --verify` rc=0, `undo-rust-swiftui` re-run: rc=0, `KAYA_SELFTEST: OK`.
 The record is about the tree as it stands.

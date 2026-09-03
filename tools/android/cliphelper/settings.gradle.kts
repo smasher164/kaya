@@ -16,7 +16,7 @@ dependencyResolutionManagement {
 
 // STANDALONE, deliberately outside android/'s build: a module in the
 // real build is one `assemble` away from affecting what the lane ships.
-// Not a throwaway probe — tools/android/run-emulator.sh installs this on
+// Not a throwaway probe — tools/android/run-emulator.py installs this on
 // every pool device as the clipboard scene's foreign app
 // (docs/clipboard-plan.md §7).
 rootProject.name = "kaya-clip-helper"

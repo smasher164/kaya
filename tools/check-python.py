@@ -40,13 +40,12 @@ dev_shell_or_die()
 #      is invisible until that branch runs, and bash has no compile step
 #      at all.
 #
-# AND THE SHIM SHAPE (9). A converted gate keeps its `.sh` name because
-# ~50 path-shaped citations in docs/probes, docs/chrome, docs/traps and
-# the plans name it, and check-doc-refs holds every one of those to a file
-# that exists. The research wanted no stub at all, for fear of the
-# preamble drifting into it; the answer is that the stub may hold NOTHING
-# BUT THE EXEC — pinned here, byte for byte, so it can never grow logic
-# and there is nothing in it to drift.
+#   9. A SCRIPT A BODY NAMES EXISTS, AND NO `.sh` NAME IS COMPOSED. This
+#      replaced the shim rule when the shims went (2026-09-02): the word
+#      sweep that renamed 1,405 citations could not see an f-string
+#      that appends `.sh` to a name, and three lanes died at their first step on
+#      the matrix that followed — a name a caller spells at run time is
+#      checked only on the lane that runs it. See SCRIPT_EXEMPT.
 #
 # AND THE PRELUDE'S OWN NEGATIVES (10), run here rather than left to a
 # gate list nobody reads: kaya_gate.py --selftest, on this sweep.
@@ -101,9 +100,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 HEADER_SUB = HEADER.replace(".resolve().parent / ",
                             ".resolve().parent.parent / ")
 
-SHIM = '''#!/usr/bin/env bash
-exec python3 "$(dirname "$0")/{stem}.py" "$@"
-'''
 
 # Rule 6's population as of phase 0. Every entry must name a file that
 # EXISTS — an exemption that can rot into a skip is worse than none
@@ -152,6 +148,33 @@ def converted():
     out["tools/lib/kaya_gate.py"] = lib.read_text(encoding="utf-8")
     return out
 
+
+# Rule 9's deliberate fakes: a self-test that needs a script which must
+# NOT exist names it here, with the reason.
+SCRIPT_EXEMPT = {
+    "tools/check-there-is-no-such-gate.sh":
+        "gates.py's census negative: a gate the list names but the tree lacks",
+    "tools/x.sh":
+        "the prelude's F2 self-test names a script only to print its sentence",
+    "tools/check-not-yet-converted.py":
+        "this gate's N12: the re.subn body under a name the exempt table lacks",
+    "tools/check-invented-by-selftest.sh":
+        "check-gates' census negative: a gate on disk that no list carries",
+    "tools/check-REMOVED-BY-SELFTEST.sh":
+        "check-gates' census negative: a listed gate the tree lacks",
+    "tools/gone.sh":
+        "check-doc-refs' N7: the (gone) marker exempting a path that left",
+    "tools/check-there-is-no-such-file.sh":
+        "check-doc-refs' negative: a citation of a file the tree lacks",
+    "tools/check-was-deleted.sh":
+        "check-doc-refs' brace-group negative: the first missing member",
+    "tools/check-also-deleted.sh":
+        "check-doc-refs' brace-group negative: the second missing member",
+    "tools/check-third-deleted.sh":
+        "check-doc-refs' brace-group negative: the third missing member",
+}
+SCRIPT_REF = re.compile(r"tools/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(?:py|sh)\b")
+COMPOSED_SH = re.compile(r"\{[^{}]*\}\.sh\b")
 
 READ_WRITE = {"read_text", "write_text", "read_bytes", "write_bytes"}
 BINARY = {"read_bytes", "write_bytes"}
@@ -278,6 +301,25 @@ def census(files):
                            f"dev-shell preamble is what this replaced; one "
                            f"variant per depth is the whole point.")
 
+        # 9. A SCRIPT A BODY NAMES EXISTS, AND NO `.sh` NAME IS COMPOSED.
+        for m in COMPOSED_SH.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            bad.append(
+                f"{path}:{line}: composes a `.sh` script name at run time "
+                f"(`{m.group(0)}`). The shims went 2026-09-02; a gate is "
+                f"its .py, and a composed name is checked only on the lane "
+                f"that runs it.")
+        for m in SCRIPT_REF.finditer(text):
+            rel = m.group(0)
+            if rel in SCRIPT_EXEMPT or (ROOT / rel).exists():
+                continue
+            line = text.count("\n", 0, m.start()) + 1
+            bad.append(
+                f"{path}:{line}: names {rel}, which does not exist. A "
+                f"renamed script fails first on whichever lane reaches the "
+                f"caller — name the file that is there, or list a "
+                f"deliberate fake in SCRIPT_EXEMPT with its reason.")
+
         for node in ast.walk(tree):
             # 11. COMMAND HYGIENE FOLLOWS THE COMMAND INTO PYTHON.
             bad.extend(command_findings(path, node))
@@ -387,42 +429,6 @@ def census(files):
     return bad
 
 
-def shim_findings():
-    """9. A converted body's `.sh` holds NOTHING BUT THE EXEC.
-
-    check-* bodies MUST have one (the docs cite those .sh names and
-    check-doc-refs holds every citation to a real file); any other
-    converted body — the generators since 2026-08-31 — is pinned the
-    moment a same-stem .sh exists beside it, and a python-first script
-    with no citations owes no shim at all. Returns (findings, pinned
-    count) so the verdict states what was actually held."""
-    bad, pinned = [], 0
-    for path in sorted(files):
-        if path.endswith("kaya_gate.py"):
-            continue
-        rel = pathlib.Path(path)
-        stem = rel.stem
-        sh = ROOT / rel.with_suffix(".sh")
-        if not sh.is_file():
-            if path.startswith("tools/check-"):
-                bad.append(f"tools/{stem}.sh does not exist — a converted "
-                           f"gate keeps its .sh name because the docs cite "
-                           f"it and check-doc-refs holds every citation to "
-                           f"a real file.")
-            continue
-        got = sh.read_text(encoding="utf-8")
-        want = SHIM.format(stem=stem)
-        if got != want:
-            bad.append(
-                f"{rel.with_suffix('.sh')} is not the bare shim. It may "
-                f"hold NOTHING but the exec — a stub with logic in it is a "
-                f"second place for the preamble to drift back to.\n"
-                f"    want: {want!r}\n    got:  {got!r}")
-        else:
-            pinned += 1
-    return bad, pinned
-
-
 files = converted()
 
 # ------------------------------------------------------------ self-tests
@@ -465,6 +471,11 @@ N = [
      "does not open with the exact prelude header"),
     ("N10 rule 5 — a walk with no counted floor",
      r"^import re$", "import re\ngate.walk('*.py')", "agrees with everything"),
+    ("N13 rule 9 — a `.sh` name composed at run time",
+     r"^import re$", "import re\nX = f\"tools/{gen}" + ".sh\"", "composes a `.sh`"),
+    ("N14 rule 9 — a script that does not exist",
+     r"^import re$", "import re\nX = \"tools/check-nothing-" + "here.py\"",
+     "does not exist"),
 ]
 for label, pattern, repl, want in N:
     body = gate.doctor(label, real, pattern, repl, want=1, flags=re.M)
@@ -534,25 +545,13 @@ else:
     print("check-python: self-test N12 — the same body under an exempt name "
           "is quiet, so the table is live")
 
-# N13 — rule 9, the shim. Perturbed on disk in a scratch copy, never in
-# the tree.
-worst = SHIM.format(stem="check-jni") + 'echo "and one more thing" >&2\n'
-if worst == SHIM.format(stem="check-jni"):
-    gate.finding("self-test N13: the shim perturbation is not a perturbation")
-else:
-    print("check-python: self-test N13 — a shim with one extra line differs "
-          "from the pinned bytes, so the comparison is not vacuous")
-
-gate.negatives_ran(16)
+gate.negatives_ran(18)
 
 # --------------------------------------------------------------- clauses
 
 gate.counted("converted gate bodies", files, floor=7)
 
 for line in census(files):
-    gate.finding(line)
-shim_bad, shims_pinned = shim_findings()
-for line in shim_bad:
     gate.finding(line)
 
 # Every exemption must name a file that still exists, or it has rotted
@@ -565,6 +564,19 @@ for path, why in sorted(SUBN_EXEMPT.items()):
         gate.finding(f"{path} is exempt from rule 6 with no real reason")
 print(f"check-python: rule 6 exemptions: {len(SUBN_EXEMPT)} "
       f"(each named, each a real file)")
+# A rule 9 fake is exempt only while some body still names it and the
+# tree still lacks it; either way round it is a dead entry.
+for name, why in sorted(SCRIPT_EXEMPT.items()):
+    if (ROOT / name).exists():
+        gate.finding(f"{name} is exempt from rule 9 as a fake, but it exists — "
+                     f"delete the exemption")
+    if not any(name in text for text in files.values()):
+        gate.finding(f"{name} is exempt from rule 9 but no body names it — "
+                     f"delete the exemption")
+    if len(why.strip()) < 20:
+        gate.finding(f"{name} is exempt from rule 9 with no real reason")
+print(f"check-python: rule 9 exemptions: {len(SCRIPT_EXEMPT)} "
+      f"(each a fake some body names, none on disk)")
 
 # RUFF, over the same population. Three of the rules above come off it
 # for free; the rest it cannot see.
@@ -592,5 +604,4 @@ else:
           "the real shell pipeline, both dev-shell sentences, the perturbation "
           "count, the census floor, scratch cleanup after an exception)")
 
-gate.verdict(f"{len(files)} converted bodies, {shims_pinned} shims pinned, "
-             f"11 rules + ruff")
+gate.verdict(f"{len(files)} converted bodies, 11 rules + ruff")

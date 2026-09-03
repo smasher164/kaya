@@ -27,7 +27,7 @@ All **[MEASURED]**, read from the tree on 2026-08-16:
 | `windows` / `windows-core` crates | **0.62** | `crates/kaya/Cargo.toml:34,52` |
 | `windows-collections` / `-numerics` / `-future` | 0.3 | `crates/kaya/Cargo.toml:120-124` |
 | `windows-bindgen` | 0.62 (`.1` in the cargo cache) | `tools/winui-bindgen/Cargo.toml` |
-| guest OS | Windows 11 arm64 in UTM (`tools/deploy-win.sh akhil@192.168.64.2`) | CLAUDE.md ladder rung 4 |
+| guest OS | Windows 11 arm64 in UTM (`tools/deploy-win.py akhil@192.168.64.2`) | CLAUDE.md ladder rung 4 |
 
 The metadata itself is on this disk —
 `third_party/winappsdk/Microsoft.WindowsAppSDK.WinUI-2.2.1/extracted/metadata/Microsoft.UI.Xaml.winmd`
@@ -362,8 +362,8 @@ WinUI app has no App.xaml, so `outer_on_launched` merges
 which in an unpackaged process resolves against the directory of the
 EXECUTABLE** — not the dll, not the CWD. Rust and Go scene exes sit
 beside `C:\kaya\resources.pri` and work; `python.exe`, `java.exe` and
-`dotnet.exe` do not, so `deploy-win.sh` arranges the minimal pri beside
-each host exe per leg (deploy-win.sh:732,760,810 and the comment at
+`dotnet.exe` do not, so `deploy-win.py` arranges the minimal pri beside
+each host exe per leg (deploy-win.py:732,760,810 and the comment at
 1560-1569).
 
 When the merge fails, kaya logs and continues — correct, because most
@@ -376,7 +376,7 @@ costing "a dump and a controlled substitution".
 
 **The controls known to need the merge are growing** — ProgressBar
 first, then ComboBox, RadioButtons, MenuBar/MenuFlyout
-(deploy-win.sh:1560-1593). `CommandBar`, `AppBarButton` and
+(deploy-win.py:1560-1593). `CommandBar`, `AppBarButton` and
 `AppBarSeparator` are the same shape of control: MUX types whose default
 styles live in the same framework dictionary
 (`src/controls/dev/CommonStyles/CommandBar_themeresources.xaml`,
@@ -389,7 +389,7 @@ follows — but it is the way to bet]**.
 `require_control_resources("this window declares a toolbar")` as its
 first statement, exactly as `ensure_menu_shell` (mod.rs:2597) and
 `ensure_context_flyout` (mod.rs:3837) do. The toolbar legs then also
-need the pri-adjacency arrangement in `deploy-win.sh`, or the
+need the pri-adjacency arrangement in `deploy-win.py`, or the
 dll-hosted guests (python/java/dotnet) die at first layout.
 
 ### 6b. The bindgen transitivity trap, which WILL produce a false "WinUI has no X"
@@ -458,7 +458,7 @@ theme resources are public), so the depth slice must READ IT rather
 than assume it, and if it turns out to come from `Content` the arm sets
 `AutomationProperties.Name` explicitly. Note the discipline that
 applies: an observation that can only ever answer one way is not an
-observation (CLAUDE.md invariant 3 / `tools/check-diagnostics.sh`).
+observation (CLAUDE.md invariant 3 / `tools/check-diagnostics.py`).
 
 ## 7. Answers in one place
 

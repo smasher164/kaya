@@ -12,6 +12,6 @@ guest = here / f"{scene}.py"
 if not guest.is_file():
     raise SystemExit(
         f"pyhost: no guest for scene {scene!r} at {guest} — stage the "
-        "guest in run-sim.sh's IOS_PYTHON_SCENES or fix KAYA_SELFTEST"
+        "guest in run-sim.py's IOS_PYTHON_SCENES or fix KAYA_SELFTEST"
     )
 runpy.run_path(str(guest), run_name="__main__")

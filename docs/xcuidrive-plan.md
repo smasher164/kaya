@@ -162,7 +162,7 @@ processes and their census.
    against the platform's XCTest instead; the docs swept.
 6. DONE, the robustness pass the maintainer asked for the same evening:
    a device reseed restarts its driver — EXERCISED by fault injection,
-   `KAYA_IOS_RESEED_TEST=<udid> tools/ios/run-sim.sh swift` puts a
+   `KAYA_IOS_RESEED_TEST=<udid> tools/ios/run-sim.py swift` puts a
    healthy phone through erase, boot, driver restart (ready in 9s), warm
    and probe (admission 56s with the erase inside it), and the suite
    passed with every driver alive at the verdict; the `type` verb's iOS

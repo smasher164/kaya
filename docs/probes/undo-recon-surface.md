@@ -73,14 +73,14 @@ The split is stated verbatim by the gate, tools/check-tx-liveness.py:10-30
 (python since the 2026-08-31 conversion; the .sh is its exec shim):
 
 - HANDLE (Rust, Go, Java, C#, Swift) — "hand the guest a transaction object, so
-  a stale one can be recognised and refused" (check-tx-liveness.sh:36-37). Rust
+  a stale one can be recognised and refused" (check-tx-liveness.py:36-37). Rust
   refuses at COMPILE time (`Tx` is `!Send`, pinned by a `compile_fail` doctest
   at crates/kaya/src/app.rs:781-798); the other four check a `closed` flag at
-  ONE chokepoint (check-tx-liveness.sh:38-39).
+  ONE chokepoint (check-tx-liveness.py:38-39).
 - AMBIENT (Python, OCaml, Haskell) — "keep the open transaction in a global, so
   there is no handle to invalidate and nothing to make stale ... therefore
   check the THREAD instead, at the entry to a build"
-  (check-tx-liveness.sh:41-45). The three guards: `_require_app_thread`
+  (check-tx-liveness.py:41-45). The three guards: `_require_app_thread`
   `bindings/python/kaya/__init__.py:100`, `require_app_thread`
   bindings/ocaml/kaya_app.ml:201, `requireAppThread`
   bindings/haskell/KayaApp.hs:2243.
@@ -196,34 +196,34 @@ default.
 
 ### 1.5 How check-abort and check-tx-liveness pin tx semantics — the template an undo gate must copy
 
-**tools/check-abort.sh — the behavioural pin.** It RUNS a negative test in each
-language against a real `libkaya` (check-abort.sh:27-28), asserting "a handler
+**tools/check-abort.py — the behavioural pin.** It RUNS a negative test in each
+language against a real `libkaya` (check-abort.py:27-28), asserting "a handler
 abort rolls the model mirror back, ships nothing, and the app continues (idiom
-decides the spelling, never the semantics)" (check-abort.sh:16-18):
+decides the spelling, never the semantics)" (check-abort.py:16-18):
 
-- Go `go test dev.kaya/bindings/go` (check-abort.sh:40) — also pins
+- Go `go test dev.kaya/bindings/go` (check-abort.py:40) — also pins
   Build-in-Build misuse and the derived-registration non-leak
-  (check-abort.sh:38-39).
+  (check-abort.py:38-39).
 - Swift compiles the bindings plus tools/checks/swift-abort/main.swift into ONE
-  module so internal mirrors are assertable (check-abort.sh:44-56).
-- C# `KAYA_CHECK=abort` branch of the guest binary (check-abort.sh:63-64).
+  module so internal mirrors are assertable (check-abort.py:44-56).
+- C# `KAYA_CHECK=abort` branch of the guest binary (check-abort.py:63-64).
 - Java tools/checks/java-abort/AbortCheck.java against the ring stub — "pure
   JVM ... no natives, so mutating transactions always abort"
-  (check-abort.sh:66-72).
-- OCaml bindings/ocaml/checks/abort_check.ml (check-abort.sh:74-78).
+  (check-abort.py:66-72).
+- OCaml bindings/ocaml/checks/abort_check.ml (check-abort.py:74-78).
 - Haskell `kaya-abort-check` built in its OWN build tree
-  (check-abort.sh:97-104); the header at check-abort.sh:84-96 records why —
+  (check-abort.py:97-104); the header at check-abort.py:84-96 records why —
   a shared `dist-newstyle` wipe destroyed the docker lane's freshly built
   guests mid-run (2026-07-24), and cabal's plan cache made "the gate that
   passes without linking" a real failure mode for weeks. Plus a
   must-not-compile fixture pinning the Build/Tpl wall, with a grep insisting on
   the *type* error so a syntax error cannot pass as "didn't compile"
-  (check-abort.sh:106-116).
+  (check-abort.py:106-116).
 - Rust is pinned in `cargo test -p kaya`; Python in
   bindings/python/kaya_app_checks.py; C has no mirror and no dispatch so there
-  is nothing to pin (check-abort.sh:19-22).
+  is nothing to pin (check-abort.py:19-22).
 
-**tools/check-tx-liveness.sh — the structural pin.** It runs nothing; it checks
+**tools/check-tx-liveness.py — the structural pin.** It runs nothing; it checks
 each guard exists and each chokepoint is still the ONLY way in:
 
 - Go: `Tx.emit` present (69-70), `Tx.alive` present (71-72).
@@ -231,7 +231,7 @@ each guard exists and each chokepoint is still the ONLY way in:
   appears EXACTLY once, emit's own body (77-79).
 - C#: the `Records` property present (84-85) and raw `records.` used EXACTLY
   twice — the submit's `Count` and `ToArray` (86-91). "EXACTLY TWO, not 'at
-  most'" (check-tx-liveness.sh:86-88).
+  most'" (check-tx-liveness.py:86-88).
 - Swift: the `tx` property present (93-94) and `storage.` used EXACTLY twice
   (95-97).
 - Python/OCaml/Haskell: the thread guard exists AND is CALLED — counted, not
@@ -241,17 +241,17 @@ each guard exists and each chokepoint is still the ONLY way in:
 - All seven: the error message must NAME the post primitive as the way out
   (121-133), so the guard says "do this instead" rather than "that is illegal".
 
-**tools/check-ambient-tx.sh — the third member, and the one an undo scope would
+**tools/check-ambient-tx.py — the third member, and the one an undo scope would
 collide with.** It forbids a *guest* from opening a transaction inside a
-handler, because the binding already did (check-ambient-tx.sh:18-38). The
+handler, because the binding already did (check-ambient-tx.py:18-38). The
 defect it exists for: Python's dispatch called six lifecycle handlers bare, so
 `kaya.destroy_window()` inside `on_close_requested` raised "no ambient
 transaction" — and five guests each hid it with `with app.build():` at the top
 of the handler, so the lanes were green while the binding was wrong
-("The workaround WAS the camouflage", check-ambient-tx.sh:33). It is Python-only
-by design (check-ambient-tx.sh:40-51), lints on INDENTATION
-(check-ambient-tx.sh:57-77), and self-tests in BOTH directions
-(check-ambient-tx.sh:79-90).
+("The workaround WAS the camouflage", check-ambient-tx.py:33). It is Python-only
+by design (check-ambient-tx.py:40-51), lints on INDENTATION
+(check-ambient-tx.py:57-77), and self-tests in BOTH directions
+(check-ambient-tx.py:79-90).
 
 **What transfers to an undo-group gate.** Copy the pair: one *behavioural* gate
 running the semantics in every language against a real core (check-abort's
@@ -259,8 +259,8 @@ shape), plus one *structural* gate pinning the chokepoint so a new callsite
 cannot skip it (check-tx-liveness's shape). Two specific lessons:
 
 - Count, do not grep, and prove the perturbation applied (CLAUDE.md:73-81;
-  check-tx-liveness.sh:106-107).
-- The message names the way out (check-tx-liveness.sh:117-120).
+  check-tx-liveness.py:106-107).
+- The message names the way out (check-tx-liveness.py:117-120).
 
 And one specific collision: if undo grouping is spelled as a scope a guest
 opens inside a handler, check-ambient-tx's premise ("opens a transaction in a
@@ -297,7 +297,7 @@ There is **no `undo` verb and no `redo` verb** today (verified by the extraction
 above and by `grep -i undo tools/scenes/ crates/kaya/src/harness.rs`, which
 returns nothing).
 
-Structural rules a new scene inherits, all enforced by tools/check-steps.sh:
+Structural rules a new scene inherits, all enforced by tools/check-steps.py:
 
 - **It must open with an `expect`** (check-steps.py:1016-1054). The first
   observation's bounded retry doubles as the scene-ready wait; an action-first
@@ -408,7 +408,7 @@ This is the part worth copying wholesale, because the clipboard milestone just
 ran it end to end (docs/deferred.md:33-40: "COMPLETE 2026-08-04: all five
 backends, all eight bindings, every lane green").
 
-**check-verbs (tools/check-verbs.sh)** goes red the moment a verb exists in
+**check-verbs (tools/check-verbs.py)** goes red the moment a verb exists in
 `parse()` and not in an interpreter (check-verbs.py:868-880). It also pins
 private constant mirrors by NAME AND VALUE together (check-verbs.py:1036-1080),
 and specifically added a `CLIP_*` clause for the clipboard's five bit-position
@@ -418,7 +418,7 @@ undoability mask) should expect to need the same bespoke clause, with the same
 perturbation-scored self-test (`named/total`, only `1/1` passes,
 check-verbs.py:640-651).
 
-**check-sugar-surface (tools/check-sugar-surface.sh)** goes red for any binding
+**check-sugar-surface (tools/check-sugar-surface.py)** goes red for any binding
 that has not spelled the new surface. Two loops track the spec by construction
 — widget kinds (check-sugar-surface.py:90-126) and window props
 (check-sugar-surface.py:3418-3478), both read from the GENERATED wire file — plus
@@ -433,15 +433,15 @@ either automatic loop. The built-in negative test is the pattern to copy: a
 fake kind must fail in all 8, or the patterns have rotted
 (check-sugar-surface.py:776-789; the menus variant at :3222-3249).
 
-**check-stubs (tools/check-stubs.sh)** is the other half of the depth-slice
+**check-stubs (tools/check-stubs.py)** is the other half of the depth-slice
 contract: a runner may not wire a scene's legs while its backend still stubs the
-feature (check-stubs.sh:18-30, checks at :72-76). The stub is a CALL —
+feature (check-stubs.py:18-30, checks at :72-76). The stub is a CALL —
 `depth_stub("<scene>")` in Rust, `depthStub("<scene>")` in Kotlin,
-`kayaDepthStub("<scene>", on: "<platform>")` in Swift (check-stubs.sh:32-39,
+`kayaDepthStub("<scene>", on: "<platform>")` in Swift (check-stubs.py:32-39,
 :52-55) — and a backend refusing in its own words is itself a failure
-(`tools/lib/hand-rolled-stubs.py`, check-stubs.sh:107-113).
+(`tools/lib/hand-rolled-stubs.py`, check-stubs.py:107-113).
 
-**check-steps (tools/check-steps.sh)** reads the same stub from the other side:
+**check-steps (tools/check-steps.py)** reads the same stub from the other side:
 `wired()` (check-steps.py:1684-1828) demands every scene have live legs in every
 one of the five runners UNLESS the backend declares the stub. Two further
 clauses matter for an undo scene:

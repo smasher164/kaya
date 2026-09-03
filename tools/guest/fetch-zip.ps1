@@ -1,7 +1,7 @@
 # Fetch a zip BY VERSION AND BY BYTES and expand it under Dest: the
 # sha256 recorded beside the version in tools/deploy-win.py is compared
 # BEFORE anything is expanded, and a mismatch is this script's own
-# refusal (tools/check-pins.sh holds the shape).
+# refusal (tools/check-pins.py holds the shape).
 #
 # A FILE, NOT AN INLINE -Command: a script passed through ssh and cmd
 # as `powershell -Command \"...\"` arrives as ONE quoted string, and

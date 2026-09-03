@@ -117,7 +117,7 @@ readonly struct Widget
     /// nothing ever calls is unspellable (docs/canvas-plan.md §3.2.1).
     ///
     /// The binding answers the ask inside a transaction IT opens
-    /// (tools/check-ambient-tx.sh); it never reaches the guest as an
+    /// (tools/check-ambient-tx.py); it never reaches the guest as an
     /// occurrence.</summary>
     public Widget OnDraw(Action<Draw, Viewbox> f)
     {
@@ -1068,7 +1068,7 @@ sealed class KayaApp
     /// transaction also belongs to the app thread. `closed` cannot see a
     /// Task continuation writing through a transaction that is still
     /// open, nor a background Build opening one of its own — both race
-    /// the app thread's model. tools/check-tx-liveness.sh holds it.
+    /// the app thread's model. tools/check-tx-liveness.py holds it.
     internal static void RequireAppThread()
     {
         int owner = appThread;
@@ -1356,7 +1356,7 @@ sealed class Tx
     // so the property checks liveness first and guards the next callsite
     // too. A write through a Tx that outlived its Build vanishes with no
     // error, which is why a check spread over callsites will not do
-    // (tools/check-tx-liveness.sh).
+    // (tools/check-tx-liveness.py).
     readonly List<byte[]> records = new();
     internal List<byte[]> Records
     {

@@ -7,7 +7,7 @@
 //
 // THE SYMBOL NAME IS THE WHOLE CONTRACT with
 // android/kaya/src/main/kotlin/dev/kaya/KayaGo.kt, resolved by name out
-// of the guest's own .so; tools/android/run-emulator.sh checks it. The
+// of the guest's own .so; tools/android/run-emulator.py checks it. The
 // short JNI name carries no argument mangling, so that class must
 // declare exactly ONE native `attach` — an overload makes both
 // unresolvable until the names carry their signatures.

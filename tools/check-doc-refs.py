@@ -10,8 +10,8 @@ dev_shell_or_die()
 
 # A PATH THE DOCS NAME MUST BE A PATH THE TREE HAS.
 #
-#   tools/check-doc-refs.sh                 every tracked .md in the tree
-#   tools/check-doc-refs.sh --also PATH     scan one more file BESIDE the
+#   tools/check-doc-refs.py                 every tracked .md in the tree
+#   tools/check-doc-refs.py --also PATH     scan one more file BESIDE the
 #                                           real set — THE TEST SEAM, so
 #                                           the watched negatives plant
 #                                           their dead reference in a
@@ -78,7 +78,7 @@ while args:
         extra.append(pathlib.Path(args[1]))
         args = args[2:]
     else:
-        sys.exit("usage: check-doc-refs.sh [--also PATH]...")
+        sys.exit("usage: check-doc-refs.py [--also PATH]...")
 for p in extra:
     # A mistyped seam path would otherwise be SKIPPED and the run would
     # go green about a file it never opened.

@@ -23,7 +23,7 @@ before it was written down here.
 
 kaya has two construction zones. The LIVE zone — widgets built in the
 app's build closure — has a named constructor for all 14 widget kinds in
-all 8 bindings, and `tools/check-sugar-surface.sh` fails the build if one
+all 8 bindings, and `tools/check-sugar-surface.py` fails the build if one
 is missing. The TEMPLATE zone — the prototype inside a collection,
 stamped once per row — has constructors for three kinds in Rust (label,
 checkbox, button) and four in several other bindings. Everything else

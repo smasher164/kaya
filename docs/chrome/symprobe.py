@@ -1,7 +1,7 @@
 import re, pathlib
 p = pathlib.Path('/Users/akhilindurti/Projects/kaya/swift/KayaSwiftUI.swift')
 lines = p.read_text().splitlines()
-# track #if os(...) nesting the way check-verbs.sh does, but record the condition
+# track #if os(...) nesting the way check-verbs.py does, but record the condition
 stack = []
 ctx = []
 for line in lines:

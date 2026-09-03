@@ -154,7 +154,7 @@ transaction 2 (the form):   clear(field)  +  focus(field)
   transaction): name the group in the handler and POST the finishing
   work — `app.post(field.clear)` then `app.post(field.focus)`, or one
   posted callable doing both. `guests/python/undo.py:128` is the
-  precedent. `tools/check-ambient-tx.sh` forbids opening a second
+  precedent. `tools/check-ambient-tx.py` forbids opening a second
   scope inside a handler, so posting is the only spelling.
 - Keep `clear` BEFORE `focus`, as every todos guest has today: the
   script asserts `expect_focused entry#0` after the add and focus
@@ -165,7 +165,7 @@ transaction 2 (the form):   clear(field)  +  focus(field)
 ### 2f. The C floor is in scope
 
 `guests/c/todos.c` runs as `todos-c` on the Linux lane
-(tools/linux/run-suites.sh:488) and `tools/check-steps.sh` is blind to
+(tools/linux/run-suites.sh:488) and `tools/check-steps.py` is blind to
 it (a known gap in docs/deferred.md). It has no `derive` — it writes
 `SIG_LEFT` by hand in `write_items_left`. That is not an exemption, it
 is the thesis at the floor: because the hand-written signal write rides
@@ -335,16 +335,16 @@ Both verdict lines byte-identical.
 | gate | rc | note |
 |---|---|---|
 | `cargo test -p kaya --features harness --locked` | 0 | 266 passed, plus 3 and 13 doc-test suites; I added no test and moved no behavior |
-| `tools/check-steps.sh` | 0 | on the reshaped file |
-| `tools/check-verbs.sh` | 0 | no new verb; `menu_activate`/`expect` already in both interpreters |
-| `tools/check-stubs.sh` | 0 | |
-| `tools/check-tx-liveness.sh` | 0 | |
-| `tools/check-sugar-surface.sh` | 0 | |
-| `tools/check-ambient-tx.sh` | 0 | the Rust guest is a handle binding; nothing ambient moved |
-| `tools/check-shell.sh` | 0 | |
-| `tools/gen-header.sh --check` | 0 | no spec or wire change |
-| `tools/gen-bindings.sh --check` | 0 | |
-| `tools/gen-guests.sh --check` | 0 | |
+| `tools/check-steps.py` | 0 | on the reshaped file |
+| `tools/check-verbs.py` | 0 | no new verb; `menu_activate`/`expect` already in both interpreters |
+| `tools/check-stubs.py` | 0 | |
+| `tools/check-tx-liveness.py` | 0 | |
+| `tools/check-sugar-surface.py` | 0 | |
+| `tools/check-ambient-tx.py` | 0 | the Rust guest is a handle binding; nothing ambient moved |
+| `tools/check-shell.py` | 0 | |
+| `tools/gen-header.py --check` | 0 | no spec or wire change |
+| `tools/gen-bindings.py --check` | 0 | |
+| `tools/gen-guests.py --check` | 0 | |
 
 ### 7c. The hold-open, recorded rather than asserted
 
@@ -388,14 +388,14 @@ backend refuses it.** The Android lane runs the todos scene on Compose
   only hole, and mac is proven green above.
 
 **Why no gate caught it, which is the part worth fixing.**
-`tools/check-stubs.sh` and `tools/check-steps.sh` state one rule
+`tools/check-stubs.py` and `tools/check-steps.py` state one rule
 between them — a scene's legs are wired on a runner if and only if that
 runner's backend has the feature — and they state it **keyed on the
 SCENE NAME**. The Compose backend stubs the scene called `undo`; the
 Android runner wires no `undo` legs; consistent, both gates green. What
 neither gate reads is which FEATURES a scene's VERBS need, so folding
 an undo assertion into a scene every backend must run is invisible to
-them. `tools/check-stubs.sh` returned 0 on this tree.
+them. `tools/check-stubs.py` returned 0 on this tree.
 
 **The guard this failure class should get** (the doctrine's own
 question — what gate would have caught it): check-steps already parses

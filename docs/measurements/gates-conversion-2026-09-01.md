@@ -1,4 +1,4 @@
-# gates.sh -> python (runner conversion, the last item)
+# gates.py -> python (runner conversion, the last item)
 
 The sweep driver, last by the plan's own ordering
 (docs/runner-conversion-plan.md §4 item 4) — converted only once
@@ -7,15 +7,15 @@ already a python heredoc behind a wrapper, so this crossing is
 tranche two's build-id shape: the heredoc becomes tools/gates.py on
 the prelude, GATES / EXCLUDED / BUILD are importable module data
 under a variable-status main() and a main guard (no mid-body
-exit(0), per check-python's own rule), and gates.sh is the pinned
+exit(0), per check-python's own rule), and gates.py is the pinned
 shim.
 
 ## Zero re-teach, by construction
 
 The consumers already read DATA: check-gates and check-keyed consume
-`gates.sh --list`'s JSON, the lanes call `--fingerprint` and the
+`gates.py --list`'s JSON, the lanes call `--fingerprint` and the
 sweep through the shim path, and check-gates' delegation clause pins
-the "tools/gates.sh" spelling in the runners — all unchanged. The
+the "tools/gates.py" spelling in the runners — all unchanged. The
 census/EXCLUDED table is importable python for any future consumer
 that wants the module instead of the JSON.
 

@@ -3297,7 +3297,7 @@ def image(source=None, grow=None):
 
 # The five canvas vocabularies, spelled as the names Python already
 # spells a role or an alignment with. The NUMBERS come from the generated
-# wire file, never retyped here (tools/check-symbol-parity.sh holds the
+# wire file, never retyped here (tools/check-symbol-parity.py holds the
 # surfaces that must copy them by hand; this is not one).
 _PAINTS = {
     "series": wire.PAINT_SERIES,
@@ -3496,7 +3496,7 @@ def canvas(viewbox, grow=None, fixed=None, on_draw=None, on_tick=None):
       to remove (§15.4).
 
     Both handlers run inside a transaction THE BINDING opens
-    (tools/check-ambient-tx.sh) and never reach the app as an
+    (tools/check-ambient-tx.py) and never reach the app as an
     occurrence."""
     w, h = viewbox
     handle = _widget(wire.KIND_CANVAS)
@@ -3861,7 +3861,7 @@ class App:
         submit that drawing (docs/canvas-plan.md §3.2.1).
 
         The binding opens the transaction — a guest opening its own
-        inside a handler is what tools/check-ambient-tx.sh refuses — and
+        inside a handler is what tools/check-ambient-tx.py refuses — and
         the ask never reaches the app.
 
         The assigned size BECOMES the canvas's viewbox, so the ops are

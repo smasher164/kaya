@@ -436,7 +436,7 @@ static class Kaya
     /// CAP_AUX_WINDOWS IS THE CORE'S NUMBER WRITTEN AGAIN, which
     /// P/Invoke leaves no way around — there is no header here to read
     /// `KAYA_CAP_AUX_WINDOWS` out of, the way Go's cgo and Swift's
-    /// bridging header do. tools/check-sugar-surface.sh reads the
+    /// bridging header do. tools/check-sugar-surface.py reads the
     /// authoritative value out of crates/kaya/src/scene.rs and fails if
     /// this line disagrees, so the copy cannot go stale in silence.
     internal const ulong CAP_AUX_WINDOWS = 1;
@@ -541,7 +541,7 @@ static class Kaya
     internal static void AssetRelease(ulong handle) => kaya_asset_release(handle);
 
     /// NAMED FOR THE CARRYING, not for the answering, and deliberately
-    /// not AssetWhyNot. tools/check-diagnostics.sh reads any *WhyNot by
+    /// not AssetWhyNot. tools/check-diagnostics.py reads any *WhyNot by
     /// that name alone and holds it to the rule that every branch must
     /// print what it measured — which is right, and which the function
     /// that EARNED the name already satisfies: asset_why_not in

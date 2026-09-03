@@ -30,7 +30,7 @@ expect_axis row@dash "horizontal"
 # width-dependent (the panes-band rule): the desktop legs cross the
 # boundary both ways, and the phone leg CUTS at resize_window and
 # asserts its own always-narrow truth as a per-leg extra step
-# (tools/ios/run-sim.sh's adaptive entry).
+# (tools/ios/run-sim.py's adaptive entry).
 resize_window 480x400
 expect_axis row@narrow "vertical"
 # Crossing back AUTO-REVERTS — the diff-against-base rule, no second

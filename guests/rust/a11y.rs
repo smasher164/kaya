@@ -6,7 +6,7 @@
 //! universal prop is proven only by grep. And there is exactly ONE
 //! container of each container kind: creation order legitimately
 //! differs per language, so `row#0` names the same widget everywhere
-//! only while there is one row (tools/check-steps.sh).
+//! only while there is one row (tools/check-steps.py).
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]

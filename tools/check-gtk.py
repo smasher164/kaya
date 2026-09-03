@@ -7,7 +7,7 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The GTK compile check that check-targets.sh cannot do: gtk-sys needs
+# The GTK compile check that check-targets.py cannot do: gtk-sys needs
 # the distro's pkg-config world, so the Linux backend builds nowhere but
 # the container. A `cargo check` in the cached image, seconds warm.
 #
@@ -38,7 +38,7 @@ if subprocess.run(["docker", "image", "ls", "-q", "kaya-linux"],
                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                   text=True, check=False).stdout.strip() == "":
     print("check-gtk: the kaya-linux image is missing — run "
-          "tools/validate-linux.sh once to build it.", file=sys.stderr)
+          "tools/validate-linux.py once to build it.", file=sys.stderr)
     sys.exit(1)
 
 # THE LAYOUT CENSUS. gtk::flex::tests exercise the PURE arithmetic
@@ -47,7 +47,7 @@ if subprocess.run(["docker", "image", "ls", "-q", "kaya-linux"],
 # CALLING it, called it with the wrong extremes, or stopped measuring
 # what it passes — so the production callsites are held here by name.
 #
-# EVERY entry is watched, in tools/check-steps.sh's target_watch shape:
+# EVERY entry is watched, in tools/check-steps.py's target_watch shape:
 # a doctored COPY on disk, the substitution count printed, the REAL
 # census re-run against that copy, and the exact finding demanded. The
 # perturbation is the change that would otherwise be silent, never the

@@ -600,7 +600,7 @@ the same decision seen from two sides.
 | Events to Go | 32 `Java_org_gioui_GioView_*` JNI exports | `ANativeActivity` callbacks + JNI | direct calls | occurrence **byte ring**, consumed off-thread |
 | Text input / IME | hand-built `InputConnection`, 12 `ime*` JNI exports; documented crashes (sr.ht #404) | hidden `EditText` added via `addContentView` to summon the IME (Fyne fork, `GoNativeActivity.java:412-419`) | app's own | **Compose's** `BasicTextField` — Google's IME code |
 | Accessibility | hand-built `AccessibilityNodeProvider` (`GioView.java:821-849`) + JNI | minimal | app's own | **Compose semantics** |
-| Env vars in library mode | patches 3 names (`XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `HOME`) at attach | patches 3 names (`TMPDIR`, `PATH`, `LD_LIBRARY_PATH`) at attach | n/a | `kaya.Env` reads C's live `getenv`; `tools/check-go-env.sh` bans `os.Getenv` in guests |
+| Env vars in library mode | patches 3 names (`XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `HOME`) at attach | patches 3 names (`TMPDIR`, `PATH`, `LD_LIBRARY_PATH`) at attach | n/a | `kaya.Env` reads C's live `getenv`; `tools/check-go-env.py` bans `os.Getenv` in guests |
 | Per-launch run arguments | **none** — baked at link time via `-X gioui.org/app.extraArgs` | n/a | n/a | per-launch: intent extras → `Os.setenv` → `kaya.Env` |
 | Multiple apps in one artifact | 1 `main` per `.so` | 1 | n/a | 31 scenes, one table (`main_android.go:83-126`) |
 

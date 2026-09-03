@@ -169,13 +169,13 @@ def check_mode(tmp):
     for f in list_generated():
         if f not in all_files:
             print(f"gen-guests: generators produce {f}, which the tree "
-                  f"does not carry — run tools/gen-guests.sh and commit",
+                  f"does not carry — run tools/gen-guests.py and commit",
                   file=sys.stderr)
             pathlib.Path(f).unlink(missing_ok=True)
             red = 1
     for f in missing:
         print(f"gen-guests: {f} is tracked as a generated surface but "
-              f"missing from the tree — run tools/gen-guests.sh and "
+              f"missing from the tree — run tools/gen-guests.py and "
               f"commit", file=sys.stderr)
         pathlib.Path(f).unlink(missing_ok=True)
         red = 1
@@ -183,7 +183,7 @@ def check_mode(tmp):
         p = pathlib.Path(f)
         if not p.exists() or p.read_bytes() != (saved / f).read_bytes():
             print(f"gen-guests: {f} is stale against its generator — "
-                  f"run tools/gen-guests.sh and commit", file=sys.stderr)
+                  f"run tools/gen-guests.py and commit", file=sys.stderr)
             shutil.copy2(saved / f, p)
             red = 1
     after_sha = sha_over(all_files)

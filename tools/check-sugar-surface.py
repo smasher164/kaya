@@ -3174,7 +3174,7 @@ check("js", "bindings/js/kaya/index.ts", "template grow",
 # converted guests explain the old floor spelling in a comment above
 # the new call, so a sweep that reads comments reports every file it
 # just fixed), and carries its exemptions with reasons the way
-# gates.sh does.
+# gates.py does.
 floor_run = subprocess.run(
     [sys.executable, str(ROOT / "tools" / "guest-floor.py")],
     cwd=ROOT, capture_output=True, text=True, check=False)
@@ -3891,7 +3891,7 @@ check_styling_point(
 # crates/kaya/src/assets.rs's bytes unchanged.
 #
 # NAMED FOR CARRYING, NOT FOR DIAGNOSING: a `…WhyNot` here would opt
-# into tools/check-diagnostics.sh by its name alone, and that gate
+# into tools/check-diagnostics.py by its name alone, and that gate
 # reads a function so named as the AUTHOR of a sentence these only
 # carry.
 check_styling_point(

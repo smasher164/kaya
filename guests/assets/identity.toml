@@ -15,7 +15,7 @@
 #   the Windows taskbar and caption, and an X11 window.
 #
 # Five routes reading five different files is how "one mark on five
-# platforms" gets broken quietly, so tools/check-app-identity.sh holds
+# platforms" gets broken quietly, so tools/check-app-identity.py holds
 # every hand-written copy of these two values equal to the two here — the
 # guests' default icon path, the guests' declared name, and the byte-
 # frozen expectation in tools/scenes/identity.steps, which is checked

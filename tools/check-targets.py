@@ -10,10 +10,10 @@ dev_shell_or_die()
 # Cross-target compile check: per-platform Rust breakage in seconds,
 # before any emulator, simulator or VM is involved.
 #
-# Usage: check-targets.sh [native|ios|android|windows|all]   (default all)
+# Usage: check-targets.py [native|ios|android|windows|all]   (default all)
 #
 # The Linux/GTK backend is the one absentee — gtk-sys needs the distro's
-# pkg-config world — so tools/check-gtk.sh is what to run after touching
+# pkg-config world — so tools/check-gtk.py is what to run after touching
 # gtk.rs. Do not read a green here as "every backend compiles".
 
 import glob

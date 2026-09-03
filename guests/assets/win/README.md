@@ -19,7 +19,7 @@ to the PROCESS exe's directory".
 That is why the file has to travel with the guests rather than live
 beside the backend. kaya's Rust scene binaries sit beside it and work;
 `python.exe`, `java.exe`, `dotnet.exe` and a `go run` temp executable do
-not, so tools/deploy-win.sh puts a copy beside each host it launches.
+not, so tools/deploy-win.py puts a copy beside each host it launches.
 The copy is inert for a program that never touches WinUI.
 
 ## Where it came from, honestly
@@ -57,7 +57,7 @@ files under the asset convention had no README (docs/assets-plan.md A1.1
 and A6, gate 3).
 
 The deploy still ships it every run and still hashes it into the deploy
-stamp (tools/deploy-win.sh); only its path moved.
+stamp (tools/deploy-win.py); only its path moved.
 
 ## Licence
 

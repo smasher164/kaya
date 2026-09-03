@@ -9,13 +9,13 @@ dev_shell_or_die()
 
 # THE FAST-GATE SWEEP. One entry point, one list, one verdict.
 #
-#   tools/gates.sh              build what the gates read, then run
+#   tools/gates.py              build what the gates read, then run
 #                               every gate and print a per-gate line
 #                               and a count
-#   tools/gates.sh --list       the list as JSON, for the tools that
+#   tools/gates.py --list       the list as JSON, for the tools that
 #                               must agree with it (check-gates,
 #                               check-keyed)
-#   tools/gates.sh --selftest   watch the count refuse: an under-run,
+#   tools/gates.py --selftest   watch the count refuse: an under-run,
 #                               a failing gate and a missing script
 #                               must all come back red
 #
@@ -32,11 +32,11 @@ dev_shell_or_die()
 # THERE IS DELIBERATELY NO SUBSET FLAG — a flag that runs part of the
 # list and still prints a verdict is defect 1 with an interface. To
 # run one gate, run that gate; they are all standalone. (KAYA_FAST is
-# the honest version, through tools/keyed.sh.)
+# the honest version, through tools/keyed.py.)
 #
 # THE SWEEP IS macOS-SHAPED: it builds libkaya.dylib and the SwiftUI
 # interpreter and three gates load them. The other four lanes run
-# their own small per-lane subset instead, and check-gates.sh does not
+# their own small per-lane subset instead, and check-gates.py does not
 # police that asymmetry.
 #
 # The census and its EXCLUDED table are importable data since the
@@ -53,14 +53,14 @@ os.chdir(ROOT)
 
 # THE LIST, roughly cheapest-and-most-likely-to-fail first.
 #
-# `keyed` says whether the gate goes through tools/keyed.sh. An
+# `keyed` says whether the gate goes through tools/keyed.py. An
 # UNKEYED gate carries its reason HERE, beside itself — check-keyed
 # enforces that the reason is written.
 GATES = [
-    ("gen-header", ["tools/gen-header.sh", "--check"], True, ""),
-    ("gen-bindings", ["tools/gen-bindings.sh", "--check"], True, ""),
-    ("gen-guests", ["tools/gen-guests.sh", "--check"], True, ""),
-    ("check-steps", ["tools/check-steps.sh"], True, ""),
+    ("gen-header", ["tools/gen-header.py", "--check"], True, ""),
+    ("gen-bindings", ["tools/gen-bindings.py", "--check"], True, ""),
+    ("gen-guests", ["tools/gen-guests.py", "--check"], True, ""),
+    ("check-steps", ["tools/check-steps.py"], True, ""),
     # The Python surface's guard and mirror semantics, headless.
     ("kaya-app-checks", ["python3", "bindings/python/kaya_app_checks.py"], False,
      "sub-second and pure python; hashing an input set would cost more than "
@@ -70,102 +70,102 @@ GATES = [
     ("js-app-checks", ["node", "bindings/js/kaya_app_checks.ts"], False,
      "sub-second; hashing an input set would cost more than the run it "
      "would skip"),
-    ("check-targets", ["tools/check-targets.sh"], True, ""),
-    ("check-shell", ["tools/check-shell.sh"], True, ""),
+    ("check-targets", ["tools/check-targets.py"], True, ""),
+    ("check-shell", ["tools/check-shell.py"], True, ""),
     # check-shell's opposite number: the gate bodies are python now
     # (docs/deferred.md's 2026-08-27 ruling), which retires the `$?` class
     # and puts swallowed exceptions, shell=True, implicit encodings and a
     # mid-gate exit(0) in its place. It also runs the prelude's own
     # negatives, so the file every converted gate imports proves its
     # refusals on a path nobody can avoid.
-    ("check-python", ["tools/check-python.sh"], True, ""),
-    ("check-mirror", ["tools/check-mirror.sh"], True, ""),
-    ("check-gates", ["tools/check-gates.sh"], True, ""),
+    ("check-python", ["tools/check-python.py"], True, ""),
+    ("check-mirror", ["tools/check-mirror.py"], True, ""),
+    ("check-gates", ["tools/check-gates.py"], True, ""),
     # The ledger may not disagree with itself — an unstruck headline
     # over a body recording the work COMPLETE sends a survey after a
     # solved problem.
-    ("check-ledger", ["tools/check-ledger.sh"], True, ""),
+    ("check-ledger", ["tools/check-ledger.py"], True, ""),
     # The other half: a doc citing a path the tree does not have.
-    ("check-doc-refs", ["tools/check-doc-refs.sh"], False,
+    ("check-doc-refs", ["tools/check-doc-refs.py"], False,
      "its input is the EXISTENCE of every path any doc names, so a rename or "
      "a delete anywhere in the tree is a real input — check-case's shape, and "
      "a key that cheap to invalidate is a cache that never hits"),
-    ("check-case", ["tools/check-case.sh"], False,
+    ("check-case", ["tools/check-case.py"], False,
      "its input is every tracked path plus the directory listings around "
      "them, so any add, delete or rename is a real input; a cache key that "
      "cheap to invalidate is a cache that never hits"),
-    ("check-sugar-surface", ["tools/check-sugar-surface.sh"], True, ""),
-    ("check-universal-props", ["tools/check-universal-props.sh"], True, ""),
+    ("check-sugar-surface", ["tools/check-sugar-surface.py"], True, ""),
+    ("check-universal-props", ["tools/check-universal-props.py"], True, ""),
     # MENU_ROLES is one line no generator reads, so a role can ship with
     # the root accepting it and every backend ignoring it. RED BY DESIGN
     # across a fan-out.
-    ("check-roles", ["tools/check-roles.sh"], True, ""),
+    ("check-roles", ["tools/check-roles.py"], True, ""),
     # The native undo tier's two guards, which NO shared scene can
     # reach: static pairing is the only wall available.
-    ("check-native-undo", ["tools/check-native-undo.sh"], True, ""),
+    ("check-native-undo", ["tools/check-native-undo.py"], True, ""),
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
-    ("check-diagnostics", ["tools/check-diagnostics.sh"], True, ""),
+    ("check-diagnostics", ["tools/check-diagnostics.py"], True, ""),
     # The harness loses legibly: a step that never returns publishes a
     # verdict and leaves, in all three harnesses. NO SCENE CAN FAIL IT —
     # the wedge would have to happen on every platform at once and would
     # measure nothing else (docs/measurements/choke-*-2026-08-24.txt).
-    ("check-harness-ceiling", ["tools/check-harness-ceiling.sh"], True, ""),
+    ("check-harness-ceiling", ["tools/check-harness-ceiling.py"], True, ""),
     # ONE NODE IS ONE WIDGET, even when its content will not decode: in
     # the declarative backends "render nothing" makes the node LEAVE THE
     # TREE and every positional reader above it reads the wrong child
     # (docs/deferred.md).
     # The five ARTIFACT gates are keyed since 2026-08-20: their keys mix
-    # the built libkaya's REAL BYTES (build-id.sh's ARTIFACT_GATES), so
+    # the built libkaya's REAL BYTES (build-id.py's ARTIFACT_GATES), so
     # "unchanged sources" alone can no longer hand back a stale PASS —
     # unchanged sources AND unchanged artifact bytes can, and that is an
     # unchanged answer.
-    ("check-empty-child", ["tools/check-empty-child.sh"], True, ""),
+    ("check-empty-child", ["tools/check-empty-child.py"], True, ""),
     # The macOS pane ladder: no column minimum ever declared to SwiftUI,
     # and the middle rung — which no shared scene may sample — walked
     # for real in an NSWindow (docs/multicolumn-plan.md).
-    ("check-pane-ladder", ["tools/check-pane-ladder.sh"], True, ""),
+    ("check-pane-ladder", ["tools/check-pane-ladder.py"], True, ""),
     # The table tier routing: both tiers present identical bytes, so no
     # device can name the one that drew it (docs/traps.md). The rule is a
     # pure function, driven here through its whole truth table.
-    ("check-table-tier", ["tools/check-table-tier.sh"], True, ""),
+    ("check-table-tier", ["tools/check-table-tier.py"], True, ""),
     # KAYA RASTERIZES, BACKENDS BLIT (docs/canvas-plan.md §1.1): a
     # backend that interpreted an op would draw the same picture, a wrong
     # pixel format survives a symmetric probe point, and a rounded scale
     # is invisible on every lane this project runs.
-    ("check-canvas-blit", ["tools/check-canvas-blit.sh"], False,
-     "no input set is declared for it in build-id.sh's GATES; same shape as "
+    ("check-canvas-blit", ["tools/check-canvas-blit.py"], False,
+     "no input set is declared for it in build-id.py's GATES; same shape as "
      "check-tx-liveness below"),
     # KAYA_APPEARANCE is inert unless asked for, and the backend still
     # reads the platform back when it is — no lane can see either half go
     # wrong, since every lane host is light.
-    ("check-appearance", ["tools/check-appearance.sh"], False,
-     "no input set is declared for it in build-id.sh's GATES; same shape as "
+    ("check-appearance", ["tools/check-appearance.py"], False,
+     "no input set is declared for it in build-id.py's GATES; same shape as "
      "check-tx-liveness below"),
-    ("check-wheel", ["tools/check-wheel.sh"], True, ""),
-    ("check-abort", ["tools/check-abort.sh"], True, ""),
-    ("check-tx-liveness", ["tools/check-tx-liveness.sh"], False,
-     "no input set is declared for it in build-id.sh's GATES, so keyed.sh "
+    ("check-wheel", ["tools/check-wheel.py"], True, ""),
+    ("check-abort", ["tools/check-abort.py"], True, ""),
+    ("check-tx-liveness", ["tools/check-tx-liveness.py"], False,
+     "no input set is declared for it in build-id.py's GATES, so keyed.py "
      "would refuse at run time; it is a pure source scan and can be keyed "
      "the day someone declares its inputs"),
-    ("check-ambient-tx", ["tools/check-ambient-tx.sh"], False,
-     "no input set is declared for it in build-id.sh's GATES; same shape as "
+    ("check-ambient-tx", ["tools/check-ambient-tx.py"], False,
+     "no input set is declared for it in build-id.py's GATES; same shape as "
      "check-tx-liveness above"),
     # A Go guest reads the HOST's environment, never Go's copy: in a
     # c-shared library os.Getenv is empty forever, and an empty
     # KAYA_SELFTEST is the default arm, not an unknown scene.
-    ("check-go-env", ["tools/check-go-env.sh"], True, ""),
-    ("check-build-id", ["tools/check-build-id.sh"], False,
+    ("check-go-env", ["tools/check-go-env.py"], True, ""),
+    ("check-build-id", ["tools/check-build-id.py"], False,
      "it inspects the built libkaya and the built interpreter; this is THE "
      "gate that must never be answered from a cache"),
-    ("check-keyed", ["tools/check-keyed.sh"], False,
+    ("check-keyed", ["tools/check-keyed.py"], False,
      "it is the cache's own gate — a cached verdict about the cache is "
      "worth nothing"),
-    ("check-pins", ["tools/check-pins.sh"], True, ""),
+    ("check-pins", ["tools/check-pins.py"], True, ""),
     # BOTH macOS design generations stay on the mac lane: SwiftUI reads
     # the MAIN EXECUTABLE's sdk stamp, so the kaya-linked legs are
     # modern and the vendor-built hosts hold the compat side.
-    ("check-design-generation", ["tools/check-design-generation.sh"], False,
+    ("check-design-generation", ["tools/check-design-generation.py"], False,
      "its inputs are the toolchain and the vendor hosts on the machine, not "
      "files in this tree — a source-keyed skip would go quiet exactly when a "
      "nixpkgs or vendor rebuild moved a stamp, which is the move it exists to "
@@ -173,71 +173,71 @@ GATES = [
     # An SF Symbols name above the OS floor renders BLANK on the floor
     # and resolves fine on every machine the project has — no scene can
     # see it; only Apple's own availability plist can answer.
-    ("check-symbols", ["tools/check-symbols.sh"], False,
+    ("check-symbols", ["tools/check-symbols.py"], False,
      "half its input is /System's name_availability.plist, which moves with "
      "the OS rather than the tree — check-design-generation's shape"),
     # ONE symbol vocabulary, SIX files: wire::SYMBOLS is not in the spec
     # hash, so a concept added to five of six sites fails nowhere and
     # renders as a missing glyph on the sixth platform alone.
-    ("check-symbol-parity", ["tools/check-symbol-parity.sh"], False,
-     "no input set is declared for it in build-id.sh's GATES; same shape as "
+    ("check-symbol-parity", ["tools/check-symbol-parity.py"], False,
+     "no input set is declared for it in build-id.py's GATES; same shape as "
      "check-tx-liveness above"),
     # The Windows accent near-no-op: a bare SystemAccentColor write
     # changes the text-selection highlight and nothing else, invisibly
     # to every lane. Fast-sweep sibling of winui::tests' rendered check
     # on the windows guest.
-    ("check-accent", ["tools/check-accent.sh"], False,
-     "no input set is declared for it in build-id.sh's GATES; same shape as "
+    ("check-accent", ["tools/check-accent.py"], False,
+     "no input set is declared for it in build-id.py's GATES; same shape as "
      "check-tx-liveness above"),
     # A table bounds its own extent, in all three synthesized tiers. The
     # card is PIXELS: every table observable answers the same with it
     # gone, so no lane can see a backend that lost it.
-    ("check-table-card", ["tools/check-table-card.sh"], True, ""),
-    ("check-verbs", ["tools/check-verbs.sh"], True, ""),
+    ("check-table-card", ["tools/check-table-card.py"], True, ""),
+    ("check-verbs", ["tools/check-verbs.py"], True, ""),
     # The file-mode numbers against the spec that owns them: five
     # hand-written sites decode the integer kaya_open_picked takes.
-    ("check-file-modes", ["tools/check-file-modes.sh"], True, ""),
+    ("check-file-modes", ["tools/check-file-modes.py"], True, ""),
     # ONE DECLARED IDENTITY, READ BY A BUILD AND BY A RUNNING APP:
     # guests/assets/identity.toml held level with every hand-written
     # copy of it, and the byte-frozen scene expectation level with the
     # mark's actual pixels.
-    ("check-app-identity", ["tools/check-app-identity.sh"], False,
+    ("check-app-identity", ["tools/check-app-identity.py"], False,
      "one of its clauses walks every path in the tree looking for app-icon "
      "resources, so any add, delete or rename is a real input — check-case's "
      "shape, and a key that cheap to invalidate is a cache that never hits"),
     # THE ASSET ROOT'S DRIFT GATE (docs/assets-plan.md A6): nothing else
     # resolves an asset for itself, and every lane that carries the root
     # carries all of it. Neither is checkable from inside the core.
-    ("check-assets", ["tools/check-assets.sh"], False,
+    ("check-assets", ["tools/check-assets.py"], False,
      "one of its clauses walks every source root looking for a second "
      "resolver and another walks the asset root itself, so any add, delete "
      "or rename anywhere is a real input — check-app-identity's shape, and a "
      "key that cheap to invalidate is a cache that never hits"),
-    ("check-jni", ["tools/check-jni.sh"], True, ""),
-    ("check-stubs", ["tools/check-stubs.sh"], True, ""),
-    ("check-staging", ["tools/check-staging.sh"], True, ""),
+    ("check-jni", ["tools/check-jni.py"], True, ""),
+    ("check-stubs", ["tools/check-stubs.py"], True, ""),
+    ("check-staging", ["tools/check-staging.py"], True, ""),
     # The C floor has no allocator, and scene.rs's two maps make a
     # widget/node id collision legal at the core — so it renders
     # correctly and no lane can see it. All eight guests overlapped
     # until 2026-08-25.
-    ("check-c-ids", ["tools/check-c-ids.sh"], True, ""),
+    ("check-c-ids", ["tools/check-c-ids.py"], True, ""),
     # The C floor refuses past its cap instead of smashing past it. Every
     # in-tree guest sizes its buffers right, so the wire bytes are the
     # same either way and no lane, scene or capture can see the check at
     # all — the unchecked memcpy shipped from milestone 0 under green.
-    ("check-c-bounds", ["tools/check-c-bounds.sh"], True, ""),
-    ("check-compose", ["tools/check-compose.sh"], True, ""),
-    ("check-detekt", ["tools/check-detekt.sh"], True, ""),
-    ("check-compose-state", ["tools/check-compose-state.sh"], True, ""),
+    ("check-c-bounds", ["tools/check-c-bounds.py"], True, ""),
+    ("check-compose", ["tools/check-compose.py"], True, ""),
+    ("check-detekt", ["tools/check-detekt.py"], True, ""),
+    ("check-compose-state", ["tools/check-compose-state.py"], True, ""),
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),
-    ("java-typecheck", ["tools/java-typecheck.sh"], True, ""),
-    ("js-typecheck", ["tools/js-typecheck.sh"], True, ""),
+    ("java-typecheck", ["tools/java-typecheck.py"], True, ""),
+    ("js-typecheck", ["tools/js-typecheck.py"], True, ""),
 ]
 
 # Gate scripts on disk that are deliberately NOT in the sweep. The
-# reason is required and check-gates.sh reads it.
+# reason is required and check-gates.py reads it.
 EXCLUDED = {
-    "tools/check-gtk.sh":
+    "tools/check-gtk.py":
         "needs docker — it compile-checks the GTK backend, which "
         "check-targets structurally cannot (gtk-sys wants the distro's "
         "pkg-config world). Run it by hand after any gtk.rs change",
@@ -252,7 +252,7 @@ BUILD = [
     # holds the stamp honest.
     ("market data", ["python3", "tools/gen-market.py", "--ensure"]),
     ("libkaya", ["cargo", "build", "--locked", "--lib"]),
-    ("libkaya id", ["tools/build-id.sh", "--verify", "target/debug/libkaya.dylib"]),
+    ("libkaya id", ["tools/build-id.py", "--verify", "target/debug/libkaya.dylib"]),
     ("SwiftUI interpreter", ["tools/swiftui/build-dylib.sh"]),
 ]
 
@@ -316,7 +316,7 @@ def sweep(gates, label="gates"):
     ran = 0
     failed = []
     for name, cmd, keyed, _why in gates:
-        argv = ["tools/keyed.sh", name, "--"] + cmd if keyed else list(cmd)
+        argv = ["tools/keyed.py", name, "--"] + cmd if keyed else list(cmd)
         print(f"[{ran + 1:02d}/{declared:02d}] {name}", flush=True)
         t0 = time.monotonic()
         rc = subprocess.call(argv, cwd=ROOT)
@@ -413,10 +413,10 @@ def fingerprint():
         if not k:
             continue
         key = subprocess.run(
-            ["tools/build-id.sh", "--gate", n],
+            ["tools/build-id.py", "--gate", n],
             stdout=subprocess.PIPE, text=True, check=False)
         if key.returncode != 0:
-            print(f"gates.sh: --fingerprint could not key {n}",
+            print(f"gates.py: --fingerprint could not key {n}",
                   file=sys.stderr)
             return None
         h.update(f"{n}={key.stdout.strip()}\n".encode())
@@ -448,8 +448,8 @@ def main(args):
         return 0
 
     if args:
-        print(f"gates.sh: unknown argument {args[0]!r} — "
-              f"usage: gates.sh [--list | --selftest | --fingerprint | --build]",
+        print(f"gates.py: unknown argument {args[0]!r} — "
+              f"usage: gates.py [--list | --selftest | --fingerprint | --build]",
               file=sys.stderr)
         return 1
 

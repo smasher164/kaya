@@ -210,7 +210,7 @@ pub(crate) fn dump(reason: &str) {
     let _ = f.flush();
     // NOT IN THE VERDICT: that text is byte-compared across the three
     // harnesses and this instrument exists in one of them
-    // (tools/check-verbs.sh). A pointer line on stderr, printed only
+    // (tools/check-verbs.py). A pointer line on stderr, printed only
     // when the env var asked for a trace.
     eprintln!(
         "KAYA_HARNESS: verb trace ({kept} records, {dropped} dropped) appended to {}",

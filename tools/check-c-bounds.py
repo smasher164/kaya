@@ -57,7 +57,7 @@ PRE_REV = "ee7bc41"
 
 T = g.scratch()
 
-# COUNT IN, COUNT OUT (gates.sh's rule, one gate down): the verdict
+# COUNT IN, COUNT OUT (gates.py's rule, one gate down): the verdict
 # names which modes actually proved the claim. guard-page is not
 # skippable; asan is, on a host without the compiler, and the skip is
 # printed.
@@ -152,7 +152,7 @@ def guarded(path):
                    "cap — the caller owns and sizes the buffer "
                    "(DESIGN.md, Binding conventions). The header is "
                    "GENERATED: fix tools/kaya-bindgen/src/c.rs and "
-                   "re-run tools/gen-bindings.sh.")
+                   "re-run tools/gen-bindings.py.")
         return [], err, False
 
     return [f"check-c-bounds: {writes} write(s) through tx->buf, "

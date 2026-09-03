@@ -27,7 +27,7 @@ import (
 )
 
 // logcatError writes one message under the tag the lane already reads
-// (tools/android/run-emulator.sh filters `kaya:*` and `Go:E`).
+// (tools/android/run-emulator.py filters `kaya:*` and `Go:E`).
 func logcatError(msg string) {
 	tag := C.CString("kaya")
 	text := C.CString(msg)

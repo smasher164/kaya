@@ -1,8 +1,8 @@
-# validate-linux.sh + validate-all.sh -> python (runner conversion, stage 4b)
+# validate-linux.py + validate-all.py -> python (runner conversion, stage 4b)
 
 The last two lane-tier runners under docs/runner-conversion-plan.md
 §4 item 3, converted together: the linux docker wrapper (51 lines)
-and the matrix driver (317 lines). gates.sh remains, last by the
+and the matrix driver (317 lines). gates.py remains, last by the
 plan's own ordering.
 
 ## What moved where
@@ -31,7 +31,7 @@ check-gates' matrix block was the whole surface: PLATFORM_LAUNCHES,
 GATE_LAUNCH, ANDROID_PID/ANDROID_WAIT re-pinned to the python
 spellings; matrix_parallel_problem parses the python parallel block
 (the five launches consecutive with the linux env rider's
-continuation tolerated, the android-wait tail, gates.sh appearing
+continuation tolerated, the android-wait tail, gates.py appearing
 only in the fingerprint and the niced launch); N5, N6, N7, N10, N11
 and N12 re-spelled as python perturbations, each applied with its
 count printed and red re-proven. bench-tables' MATRIX_RUNNERS

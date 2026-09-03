@@ -1,4 +1,4 @@
-/* The KayaTx cap probe, run by tools/check-c-bounds.sh.
+/* The KayaTx cap probe, run by tools/check-c-bounds.py.
  *
  * Built TWICE — against bindings/c/kaya_wire.h as it stands, and against
  * the PRE-CAP header spliced out of git with -DKAYA_TX_PRE_CAP — so the
@@ -13,7 +13,7 @@
  * the byte after cap is another allocation rather than an unmapped page,
  * which is what a guest's buffer actually is. Only a sanitizer sees that
  * overrun, and only the compiler flake.nix names has one that runs on this
- * host (docs/traps.md). check-c-bounds.sh runs them under nothing else. */
+ * host (docs/traps.md). check-c-bounds.py runs them under nothing else. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
      * allocator, so nothing here attributes the pre-cap header's overrun
      * except a sanitizer: measured 2026-08-27, unsanitized it exits 0 in
      * silence, and under the dev shell's hardening it dies of a SIGTRAP
-     * printing zero bytes. Run under ASan only (tools/check-c-bounds.sh,
+     * printing zero bytes. Run under ASan only (tools/check-c-bounds.py,
      * companion mode). */
     if (strcmp(mode, "heap") == 0) {
         uint8_t *heap = malloc(64);

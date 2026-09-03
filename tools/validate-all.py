@@ -12,11 +12,11 @@ dev_shell_or_die()
 # lane's honest numbers, debugging under contention, or recording mode
 # (one screen, one recorder).
 #
-# Usage: validate-all.sh [--serial] [windows-host]
+# Usage: validate-all.py [--serial] [windows-host]
 #   windows-host defaults to akhil@192.168.64.2 (the UTM VM;
 #   deploy-win auto-starts it).
 #
-# tools/check-gates.sh pins the parallel launch block: all five
+# tools/check-gates.py pins the parallel launch block: all five
 # platform lanes queued together with no barrier between them,
 # Android's exact lane process waited on, then the one gate sweep at
 # niceness 10.
@@ -165,16 +165,16 @@ if MODE == "parallel":
     # contention — measured as the mac lane's 791s against 620 on the
     # day's fifth matrix, every leg green and the sum of leg times
     # DOWN, with nothing amiss but a stale token.
-    if subprocess.run(["tools/gates.sh", "--build"]).returncode != 0:
+    if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:
         sys.exit(1)
-    got = subprocess.run(["tools/gates.sh", "--fingerprint"],
+    got = subprocess.run(["tools/gates.py", "--fingerprint"],
                          stdout=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace",
                          check=False)
     if got.returncode != 0:
         sys.exit(1)
     os.environ["KAYA_MATRIX_GATES_TOKEN"] = got.stdout.strip()
-    run_lane("mac", ["tools/validate-mac.sh"])
+    run_lane("mac", ["tools/validate-mac.py"])
     # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone
     # — bare KAYA_JOBS would resize the mac pool too. Empty means the
     # lane's own default (run-suites' ${KAYA_JOBS:-8} treats empty as
@@ -184,20 +184,20 @@ if MODE == "parallel":
     # android and a picker leg on iOS in the same run — the wall only
     # moved 403 -> 394 while the extra host share destabilized the
     # phone lanes, KAYA_WIN_JOBS' contention story one lane over.
-    run_lane("linux", ["tools/validate-linux.sh"],
+    run_lane("linux", ["tools/validate-linux.py"],
              env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", "")})
-    run_lane("windows", ["tools/deploy-win.sh", HOST, "all"])
-    run_lane("ios", ["tools/ios/run-sim.sh"])
-    run_lane("android", ["tools/android/run-emulator.sh"])
+    run_lane("windows", ["tools/deploy-win.py", HOST, "all"])
+    run_lane("ios", ["tools/ios/run-sim.py"])
+    run_lane("android", ["tools/android/run-emulator.py"])
     android_lane_proc = lane_procs[-1]
     android_lane_proc.wait()
-    run_lane("gates", ["nice", "-n", "10", "tools/gates.sh"])
+    run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])
 else:
-    run_lane("mac", ["tools/validate-mac.sh"])
-    run_lane("linux", ["tools/validate-linux.sh"])
-    run_lane("windows", ["tools/deploy-win.sh", HOST, "all"])
-    run_lane("ios", ["tools/ios/run-sim.sh"])
-    run_lane("android", ["tools/android/run-emulator.sh"])
+    run_lane("mac", ["tools/validate-mac.py"])
+    run_lane("linux", ["tools/validate-linux.py"])
+    run_lane("windows", ["tools/deploy-win.py", HOST, "all"])
+    run_lane("ios", ["tools/ios/run-sim.py"])
+    run_lane("android", ["tools/android/run-emulator.py"])
 
 # DURATION IS A CORRECTNESS SIGNAL (CLAUDE.md invariant 8): a lane can
 # get six times slower and still report ALL PASS. Measured 2026-07-25:

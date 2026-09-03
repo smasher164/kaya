@@ -466,7 +466,7 @@ type Asset = R.Asset
 -- | Open an asset by its relative path under the asset root, spelled
 -- with @\/@ — @asset "fonts\/sora-wght.ttf"@. Resolving the root is the
 -- core's (docs\/assets-plan.md); no guest reads an asset environment
--- variable or carries a repo-relative default, and tools/check-assets.sh
+-- variable or carries a repo-relative default, and tools/check-assets.py
 -- enforces that.
 --
 -- IO, AND CALLED OUTSIDE THE TRANSACTION: 'Build' is a pure state monad,
@@ -3835,7 +3835,7 @@ dispatchLoop app = do
       -- (docs/canvas-plan.md §3.2.1): the guest registered a drawing as a
       -- function of size, so this calls it for the size the core asked
       -- about and submits the one set_drawing itself, in a transaction the
-      -- BINDING opens (tools/check-ambient-tx.sh). An unregistered canvas
+      -- BINDING opens (tools/check-ambient-tx.py). An unregistered canvas
       -- id drops the ask like any other unclaimed occurrence.
       --
       -- The size the ask carried IS the new viewbox, which is what makes

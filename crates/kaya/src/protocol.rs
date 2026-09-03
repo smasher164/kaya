@@ -1649,7 +1649,7 @@ pub enum ApplyOp {
     /// backend blits; it interprets no op and owns no drawing API.
     /// Re-emitted on a new declaration, a scale report or an appearance
     /// flip. A zero-sized buffer means declared-and-empty: the node
-    /// stays present with no picture (tools/check-empty-child.sh).
+    /// stays present with no picture (tools/check-empty-child.py).
     SetDrawing { id: WidgetId, width: u32, height: u32, scale: f64, pixels: Blob },
     /// The brand accent, DERIVED (docs/styling-plan.md D1): the seed —
     /// for Material, the one platform whose own derivation kaya defers

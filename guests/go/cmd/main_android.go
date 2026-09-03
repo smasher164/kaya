@@ -20,7 +20,7 @@ func main() {}
 func androidApp() {
 	// kaya.Env AND NEVER os.Getenv: os.Getenv answers "" here forever, on
 	// every leg, because a loaded library never sees an envp.
-	// tools/check-go-env.sh's header carries the measurement.
+	// tools/check-go-env.py's header carries the measurement.
 	scene := kaya.Env("KAYA_SELFTEST")
 	if scene == "" {
 		// AN EMPTY NAME IS ITS OWN ARM, and the only run-time wall

@@ -38,7 +38,7 @@ cross) so a Dock tile carrying one is unmistakable in a screenshot.
   guest process (Go/Rust/Python/…) `dlopen`s the interpreter and calls
   `@_cdecl("kaya_swiftui_run")`, which calls `KayaApp.main()` on the
   caller's main thread.
-- `tools/validate-mac.sh` launches guests as **bare executables** staged
+- `tools/validate-mac.py` launches guests as **bare executables** staged
   into `target/rust-guests/`. Its own comment (lines 74-102) proves it
   knows they are unbundled: *"Launching a bare (unbundled) executable on
   macOS registers it with LaunchServices, and `_LSApplicationCheckIn`
@@ -56,7 +56,7 @@ cross) so a Dock tile carrying one is unmistakable in a screenshot.
   `toolbar-mac.md` §Q3 — bundling is NOT what selects the macOS 26
   design; the *main executable's* linked SDK is, and kaya's is 14.4.
   `film-mac.md` — guests run `.accessory` and never `activate()`.
-  `CLAUDE.md` invariant 3 / `check-diagnostics.sh` — `.accessory` means
+  `CLAUDE.md` invariant 3 / `check-diagnostics.py` — `.accessory` means
   `NSApp.isActive` is **always false**, the `kayaOpenPanelWhyNot` bug.
 
 ## 2. What an unbundled process IS, measured
@@ -365,7 +365,7 @@ the bundle after the product.
 
 ## 7. Q4 — what the harness could HONESTLY read back on mac
 
-The repo's rule (CLAUDE.md invariant 3, `check-verbs.sh`'s
+The repo's rule (CLAUDE.md invariant 3, `check-verbs.py`'s
 stamped-observation clause, `docs/traps.md`): a verdict must be a
 measurement, not an echo. Graded honestly:
 

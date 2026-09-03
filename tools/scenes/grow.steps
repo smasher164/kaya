@@ -4,7 +4,7 @@
 # column#0 and row#0 are each the scene's ONLY container of their kind,
 # which is what makes naming them safe — container targets index by
 # creation order and that order legitimately differs per language (see
-# tools/check-steps.sh).
+# tools/check-steps.py).
 #
 # Every child of both containers is a grower, so each split is exactly
 # weight/Sigma-weight: 1,2,1 divide the column 25/50/25 and the row's

@@ -13,7 +13,7 @@
 # enforces that band. The MIDDLE rung — which panes shed first when
 # only some fit — is where the platforms genuinely differ and no shared
 # byte can pin it; each lane's own gate holds its ladder
-# (tools/check-pane-ladder.sh is the macOS one).
+# (tools/check-pane-ladder.py is the macOS one).
 expect_entries 0
 expect_title "panes"
 expect_panes

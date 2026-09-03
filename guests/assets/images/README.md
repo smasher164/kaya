@@ -7,7 +7,7 @@ byte array, extracted verbatim on 2026-08-19 when those guests moved to
 is the one hygiene question a vendored binary asks.
 
 A SEPARATE FAMILY FROM icons/ BECAUSE THE GATE SAYS SO, correctly:
-tools/check-app-identity.sh reads any `icons/...` asset open as a
+tools/check-app-identity.py reads any `icons/...` asset open as a
 reference to the DECLARED mark and refuses a name that is not it — a
 mistyped mark name fails silently otherwise. This file is not the app's
 mark; it is the a11y scene's image-widget stand-in, where the LABEL is

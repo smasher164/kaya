@@ -199,7 +199,7 @@ they all generate.
 
 The trap is self-guarding, which is the good news: a lowering written
 against an unfiltered type does not compile, and the windows
-cross-compile is already in `tools/check-targets.sh`.
+cross-compile is already in `tools/check-targets.py`.
 
 ### 2b. UIA's FontName attribute — MEASURED DEAD, twice, and kaya already knew
 
@@ -400,7 +400,7 @@ types-over-generation-over-checks:
    "forgot the family write" is not a state the source can express.
 2. **Failing that, a gate in the set the lanes already run**: any
    `SetStyle` whose key ends `TextBlockStyle` must be followed by a
-   family write in the same arm. That is `check-universal-props.sh`'s
+   family write in the same arm. That is `check-universal-props.py`'s
    shape (per-backend arm consumes the thing), and its negative test
    must be watched failing — delete the family line, see the gate go
    red, restore.
@@ -409,7 +409,7 @@ types-over-generation-over-checks:
    and its failure is loud in a way nothing else catches — the app's
    icons turn into boxes.
 
-`tools/check-diagnostics.sh` also applies to whatever why-not the read
+`tools/check-diagnostics.py` also applies to whatever why-not the read
 grows: a WinUI typeface why-not must not print "the font is not
 installed" when what it measured was "DirectWrite's collection does not
 have that family string" (§2c's caveat is precisely a case where the
@@ -417,7 +417,7 @@ diagnostic can be true and misleading). One answer, or an answer that
 interpolates nothing, is what that gate already refuses.
 
 One more, from §5 of the icons report and still true: **`winui::tests`
-runs on no lane.** `tools/deploy-win.sh` filters the unit-test binary to
+runs on no lane.** `tools/deploy-win.py` filters the unit-test binary to
 `capi::picked_tests`. Any structural guard for this arm should be a
 `const` assertion or a shell gate, never a `#[test]` under `winui::`.
 

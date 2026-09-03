@@ -24,7 +24,7 @@ android {
     sourceSets {
         getByName("main") {
             // "generated" holds dev.kaya.KayaBuildId, written by
-            // tools/android/run-emulator.sh. Absent outside that lane,
+            // tools/android/run-emulator.py. Absent outside that lane,
             // which gradle treats as an empty source dir.
             java.srcDirs("../../bindings/java", "generated")
         }

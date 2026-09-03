@@ -1,6 +1,6 @@
 """A gate's declared inputs must cover the files it actually reads.
 
-tools/keyed.sh skips a gate whose declared input set has not moved since
+tools/keyed.py skips a gate whose declared input set has not moved since
 it last passed, so an input a gate READS but does not DECLARE is a
 false-PASS generator — and it fires exactly when the undeclared file is
 the thing that changed. So: scan each gate's script for repo paths it
@@ -21,7 +21,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-# Every gate gets tools/ and the flake implicitly (see build-id.sh's
+# Every gate gets tools/ and the flake implicitly (see build-id.py's
 # gate_key), so a script naming its own siblings is always covered.
 IMPLICIT = ("tools/", "flake.nix", "flake.lock")
 
@@ -33,7 +33,7 @@ PATH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9_]+")
 def _build_id():
     """tools/build-id.py, imported: the tables are DATA there since the
     2026-08-31 conversion. The text-parse this replaces read
-    build-id.sh, which is a two-line shim now — it crashed the moment
+    build-id.py, which is a two-line shim now — it crashed the moment
     the shim landed, which is exactly when a quiet fallback would have
     gone vacuous instead."""
     import importlib.util
@@ -131,14 +131,7 @@ def main() -> int:
     status = 0
     checked = 0
     for gate, declared in table.items():
-        # The BODY, not the shim: a converted gate's .sh is two exec
-        # lines, and scanning those instead of the .py made this whole
-        # census read nothing as the conversion advanced — found
-        # 2026-08-31 when the build-id conversion crashed the table
-        # parse above and this loop got re-read alongside it.
         script = ROOT / "tools" / f"{gate}.py"
-        if not script.exists():
-            script = ROOT / "tools" / f"{gate}.sh"
         if not script.exists():
             continue
         checked += 1
@@ -150,7 +143,7 @@ def main() -> int:
                 where = source.relative_to(ROOT)
                 print(
                     f"keyed-inputs: {gate} names {path} in {where} but does not "
-                    f"declare it — build-id.sh GATES[{gate!r}] = {declared}. "
+                    f"declare it — build-id.py GATES[{gate!r}] = {declared}. "
                     f"Under KAYA_FAST a change there would hand back a stale PASS.",
                     file=sys.stderr,
                 )

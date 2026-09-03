@@ -1,4 +1,4 @@
-# The detekt configuration for tools/check-detekt.sh.
+# The detekt configuration for tools/check-detekt.py.
 #
 # This file is the WHOLE config on purpose — it is passed without
 # --build-upon-default-config, so a rule not named here does not run.

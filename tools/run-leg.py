@@ -59,7 +59,7 @@ if "--build" in flags:
 for what, path, fix in (("libkaya", LIB, "cargo build --locked --lib"),
                         ("the SwiftUI interpreter", DYLIB,
                          "tools/swiftui/build-dylib.sh")):
-    verify = [str(ROOT / "tools/build-id.sh"), "--verify"]
+    verify = [str(ROOT / "tools/build-id.py"), "--verify"]
     if what != "libkaya":
         verify += ["--component", "swiftui"]
     got = subprocess.run(verify + [str(path)], cwd=ROOT)

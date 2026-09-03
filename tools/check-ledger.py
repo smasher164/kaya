@@ -11,8 +11,8 @@ dev_shell_or_die()
 # THE LEDGER MAY NOT DISAGREE WITH ITSELF. A ledger entry is read the
 # way a diagnostic is read: whoever reads it next acts on the sentence.
 #
-#   tools/check-ledger.sh              check docs/deferred.md
-#   tools/check-ledger.sh <path>       check some other copy — THE TEST
+#   tools/check-ledger.py              check docs/deferred.md
+#   tools/check-ledger.py <path>       check some other copy — THE TEST
 #                                      SEAM, how the watched negatives
 #                                      run against a COPY
 #
@@ -67,7 +67,7 @@ import re
 root = ROOT
 args = sys.argv[1:]
 if len(args) > 1:
-    sys.exit("usage: check-ledger.sh [ledger-path]")
+    sys.exit("usage: check-ledger.py [ledger-path]")
 target = pathlib.Path(args[0]) if args else root / "docs/deferred.md"
 
 status = 0

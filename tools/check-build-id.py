@@ -7,7 +7,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The gate for the stale-artifact guard (tools/build-id.sh). Two
+# The gate for the stale-artifact guard (tools/build-id.py). Two
 # questions: does a BUILT artifact carry the current id and does the
 # verifier reject one that does not, and does every lane verify what it
 # runs or ships? The verify call is one somebody has to write, so a new
@@ -30,9 +30,9 @@ def fail(msg):
 
 
 def verify(*args):
-    """tools/build-id.sh --verify ... — quiet; (rc, stderr-text)."""
+    """tools/build-id.py --verify ... — quiet; (rc, stderr-text)."""
     run = subprocess.run(
-        ["tools/build-id.sh", "--verify", *args], cwd=ROOT,
+        ["tools/build-id.py", "--verify", *args], cwd=ROOT,
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
         encoding="utf-8",
         check=False)
@@ -80,7 +80,7 @@ with scratch_dir("check-build-id-") as tmp:
     # 2. Coverage. The list is explicit: a runner that silently stopped
     # verifying looks exactly like one that never needed to. The windows
     # runner is python since the runner conversion, and its argv spelling
-    # (["…/build-id.sh", "--verify", …]) matched NEITHER of the two shell
+    # (["…/build-id.py", "--verify", …]) matched NEITHER of the two shell
     # substrings this clause used to hold — so the call is read as a
     # non-comment LINE naming build-id and --verify together, which both
     # languages spell.
@@ -98,7 +98,7 @@ with scratch_dir("check-build-id-") as tmp:
                      "tools/deploy-win.py", "tools/swiftui/build-dylib.sh"]:
         if not lane_verifies((ROOT / lane_rel).read_text(encoding="utf-8")):
             fail(f"{lane_rel} builds the core but never verifies what it "
-                 f"runs (build-id.sh --verify)")
+                 f"runs (build-id.py --verify)")
 
     # The clause's own negative, watched because this parse already
     # drifted once (the argv spelling above): the windows runner with

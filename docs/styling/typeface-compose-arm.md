@@ -146,7 +146,7 @@ printing (#5, #6).
 
 ## 4. EXISTING SCENES GREEN
 
-`tools/android/run-emulator.sh compose` on the FINAL tree: **32 legs,
+`tools/android/run-emulator.py compose` on the FINAL tree: **32 legs,
 32 PASS, 0 FAILED, rc=0** — including `styling-compose`, which exercises
 the same KayaTheme the two new writes live in (brand accent, roles,
 inset), and `ranges`/`textarea`/`entry`, which read the ambient text
@@ -156,12 +156,12 @@ log-volume change, is compose-suite.log).
 
 ## 5. GATES
 
-`tools/gates.sh`: **declared 31, ran 31, passed 28.** The three reds,
+`tools/gates.py`: **declared 31, ran 31, passed 28.** The three reds,
 attributed:
 
 - **check-steps** — `scene "typeface" has no live legs` in
-  tools/linux/run-suites.sh, tools/deploy-win.sh AND
-  tools/android/run-emulator.sh. This is the fan-out's designed red (the
+  tools/linux/run-suites.sh, tools/deploy-win.py AND
+  tools/android/run-emulator.py. This is the fan-out's designed red (the
   gate stops demanding legs only while a backend still declares a depth
   stub, and three backends have now dropped theirs). The android line is
   MINE and cannot be cleared from here: wiring the leg is a tools/**
@@ -189,7 +189,7 @@ attributed:
   4f234a9dd9b2ba8b and 829ca167bc513e0f), because sibling agents are
   editing crates/ while the gate builds and then verifies. Run standalone
   in a quiet moment — `cargo build -p kaya --features harness --locked`
-  then `tools/build-id.sh --verify` — it passed twice in a row, and
+  then `tools/build-id.py --verify` — it passed twice in a row, and
   `check-build-id: OK` was observed. I touched no file under crates/.
 
 Individually green and watched: check-compose (watched failing first),

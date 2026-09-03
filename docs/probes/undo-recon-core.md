@@ -349,7 +349,7 @@ handler returns, so handlers are atomic without any effort from the author.
 Explicit transactions exist only for writes outside handlers, such as timers
 and background completions."
 
-Enforced by `tools/check-ambient-tx.sh` (CLAUDE.md:185-188): no guest may open
+Enforced by `tools/check-ambient-tx.py` (CLAUDE.md:185-188): no guest may open
 its own transaction inside a handler — one that does is camouflage, and it hid
 a real Python defect for months.
 
@@ -361,7 +361,7 @@ a real Python defect for months.
   recognised and refused. **Rust at compile time** (`Tx` is `!Send`/`!Sync`,
   `app.rs:781-784`); **Go, Java, C#, Swift** check a `closed` flag at *one*
   chokepoint every write goes through — `bindings/go/app.go` `Tx.emit`/`Tx.alive`
-  (gate at `check-tx-liveness.sh:69-72`), `bindings/java/dev/kaya/KayaApp.java`
+  (gate at `check-tx-liveness.py:69-72`), `bindings/java/dev/kaya/KayaApp.java`
   private `emit` with **exactly one** `records.add(` (`:75-79`),
   `bindings/csharp/KayaApp.cs` `internal List<byte[]> Records` property with
   exactly two raw-field uses (`:84-91`), `bindings/swift/KayaApp.swift`
@@ -420,7 +420,7 @@ at `:142-151` and per-object restores at `:188`, `:283`, `:307`, `:578`,
 menu-domain barrier restores every signal the batch wrote before propagating
 the panic, so a caught panic never leaves partially-applied signal state.
 
-**The gate** — `tools/check-abort.sh`: every binding carries the same negative
+**The gate** — `tools/check-abort.py`: every binding carries the same negative
 test (abort mid-handler → mirror restored, nothing shipped, next dispatch
 works), run for Go, Swift, C#, Java, OCaml, Haskell; Rust's pin is in
 `cargo test -p kaya`, Python's in `kaya_app_checks.py`, C has no mirror.
@@ -631,8 +631,8 @@ Additive, and the shape is fully precedented: one string in `MENU_ROLES`
 hashed; it is **not** (`hash()` at `spec.rs:298-353` walks records, enums, and
 the four prop tables; `MENU_ROLES` is a scene-side const, not a spec enum). So
 adding a role does **not** regenerate the bindings, which is why `MenuRole` in
-each binding is hand-maintained and why `check-sugar-surface.sh` /
-`check-verbs.sh` would need to grow a clause if role coverage is to be gated
+each binding is hand-maintained and why `check-sugar-surface.py` /
+`check-verbs.py` would need to grow a clause if role coverage is to be gated
 across the eight bindings and both interpreters. Every backend has a
 hard-coded `"cut" | "copy" | "paste"` triple in its refresh filter
 (`gtk.rs:2312`, `winui/mod.rs:3487`) — four places that must be found by

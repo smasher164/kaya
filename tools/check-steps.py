@@ -26,7 +26,7 @@ import tempfile
 
 # The windows lane's tables — roster, order, drain structure — are DATA
 # since the runner conversion (docs/runner-conversion-plan.md §2); the
-# clauses that used to regex tools/deploy-win.sh's text import what the
+# clauses that used to regex tools/deploy-win.py's text import what the
 # runner imports.
 from lanes import android as android_lane
 from lanes import ios as ios_lane
@@ -1110,7 +1110,7 @@ def panes_width_lint(text, path):
     # The band where the platforms legitimately disagree about THREE
     # panes; the middle rung is deliberately unsampleable by a shared
     # scene — each lane's own gate holds its ladder
-    # (tools/check-pane-ladder.sh on macOS).
+    # (tools/check-pane-ladder.py on macOS).
     return _width_lint(text, path, "expect_panes", 400, 1400,
                        "about three panes (Material wants 1200dp, "
                        "GNOME 1075px at large text, the WinUI nest "
@@ -1659,7 +1659,7 @@ for p in STEPS:
 # in the lane modules their legs are generated from. NEVER the bare
 # name: the name-level check this
 # replaced was satisfied by a COMMENT (the only `background` in
-# run-sim.sh sat in a sentence about shell jobs) and by unrelated CODE
+# run-sim.py sat in a sentence about shell jobs) and by unrelated CODE
 # (`window` inside resize_window), so four pairs claimed wiring that
 # did not exist — found by the 2026-08-19 comment sweep's gate survey.
 #
@@ -3759,7 +3759,7 @@ if out:
 
 # THE iOS PICKER'S SILENT WIRINGS. Each of these fails in a way that
 # looks like a backend bug rather than a harness one. (The file_mode
-# clause lives in tools/check-file-modes.sh, which reads the numbers
+# clause lives in tools/check-file-modes.py, which reads the numbers
 # out of crates/kaya/src/spec.rs rather than hard-coding them.)
 def ios_picker():
     bad = []
@@ -3800,11 +3800,11 @@ if out:
     status = 1
 
 
-# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED. gen-bindings.sh
+# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED. gen-bindings.py
 # stamps a hash of tools/kaya-bindgen/src/*.rs beside the bindings it
 # wrote; if the generator moved since, the checked-in bindings are
 # stale and everything downstream is a lie that COMPILES
-# (docs/traps.md). `gen-bindings.sh --check` is the authoritative
+# (docs/traps.md). `gen-bindings.py --check` is the authoritative
 # answer and regenerates to get it; this is the cheap one, so it can
 # be asked constantly.
 def generator_stamp(root):
@@ -3820,7 +3820,7 @@ def generator_stamp(root):
     if want != have:
         return (f"the binding generator has changed since the bindings "
                 f"were generated (generator {want}, bindings say "
-                f"{have or '<no stamp>'}) — run tools/gen-bindings.sh")
+                f"{have or '<no stamp>'}) — run tools/gen-bindings.py")
     return None
 
 

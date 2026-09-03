@@ -349,8 +349,8 @@ step-verb arm) and `android/.../KayaCompose.kt (gone)` (the same four), plus the
 `Stage` trait in `crates/kaya/src/harness.rs` (`file_dialog_state`,
 `choose_file`, `goto_directory` today — MEASURED: three methods, no
 defaults, implemented in `gtk.rs` and `winui/mod.rs`) and both Rust-native
-backends. `tools/check-verbs.sh` will hold both interpreters to the new
-verbs; `tools/check-steps.sh` will hold the scene to them.
+backends. `tools/check-verbs.py` will hold both interpreters to the new
+verbs; `tools/check-steps.py` will hold the scene to them.
 
 ### Honest size
 

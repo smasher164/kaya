@@ -18,7 +18,7 @@ Script: inline via KAYA_SELFTEST_SCRIPT, one step —
 (label#last is the last stamped cell of the last stamped row, so a pass
 proves the whole stamp reached the widget tree.)
 
-libkaya.so build id verified before the sweep: tools/build-id.sh --verify
+libkaya.so build id verified before the sweep: tools/build-id.py --verify
 => rc 0.
 
 WATCHED NEGATIVE (the assertion is not vacuous): with the guest stamping

@@ -1,7 +1,7 @@
 package kaya
 
 // The canvas SIZE POLICY (docs/canvas-plan.md §3.2.1). Headless, beside
-// the abort pin — tools/check-abort.sh runs this package.
+// the abort pin — tools/check-abort.py runs this package.
 
 import (
 	"encoding/binary"

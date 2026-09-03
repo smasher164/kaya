@@ -7,13 +7,13 @@ fn main() {
     static_vcruntime::metabuild();
 
     // Bake the id of the sources this core is compiled from. The hash
-    // comes from tools/build-id.sh, shelled out to rather than
+    // comes from tools/build-id.py, shelled out to rather than
     // reimplemented, so the two cannot disagree.
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .join("../..")
         .canonicalize()
         .expect("kaya build.rs: cannot resolve the workspace root");
-    let script = root.join("tools/build-id.sh");
+    let script = root.join("tools/build-id.py");
     let id = if script.is_file() {
         // build.rs re-runs only when something it DECLARES changes, and
         // the id is a function of the whole source set — so the whole
@@ -22,15 +22,15 @@ fn main() {
         for input in ["crates", "Cargo.toml", "Cargo.lock"] {
             println!("cargo::rerun-if-changed={}", root.join(input).display());
         }
-        let out = Command::new("bash")
+        let out = Command::new("python3")
             .arg(&script)
             .arg("core")
             .current_dir(&root)
             .output()
-            .expect("kaya build.rs: could not run tools/build-id.sh");
+            .expect("kaya build.rs: could not run tools/build-id.py");
         assert!(
             out.status.success(),
-            "kaya build.rs: tools/build-id.sh failed: {}",
+            "kaya build.rs: tools/build-id.py failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
         String::from_utf8(out.stdout)
@@ -59,7 +59,7 @@ fn main() {
 /// bindings it produced were written (docs/traps.md).
 ///
 /// Two exemptions: no tools/ directory (kaya built as a published
-/// dependency), and KAYA_REGENERATING, which gen-bindings.sh sets
+/// dependency), and KAYA_REGENERATING, which gen-bindings.py sets
 /// because the generator depends on this crate — without it a
 /// generator edit would fail the build of the tool that fixes it.
 fn refuse_a_stale_generator(root: &std::path::Path) {
@@ -93,7 +93,7 @@ fn refuse_a_stale_generator(root: &std::path::Path) {
         want == have,
         "kaya build.rs: the binding generator has changed since the bindings \
          were generated (generator {want}, bindings say {have}) — run \
-         tools/gen-bindings.sh. Every binding downstream is stale until you do."
+         tools/gen-bindings.py. Every binding downstream is stale until you do."
     );
 }
 

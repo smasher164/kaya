@@ -1,5 +1,5 @@
 // The table tier rule, driven for real — compiled INTO the interpreter's
-// own module by tools/check-table-tier.sh and run as an executable.
+// own module by tools/check-table-tier.py and run as an executable.
 // Three halves:
 //
 //   1  THE TRUTH TABLE: kayaTableTier over every width the rule knows

@@ -88,7 +88,7 @@ let () =
              own transaction — and [clear] inside an undoable group is
              refused at apply anyway (docs/undo-plan.md D4). [post], not
              a nested [build]: a handler already is a transaction
-             (tools/check-ambient-tx.sh). *)
+             (tools/check-ambient-tx.py). *)
           post app (fun () -> clear field)
         end
       in

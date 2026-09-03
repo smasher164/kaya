@@ -9,9 +9,9 @@ from kaya_gate import ROOT
 # feeds an artifact, and a way to ask a built file which sources it came
 # from. Two modes, one implementation:
 #
-#   tools/build-id.sh core             prints the id; crates/kaya/build.rs
+#   tools/build-id.py core             prints the id; crates/kaya/build.rs
 #                                      bakes it into the library
-#   tools/build-id.sh --verify FILE…   each file must CARRY the current
+#   tools/build-id.py --verify FILE…   each file must CARRY the current
 #                                      id, or the build that produced it
 #                                      never happened
 #
@@ -52,7 +52,7 @@ COMPONENTS = {
 
 # What each GATE reads BEYOND the implicit set every one of them gets:
 # tools/ plus flake.nix/flake.lock — see gate_key. Read by
-# tools/keyed.sh.
+# tools/keyed.py.
 #
 # THE RULE FOR EDITING THIS TABLE: sets are deliberately
 # OVER-approximate, whole directories rather than file lists. Naming too
@@ -149,7 +149,7 @@ GATES = {
     "check-empty-child": ["crates", "swift", "android"],
     "check-pane-ladder": ["crates", "swift", "docs"],
     "check-table-tier": ["crates", "swift", "docs"],
-    # The fixture tools/check-keyed.sh exercises. A REAL entry on
+    # The fixture tools/check-keyed.py exercises. A REAL entry on
     # purpose: a self-test stamping under a live gate's name would make
     # the next KAYA_FAST run skip that gate.
     "keyed-selftest": [],
@@ -287,7 +287,7 @@ def gate_key(name):
 
 def main(args):
     if not args:
-        sys.exit("usage: build-id.sh <component> | --gate NAME "
+        sys.exit("usage: build-id.py <component> | --gate NAME "
                  "| --verify [--component NAME] FILE...")
 
     if args[0] == "--gate":

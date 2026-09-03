@@ -47,7 +47,7 @@ import subprocess
 if platform_mod.system() != "Darwin":
     print(f"check-design-generation: this gate reads macOS Mach-O stamps "
           f"and builds probes with the mac toolchain; it belongs to the "
-          f"mac sweep (tools/gates.sh) and has nothing to say on "
+          f"mac sweep (tools/gates.py) and has nothing to say on "
           f"{platform_mod.system()}. Refusing rather than passing.",
           file=sys.stderr)
     sys.exit(1)
@@ -240,21 +240,21 @@ with scratch_dir("check-design-generation-") as tmp:
          "are linked by this shell's cc, and flake.nix's buildInputs SDK "
          "is what stamps them"),
         ("swift", "modern", "file", str(tmp / "probe-swift"), {},
-         "the swift legs (validate-mac.sh's build_swift) and the SwiftUI "
+         "the swift legs (validate-mac.py's build_swift) and the SwiftUI "
          "interpreter, both built through kaya_swiftc against Apple's "
          "SDK"),
         ("python", "compat", "which", "python3", {},
-         "validate-mac.sh's python legs — `python3 "
+         "validate-mac.py's python legs — `python3 "
          "guests/python/<scene>.py`, a nixpkgs-prebuilt host kaya does "
          "not link"),
         ("dotnet", "compat", "which", "dotnet", {},
-         "validate-mac.sh's csharp legs — `dotnet exec $CS_GUEST`, a "
+         "validate-mac.py's csharp legs — `dotnet exec $CS_GUEST`, a "
          "Microsoft-built host nix only repackages"),
         ("java", "compat", "which", "java", {},
-         "validate-mac.sh's java legs — `java -XstartOnFirstThread -cp "
+         "validate-mac.py's java legs — `java -XstartOnFirstThread -cp "
          "target/java-guests …`, an Azul-built host"),
         ("node", "compat", "which", "node", {},
-         "validate-mac.sh's js legs — `node guests/js/<scene>.ts`, a "
+         "validate-mac.py's js legs — `node guests/js/<scene>.ts`, a "
          "nixpkgs-prebuilt host kaya does not link (docs/js-plan.md §1)"),
     ]
 

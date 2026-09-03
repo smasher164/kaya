@@ -19,7 +19,7 @@ its table hangs off that sentence. Measured here:
 
 Windows Firewall drops inbound ICMP echo by default (File and Printer
 Sharing / Echo Request rules are off in the default profile); sshd is
-running with start type Automatic, which is what `tools/deploy-win.sh`'s
+running with start type Automatic, which is what `tools/deploy-win.py`'s
 own requirements section says the image is set up for. So a ping test
 reports "powered off" for a perfectly healthy guest, and a session that
 believes it stops measuring.
@@ -136,7 +136,7 @@ to say so.
 
 Driven by hand (`schtasks` + a scratchpad `.cmd`, the shape
 `tools/guest/run_<scene>_rust.cmd` has), because wiring the leg into
-tools/deploy-win.sh is a tools/** edit this charge withheld — see §5.
+tools/deploy-win.py is a tools/** edit this charge withheld — see §5.
 
 ### THE TWO MEASUREMENTS THAT CAME OUT OF IT
 
@@ -286,12 +286,12 @@ own evidence that the perturbed code ran.
 
 ## 5. THE LEG IS NOT WIRED, and check-steps says so
 
-`tools/deploy-win.sh` runs depth scenes by NAME, and this charge withheld
+`tools/deploy-win.py` runs depth scenes by NAME, and this charge withheld
 tools/** edits, so the leg was driven by hand: `schtasks` running a
 scratchpad `.cmd` shaped exactly like `tools/guest/run_styling_rust.cmd`.
 That is the same path a wired leg takes, minus the pool slot.
 
-    check-steps: scene "typeface" has no live legs in tools/deploy-win.sh
+    check-steps: scene "typeface" has no live legs in tools/deploy-win.py
                  (wanted "run_suite typeface_")
 
 RED, correctly, and it stays red until three things land — all in
@@ -339,20 +339,20 @@ what is true; check-stubs went green on it.
 
 ## 7. VERIFICATION
 
-- `tools/check-targets.sh` — native, ios, android, **windows**, go-android
+- `tools/check-targets.py` — native, ios, android, **windows**, go-android
   all OK, in BOTH feature configurations (that is what the script does).
 - `cargo test -p kaya --features harness --locked --lib` — 352 passed.
-- `tools/check-stubs.sh` OK, `tools/check-diagnostics.sh` OK,
-  `tools/check-verbs.sh` OK (60 verbs), `tools/check-universal-props.sh`
-  OK, `tools/check-roles.sh` OK, `tools/check-case.sh` OK,
-  `tools/check-shell.sh` OK.
-- `tools/check-steps.sh` RED on three runners (windows, linux, android)
+- `tools/check-stubs.py` OK, `tools/check-diagnostics.py` OK,
+  `tools/check-verbs.py` OK (60 verbs), `tools/check-universal-props.py`
+  OK, `tools/check-roles.py` OK, `tools/check-case.py` OK,
+  `tools/check-shell.py` OK.
+- `tools/check-steps.py` RED on three runners (windows, linux, android)
   for the missing typeface legs — §5. The linux and android halves are
   the GTK and Compose arms' own, already recorded in docs/deferred.md.
 - The lane leg, final run on the shipped tree:
   `KAYA_SELFTEST: OK (typeface, typeface Georgia, clicked hi, ax "heading/typeface")`.
 
-I did NOT run the full `tools/gates.sh`: three other arms are editing
+I did NOT run the full `tools/gates.py`: three other arms are editing
 shared files in this same tree right now (guests/rust/typeface.rs changed
 under me mid-build), so a sweep's reds would not be attributable. The
 gates above are the ones this arm's changes can move.
@@ -393,7 +393,7 @@ listing them and showing the listing empty, not asserted.
 
 Two things deliberately left: `C:\kaya\kaya.dll` is this arm's build of
 the same sources the tree holds (every deploy rebuilds and re-ships it,
-after `build-id.sh --verify`), and `C:\kaya\scenes\typeface.steps`, which
+after `build-id.py --verify`), and `C:\kaya\scenes\typeface.steps`, which
 every deploy scps anyway.
 
 **Unrelated finding worth passing on:** the guest's `%TEMP%` holds well

@@ -298,7 +298,7 @@ returned `b'3.14.7 ...'` under a `python3` whose only `otool -L` entry is
 `libSystem.B.dylib` — i.e. libpython was statically linked into that
 executable and `CDLL(None)` found it. This is the exact shape kaya has: the
 repo builds `libkaya.a` (`crate-type = ["rlib", "cdylib", "staticlib"]`) and
-`tools/ios/run-sim.sh` links it into the app executable. **`ctypes.CDLL(None)`
+`tools/ios/run-sim.py` links it into the app executable. **`ctypes.CDLL(None)`
 will reach libkaya's `#[no_mangle] extern "C"` symbols provided the app links
 the archive with `-force_load` (or `-all_load`), so unreferenced symbols are
 not dropped.** Without that, only the symbols Swift already calls survive.

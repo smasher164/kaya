@@ -6,7 +6,7 @@
 // commit is not.
 //
 // Compile and run (from the repo root, inside `nix develop`; javac
-// resolution mirrors tools/java-typecheck.sh — the KayaRing stub
+// resolution mirrors tools/java-typecheck.py — the KayaRing stub
 // stands in for the Android JNI class):
 //   javac -d /tmp/java-abort-check \
 //     tools/guest/java-stub/dev/kaya/KayaRing.java \

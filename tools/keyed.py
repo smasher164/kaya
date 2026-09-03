@@ -8,11 +8,11 @@ from kaya_gate import ROOT
 # Run a gate, or skip it because nothing it reads has changed since it
 # last passed.
 #
-#   tools/keyed.sh <gate-name> -- <command...>
+#   tools/keyed.py <gate-name> -- <command...>
 #
 # OFF BY DEFAULT: without KAYA_FAST=1 this execs the command, so the
 # matrix never consults a cache. Input sets and why they are
-# deliberately over-approximate live in tools/build-id.sh's GATES; a key
+# deliberately over-approximate live in tools/build-id.py's GATES; a key
 # that omits an input would skip a gate whose answer had changed.
 # Failures are never stored.
 #
@@ -32,13 +32,13 @@ def run_status(cmd):
 
 def main(argv):
     if not argv or not argv[0]:
-        print("usage: keyed.sh <gate-name> -- <command...>",
+        print("usage: keyed.py <gate-name> -- <command...>",
               file=sys.stderr)
         return 1
     name = argv[0]
     rest = argv[1:]
     if rest[:1] != ["--"]:
-        print("keyed.sh: expected -- before the command", file=sys.stderr)
+        print("keyed.py: expected -- before the command", file=sys.stderr)
         return 2
     cmd = rest[1:]
 

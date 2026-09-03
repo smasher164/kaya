@@ -179,7 +179,7 @@ def ink_tolerance(harness_src=None, swift_src=None, kotlin_src=None):
 #
 # NO LANE CAN FAIL THIS. Every runner greps the verdict for
 # `KAYA_SELFTEST: OK` and never diffs its text (validate-mac.py:622,
-# run-emulator.sh, run-sim.sh, run-suites.sh), so the spellings can
+# run-emulator.py, run-sim.py, run-suites.sh), so the spellings can
 # disagree forever with every leg green — which is exactly how they
 # did.
 #
@@ -361,7 +361,7 @@ def ax_spelling(harness_src=None, swift_src=None, kotlin_src=None):
 #
 # So they are held HERE, the way check-native-undo holds a pair no
 # scene can fail. The SwiftUI half of the same loop lives in
-# tools/check-table-tier.sh, which reads the mac driver.
+# tools/check-table-tier.py, which reads the mac driver.
 def window_tier(kotlin_src=None):
     bad = []
     if kotlin_src is None:

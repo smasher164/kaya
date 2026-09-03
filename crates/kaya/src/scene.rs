@@ -1041,7 +1041,7 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
 /// selected. A role item lowers to the platform's own command, acts on
 /// the FOCUSED widget, and configures its own enablement, which kaya
 /// computes. `undo` and `redo` are the same layer one tier deeper
-/// (docs/undo-plan.md D6). tools/check-roles.sh holds every backend to
+/// (docs/undo-plan.md D6). tools/check-roles.py holds every backend to
 /// this line.
 pub(crate) const MENU_ROLES: &[&str] =
     &["settings", "cut", "copy", "paste", "undo", "redo"];

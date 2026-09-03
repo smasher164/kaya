@@ -14,7 +14,7 @@ package dev.kaya;
  * <p>dev.kaya.KayaRing exists twice by design — this class on the
  * desktops, the Kotlin one in android/kaya, whose attach takes an
  * Activity anchor and which has no run. Coverage across the two is
- * tools/check-jni.sh.
+ * tools/check-jni.py.
  */
 public final class KayaRing {
     /** Register everything else (the one name-resolved entry). */

@@ -308,7 +308,7 @@ negative("the WinUI unwrap perturbation", WINUI,
 if platform.system() == "Darwin":
     if not (ROOT / "target/debug/libkaya.dylib").is_file():
         print("check-empty-child: target/debug/libkaya.dylib is not built "
-              "— the probe links against it. Run tools/gates.sh, which "
+              "— the probe links against it. Run tools/gates.py, which "
               "builds what its gates read.", file=sys.stderr)
         sys.exit(1)
     with scratch_dir("check-empty-child-") as tmp:

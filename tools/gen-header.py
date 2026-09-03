@@ -10,7 +10,7 @@ dev_shell_or_die()
 # Regenerate crates/kaya/include/kaya.h from the Rust source — the one
 # spelling of the cbindgen invocation.
 #
-# Usage: tools/gen-header.sh [--check]   (--check fails on a stale
+# Usage: tools/gen-header.py [--check]   (--check fails on a stale
 # header and touches nothing)
 
 import os
@@ -35,7 +35,7 @@ if sys.argv[1:2] == ["--check"]:
             subprocess.run(["diff", "-u", HEADER, str(out)],
                            check=False)
             print(f"{HEADER} is stale; regenerate with "
-                  f"tools/gen-header.sh", file=sys.stderr)
+                  f"tools/gen-header.py", file=sys.stderr)
             sys.exit(1)
 else:
     r = subprocess.run(

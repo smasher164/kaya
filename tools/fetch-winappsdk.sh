@@ -18,7 +18,7 @@ fi
 #
 # Each package names an exact version AND the sha256 of the .nupkg
 # nuget.org serves for it. This is a curl, not a package manager: no
-# lockfile covers it, and tools/check-pins.sh's other four clauses read
+# lockfile covers it, and tools/check-pins.py's other four clauses read
 # gradle, .csproj, opam and SwiftPM, so this door was guarded by nobody
 # until its fifth (docs/canvas-plan.md §3.1).
 set -euo pipefail
@@ -27,7 +27,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/third_party/winappsdk"
 
 # BY HASH, NEVER BY SIZE — a same-length corruption passes a size check
-# (the staging rule tools/check-assets.sh holds for the asset root).
+# (the staging rule tools/check-assets.py holds for the asset root).
 # check-pins cuts this function out and runs it against both outcomes,
 # so the refusal must print what it measured.
 verify_sha256() {
@@ -70,7 +70,7 @@ fetch() {
     # THE CACHE IS VERIFIED TOO, before the early-out below can skip
     # anything: the directory name carries the version, so a bump
     # refetches, but nothing else says the bytes already on disk are the
-    # ones this file names (deploy-win.sh's version-keyed go check is the
+    # ones this file names (deploy-win.py's version-keyed go check is the
     # same lesson one machine over).
     if ! verify_sha256 "$pkg" "$want" "$id $version"; then
         exit 1

@@ -7,7 +7,7 @@
 //! there is exactly ONE column and ONE row: container targets index by
 //! creation order, which legitimately differs per language, so a second
 //! container of either kind makes `column#0`/`row#0` name different
-//! widgets on different lanes (tools/check-steps.sh).
+//! widgets on different lanes (tools/check-steps.py).
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();

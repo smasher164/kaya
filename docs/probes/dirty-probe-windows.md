@@ -256,7 +256,7 @@ Consequences for the design:
 2. Two other routes exist for anything that has to read from outside
    the guest (`GetWindowTextW` and .NET `Process.MainWindowTitle`, both
    verified to return the same string) — but neither is needed, and
-   `deploy-win.sh` has no window-title reader of its own. The only
+   `deploy-win.py` has no window-title reader of its own. The only
    ssh-side title read in the tree is diagnostic:
    `tools/guest/desk-warm.ps1` P/Invokes `GetWindowTextW` to name
    whatever window is holding the foreground. The lane's real title
@@ -303,7 +303,7 @@ NONE (no window.exe, no notepad, no wscript, no powershell)
 Scheduled tasks created: `kaya_dirtyprobe`, `kaya_dirtyprobe2` — both
 deleted; neither appears in `schtasks /query`. (`kaya_deskwarm` remains
 and is left deliberately: it is the lane's own task, recreated with `/f`
-by every `deploy-win.sh` run, and deleting it would be the deviation.)
+by every `deploy-win.py` run, and deleting it would be the deviation.)
 
 VM disk: probe files lived in `C:\kaya\dirtyprobe\` only — never in
 `C:\kaya` itself, so the lane's deployed artifacts and their build-id

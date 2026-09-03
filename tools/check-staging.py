@@ -186,7 +186,7 @@ def check(root):
     # row@narrow "vertical"` true and the other makes it false — same
     # build, no code in between, and the verdict is CORRECT both times,
     # which is why no rerun could ever explain it (measured 2026-08-29,
-    # docs/traps.md). The pool's device TYPE is pinned in run-sim.sh;
+    # docs/traps.md). The pool's device TYPE is pinned in run-sim.py;
     # this is its geometry.
     plist = (root / "tools/ios/Info.plist.in").read_text(encoding="utf-8")
     for key in ("UISupportedInterfaceOrientations",

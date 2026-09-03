@@ -139,7 +139,7 @@ let kaya_spec_hash = foreign ~from:lib "kaya_spec_hash" (void @-> returning int6
 (* The host capability word; Kaya_app.capabilities is the surface.
    cap_aux_windows is the core's KAYA_CAP_AUX_WINDOWS written again —
    ctypes has no header to read it from — and
-   tools/check-sugar-surface.sh fails if it disagrees with
+   tools/check-sugar-surface.py fails if it disagrees with
    crates/kaya/src/scene.rs. *)
 let kaya_capabilities =
   foreign ~from:lib "kaya_capabilities" (void @-> returning int64_t)

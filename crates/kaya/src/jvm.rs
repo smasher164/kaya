@@ -7,7 +7,7 @@
 //! Java in bindings/java-desktop — and registration matches by
 //! name+signature against whichever class loaded this library. A
 //! native the class declares and no list registers fails only at FIRST
-//! USE; tools/check-jni.sh closes that direction statically.
+//! USE; tools/check-jni.py closes that direction statically.
 
 use jni::objects::{JByteArray, JClass};
 use jni::sys::{jint, jlong};
@@ -16,7 +16,7 @@ use jni::JNIEnv;
 
 /// Register the ring natives on dev.kaya.KayaRing — the portable
 /// surface both JVMs share. Everything here is shared by rule: the JVM
-/// guest tier is ONE tier (tools/check-jni.sh).
+/// guest tier is ONE tier (tools/check-jni.py).
 pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let class = env.find_class("dev/kaya/KayaRing")?;
     env.register_native_methods(

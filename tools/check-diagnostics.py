@@ -656,7 +656,7 @@ def audit_swift(path, text):
             "gate cannot see: no `return` in it carries a literal, so "
             "its answers are built somewhere else and the sole-branch "
             "rule cannot be checked. Write the answers as returns, or "
-            "teach tools/check-diagnostics.sh to follow this shape.")
+            "teach tools/check-diagnostics.py to follow this shape.")
         bad += b
         census.append(c)
     return bad, census
@@ -699,7 +699,7 @@ def audit_rust(path, text):
             "be checked. Write each answer as `return format!(…)`, or "
             "as the value of a match arm (a format!/panic!/concat!/"
             "String::from, or a literal with `.to_owned()` on it), or "
-            "teach tools/check-diagnostics.sh to follow this shape.")
+            "teach tools/check-diagnostics.py to follow this shape.")
         bad += b
         census.append(c)
     return bad, census
@@ -745,7 +745,7 @@ def audit(roots, override=None):
                 f"{m.group(1)} is a diagnostic by the naming "
                 f"convention, but this gate reads Swift and Rust only, "
                 f"so nothing is checking it. Add this language to "
-                f"tools/check-diagnostics.sh (a lexer and an "
+                f"tools/check-diagnostics.py (a lexer and an "
                 f"interpolation rule, ~30 lines) — do not rename the "
                 f"function to hide from the gate.")
     if not census:

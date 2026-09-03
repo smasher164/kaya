@@ -1322,7 +1322,7 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     // property"). Re-applied on every report because a mount REPLACES the
     // content root, and only when it differs, so setting it cannot loop
     // through the ActualThemeChanged edge wired just below
-    // (tools/check-appearance.sh).
+    // (tools/check-appearance.py).
     if let Some(mode) = crate::canvas::appearance_override() {
         let want = match mode {
             crate::canvas::Mode::Dark => ElementTheme::Dark,
@@ -9680,7 +9680,7 @@ fn role_enabled(core: &CoreState, role: &str) -> bool {
 /// structural enablement — and before a harness activation OR READ.
 ///
 /// THE ROLE SET IS ONE OF D6's FOUR RECORDED SILENT-FAILURE SITES
-/// (docs/undo-plan.md; tools/check-roles.sh's third clause holds it
+/// (docs/undo-plan.md; tools/check-roles.py's third clause holds it
 /// open): an item whose role is outside this `matches!` never has its
 /// enablement recomputed, and on this backend a disabled item is refused
 /// by BOTH the invoke pipeline and the chord hook. It must name every
@@ -9716,7 +9716,7 @@ fn refresh_role_enablement(core: &CoreState) {
 ///
 /// SPLIT FROM THE CLIPBOARD PERFORM ON PURPOSE, the way the mac arm
 /// splits it: an undo is not a clipboard command, it answers from two
-/// tiers rather than one, and tools/check-roles.sh reads the UNION of
+/// tiers rather than one, and tools/check-roles.py reads the UNION of
 /// this file's `perform_*_role` functions for exactly this reason.
 ///
 /// THIS IS ALSO WHERE THE CHORD LANDS. §1.1's measured finding is that
@@ -11054,7 +11054,7 @@ impl windows::Win32::Graphics::DirectWrite::IDWriteTextAnalysisSource_Impl for T
 ///
 /// A drawing that will not decode is PRESENT AND EMPTY, never absent: the
 /// Image control stays in the tree with no Source
-/// (tools/check-empty-child.sh).
+/// (tools/check-empty-child.py).
 fn set_drawing(
     image: &Image,
     width: u32,

@@ -87,7 +87,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // auxiliary windows" after one harness step, with the icon
         // already declared. That wall has not moved. The phone lanes
         // drop the one step that reads this window
-        // (tools/android/run-emulator.sh's scene_script_drop); the
+        // (tools/android/run-emulator.py's scene_script_drop); the
         // NAME's reader there is the package's own label.
         if kaya::capabilities().aux_windows {
             let untitled = tx.create_window(UNTITLED).size(360.0, 240.0).id();

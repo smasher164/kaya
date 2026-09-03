@@ -245,10 +245,10 @@ that arm kept it. The move off it is not a tidy-up.
 ```
 tools/swift-typecheck.sh            OK
 tools/swiftui/build-dylib.sh        built target/swiftui/libkaya_swiftui.dylib
-tools/check-verbs.sh                OK (62 verbs, 86 constants + CLIP_* + spec hash)
-tools/check-stubs.sh                OK
-tools/check-steps.sh                OK
-tools/check-diagnostics.sh          OK (kayaPromotedSymbolWhyNot answers=2 measured=2)
+tools/check-verbs.py                OK (62 verbs, 86 constants + CLIP_* + spec hash)
+tools/check-stubs.py                OK
+tools/check-steps.py                OK
+tools/check-diagnostics.py          OK (kayaPromotedSymbolWhyNot answers=2 measured=2)
 ```
 
 Legs, all from the restored (fixed) tree, `shasum -c` verified before

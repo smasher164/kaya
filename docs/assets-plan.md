@@ -10,7 +10,7 @@ branch made to print; the file-like reader is binding-side sugar over
 bytes in each language's own idiom; the eight typeface guests collapsed
 from a ten-line preamble to one line; the asset root moved as a UNIT on
 every lane that stages one; guests/assets/win/minimal-resources.pri moved under
-the root with a provenance README; and tools/check-assets.sh holds all of
+the root with a provenance README; and tools/check-assets.py holds all of
 it. STREAMING and Go's `fs.FS` façade stayed refused behind their named
 triggers, as ruled. The two carve-outs the build itself forced are stated
 in A3's walls and in A8.
@@ -47,7 +47,7 @@ docs/chrome/assets-survey.md), [INFER] (reasoning a depth slice
 must confirm).
 
 Every path and line this document cites is checked by
-tools/check-doc-refs.sh.
+tools/check-doc-refs.py.
 
 The ratified precedent this generalizes is docs/app-identity-plan.md:124
 (ruling 4, "the identity comes from a file") and its mechanism section
@@ -227,7 +227,7 @@ and a file on disk invites the next reader to fix it.
    guests/assets/win/minimal-resources.pri: 1040 bytes of opaque MRT
    data, committed once, not regenerable, no provenance file, working-
    tree mode `-rw----r-x`. It was shipped to the VM by
-   tools/deploy-win.sh and hashed into the deploy stamp, so it was
+   tools/deploy-win.py and hashed into the deploy stamp, so it was
    already treated as data by the machinery and as a tool by the layout.
 
 ### One layering note
@@ -248,8 +248,8 @@ DESIGN.md:2418 already ruled the question: "Icons want names, not bytes
 ... The Blob stays for genuinely app-specific art."
 
 A measured gap found while surveying them, since closed in full
-(2026-08-19): `check-symbols.sh` (gate 38) holds the SwiftUI table's
-names to the OS floor, and `check-symbol-parity.sh` (gate 39) pins all
+(2026-08-19): `check-symbols.py` (gate 38) holds the SwiftUI table's
+names to the OS floor, and `check-symbol-parity.py` (gate 39) pins all
 the tables to `wire::SYMBOLS` — value, name and coverage for the
 hand-copied layers, coverage for the two that name the wire constants.
 
@@ -332,7 +332,7 @@ default, and let every guest read the file with its own language's API.
 - One of those eight has a language-specific trap severe enough to have
   earned its own gate: a Go guest must read the host's environment
   through `kaya.Env` and never `os.Getenv`, because in a c-shared library
-  Go's copy is empty forever (tools/check-go-env.sh, and
+  Go's copy is empty forever (tools/check-go-env.py, and
   guests/go/typeface/typeface.go:24 carries the comment). Invariant 3
   prefers one implementation to a gate over eight copies.
 
@@ -496,7 +496,7 @@ it equal the asset bytes in the tree. The failure it prevents is the
 quiet kind the identity plan names: the launcher shows last month's icon,
 the running window shows this month's, and every test passes. It belongs
 where invariant 3 puts guards, which is in the packaging step itself,
-with tools/gates.sh as the backstop for platforms whose packaging step
+with tools/gates.py as the backstop for platforms whose packaging step
 does not exist yet.
 
 **Gate 3, provenance.** Every family directory under the asset root has a
@@ -592,8 +592,8 @@ which is how the survey found it at all.
 
 Two findings that stand on their own, whether or not any of this
 proceeds: ~~no gate pins the four per-platform icon tables to one
-another~~ [MEASURED] (closed 2026-08-19: `check-symbols.sh` gate 38 +
-`check-symbol-parity.sh` gate 39);
+another~~ [MEASURED] (closed 2026-08-19: `check-symbols.py` gate 38 +
+`check-symbol-parity.py` gate 39);
 and **the core's only
 `include_bytes!` reaches into guests/assets/ with nothing stating the
 dependency**, so moving the font breaks a core harness test with an error

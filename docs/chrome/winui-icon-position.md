@@ -462,7 +462,7 @@ Two things I would flag rather than have noticed:
 ## 10. THE SUITES, THE UNIT TESTS AND THE GATES (final tree)
 
 ```
-tools/deploy-win.sh akhil@192.168.64.2 all
+tools/deploy-win.py akhil@192.168.64.2 all
     rc=0   legs: 171 {'PASS': 171}   FAILs: []
     deploy-win: 4/4 unit tests passed on the guest (capi::picked_tests)
     deploy-win: 8/8 unit tests passed on the guest (winui::tests)
@@ -499,13 +499,13 @@ its caption has no mark, and an empty Auto column measures zero.
 
 ```
 cargo test -p kaya --features harness --locked   366 + 3 + 13 passed, 0 failed
-tools/gates.sh    declared 34, ran 34, passed 33
+tools/gates.py    declared 34, ran 34, passed 33
                   the one FAIL is check-sugar-surface, and it is the
                   STANDING designed red of the identity slice: the same 7
                   bindings still owe `app_identity` sugar (python, go,
                   csharp, java, swift, haskell, ocaml). Untouched by this
                   arm; it goes green when the fan-out lands.
-tools/check-targets.sh   native / ios / android / windows / go-android
+tools/check-targets.py   native / ios / android / windows / go-android
                          ALL OK, BOTH feature configurations
 ```
 
@@ -549,7 +549,7 @@ still carry the identity depth stubs the previous slice logged.
 
 - **VM scheduled tasks**: `schtasks /query /fo list` grepped for
   `kaya_ip|kaya_tcp` → **`<none>`**. (The ~190 `kaya_<leg>` tasks that
-  remain are `deploy-win.sh`'s own per-leg launchers and predate this
+  remain are `deploy-win.py`'s own per-leg launchers and predate this
   session.)
 - **VM scratch**: `C:\Users\akhil\kaya-ip`, `C:\Users\akhil\kaya-tc-probe`
   and the `evt.ps1`/`cleanup.ps1` helpers I pushed → all **ABSENT** after

@@ -12,13 +12,13 @@ import android.content.Context
  * (android/kaya/build.gradle.kts).
  *
  * These are called FROM native code, not into it, so nothing here is
- * `external fun` and tools/check-jni.sh holds no list for this file.
+ * `external fun` and tools/check-jni.py holds no list for this file.
  */
 object KayaAssets {
     /**
      * The subdirectory of the APK's `assets/` that IS kaya's asset root.
      * The same string is in android/build.gradle.kts and in
-     * tools/check-assets.sh's APK clause; that gate holds the three
+     * tools/check-assets.py's APK clause; that gate holds the three
      * equal.
      */
     const val ROOT = "kaya"

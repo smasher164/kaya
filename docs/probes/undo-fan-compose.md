@@ -111,7 +111,7 @@ recorded at the call site rather than left as an omission.
 
 Fixtures prove fixtures right. Everything above was measured on the
 probe app; this was measured on `KayaCompose.kt` itself, built and
-build-id VERIFIED the way `tools/android/run-emulator.sh` builds it, on
+build-id VERIFIED the way `tools/android/run-emulator.py` builds it, on
 **emulator-5554**. Only the observation was temporary (one log line at
 the emission site, two throwaway harness verbs); every code path under
 test is the shipped one. Instrument: `scratchpad/undoprobe-leg.sh (gone)`,
@@ -168,7 +168,7 @@ the app as user edits, on a channel that measurably reports them.
 - `SPEC_HASH: ULong = 0x44b8c0a4228f2b33uL` (was `0x408bcf69e0ad2bfd`).
 - `APPLY_CLEAR_UNDO = 27`, beside the clipboard pair.
 
-`tools/check-verbs.sh` = **OK (48 verbs, 77 constants + the CLIP_*
+`tools/check-verbs.py` = **OK (48 verbs, 77 constants + the CLIP_*
 mirrors + spec hash against 2 interpreters)**. These two lines were the
 milestone's LAST check-verbs hold-open; the gate is green for the first
 time since the spec moved.
@@ -240,14 +240,14 @@ with the WIDGET, which is one turn past the emission.
   routing function so enablement and activation cannot drift (A4).
 - `kayaPerformUndoRole` is a separate function from
   `kayaPerformClipboardRole` — an undo is not a clipboard command — and
-  `kayaActivateMenuItem` asks it first. `tools/check-roles.sh` reads the
+  `kayaActivateMenuItem` asks it first. `tools/check-roles.py` reads the
   UNION of `kayaPerform*Role`, which anticipates exactly this split.
 - The NATIVE tier is fully live: `kayaNativeUndo(redo)` walks
   `undoState.undo()/redo()`, samples the widget at the one moment the
   sample is true, writes Q2's echo bracket, and reports the three facts.
   The third fact is `canUndo` IN BOTH DIRECTIONS, as the mac arm sends it.
 
-**`tools/check-roles.sh` now reports ZERO KayaCompose.kt findings.**
+**`tools/check-roles.py` now reports ZERO KayaCompose.kt findings.**
 
 There is no hard-coded role SET to update in this file — check-roles'
 third clause is written about the sets that exist, and the two
@@ -296,8 +296,8 @@ replacement in a comment directly above it:
 They REFUSE rather than answer quietly, because a route that guessed or a
 core undo that no-oped would be indistinguishable from an empty ledger —
 the exact silent class this milestone exists to close. The refusal is
-`depthStub("undo")`, which is the one spelling `tools/check-stubs.sh` and
-`tools/check-steps.sh` both READ, preceded by a `KAYA_UNDO_TRACE` line
+`depthStub("undo")`, which is the one spelling `tools/check-stubs.py` and
+`tools/check-steps.py` both READ, preceded by a `KAYA_UNDO_TRACE` line
 naming the entry, the facts the backend had computed, and the two files
 to add the JNI to.
 
@@ -310,15 +310,15 @@ The complete two-file change is written out in
 
 ### And that is why the undo LEGS ARE NOT WIRED
 
-`tools/check-stubs.sh` states one rule from both sides: a scene's legs
+`tools/check-stubs.py` states one rule from both sides: a scene's legs
 are wired on a runner IF AND ONLY IF that runner's backend has the
 feature. With `depthStub("undo")` in KayaCompose.kt, wiring the legs is a
 gate failure — and I WATCHED IT FIRE rather than assume it:
 
 | state | check-stubs |
 |---|---|
-| stub present, no undo leg in run-emulator.sh | **OK** |
-| stub present, `run_apk undo-compose …` inserted (1 substitution, printed) | **FAIL** — `tools/android/run-emulator.sh wires 'undo' legs but android/…/KayaCompose.kt still stubs it (depth_stub("undo"))` |
+| stub present, no undo leg in run-emulator.py | **OK** |
+| stub present, `run_apk undo-compose …` inserted (1 substitution, printed) | **FAIL** — `tools/android/run-emulator.py wires 'undo' legs but android/…/KayaCompose.kt still stubs it (depth_stub("undo"))` |
 
 So the charge's "legs green ×3" is not reachable from inside this
 charge's file set, and the repo's own guard says so in the message it
@@ -330,7 +330,7 @@ prints. What I ran instead is in §6.
 
 ### 6.1 The lane, THREE CONSECUTIVE RUNS
 
-`tools/android/run-emulator.sh compose`, on the final source, three times
+`tools/android/run-emulator.py compose`, on the final source, three times
 in a row:
 
 ```
@@ -357,16 +357,16 @@ does carry. The undo-specific claims were measured directly instead
 
 | gate | rc | verdict |
 |---|---|---|
-| `tools/check-verbs.sh` | **0** | **OK (48 verbs, 77 constants + the CLIP_* mirrors + spec hash against 2 interpreters)** — the milestone's LAST hold-open, now green |
-| `tools/check-roles.sh` | 1 | **ZERO KayaCompose findings.** Reading at 18:29: 5 findings, all `crates/kaya/src/gtk.rs` (undo/redo × enablement/perform, plus its hard-coded role set). Reading at 18:47: the gate's own SELF-TEST now fails because a sibling changed gtk.rs's `matches!` filter and the perturbation anchor moved — a live cross-agent artifact, still zero Compose |
-| `tools/check-stubs.sh` | 0 | OK — and its refusal WATCHED FIRING (§5) |
-| `tools/check-steps.sh` | 1 | **ZERO android findings.** One finding, `tools/linux/run-suites.sh` — the GTK sibling's half of the same IFF |
-| `tools/check-compose.sh` | 0 | the Kotlin COMPILES — and proven non-vacuous twice (§4.2) |
-| `tools/check-detekt.sh` | 0 | no dead Kotlin (the reason `kayaRouteCode` was deleted rather than parked) |
-| `tools/check-targets.sh` | 0 | native / ios / android / windows ALL OK, both feature configs — covers the guest arm added to `milestone2_android.rs` |
-| `tools/check-universal-props.sh` | 0 | the a11y modifier still reaches both text kinds through the new composable |
-| `tools/check-shell.sh` | 0 | — |
-| `tools/check-keyed.sh` | 0 | OK (18 gates keyed) |
+| `tools/check-verbs.py` | **0** | **OK (48 verbs, 77 constants + the CLIP_* mirrors + spec hash against 2 interpreters)** — the milestone's LAST hold-open, now green |
+| `tools/check-roles.py` | 1 | **ZERO KayaCompose findings.** Reading at 18:29: 5 findings, all `crates/kaya/src/gtk.rs` (undo/redo × enablement/perform, plus its hard-coded role set). Reading at 18:47: the gate's own SELF-TEST now fails because a sibling changed gtk.rs's `matches!` filter and the perturbation anchor moved — a live cross-agent artifact, still zero Compose |
+| `tools/check-stubs.py` | 0 | OK — and its refusal WATCHED FIRING (§5) |
+| `tools/check-steps.py` | 1 | **ZERO android findings.** One finding, `tools/linux/run-suites.sh` — the GTK sibling's half of the same IFF |
+| `tools/check-compose.py` | 0 | the Kotlin COMPILES — and proven non-vacuous twice (§4.2) |
+| `tools/check-detekt.py` | 0 | no dead Kotlin (the reason `kayaRouteCode` was deleted rather than parked) |
+| `tools/check-targets.py` | 0 | native / ios / android / windows ALL OK, both feature configs — covers the guest arm added to `milestone2_android.rs` |
+| `tools/check-universal-props.py` | 0 | the a11y modifier still reaches both text kinds through the new composable |
+| `tools/check-shell.py` | 0 | — |
+| `tools/check-keyed.py` | 0 | OK (18 gates keyed) |
 
 ### 6.3 Negative tests, each WATCHED FAILING with its substitution count
 
@@ -374,7 +374,7 @@ does carry. The undo-specific claims were measured directly instead
 |---|---|---|
 | drop the M3 opt-in from `KayaTextField` | 1 | check-compose FAIL at the `DecorationBox` call |
 | drop the foundation opt-in from `KayaUndoState` | 1 | check-compose FAIL, 10 errors, all inside that object |
-| wire `undo-compose` into run-emulator.sh with the stub present | 1 | check-stubs FAIL naming both files |
+| wire `undo-compose` into run-emulator.py with the stub present | 1 | check-stubs FAIL naming both files |
 
 Each perturbation asserted its own application before the gate ran and
 refused to proceed on 0 substitutions; each file was restored from a
@@ -412,7 +412,7 @@ file, `kayaWriteText` and the KayaTextField observer.
 1. **THE ONE OPEN ITEM: the core tier is not implemented** (§5). Five
    named functions, five one-line bodies, two files outside this charge.
    `scratchpad/undo-compose-jni-handoff.md (gone)` is the whole change.
-2. **The undo legs are NOT wired into run-emulator.sh**, and that is
+2. **The undo legs are NOT wired into run-emulator.py**, and that is
    check-stubs' refusal rather than an omission (§5). The charge asked
    for them green ×3; §6.1 is what was run in their place, and it is not
    the same claim.
@@ -490,7 +490,7 @@ file, `kayaWriteText` and the KayaTextField observer.
 
 - **Started and stopped by me:** the probe app `dev.kaya.undoprobe`
   (three campaigns on emulator-5558), one instrumented `milestone2` leg
-  on emulator-5554, and four `run-emulator.sh compose` suites (26 legs
+  on emulator-5554, and four `run-emulator.py compose` suites (26 legs
   each; every leg terminates itself under KAYA_SELFTEST). PROVEN
   STOPPED: `pgrep -fl "undoprobe|milestone2|run-emulator|screenrecord|
   logcat"` returns nothing, and all four devices report

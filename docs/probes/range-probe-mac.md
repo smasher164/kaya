@@ -334,7 +334,7 @@ The bill for the mac arm, itemised:
    `@FocusState` mirror of `kayaScene.focusedId` (`becomeFirstResponder`
    + `NSTextViewDelegate` didBeginEditing), the border and frame, and
    the universal a11y props, which currently ride SwiftUI modifiers
-   (`kayaApplyA11y`, `:2938-2978`) — `check-universal-props.sh` will
+   (`kayaApplyA11y`, `:2938-2978`) — `check-universal-props.py` will
    police that, correctly.
 3. Set the a11y identifier on the text view itself, or `expect_ax`
    regresses to `AXScrollArea` (J1).
@@ -348,7 +348,7 @@ The bill for the mac arm, itemised:
    and REVEAL do not disturb it).
 7. Undo: nothing to do. None of the three registers an undo action
    (H1), so the native-undo tier (`:6190-6234`) and
-   `tools/check-native-undo.sh` are untouched.
+   `tools/check-native-undo.py` are untouched.
 
 If instead the milestone wants to keep the stock `TextEditor`: SELECT
 works (`TextSelection`, macOS 15) but is reset by every app text write;

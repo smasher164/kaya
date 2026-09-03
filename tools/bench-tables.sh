@@ -96,7 +96,7 @@ MATRIX_RUNNERS="validate-all.py validate-mac.py validate-linux.py deploy-win.py 
 
 if [ -n "${KAYA_MATRIX_GATES_TOKEN:-}" ]; then
     echo "$0: refusing — this shell carries KAYA_MATRIX_GATES_TOKEN, which" >&2
-    echo "  tools/validate-all.sh exports to the lanes it starts. A bench run" >&2
+    echo "  tools/validate-all.py exports to the lanes it starts. A bench run" >&2
     echo "  inside the matrix measures the matrix's contention, not kaya." >&2
     exit 3
 fi
@@ -159,7 +159,7 @@ probe_linux() {
     fi
     if [ -z "$(docker images -q kaya-linux 2>/dev/null)" ]; then
         echo "$0: the kaya-linux image is not cached — build it the way" >&2
-        echo "  tools/validate-linux.sh does, then re-run." >&2
+        echo "  tools/validate-linux.py does, then re-run." >&2
         return 1
     fi
     return 0
@@ -249,9 +249,9 @@ if [ "$PLATFORM" = "guest" ] || [ "$PLATFORM" = "macos" ]; then
         echo "$0: cargo build --locked --lib failed — not benching a stale library." >&2
         exit 1
     fi
-    tools/build-id.sh --verify "target/debug/$CORE_LIB" || exit 1
+    tools/build-id.py --verify "target/debug/$CORE_LIB" || exit 1
     if [ "$PLATFORM" = "macos" ]; then
-        tools/build-id.sh --verify --component swiftui \
+        tools/build-id.py --verify --component swiftui \
             target/swiftui/libkaya_swiftui.dylib || exit 1
     fi
 fi

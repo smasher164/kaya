@@ -80,7 +80,7 @@ it stands **cannot serve a save-as**, which is the whole point of (B).
 ### A.3 The guest side: does each runtime accept a write HANDLE?
 
 The windows lane carries five languages for `filedialog`
-(`deploy-win.sh:1433-1441`: rust, python, go, csharp, java).
+(`deploy-win.py:1433-1441`: rust, python, go, csharp, java).
 
 Driven on the VM against a real GENERIC_WRITE / TRUNCATE_EXISTING handle,
 using each binding's own conversion line (MEASURED):
@@ -204,7 +204,7 @@ B-noext typed "bare"  → RESULT OK path="…\bare.txt"   (SetDefaultExtension w
 3. **It does not work elevated.** DOCUMENTED, same page: "The file and
    folder picker APIs (Windows.Storage.Pickers) in the Windows SDK don't
    work when apps run as administrator (elevated mode)." Every lane leg
-   runs `schtasks … /rl highest` (`deploy-win.sh:993`), i.e. elevated.
+   runs `schtasks … /rl highest` (`deploy-win.py:993`), i.e. elevated.
 4. It is async (`IAsyncOperation`), so it wants a pump on the STA rather
    than the blocking modal `Show()` the apartment thread already runs.
 
@@ -262,7 +262,7 @@ path and *nothing else happens*.
 
 ### B.3 The harness story on Windows — measured, and one real gap
 
-The brief said "the open dialog UIA machinery already in deploy-win.sh".
+The brief said "the open dialog UIA machinery already in deploy-win.py".
 That is not what is there, and the difference matters: **UI Automation is
 forbidden against this dialog** (`winui/mod.rs:2218-2237`, `9194-9199`,
 and the deliberate absence of the `Win32_UI_Accessibility` feature at
@@ -361,7 +361,7 @@ it reuses the machinery that exists:
   `harness.rs` (parser + `Step` + `Stage` method + the three test stubs),
   in gtk.rs, winui/mod.rs, **and re-implemented in both interpreter
   backends** (`KayaSwiftUI.swift:5317`, `KayaCompose.kt:4022` both carry
-  their own `file_choose`), plus `tools/check-verbs.sh`;
+  their own `file_choose`), plus `tools/check-verbs.py`;
 - one new shared scene under `tools/scenes/`, compared byte-for-byte
   across five lanes and ported to all 8 guest languages;
 - and the Java binding must stop returning `FileInputStream` before any

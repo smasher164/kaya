@@ -34,7 +34,7 @@ publish, and the watchdog's fire path before `_exit`/`halt`. A
 relative `KAYA_VERB_TRACE` resolves under the interpreter's own
 container directory (Documents on iOS, the files dir on Android), so a
 phone runner names the file without a container lookup on every
-passing leg. tools/check-verbs.sh's verb-trace clause holds the three
+passing leg. tools/check-verbs.py's verb-trace clause holds the three
 level — the env var by name, the four shapes compared FLATTENED, two
 dump sites per runner with the runner's one AFTER the green verdict's
 text and BEFORE the publish and the watchdog's one before its exit —
@@ -61,7 +61,7 @@ next iOS failure. The panic log rides the same slice (fault.rs's
 WHAT LANDED
 - THE JOURNAL, `tools/lib/flightrec.py` + `tools/lib/flightrec.sh`. JSONL
   under `${KAYA_FLIGHTREC_DIR:-${XDG_STATE_HOME:-~/.local/state}/kaya/flightrec}`:
-  a run header (run id, all three tree ids from build-id.sh, host load,
+  a run header (run id, all three tree ids from build-id.py, host load,
   free disk, memory pressure) and a record per leg (lane, leg, verdict,
   duration, failure sentence, bundle path). Retention is newest N run
   directories (default 20), enforced at run start with the cap PRINTED;
@@ -77,7 +77,7 @@ WHAT LANDED
   state dir is named by no candidate, survives `rm -rf target`, and is one
   home per machine, which is what lets two lanes from two worktrees appear
   in one journal.
-- MAC AT-FAIL CAPTURE, in `tools/validate-mac.sh`'s `run()` on all three
+- MAC AT-FAIL CAPTURE, in `tools/validate-mac.py`'s `run()` on all three
   of its paths. Seven sections: the per-leg sampler's history, `sample`
   of the live guest, the leg log, WindowServer CPU, the CGWindowList
   window list (`tools/mac/flightrec-winlist.swift`, built on demand to a
@@ -99,8 +99,8 @@ WHAT LANDED
   id-normalization search are instrumented; `poll_named` gives a retried
   observation its per-attempt records, which plain `poll` never kept.
 
-WHY A SELF-TEST AND NOT A NUMBERED GATE. `tools/flightrec-selftest.sh` is
-deliberately not named `check-*.sh`: check-gates' delegation clause forbids
+WHY A SELF-TEST AND NOT A NUMBERED GATE. `tools/flightrec-selftest.py` is
+deliberately not named `check-*.py`: check-gates' delegation clause forbids
 validate-mac from invoking anything gate-shaped, its census would demand
 registration in four places, and what needs proving is a RUNTIME property
 of a host — that these capture commands answer here — which no static gate
@@ -166,15 +166,15 @@ sampler start 123ms, flush of 200 records 50ms). One real windows suite,
 five legs concurrent, alternating: hooks-off median 2605ms (spread
 2515-4278), hooks-on median 2622ms (2616-2797) — the hooks-on runs sit
 inside hooks-off's own spread, and they include that once-per-lane setup.
-tools/flightrec-selftest.sh clause N6 is the wall: a PASSING leg must
+tools/flightrec-selftest.py clause N6 is the wall: a PASSING leg must
 scaffold no bundle, must still be journalled through the spool, must leave
 the spool truncated, and `flightrec_leg`'s body may not name python3,
 run_ssh, scp or mkdir. A lane ceiling noticed this once, after a whole
 matrix; N6 notices in seconds.
 
 WHAT IS OPEN
-- ~~BREADTH: linux (`tools/validate-linux.sh`), iOS (`tools/ios/run-sim.sh`)
-  and Android (`tools/android/run-emulator.sh`) do not journal or capture.~~
+- ~~BREADTH: linux (`tools/validate-linux.py`), iOS (`tools/ios/run-sim.py`)
+  and Android (`tools/android/run-emulator.py`) do not journal or capture.~~
   CLOSED 2026-09-02: all five journal since 2026-08-29; the verb trace joins the linux, iOS
   and Android bundles 2026-09-02 (above). Android and iOS still dump
   their at-fail logcat and simdrive evidence into target/validate-failures
@@ -274,7 +274,7 @@ needs no sign-off: it fixes nothing (the same bug reproduces on Xcode 26.3
 and older, so it pins the fix to an unpinned host artifact) and the ABI
 split between the two runtimes is total.
 
-What it unblocks, live: tools/check-c-bounds.sh has an ASAN COMPANION MODE
+What it unblocks, live: tools/check-c-bounds.py has an ASAN COMPANION MODE
 beside the guard page — the same c-tx-cap probe on a plain malloc
 (`heap`/`heap-many`), where the pre-cap header is a reported
 heap-buffer-overflow naming the write and its size and this one writes
@@ -342,7 +342,7 @@ refusal at zero, a census floor, atexit scratch and negatives_ran.
 Eight watched property groups, every refusal MADE TO PRINT. `ruff`
 joined flake.nix from the PINNED nixpkgs (flake.lock unmoved), and
 the fingerprint moved with it as ruled: 5061dae8d7b8 -> e232b0560910.
-tools/check-python.sh is the new gate, 49th in the sweep, holding ten
+tools/check-python.py is the new gate, 49th in the sweep, holding ten
 rules ruff cannot plus ruff itself, and running the prelude's
 negatives so the file every gate imports proves its refusals where
 nobody can skip them. Eleven watched negatives.
@@ -365,7 +365,7 @@ one of which check-doc-refs holds to a file that exists — a rename
 falsifies recorded history or buries it under `(gone)`. The stub's
 own risk (a second place for the preamble to drift) is closed by
 check-python pinning its exact bytes, so it can never hold anything
-but the exec. This also left gates.sh's GATES, check-gates' census
+but the exec. This also left gates.py's GATES, check-gates' census
 and both doctrine mirrors untouched by the conversion itself, so a
 phase-0 mistake could not be a list mistake.
 
@@ -388,7 +388,7 @@ keep needing enforcement — all of which argues the shell surface is
 maintained at cost. What the discussion must answer before a sweep:
 where the dev-shell fingerprint preamble lives in a python world (a
 shared prelude? a launcher?), what check-shell's role becomes, whether
-gates.sh itself converts, how the self-test/watched-negative idiom and
+gates.py itself converts, how the self-test/watched-negative idiom and
 EXIT-trap cleanup port, and whether the 47-gate sweep's per-process
 overhead actually moves. Nothing converts until the shape is ruled.
 
@@ -418,7 +418,7 @@ whose FAIL text does not is the same defect.
 NO LANE COULD HAVE CAUGHT THIS. Every runner only greps the verdict for
 `KAYA_SELFTEST: OK` and never diffs its text (validate-mac.py:622,
 run-emulator.py, run-sim.py, run-suites.sh), so the byte-compared-verdict
-rule is doctrine that only a gate can hold. tools/check-verbs.sh got the
+rule is doctrine that only a gate can hold. tools/check-verbs.py got the
 clause: a census reading each emitter out of its OWN ARM in all three
 harnesses, flattening every interpolation to `<v>` so three languages
 compare as one string, holding both the observation and the `wanted`
@@ -569,7 +569,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
     navigation strip's `Save` EXACTLY because `press Save` falsely
     succeeds on this sheet — it matches the static text "Save as" by
     containment and the sheet stays up. `save-swiftui` runs in
-    tools/ios/run-sim.sh.
+    tools/ios/run-sim.py.
   - ~~**DEPTH STUB: save on gtk**~~ — LANDED 2026-08-09.
     `gtk::FileDialog` asked to `save()` rather than `open()`, so the live
     slot, the retire path, the result occurrence, the armed directory and
@@ -602,7 +602,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
     found by the save probes, it returned a `FileInputStream` whatever
     the mode, so a Java app could not write to a picked file anywhere.
   - ~~**The Swift interpreter matches file-mode NUMBERS as bare
-    literals**~~ — GUARDED 2026-08-10 by `tools/check-file-modes.sh`,
+    literals**~~ — GUARDED 2026-08-10 by `tools/check-file-modes.py`,
     which reads the number `swift/KayaSwiftUI.swift`'s opener RECEIVES
     against the spec's own and censuses every other site that decodes
     one. D3 asked for exactly this gate.
@@ -687,7 +687,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
     convention) and its caption read. Same shape; the windows runner
     wires no `dirty` legs.~~ LANDED 2026-08-06: the marker composes in
     `refresh_caption`, the one caption writer this backend now has
-    (five `SetTitle` sites collapsed into it, and `deploy-win.sh`
+    (five `SetTitle` sites collapsed into it, and `deploy-win.py`
     refuses a sixth); `Stage::window_dirty` reads the real OS caption;
     `run_suite dirty_rust` is a live leg.
   - ~~**DEPTH STUB: dirty on compose**~~ — LANDED 2026-08-06. All four
@@ -714,7 +714,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
     runs the shared scene's PHONE-EXPRESSIBLE PREFIX — everything above
     `close_window`, which is the mark going up, coming down on save,
     and going up again — with the cut declared by VERB and guarded
-    both ways in tools/ios/run-sim.sh. The Compose arm faces the same
+    both ways in tools/ios/run-sim.py. The Compose arm faces the same
     tail and can lift the same shape; if it does, the two belong in one
     helper rather than two spellings.
   - ~~The seven other bindings' sugar spelling of the window prop
@@ -1109,7 +1109,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
   editor's own reads.
 - ~~**DEFECT — Go silently drops a write to a closed transaction.**~~
   FIXED 2026-07-28 for Go and Rust, CLOSED 2026-07-31 for the remaining
-  five, and GUARDED by tools/check-tx-liveness.sh — the body below is
+  five, and GUARDED by tools/check-tx-liveness.py — the body below is
   the record. Go's `Tx.emit` is now the one append site and `Tx.alive`
   the one panic (bindings/go/app.go). As found:
   `Tx` carried a `closed` flag and the Widget/MenuItem chain methods
@@ -1149,7 +1149,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
     (Haskell). Both check the THREAD at the build entry, which is
     exactly Python's `_require_app_thread`, so the three ambient
     bindings now spell the rule identically.
-  THE GATE IS `tools/check-tx-liveness.sh`, in validate-mac: it pins
+  THE GATE IS `tools/check-tx-liveness.py`, in validate-mac: it pins
   that each guard exists, that each chokepoint is still the ONLY way in
   (exact counts, not "at most"), and that every message names the post
   as the way out. Five negative tests, and the first draft of the gate
@@ -1447,8 +1447,8 @@ list, in rough priority order; chat / todo / media stay unpicked.
       `PropKind::Enum("symbol")` at crates/kaya/src/spec.rs:229 and
       :253) BESIDE the `icon` Blob, which stays for app-specific art.
       The vocabulary is `wire::SYMBOLS` and two gates hold it —
-      tools/check-symbols.sh (every SF name exists at kaya's floor) and
-      tools/check-symbol-parity.sh (one vocabulary, six files). As
+      tools/check-symbols.py (every SF name exists at kaya's floor) and
+      tools/check-symbol-parity.py (one vocabulary, six files). As
       filed: `icon` is a Blob today (sprop 2 / mprop 5), which is the
       wrong primitive for STANDARD icons — the platforms draw the same
       concept differently, and their symbol sets metric-match adjacent
@@ -1607,7 +1607,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
   transitional.
   APPROVED 2026-08-16 (maintainer): bump the SDK for the kaya-built legs so guests opt into macOS 26's modern design generation; the artifact-screenshot caveat (stills will show the modern look, not older releases') is acknowledged. The constraint above still binds: the compat generation keeps a leg — the vendor-stamped hosts (JVM, .NET apphost) stay compat regardless of the flake, and the bump slice must VERIFY that coverage rather than assume it. Scout report: docs/chrome/sdk-bump-scout.md.
   THE BUMP LANDED 2026-08-17 (`4e5c67e`), and the verification is now
-  mechanical rather than owed: `tools/check-design-generation.sh` reads
+  mechanical rather than owed: `tools/check-design-generation.py` reads
   which generation each mac leg's host was linked for and refuses if
   EITHER door closes, so the standing constraint above is enforced by a
   gate instead of by whoever remembers it. The constraint itself does
@@ -1782,7 +1782,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
   carries six, and the five past `settings` arrived under this entry's
   own trigger — `cut`, `copy` and `paste` with the clipboard milestone
   (2026-08-02), `undo` and `redo` with the undo one (2026-08-04), each
-  reaching all four backends, with tools/check-roles.sh holding the
+  reaching all four backends, with tools/check-roles.py holding the
   vocabulary and the arms to one line and DESIGN.md's cut list now
   reading "roles beyond the six". STILL OPEN, trigger-gated:
   punctuation keys beyond the admitted set — `scene.rs` admits exactly
@@ -2027,7 +2027,7 @@ reach.
   — DONE 2026-08-22, the entry's own interim option: all three pins
   moved TOGETHER to the 1.27.0 release tarballs with go.dev's published
   sha256s (flake.nix's fetchurl, tools/linux/Dockerfile's sha256sum -c,
-  tools/deploy-win.sh's Invoke-WebRequest), `nix develop -c go version`
+  tools/deploy-win.py's Invoke-WebRequest), `nix develop -c go version`
   answers go1.27.0, and deploy-win's VM check became VERSION-KEYED —
   the old `if exist` would have kept the VM's cached rc2 through the
   bump forever. AND the clean move landed the same hour, the
@@ -2153,10 +2153,10 @@ reach.
   KAYA_STALL_MS, stall-compose, stall-jvm, stall-go
 - ~~**The Swift iOS bundle is not self-contained**~~ (measured 2026-08-07
   while landing Go on iOS, by a negative test aimed at something else)
-  — FIXED 2026-08-19, both halves, in tools/ios/run-sim.sh's swift
+  — FIXED 2026-08-19, both halves, in tools/ios/run-sim.py's swift
   suite: the link names `"$TARGET_DIR/libkaya.a"` by path the way the Go
   arm's `#cgo ios` line does, and every `${guest}swift-bin` is
-  `build-id.sh --verify`'d before a bundle is made — the Go arm's own
+  `build-id.py --verify`'d before a bundle is made — the Go arm's own
   test one suite down, moved up.
   WATCHED FAILING against the real toolchain, one guest linked both
   ways: with `-L … -lkaya` the binary carries `otool -L
@@ -2185,7 +2185,7 @@ reach.
   Nothing errors; the files just go where nothing looks. The rule is now
   stated in DESIGN.md's Binding conventions (a guest asks KAYA for
   platform locations, never the language runtime's snapshot) and
-  tools/check-go-env.sh enforces the shape: a bare `os.TempDir` is red,
+  tools/check-go-env.py enforces the shape: a bare `os.TempDir` is red,
   and it is legal only as the fallback of a function that branches on
   `runtime.GOOS`. The defect this entry filed — the iOS leg landing on
   a guest that writes where the picker cannot look — can no longer be
@@ -2212,7 +2212,7 @@ reach.
   the OS thread answers for the goroutine exactly. Behaviour pinned in
   bindings/go/app_test.go's TestATransactionRefusesAnotherGoroutine
   and guests/csharp/AbortCheck.cs's WrongThread, both watched failing.
-  GUARD: tools/check-tx-liveness.sh's wrong-thread census — five facts
+  GUARD: tools/check-tx-liveness.py's wrong-thread census — five facts
   per handle binding read out of EXTRACTED BODIES rather than grepped
   by name, because `alive()` is also the ASSET handle's liveness check
   in Java and Swift and comes first in both files; it refuses a
@@ -2319,7 +2319,7 @@ reach.
     GTK and WinUI own raw controls. The mac write is §3a's rule where
     §3a's premise fails — a declarative layer between the widget and the
     model — and it is now paired with a gate
-    (tools/check-native-undo.sh) rather than with a note.
+    (tools/check-native-undo.py) rather than with a note.
 
   From the fresh-key breadth arms (2026-08-05), a doctrine question
   for the maintainer — RULED same day, option B: the entry/milestone2
@@ -2474,7 +2474,7 @@ reach.
   Two more carried out of the fan-out (2026-08-04), both gate gaps
   rather than behavior, both CLOSED:
   - ~~**check-steps is blind to the C floor.**~~ **FIXED 2026-08-05**
-    (`sweep_c_floor` in tools/check-steps.sh). Not a row in the existing
+    (`sweep_c_floor` in tools/check-steps.py). Not a row in the existing
     per-language sweep, and the gate says why: that sweep demands a MAC
     leg for every scene in mac's SCENES whose guest file exists, and the
     C floor deliberately carries a different scene set per lane — a `c`
@@ -2527,7 +2527,7 @@ reach.
   bounded-retry wrapper prints `KAYA_HARNESS: step-failed <text>` on the
   same `Log.i("kaya", ...)` writer as its step trace, byte-identical to
   the other two, and the three are no longer compared by eye —
-  tools/check-verbs.sh holds them level in two clauses: the line is
+  tools/check-verbs.py holds them level in two clauses: the line is
   present in all three WITH the failure text interpolated (a fixed
   sentence names no cause), and in the two interpreters at least one such
   print sits AFTER the last `retryStep = true`, i.e. in the branch that
@@ -2577,7 +2577,7 @@ reach.
   the "No gate compiles a Swift GUEST for iOS" section further down this
   file (the same gap, found again and written down twice).
   tools/swift-typecheck.sh:160-214 is exactly the loop this asked for:
-  it reads IOS_SWIFT_SCENES and IOS_MIN out of tools/ios/run-sim.sh,
+  it reads IOS_SWIFT_SCENES and IOS_MIN out of tools/ios/run-sim.py,
   refuses when a shipped guest's source is missing, typechecks each
   against `-sdk iphonesimulator … arm64-apple-ios$ios_min-simulator`,
   and skips with the loud note when there is no simulator SDK.
@@ -2586,7 +2586,7 @@ reach.
   macOS only, so the iOS scene_root branch guests/swift/clipboard.swift
   needed (the §7.6 android trap's cousin — the guest and the
   interpreter must agree on $TMP) typechecks nowhere until
-  run-sim.sh's own build loop compiles it on a booted pool. The
+  run-sim.py's own build loop compiles it on a booted pool. The
   interpreter's iOS half earned its typecheck pass for exactly this
   class; the guests deserve the same — an iphonesimulator -typecheck
   loop over guests/swift/*.swift in swift-typecheck.sh, gated the
@@ -2604,7 +2604,7 @@ reach.
   lifecycle paths the rollback-and-log discipline they never had.
   WHY NO GATE SAW IT: the scenes passed, because five guests each
   opened a transaction by hand. The workaround was the camouflage. The
-  guard is therefore `tools/check-ambient-tx.sh`, which forbids a guest
+  guard is therefore `tools/check-ambient-tx.py`, which forbids a guest
   from opening one inside a handler — with nothing able to compensate,
   the existing scenes ARE the test.
   SCOPE, stated so nobody widens it carelessly: the defect needs an
@@ -2659,7 +2659,7 @@ reach.
     output determinism wants -Zremap-path-prefix and friends, and its
     payoff is a shared build cache, which is a packaging-milestone
     concern.
-- ~~deploy-win.sh uses `sed` and `awk`~~ — LANDED 2026-07-27 (the
+- ~~deploy-win.py uses `sed` and `awk`~~ — LANDED 2026-07-27 (the
   rewrite and its gate both rode `d1a64fd`). check-shell now bans both
   in COMMAND POSITION across `tools/**/*.sh`, with a self-test that
   scores a real invocation against the word inside another word — the
@@ -2746,7 +2746,7 @@ reach.
   fiducials AT OPPOSITE ENDS of a film, or a per-leg in-band fiducial —
   rather than trusting one anchor across a whole suite. THE PHRASING IS
   DELIBERATE (sharpened 2026-08-19): iOS already plants two fiducials
-  (tools/ios/run-sim.sh — a dark flip and the flip BACK) and they are
+  (tools/ios/run-sim.py — a dark flip and the flip BACK) and they are
   BOTH AT THE START, which makes the anchor survive a recorder that
   attached mid-flip and does nothing at all for the rate. Two fiducials
   at one end is not this item. Windows has a third
@@ -2755,7 +2755,7 @@ reach.
   never attached to a window that lives about two seconds.
 - Per-binding EMISSION checks (kaya_app_checks.py-style — assert the
   records a construction emits) in Java and Haskell — Go, Swift, C#
-  and OCaml already have one (run by tools/check-abort.sh), so this is
+  and OCaml already have one (run by tools/check-abort.py), so this is
   two languages owed, not seven.
   The motivating miss: the Swift binding's containerOf ACCEPTED
   construction-time `spacing:` but never applied it (one commit's
@@ -2769,7 +2769,7 @@ reach.
   proving the checked-in file matches the generator — a hand edit (or a
   filter change without regeneration) goes unnoticed until the next
   regeneration clobbers it. COMPILABILITY is already covered on every
-  mac run — `tools/check-targets.sh` cross-compiles the windows target,
+  mac run — `tools/check-targets.py` cross-compiles the windows target,
   so a broken bindings.rs fails in seconds rather than on the VM. What
   is missing is PROVENANCE: nothing proves the checked-in file is what
   the generator would emit.
@@ -2976,7 +2976,7 @@ reach.
   buffer receives the core's premultiplied RGBA8, plus the
   premultiplied-BGRA8 swizzle §11's measure-at-implementation list
   holds open, and RenderTargetBitmap for expect_ink. Closed when
-  tools/deploy-win.sh wires the canvas legs and they pass.
+  tools/deploy-win.py wires the canvas legs and they pass.
   KEY: canvas, set_drawing, canvas_probe, canvas_ink, WriteableBitmap~~
   LANDED 2026-08-26 (breadth): `WriteableBitmap.PixelBuffer` through
   `IBufferByteAccess`, with the RGBA->BGRA swizzle in the one arm that
@@ -2985,7 +2985,7 @@ reach.
   those were vtable PADS whose methods did not exist until their
   argument types were filtered. Scale is
   `XamlRoot.RasterizationScale`, appearance `FrameworkElement.ActualTheme`.
-  `canvas_rust` is wired in tools/deploy-win.sh with its launcher.
+  `canvas_rust` is wired in tools/deploy-win.py with its launcher.
   THE INK READ WAS RenderTargetBitmap AND IS `PrintWindow` NOW
   (2026-08-26, same day): that API renders (Completed, 300x120) and then
   `GetPixelsAsync` yields NO BUFFER on this VM — for the window root as
@@ -3018,7 +3018,7 @@ reach.
   core's buffer in the KIND_CANVAS render arm, plus PixelCopy or a
   bitmap draw for expect_ink. The wire constants and the three verb
   arms are in already, so only the render and the read-back are
-  outstanding. Closed when tools/android/run-emulator.sh wires the
+  outstanding. Closed when tools/android/run-emulator.py wires the
   canvas legs and they pass.
   KEY: canvas, set_drawing, KIND_CANVAS, CANVAS_VOCABULARY,
   expect_drawing_hash~~
@@ -3031,7 +3031,7 @@ reach.
   window-to-surface offset kayaTextBoxes documents. Two new natives —
   `KayaPresent.presentation` and `KayaPresent.canvasProbe` — registered
   in crates/kaya/src/android.rs. `canvas-compose` is wired in
-  tools/android/run-emulator.sh. KayaCompose.kt now stubs NOTHING, so
+  tools/android/run-emulator.py. KayaCompose.kt now stubs NOTHING, so
   its `depthStub` helper is gone (an unused private function fails
   check-detekt); a comment holds the shape for the next depth slice.
 - ~~The canvas's ink assertion NAMES THE APPEARANCE, and that is a
@@ -3057,7 +3057,7 @@ reach.
   are separate axes and this entry is the second one. Note for whoever
   closes it: the tolerance is exactly ±1 and is NOT the place to absorb
   a mode difference — a dark palette is a different colour, not a
-  rounding, and tools/check-verbs.sh pins all three harnesses' constants
+  rounding, and tools/check-verbs.py pins all three harnesses' constants
   at the ruled value for that reason.
   A THIRD ROUTE OPENED 2026-08-26 with the paint floor (ruling 13,
   docs/canvas-plan.md §3.4): a test figure painted in LITERAL RGBA has
@@ -3103,7 +3103,7 @@ reach.
   this entry named exactly two and a future reader would otherwise think
   only one was ever built: "the harness pins the appearance for a leg the
   way it pins the scale" is `KAYA_APPEARANCE=light|dark`
-  (tools/check-appearance.sh). It does not replace the two-mode string —
+  (tools/check-appearance.py). It does not replace the two-mode string —
   that is what makes the VERDICT byte-identical across platforms — it
   makes the dark half REACHABLE, as the `canvasdark-*` leg on all five
   lanes, instead of only on a machine somebody had set to dark.
@@ -3120,7 +3120,7 @@ reach.
   plausible macOS dark window: the opposite reading, at the weakest
   separation in the whole contrast table (1.07). It is a taste question
   AND a consistency question, because the tables next to the chart draw
-  their card in the PLATFORM's own token (tools/check-table-card.sh)
+  their card in the PLATFORM's own token (tools/check-table-card.py)
   while the canvas draws in kaya's palette, so on a dark host the chart
   can sit visibly darker than the cards beside it.
   WHAT WAS BLOCKING IT IS GONE: the measurement said this "needs a dark
@@ -3316,7 +3316,7 @@ reach.
   named kaya-compose-pump, 2 named kaya-selftest"; `refreshNavTitle`
   removed -> `title "Aurora Notes", wanted "detail"`; the appearance
   install moved into the first-mount branch -> the per-window refusal.
-  `tools/java-typecheck.sh` runs the KayaApp backstop off-device on every
+  `tools/java-typecheck.py` runs the KayaApp backstop off-device on every
   gate sweep, watched failing against a copy with the latch removed.
 - ~~A canvas STRETCHES ITS BUFFER rather than re-rasterizing at the
   assigned track~~ (found while landing the depth slice 2026-08-26). The
@@ -3423,7 +3423,7 @@ reach.
     the render was byte-identical. Corrected, the JVM leg's rectangles
     are python's own 44/136/228/320 and the verdict text matches
     python's byte for byte. `sizepolicy-java-swiftui` is wired in
-    tools/validate-mac.sh, and that leg is the standing negative: the
+    tools/validate-mac.py, and that leg is the standing negative: the
     JVM's readers report the mirrored space for the life of the
     process, so dropping the correction reds it (docs/traps.md holds
     the full measurement).
@@ -3462,7 +3462,7 @@ reach.
     `KayaCanvas` now (a `GtkWidget` subclass: natural size = the blit,
     snapshot = the blit centred and clipped), and `ContentFit::Fill` —
     which cited §3.2's superseded rule 2 — is gone with the stretch it
-    named. tools/check-canvas-blit.sh gained the GTK half of clause 4.
+    named. tools/check-canvas-blit.py gained the GTK half of clause 4.
   - ~~**DEPTH STUB: sizepolicy on winui**~~ — CLOSED 2026-08-28: the
     winui arm reports the track, drives frames off
     `CompositionTarget::Rendering` outside the harness, and the
@@ -3493,7 +3493,7 @@ reach.
     construction), blits the buffer 1:1 and centred, and drives
     `kaya_frame` off `withFrameNanos` outside the harness. `expect_raster`
     and `frame` are real arms; `sizepolicy-compose` is wired in
-    tools/android/run-emulator.sh against guests/rust/sizepolicy.rs.
+    tools/android/run-emulator.py against guests/rust/sizepolicy.rs.
     Watched red on a live emulator leg with the track report cut out
     (`raster no track reported, wanted track`).
   - ~~**iOS is DECLARED OFF, not stubbed**~~ — CLOSED 2026-08-28: the
@@ -3649,14 +3649,14 @@ attempts to edit one of them programmatically mangled it — once by
 splitting on CRLF and rejoining wrong, once by a `\r\n` that did not
 survive shell quoting into python. Neither showed up until a leg timed
 out at 327 seconds. Around the same afternoon a slice edit to
-tools/deploy-win.sh silently swallowed five `run_suite background_*`
+tools/deploy-win.py silently swallowed five `run_suite background_*`
 lines; only check-steps caught it.
 
 What to move, roughly in order of pain: tools/guest/*.cmd (CRLF, cmd
 escaping, 188 near-identical files — re-measured 2026-08-19; as filed it
 said "forty", so the surface has quadrupled and 188 near-identical files
 is a GENERATION problem rather than a translation one, which changes the
-item's shape as well as its size), tools/deploy-win.sh (the longest
+item's shape as well as its size), tools/deploy-win.py (the longest
 and the one whose leg ordering is load-bearing), then the rest of
 tools/*.sh — 52 of them today against 2 tools/*.py, so nothing has moved
 yet (overtaken: see the 2026-08-31 progress note below — the gate tier
@@ -3667,7 +3667,7 @@ real data structures for things the shell fakes with string splicing.
 
 Two things NOT to lose in the move: the dev-shell fingerprint check
 every tools/ script starts with, and the `$?`-read-once discipline that
-tools/check-shell.sh enforces (a rule that exists only because shell
+tools/check-shell.py enforces (a rule that exists only because shell
 makes it easy to get wrong — which is itself an argument for leaving).
 See also the portsh work for the cases where one script must run on both
 sides.
@@ -3681,7 +3681,7 @@ logic; each old body was run beside its replacement on
 the same tree with stdout, stderr and exit compared, and every watched
 negative re-proven red on the converted body; the two largest,
 tools/check-steps.py and tools/check-sugar-surface.py, closed the set
-today, both byte-identical on both streams). The runners, keyed.sh, the
+today, both byte-identical on both streams). The runners, keyed.py, the
 generators and tools/lib/*.sh stay shell by the 2026-08-27 ruling's
 present-tense boundary. Both things the paragraph above said not to
 lose survived the move: the fingerprint lives in tools/lib/kaya_gate.py
@@ -3703,13 +3703,13 @@ RULED 2026-08-31 (Akhil, evening, after the matrix record): NEW
 SCRIPTS ARE PYTHON FIRST — on the kaya_gate prelude — so nothing new
 joins this entry, and the NEXT TRANCHES convert in order: (1) the
 three generators (gen-header, gen-bindings, gen-guests — decision
-logic already in the gate sweep), (2) keyed.sh and build-id.sh as
+logic already in the gate sweep), (2) keyed.py and build-id.py as
 typed python modules with thin CLI faces, their GATES/input-set
 tables becoming importable data, (3) the runners, reframed as
 leg-tables-become-shared-data — check-steps, check-staging and
 check-gates regex-parse runner shell text today, so each runner port
 re-teaches its census gates to import the same tables;
-deploy-win.sh first. This moves the 2026-08-27 ruling's
+deploy-win.py first. This moves the 2026-08-27 ruling's
 runners-stay-shell boundary, which was recorded present-tense for
 exactly this revisit. Out of scope as before: in-container and
 in-toolchain payloads, and the .cmd stubs (the HOLD).
@@ -3720,7 +3720,7 @@ byte-compared against the old body on the same tree, and each
 tranche paid immediately — gen-bindings' bare `cargo run` was the
 one cargo invocation outside both cargo rules' alternation (it
 carries --locked now and `run` joined the rules), and
-tools/lib/keyed-inputs.py turned out to be parsing build-id.sh's
+tools/lib/keyed-inputs.py turned out to be parsing build-id.py's
 text and scanning tools/<gate>.sh SHIMS — its input-coverage census
 had gone progressively vacuous across the whole conversion, and it
 imports the module and scans the .py bodies now. Tranche 3 is
@@ -3846,7 +3846,7 @@ module (run-suites.sh is an in-container payload by §6 and
 check-steps' linux arms keep reading its text), and the matrix driver
 is python with its launch block as the data check-gates pins — the
 five concurrent launches, Android's process provenance and wait, the
-niced delayed sweep, and gates.sh reachable only through the
+niced delayed sweep, and gates.py reachable only through the
 fingerprint and the one launch, all six matrix negatives re-spelled
 and re-proven. The BUDGETS table moved with every ceiling's measured
 raise/lower history intact, and per-lane durations are stamped by
@@ -4199,7 +4199,7 @@ during the template-zone sugar pass. Kept because the mechanism
 generalises and the wrong first answer is instructive.
 
 Per-language leg times for one scene, mac lane, machine quiet
-(tools/validate-mac.sh, `split`):
+(tools/validate-mac.py, `split`):
 
     rust 38s   ocaml 16s   haskell 10s   swift 9s
     python 1s  go 0s       csharp 0s     java 1s
@@ -4243,7 +4243,7 @@ with nothing wrong in the tree.
 **The fix:** validate-mac stages the built examples into
 `target/rust-guests` (list derived from `$SCENES`, so a new scene cannot
 be built and then left running out of the build directory) and asserts
-that directory stays small. `tools/check-shell.sh` refuses any `run`
+that directory stays small. `tools/check-shell.py` refuses any `run`
 line that execs out of `target/{debug,release}/{examples,deps}`, with a
 self-test, watched failing.
 
@@ -4364,7 +4364,7 @@ reports named:
   notice the NEXT drift. A census offered and not landed is a
   measurement with a shelf life.
 
-The census's three watched negatives now live in check-sugar-surface.sh:
+The census's three watched negatives now live in check-sugar-surface.py:
 a template setter deleted while its identically-spelled LIVE twin stays
 (OCaml, the historical shape), a forward deleted from a generated C#
 façade, and the zone's own header renamed — the third proving the reader
@@ -4420,7 +4420,7 @@ interpreter carries slice 1's one real brand lowering
   The enum's members are `None`, `Level1`..`Level9`; the docs'
   `HeadingLevel1` spelling is the UWP one and does not exist here. NOT
   PROVEN HERE: no leg ran — the windows lane needs its styling legs
-  wired in tools/deploy-win.sh, and the pixels are the captures'
+  wired in tools/deploy-win.py, and the pixels are the captures'
   business. (The inset arm was already live.)
 - ~~**DEPTH STUB: styling on compose**~~ — LANDED 2026-08-12. The
   seed-derived scheme goes through the MaterialTheme root the foundation
@@ -4590,7 +4590,7 @@ two measured Linux gaps, and two questions that outgrew the scene:
   vacuously on iOS until the read was made to `guard let` the window.
 - ~~**DEPTH STUB: identity on swiftui/ios**~~ — LANDED 2026-08-18 as
   PACKAGING, which is what this entry said it would be.
-  tools/ios/run-sim.sh reads guests/assets/identity.toml ONCE, at the
+  tools/ios/run-sim.py reads guests/assets/identity.toml ONCE, at the
   top, with tomllib, and never retypes either value; `make_bundle` grew
   a fourth argument that copies the declared mark into the bundle
   VERBATIM — not resized, because the byte-equality rule holds every
@@ -4607,7 +4607,7 @@ two measured Linux gaps, and two questions that outgrew the scene:
   deliberately not at the bundle's copy: comparing the bundle with
   itself would make ruling 4's byte equality vacuous on this lane, where
   the data container is a second, independently delivered copy. Three
-  legs; `tools/ios/run-sim.sh all` ran 87 legs with zero failures. The
+  legs; `tools/ios/run-sim.py all` ran 87 legs with zero failures. The
   permanent half — that iOS has no runtime route at all — is now a
   stated divergence in DESIGN.md rather than a ledger row, because it is
   a fact about the platform and not a schedule.
@@ -4665,8 +4665,8 @@ Beyond the four stubs, what the depth slice deliberately left for the
 breadth arms, and where each of those went. LANDED 2026-08-18: the
 declaration itself (guests/assets/identity.toml, ruling 4's "one file,
 two readers", beside the vendored typeface's own pattern); the
-byte-equality gate over it (tools/check-app-identity.sh, six clauses,
-which found a real drift on its first run — tools/deploy-win.sh staged
+byte-equality gate over it (tools/check-app-identity.py, six clauses,
+which found a real drift on its first run — tools/deploy-win.py staged
 the mark with a GLOB and therefore shipped whatever was in the directory
 rather than what was declared); the PACKAGING readers the phones have
 (the APK's mipmap and `make_bundle`'s bundle copy, per ruling 3); and
@@ -4763,7 +4763,7 @@ cleans up existing code rather than only anticipating a handshake. All
 eight bindings have it: the query is `capabilities` in each language's
 casing and it answers with NAMED BOOLEANS — `aux_windows` / `AuxWindows`
 / `auxWindows` on a record, struct, dataclass or newtype — never the raw
-u64. tools/check-sugar-surface.sh holds the eight level in three clauses
+u64. tools/check-sugar-surface.py holds the eight level in three clauses
 (the query, the named flag, and the bit NUMBER against the core's), each
 with a watched negative; 21 perturbations were driven and every one went
 red.
@@ -4839,7 +4839,7 @@ KEY: swift-typecheck, iOS guest, guests/swift, gate gap, os(iOS)
 CLOSED 2026-08-18. tools/swift-typecheck.sh grew the pass: the guests
 the iOS lane ships, compiled against the iphonesimulator SDK with the
 LANE's flags. Both halves of "the lane's" are read out of
-tools/ios/run-sim.sh rather than restated here — the guest list
+tools/ios/run-sim.py rather than restated here — the guest list
 (IOS_SWIFT_SCENES, 28 of the 37 sources; window/panels and friends are
 desktop-only by design) and the deployment target (IOS_MIN = 16.0, which
 is NOT the 17.0 the interpreter passes use, and the older target is the
@@ -4852,10 +4852,10 @@ OUTSIDE its `#if !os(iOS)` fails the iOS pass (RC=1, 2 diagnostics,
 "no such module 'AppKit'") while the macOS pass over the same bytes stays
 green (RC=0, 0 diagnostics). Every pass now names the file set it walked
 in the verdict, and a pass handed nothing to compile REFUSES rather than
-passes — driven three ways: an empty guests/swift, a run-sim.sh that no
+passes — driven three ways: an empty guests/swift, a run-sim.py that no
 longer declares IOS_SWIFT_SCENES, and a lane entry naming a guest with no
 source. No keying change was needed: `tools/` rides every gate key
-(tools/build-id.sh), so reading run-sim.sh is already inside
+(tools/build-id.py), so reading run-sim.py is already inside
 swift-typecheck's declared input set.
 
 The original entry is kept below for the record.
@@ -4868,7 +4868,7 @@ simulator, minutes into a run.
 
 THAT IS LIVE FROM 2026-08-18 RATHER THAN THEORETICAL:
 guests/swift/identity.swift now carries a `#if !os(iOS)` guard around the
-auxiliary window, and Swift guests reach phones — tools/ios/run-sim.sh
+auxiliary window, and Swift guests reach phones — tools/ios/run-sim.py
 builds bundles out of guests/swift. The arm typechecked the file by hand
 against the simulator SDK (RC=0) and proved the branch really is excluded
 there, by splicing a poisoned line into a TEMP COPY: macOS RC=1 with
@@ -5086,7 +5086,7 @@ relocate.
 KEY: symbol-floor gate, check-symbols, name_availability.plist, kayaSymbolTable
 
 RESOLVED 2026-08-19, same day: the maintainer ruled "register it" and the
-draft landed as tools/check-symbols.sh, gate 38 in gates.sh's sweep, the
+draft landed as tools/check-symbols.py, gate 38 in gates.py's sweep, the
 check-gates census and both doctrine mirrors. Two changes against the
 draft: the row regex learned the table's fourth column (`rendered`, the
 AX read-back measurement, which the floor deliberately does not bind),
@@ -5101,16 +5101,16 @@ a resolution check only fails on a machine old enough to BE the floor,
 so the scene-level assertion is vacuous on every machine the project
 runs on. The only real guard is a static gate reading Apple's
 `name_availability.plist` — every name's introduction year against the
-declared floor. That gate WAS DRAFTED (`check-symbols.sh`, ~6KB, written
+declared floor. That gate WAS DRAFTED (`check-symbols.py`, ~6KB, written
 2026-08-16 in that session's scratchpad) and never landed; the
 kayaSymbolTable header cited it at a path that stopped existing when the
 session ended. Landing it is a registration decision, not just a copy:
-it must join tools/, gates.sh's sweep (or its EXCLUDED table with a
+it must join tools/, gates.py's sweep (or its EXCLUDED table with a
 reason), the check-gates census, and the CLAUDE.md/AGENTS.md gate list —
 which is the maintainer's review. RECOVERY: the draft's bytes are in
 this project's session transcripts under
 ~/.claude/projects/-Users-akhilindurti-Projects-kaya/ — search the
-subagent .jsonl files for `check-symbols.sh` and replay the Write
+subagent .jsonl files for `check-symbols.py` and replay the Write
 payload (the styling-doc recovery of 2026-08-19 proved this route).
 
 ## ~~The template button's caption is not uniform~~ (found 2026-08-17)
@@ -5262,7 +5262,7 @@ red naming what the chrome really drew, so the read cannot be an echo.
 The observation string did not move: `title "<want>"`, byte for byte,
 and the editor leg's whole verdict is byte-identical to the film's.
 
-## ~~The CLASS behind the stale title bar has no gate (opened 2026-08-17 by the fix above)~~ CLOSED 2026-09-02: tools/check-compose-state.sh is the gate
+## ~~The CLASS behind the stale title bar has no gate (opened 2026-08-17 by the fix above)~~ CLOSED 2026-09-02: tools/check-compose-state.py is the gate
 KEY: KayaSceneModel plain field, composition state, compose recomposition, one-field audit
 
 A `KayaSceneModel` field that decides what a composable DRAWS must be
@@ -5296,10 +5296,10 @@ read, not read to draw.
 `@Composable` bodies and fails a plain field a composable reads to draw,
 with the four ordering-safe alert fields exempted BY NAME and with the
 ordering itself asserted rather than assumed. It is deliberately not in
-this fix — landing a new gate is a four-way edit (the script, gates.sh's
+this fix — landing a new gate is a four-way edit (the script, gates.py's
 list, check-gates' census, the CLAUDE.md/AGENTS.md prose) and this slice
 was scoped to the defect and its ledger.~~
-THE GATE LANDED 2026-09-02, tools/check-compose-state.sh, exactly that
+THE GATE LANDED 2026-09-02, tools/check-compose-state.py, exactly that
 shape: comments and strings blanked positionally, every
 `KayaSceneModel.<field>` inside every `@Composable fun` body classified
 read or write, a plain field READ to draw refused unless EXEMPT by name
@@ -5418,7 +5418,7 @@ Slice 2b — depth then breadth, the standing pattern):
   THE LEG CLOSED 2026-08-16 (`31ace6b`) THE SAME WAY THE GTK ONE DID —
   by the shared blob, which this bullet already named as the only exit
   that keeps the expected family one byte-frozen string on every lane.
-  `tools/android/run-emulator.sh` now wires three `typeface` legs
+  `tools/android/run-emulator.py` now wires three `typeface` legs
   (compose, jvm, go), each naming the pushed font copy in
   `KAYA_FONT_FILE`. The blocker it records stands as the reason: `Georgia`
   is absent on the emulator image (and Android's family lookup is
@@ -5835,14 +5835,14 @@ obvious:
   levels — and every AAR on the classpath merges its `assets/` into the
   same namespace. Either would put a name in the census the app never
   shipped, and the census is frozen in a scene. The prefix is written in
-  three files and tools/check-assets.sh's C7 holds them equal.
+  three files and tools/check-assets.py's C7 holds them equal.
 
   Absent and unreadable are ONE answer on this route. An APK entry has
   no `ENOENT`; the platform answers with a stream or an IOException. The
   sentence says "no asset named X" plus the census, and lets the reader
   see which it is, rather than naming a cause it did not measure.
 
-  tools/check-jni.sh does NOT cover this class. Its subject is `external
+  tools/check-jni.py does NOT cover this class. Its subject is `external
   fun` declarations, and KayaAssets has none — it is called FROM native
   code by `call_static_method`, which no list holds. What holds the name
   is the leg, every run.
@@ -5853,12 +5853,12 @@ KEY: assets, identity, KAYA_ICON_FILE, one resolver, check-assets EXEMPT
 The eight typeface guests collapsed to `asset("fonts/sora-wght.ttf")`;
 the eight identity guests did not, and still read `KAYA_ICON_FILE` with
 a repo-relative default. They are eight of the entries in
-tools/check-assets.sh's EXEMPT table, so the gate names them every run
+tools/check-assets.py's EXEMPT table, so the gate names them every run
 rather than letting them pass quietly, and that table now refuses an
 exemption that is no longer earned.
 
 The reason it was not done in the same slice is a real coupling and not
-a scheduling one: tools/check-app-identity.sh's C3 clause REQUIRES that
+a scheduling one: tools/check-app-identity.py's C3 clause REQUIRES that
 every file naming `KAYA_ICON_FILE` also spells the declared path out of
 guests/assets/identity.toml. A guest rewritten to
 `asset("icons/kaya-mark.png")` names neither, so C3 has to learn the new
@@ -5870,7 +5870,7 @@ identity slice landed, is two risks in one commit for no gain.
 When it happens: C3 gains an arm that accepts `asset("<the declared
 icon's path under the root>")` as naming the declaration, the eight
 guests lose their environment read, and the eight EXEMPT entries come
-out of check-assets.sh together.
+out of check-assets.py together.
 
 COMPLETE 2026-08-18, and that is exactly what happened — the three
 moves in one commit, because the stale-exemption clause makes them
@@ -5920,7 +5920,7 @@ the typeface scene's guests now call `asset("fonts/sora-wght.ttf")` and
 with, which is the strongest bytes-reached-the-platform observation kaya
 owns. The miss diagnostic's eight answers are each made to print by
 `assets::tests::why_not_answers_in_facts` and audited by
-tools/check-diagnostics.sh at answers=8, measured=8.
+tools/check-diagnostics.py at answers=8, measured=8.
 
 What is NOT proven cross-platform is the miss SENTENCE: that the census
 of what the package carries is the same eight names on five platforms.
@@ -5942,7 +5942,7 @@ delivery is the real packaging mechanism.
 The frozen census is the forcing function: it can only pass if every
 lane stages the WHOLE root, which is exactly the property A5.1 asks for
 and which nothing else observes at run time. It also means adding an
-asset reddens the scene, so tools/check-assets.sh should gain a clause
+asset reddens the scene, so tools/check-assets.py should gain a clause
 holding that frozen string equal to the root's listing — one gate red
 naming the .steps file, before any lane runs, rather than five red lanes.
 
@@ -6087,7 +6087,7 @@ Same four byte shapes, same two positions, run for real:
 
 ### THE WALL
 
-`tools/check-empty-child.sh` (gates.sh, CLAUDE.md rung 2). Clause A is a
+`tools/check-empty-child.py` (gates.py, CLAUDE.md rung 2). Clause A is a
 RUNTIME negative on macOS: tools/checks/swiftui-empty-child.swift is
 compiled into the interpreter's own module and run, driving four byte
 shapes through the real `kayaDecodeImage`, `KayaRender` and
@@ -6307,7 +6307,7 @@ remembering. The landing, per backend and surface:
   columns), regular takes the native Table where TableColumnForEach's
   iOS 17.4 floor allows. The four verb arms lost their stubs and
   changed nothing else: every read they make was already
-  cross-platform. tools/ios/run-sim.sh wires table in
+  cross-platform. tools/ios/run-sim.py wires table in
   IOS_SWIFT_SCENES and IOS_GO_SCENES plus a rust table-swiftui phone
   leg and a table-swiftui-pad leg, the only leg in any lane that runs
   the native Table. THE PAD LEG APPENDS NO EXTRA STEP, unlike the
@@ -6399,7 +6399,7 @@ remembering. The landing, per backend and surface:
   resize hook is LayoutUpdated (SizeChanged is a vtable pad in the
   generated bindings), made idempotent by a width stamp; ~~the iOS tier
   routing (KayaTableSurface) is held by no gate~~ (GATED 2026-08-21:
-  tools/check-table-tier.sh — the routing extracted to the pure
+  tools/check-table-tier.py — the routing extracted to the pure
   `kayaTableTier(width:dynamicColumns:)`, a static clause holding
   KayaTableSurface as the only constructor of either tier view, and a
   runtime probe (tools/checks/swiftui-table-tier.swift, the
@@ -6407,7 +6407,7 @@ remembering. The landing, per backend and surface:
   every run. What remains unheld is only whether a physical device
   reports the size class the simulator did); and ~~a lane
   run from a NESTED WORKTREE has two bring-up hazards the slice
-  agents worked around rather than fixed — deploy-win.sh's SSH mux
+  agents worked around rather than fixed — deploy-win.py's SSH mux
   ControlPath under $ROOT/target exceeds the 104-byte AF_UNIX limit
   (fix wants a design choice: key a short path under TMPDIR on a hash
   of $ROOT), and third_party/winappsdk is gitignored so a fresh
@@ -6439,7 +6439,7 @@ remembering. The landing, per backend and surface:
   for the handler's re-declaration — the guest moved onto it and the
   guest-floor exemption died); and ~~a census clause holding
   `columns`/`on_sort` present in all eight bindings, which no gate
-  demands yet~~ (CLOSED 2026-08-21: it is tools/check-sugar-surface.sh's
+  demands yet~~ (CLOSED 2026-08-21: it is tools/check-sugar-surface.py's
   table clause, beside the range-verb and capability clauses whose shape
   it copies. A TABLE IS NOT A KIND — a For with a header — so neither
   the constructor sweep nor the window-prop sweep could ever see it,
@@ -6881,7 +6881,7 @@ ms=6983` is DocumentsUI's COLD start against a 5s frame-sized
 deadline (dialogs 2 and 3 in the same leg: 1375ms, 285ms). Its wall
 shipped the same day: `DIALOG_LAUNCH_BUDGET_NS = 20s` in
 KayaCompose.kt, used in both dialog arms, held by
-check-harness-ceiling.sh (extension precedes kayaNoteDialogUnseen,
+check-harness-ceiling.py (extension precedes kayaNoteDialogUnseen,
 budget may not shrink below 10s), measurement in docs/traps.md. (2)
 The ghost proper (lost result / straggler back) is quiet since the
 13th sighting 2026-08-27 — 21 android dialog-family leg samples on
@@ -7411,7 +7411,7 @@ below that a synchronous kernel IO holds even `TerminateProcess`
 (docs/traps.md "exit() is not final on Windows"). The walls:
 `harness_exit` uses TerminateProcess (crates/kaya/src/harness.rs),
 proven on the guest against a real FLS-callback wedge by
-`harness::win_exit_tests` in deploy-win.sh's unit phase, and the
+`harness::win_exit_tests` in deploy-win.py's unit phase, and the
 runner stopped waiting for the corpse (wait-exit.ps1's KAYA_LINGER).
 Measured 2026-08-30 over three full windows lane runs (201 legs each,
 load1 65.0/7.4/9.4): the seven dialog legs cost 33s/21s/26s COMBINED —
@@ -7466,7 +7466,7 @@ taps as intentional navigation inside the picker (AXButtons "On My
 iPhone", "Browse", "Cancel"); the residual FP -1005 / empty
 didPickDocumentURLs face was closed by the per-phone `dev.kaya.*`
 uninstall census and the known-byte export/reopen admission probe
-(tools/ios/run-sim.sh). Measured 2026-08-30: three iOS lane runs (113
+(tools/ios/run-sim.py). Measured 2026-08-30: three iOS lane runs (113
 legs each, one at load1 62.3), all ten sheet-family legs PASS in each,
 and the day's simdrive logs show every `wait_picker ok=yes` in 1-4
 tries with `read_timeouts=0` on all 105 reads sampled. The instruments
@@ -7554,7 +7554,7 @@ bridge is managing. Two silences ended: the HID send's completion
 Error and its 10s wait were discarded, so a dropped tap could never be
 observed from this side, and every accessibility round trip is now
 counted and timed — a request that expires at 20s returns nil, which
-every caller reads as "nothing is there". run-sim.sh's watcher adds
+every caller reads as "nothing is there". run-sim.py's watcher adds
 the half simdrive cannot see, one line per request with rc, total ms
 and the pid-resolution ms.
 
@@ -7718,7 +7718,7 @@ tree's inline PNGs 'stay' under one blanket reason — a DECODE-assertion
 scene must not fail because a file was not staged — but a11y is not a
 decode assertion: its image exists so the accessibility read has an
 image widget with a label, and the staging risk died when the asset
-root became a hash-verified unit on every lane (tools/check-assets.sh).
+root became a hash-verified unit on every lane (tools/check-assets.py).
 The example tier should read as the kaya calls an app would make:
 asset(name) for the picture, the way the typeface and identity guests
 already do. The decode-assertion inlines (the gallery's corrupt PNG and
@@ -7970,7 +7970,7 @@ presentation, the iOS paste prompt, the stall scene's deliberate block
    never produced an accepted matrix result and was rejected because it
    broke the ratified all-five-platform concurrency rule. Validate-all's
    contract remains: start all five platform lanes together, wait for
-   Android's recorded pid, then launch `nice -n 10 tools/gates.sh` while
+   Android's recorded pid, then launch `nice -n 10 tools/gates.py` while
    longer lanes continue. The four-phone runner/probe default and 310s
    ceiling remain; the 350s result left the duration anomaly open
    until the 2026-08-30 closure in this entry's head note.
@@ -8201,7 +8201,7 @@ truncating when 56315ce added the net line): the panel goes 210pt ->
 ("2026-08-24" in full, the same ink the grown ledger table draws in the
 same capture).
 
-GUARDED: `tools/check-table-tier.sh`. Two RUNTIME clauses in the
+GUARDED: `tools/check-table-tier.py`. Two RUNTIME clauses in the
 real-window probe — no column declares a minimum below its measured
 content, and a hugging container widens to the table's content — plus a
 static pairing clause for the re-present, because that staleness is INK
@@ -8278,7 +8278,7 @@ the scroller becomes transparent: minimum and natural both become the
 content's. The windowed tier is untouched — the transactions view's
 15,000 rows (then ledger.steps', the portfolio's since 2026-08-26)
 and varied's grown tables keep AUTOMATIC and their bounded viewports —
-and `check-gtk.sh`'s census holds both the policy write and the grow
+and `check-gtk.py`'s census holds both the policy write and the grow
 read, each watched failing. The 58px measurement is in docs/traps.md
 ("A GTK table's viewport floor is the scrollbar's own minimum"), which
 is where the next session will look.
@@ -8292,7 +8292,7 @@ shipped GNOME and Windows apps, and inspected and approved the
 round-two captures — interior inset 12px per platform metrics, small
 GTK tables hugging their rows after the 58px scrollbar-minimum fix
 (its own struck entry, one above). Implemented on GTK, WinUI and
-Compose, held by tools/check-table-card.sh; macOS keeps the native
+Compose, held by tools/check-table-card.py; macOS keeps the native
 interior. THE LAST TWO SPELLINGS WERE RULED THE SAME DAY, both of them
 the platform's GROUPED idiom rather than the desktop card: the iOS
 synthesized tier takes the INSET-GROUPED card, and Compose the
@@ -8348,7 +8348,7 @@ keeps every cell edge where expect_column_edges already found it:
   draw modifiers; neither measures. SUPERSEDED the same day by the
   segmented grouped container — the section at the end of this entry.
 
-NO SCENE CAN FAIL THIS, so tools/check-table-card.sh is the wall: the
+NO SCENE CAN FAIL THIS, so tools/check-table-card.py is the wall: the
 card present in all four, flat (strokeless and borderless on the two
 grouped tiers), coloured from platform tokens rather than literals, on
 the CONTENT layer where iOS and Compose demand it, and held OFF the
@@ -8481,7 +8481,7 @@ Compose bullet above is superseded in three ways at once:
     Spelled with two RoundedCornerShapes and plain background modifiers,
     NOT by adopting the API: android/kaya/build.gradle.kts pins
     compose-bom 2024.10.01 = material3 1.3.1, and a card is not worth a
-    dependency bump (tools/check-pins.sh).
+    dependency bump (tools/check-pins.py).
   - THE CONTAINER IS CONTENT, iOS's correction one platform over. The two
     segments are laid-out CHILDREN of KayaTableSurface's own Layout — which
     already sizes itself to the collection's whole extent (top spacer +
@@ -8563,7 +8563,7 @@ WHAT MOVED, exactly, and why every instrument stays honest:
   - expect_fills' hug clause: `tableContentH` and `tableViewportH` both
     shrink together on a hugging table (its clip IS its content height),
     so the clause cannot flip.
-tools/check-table-card.sh pins the ABSENCE, read out of the table's own
+tools/check-table-card.py pins the ABSENCE, read out of the table's own
 content lambda so the file's four other HorizontalDividers (menu
 separators, section rules) are none of its business, with the rule
 spliced back exactly where it stood as the watched negative.
@@ -8611,7 +8611,7 @@ KEY: CollectionOf Tx-only, collection_of, collection(of:), RecordCollection At, 
 carry named fields in every binding now. Nothing moved in a generator —
 bindings/go/records.go, bindings/csharp/KayaRecords.cs,
 bindings/java/dev/kaya/KayaRecords.java and bindings/swift/KayaRecords.swift
-are HAND-WRITTEN: tools/gen-guests.sh's GENERATED list covers only the
+are HAND-WRITTEN: tools/gen-guests.py's GENERATED list covers only the
 per-guest `<Rec>Kaya` files under guests/, never the binding libraries.
 - Go: free `TplCollectionOf[K, T](t *Tpl)` beside `CollectionOf`, over
   one shared `newRecordCollection`; `RecordCollection.At` SHADOWS the
@@ -8650,7 +8650,7 @@ kaya_app_checks.py, Go's `TestANestedRecordCollectionIsDeclaredInThe
 TemplateAndAddressedTyped` (check-abort's `go test`), C#'s
 `NestedRecordTable` in guests/csharp/AbortCheck.cs, OCaml's block in
 bindings/ocaml/checks/abort_check.ml, Java's `nestedRecordTable` in
-tools/java-typecheck.sh, Swift's tools/checks/swift-nested-table.swift
+tools/java-typecheck.py, Swift's tools/checks/swift-nested-table.swift
 (now record-typed end to end) and Haskell's NestedTable.hs.
 
 STILL ONE TIER UP, and not this entry: the KayaGen generators emit the
@@ -8754,7 +8754,7 @@ the build — its handles export abstractly, so no runtime probe can see
 an id. scene.rs's collision walls stay as the backstop that should
 never fire. DESIGN.md's Binding conventions now state the rule. The C
 floor's hand-authored guests were renumbered onto it 2026-08-25, and
-tools/check-c-ids.sh refuses a re-collision from 2026-08-26 (chore
+tools/check-c-ids.py refuses a re-collision from 2026-08-26 (chore
 entry below).
 
 The Haskell breadth probe manufactured a widget-id/template-node-id
@@ -8792,14 +8792,14 @@ and after the renumber: identical length in all eight, and every differing
 byte an 8-byte id field carrying exactly one mapped (old -> new) pair —
 no string, kind or record head moved. The comparator was watched red on a
 doctored byte first, and refuses a guest showing zero differences.
-check-steps.sh passes unchanged; no .steps file or expected string moved.
+check-steps.py passes unchanged; no .steps file or expected string moved.
 All 17 C guests build (guests/c/Makefile, the whole SCENES list).
 
 GATED 2026-08-26, the half the renumber left open: nothing refused a C
 guest that re-collided the spaces, because scene.rs keeps `widgets` and
 `template_nodes` as separate maps and the collision is therefore legal
 at the core — it renders correctly and ships, which is exactly how all
-eight overlapped for months under green lanes. tools/check-c-ids.sh is
+eight overlapped for months under green lanes. tools/check-c-ids.py is
 in the fast sweep now. It reads the CALLS, not the `W_`/`N_` names:
 comments and string literals are blanked, then create_widget /
 create_for / create_when / template_end are walked in source order
@@ -8882,7 +8882,7 @@ thread gives every step a 60s ceiling and guarantees exit within 3s of
 any published verdict (above Android's 20s ax extension, below
 validate-mac's 120s kill; KAYA_STEP_CEILING_MS drives the real path in
 tests). Every branch watched printing, every silence watched first.
-Held by the new tools/check-harness-ceiling.sh — gate 43 — since no
+Held by the new tools/check-harness-ceiling.py — gate 43 — since no
 shared scene can fail it.
 
 The harness's expect deadline is checked after an attempt returns, and
@@ -9171,7 +9171,7 @@ through it; winui keeps the Button controls beside the click tags
 divergence, and resolves stamped buttons by key (its other registries
 still hold controls without tags — stated in the arm); KayaSwiftUI and
 KayaCompose read a node's `tag` where they read the table's `sortTag`.
-tools/check-verbs.sh pins each arm's generic spelling and refuses the
+tools/check-verbs.py pins each arm's generic spelling and refuses the
 column-only guard, seven watched negatives. THE PROOF IS THE
 AFFORDANCE THIS ENTRY NAMED: guests/python/portfolio.py's account
 cards carry a stamped "Transactions" button (a11y id `transactions`)
@@ -9235,7 +9235,7 @@ construction, with no per-site ensure() to forget. Initial capacity stays
 4096, so every record the tree produces today takes the same no-realloc
 path the bench measured.
 
-THE GUARD is in tools/java-typecheck.sh, which gains the only clause in
+THE GUARD is in tools/java-typecheck.py, which gains the only clause in
 that file that is RUN rather than compiled: an exerciser that encodes and
 reads back a 100,000-character text prop and a 20,000-value drawing (a
 320,064-byte record), plus the exact boundary — 4064 characters and 4065.
@@ -9300,7 +9300,7 @@ THE GUARDS, two of them. `guests/c/Makefile` gains
 `-Werror=missing-field-initializers`, so a `KayaTx tx = {buf, 0}` — which
 still COMPILES against a three-field struct, reads cap 0 and refuses
 every record at run time — now fails the BUILD naming `cap`: the wall on
-the path nobody can avoid. And `tools/check-c-bounds.sh`, the 48th gate,
+the path nobody can avoid. And `tools/check-c-bounds.py`, the 48th gate,
 because nothing else can see any of this: every in-tree guest sizes its
 buffers correctly, so the wire bytes are identical either way and no
 scene, lane or capture is different — which is how the unchecked memcpy
@@ -9962,7 +9962,7 @@ beside varied-python.
 KEY: portfolio android, zero-width track, constraints model, proposal model, kayaFixedRepresentable, Can't represent, ANDROID_UNWIRED_SCENES
 
 The packaging milestone's android slice brought python up (varied-python
-runs; the suite is run-emulator.sh's), and the portfolio was the first
+runs; the suite is run-emulator.py's), and the portfolio was the first
 scene to mount a table inside a ZERO-WIDTH track on Compose: at phone
 width the dashboard's detail column overflows, SwiftUI's proposal model
 lays the overflow out at natural size (clipped, geometry real — the iOS
@@ -10110,7 +10110,7 @@ container layout recorded". TWO consequences, one fixed and one held:
   `varied-python` IS FIXED (2026-08-29), and the fix came off the pipe
   above within twenty minutes of it existing: two temporary kayaDiag
   lines in the synthesized tier — one per band publish, one per computed
-  `visible` — plus the park's own decisions, then `tools/ios/run-sim.sh
+  `visible` — plus the park's own decisions, then `tools/ios/run-sim.py
   python`, which is TWO legs and 35 seconds, looped until red. THE
   ARITHMETIC IT CAUGHT is in docs/traps.md; in one line, a correction
   above the viewport moves the scroll offset as well as the band, and the
@@ -10137,7 +10137,7 @@ container layout recorded". TWO consequences, one fixed and one held:
   applied no override, and the leg correctly said "horizontal". The
   verdict was right both times and only the premise moved, which is why
   no rerun could ever explain it. tools/ios/Info.plist.in pins portrait
-  for both device families now, and tools/check-staging.sh holds it with
+  for both device families now, and tools/check-staging.py holds it with
   the missing-key and the two-orientation branches each watched refusing.
   Full arithmetic, the pad canary, and the vacuous-loop lesson are in
   docs/traps.md.

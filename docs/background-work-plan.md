@@ -107,7 +107,7 @@ Uniform semantics, spelled per language:
   chain methods do check, so a write through a captured `Tx` vanished
   with no panic and no error. FIXED, and the audit became a wall: every
   Go write goes through one chokepoint that carries the closed check
-  (bindings/go/app.go), and `tools/check-tx-liveness.sh` holds the rule
+  (bindings/go/app.go), and `tools/check-tx-liveness.py` holds the rule
   in all eight bindings.
 - **The other six**: same audit, same negative test. A language that
   cannot make it a compile error makes it a loud failure.
@@ -193,6 +193,6 @@ daemon thread in the Java and Kotlin guests.
 ## §6 — the ladder
 
 `cargo test -p kaya --features harness --locked`, the fast gates,
-`tools/validate-mac.sh`, then the eight-language sweep with an explicit
-do/can't/defer verdict each, then `tools/validate-all.sh`. Then file
+`tools/validate-mac.py`, then the eight-language sweep with an explicit
+do/can't/defer verdict each, then `tools/validate-all.py`. Then file
 dialogs, whose §0 shrinks to almost nothing once this exists.

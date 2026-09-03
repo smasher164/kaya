@@ -223,7 +223,7 @@ def scan_fetcher(path, text):
             bad.append(f"{path}: verify_sha256() computes no sha256 — a "
                        "size or mtime check passes the same-length "
                        "corruption a half-written body produces (the "
-                       "tools/check-assets.sh staging rule)")
+                       "tools/check-assets.py staging rule)")
         if "return 1" not in v:
             bad.append(f"{path}: verify_sha256() never refuses "
                        f"(no `return 1`)")
@@ -311,7 +311,7 @@ for f in sorted(root.glob("tools/**/*.sh")):
     rel = f.relative_to(root).as_posix()
     # This file names the host in its own clause; a gate that scans a
     # directory scans itself (docs/traps.md).
-    if rel in KNOWN_FETCHERS or rel == "tools/check-pins.sh":
+    if rel in KNOWN_FETCHERS or rel == "tools/check-pins.py":
         continue
     if "api.nuget.org" in f.read_text(encoding="utf-8"):
         out.append(f"{f}: resolves a package from nuget's flat container, "

@@ -9,9 +9,9 @@ dev_shell_or_die()
 
 # Deploy milestone-0 artifacts to the Windows VM and run the validations.
 #
-# Usage: tools/deploy-win.sh user@host [--provision] [<leg>|all]
-#        tools/deploy-win.sh user@host <scene>_<lang>  # ONE leg
-#        tools/deploy-win.sh user@host probe=<exe>     # aliveness probe
+# Usage: tools/deploy-win.py user@host [--provision] [<leg>|all]
+#        tools/deploy-win.py user@host <scene>_<lang>  # ONE leg
+#        tools/deploy-win.py user@host probe=<exe>     # aliveness probe
 #
 # The roster, its order and the drain barriers are DATA:
 # tools/lib/lanes/win.py, the one source the gates import too
@@ -59,7 +59,7 @@ LANE_MODULE = ROOT / "tools/lib/lanes/win.py"
 # THE SSH MUX SOCKET, COMPUTED AND REFUSED BEFORE ANYTHING IS BUILT.
 # sun_path is 104 bytes INCLUDING the terminator, so 103 is the longest
 # path ssh will bind (docs/traps.md, "A deep worktree makes
-# deploy-win.sh unreachable"). ssh_config(5)'s advice for staying inside
+# deploy-win.py unreachable"). ssh_config(5)'s advice for staying inside
 # the cap is a short directory plus a hashed name, so the length no
 # longer depends on where this checkout sits. NOT $TMPDIR: `nix develop`
 # overwrites it with a per-invocation dir it deletes on exit (measured
@@ -114,13 +114,13 @@ def die(msg):
 
 
 # Compile the windows target before touching the VM.
-if subprocess.run([str(ROOT / "tools/check-targets.sh"), "windows"],
+if subprocess.run([str(ROOT / "tools/check-targets.py"), "windows"],
                   check=False).returncode != 0:
     sys.exit(1)
 timing("check-targets")
 
 if len(sys.argv) < 2:
-    die("usage: deploy-win.sh user@host [--provision] [rust|python|go|all]")
+    die("usage: deploy-win.py user@host [--provision] [rust|python|go|all]")
 HOST = sys.argv[1]
 PROVISION = False
 SUITE = "all"
@@ -421,11 +421,11 @@ for build_args in (
         sys.exit(1)
 # Verify BEFORE the deploy: a stale dll that reaches the VM is a stale
 # dll on another machine, where nothing local can see it.
-if subprocess.run([str(ROOT / "tools/build-id.sh"), "--verify",
+if subprocess.run([str(ROOT / "tools/build-id.py"), "--verify",
                    str(TARGET / "kaya.dll")], check=False).returncode != 0:
     sys.exit(1)
 for gen in ("gen-header", "gen-bindings"):
-    if subprocess.run([str(ROOT / f"tools/{gen}.sh"), "--check"],
+    if subprocess.run([str(ROOT / f"tools/{gen}.py"), "--check"],
                       check=False).returncode != 0:
         sys.exit(1)
 
@@ -679,7 +679,7 @@ must_ssh("cmd /c java -version >nul 2>&1 && echo jdk present || winget "
 # "install" echoed its own text and returned 0 for weeks while the go legs
 # built with the VM's system Go 1.26.5 (measured 2026-09-01, docs/traps.md).
 # tools/guest/fetch-zip.ps1 downloads, compares the sha256 recorded beside
-# the version here, and expands only on a match; tools/check-pins.sh holds
+# the version here, and expands only on a match; tools/check-pins.py holds
 # the shape. A present toolchain of the pinned version is left alone.
 if scp_to([ROOT / "tools/guest/fetch-zip.ps1"], "C:/kaya/") != 0:
     die("deploy-win: could not ship fetch-zip.ps1")
@@ -955,7 +955,7 @@ else:
     # mechanism.
     # A `rmdir` and a `mkdir` are two commands, never `if exist X rmdir
     # X & mkdir Y` in one: cmd runs the mkdir INSIDE the if, so a path
-    # that never existed is never created (tools/check-steps.sh holds it).
+    # that never existed is never created (tools/check-steps.py holds it).
     must_ssh('cmd /c "if exist C:\\kaya\\cs rmdir /s /q C:\\kaya\\cs"')
     must_ssh('cmd /c "mkdir C:\\kaya\\cs"')
     must_ssh('cmd /c "if exist C:\\kaya\\bindings\\python rmdir /s /q '
@@ -1153,7 +1153,7 @@ def unit_tests_on_windows():
               file=sys.stderr)
         print("  This is the ONLY thing that compiles crates/kaya's tests "
               "for", file=sys.stderr)
-        print("  this target — tools/check-targets.sh checks --lib alone — "
+        print("  this target — tools/check-targets.py checks --lib alone — "
               "so a", file=sys.stderr)
         print("  test that only compiles on unix fails HERE and nowhere "
               "else.", file=sys.stderr)
@@ -1886,7 +1886,7 @@ if os.environ.get("KAYA_RECORD"):
 # still end with the answer. Without it a log that stops early — a
 # killed lane, a lost pipe — reads exactly like a complete one, which is
 # how an ios run that reached no leg at all was read as a pass
-# (2026-08-29). tools/check-gates.sh holds all five runners to this.
+# (2026-08-29). tools/check-gates.py holds all five runners to this.
 if status == 0:
     print("deploy-win: ALL PASS")
 else:

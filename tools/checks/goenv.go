@@ -1,4 +1,4 @@
-// The scanner behind tools/check-go-env.sh: which Go source reads the
+// The scanner behind tools/check-go-env.py: which Go source reads the
 // environment through Go's own copy of it.
 package main
 

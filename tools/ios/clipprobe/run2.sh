@@ -47,7 +47,7 @@ if [ -z "$UDID" ]; then
         | grep -oE '[0-9A-F-]{36}') || true
 fi
 [ -n "$UDID" ] || {
-    echo "run2.sh: no kaya-sim-0; run tools/ios/run-sim.sh once" >&2
+    echo "run2.sh: no kaya-sim-0; run tools/ios/run-sim.py once" >&2
     exit 1
 }
 xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1 || true

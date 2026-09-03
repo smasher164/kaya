@@ -9,9 +9,9 @@ dev_shell_or_die()
 
 # THE FLIGHT RECORDER'S CAPTURE PATHS, WATCHED FIRING.
 #
-# NOT a numbered gate, and the name says so — tools/check-gates.sh's
-# census reads `tools/check-*.sh` and `tools/gen-*.sh` as gates and
-# would demand this be registered in gates.sh, CLAUDE.md and AGENTS.md;
+# NOT a numbered gate, and the name says so — tools/check-gates.py's
+# census reads `tools/check-*.py` and the three `tools/gen-*.py` as gates and
+# would demand this be registered in gates.py, CLAUDE.md and AGENTS.md;
 # worse, its delegation clause forbids the mac runner from invoking
 # anything gate-shaped at all, and the mac runner is exactly who needs
 # to run this. What it proves is a RUNTIME property of a host — that

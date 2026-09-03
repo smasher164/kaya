@@ -2,7 +2,7 @@
 
 Ruled 2026-08-31 (docs/deferred.md, the retire-the-shell entry): new
 scripts are python first, and the runners convert as the third tranche,
-deploy-win.sh first. This moves the 2026-08-27 ruling's
+deploy-win.py first. This moves the 2026-08-27 ruling's
 runners-stay-shell boundary, which was recorded present-tense for
 exactly this revisit. Tranches one (generators, 511a3da) and two
 (keyed/build-id as importable data, 36d7213) are landed; this document
@@ -10,9 +10,9 @@ is the design the third needs before anyone types a line of it.
 
 ## 1. What a runner is, measured
 
-10,076 lines across six files: deploy-win.sh 2,255, run-emulator.sh
-2,810, run-sim.sh 2,500, validate-mac.sh 1,703, validate-all.sh 317,
-validate-linux.sh 51 (plus gates.sh 440, the sweep driver). Three
+10,076 lines across six files: deploy-win.py 2,255, run-emulator.py
+2,810, run-sim.py 2,500, validate-mac.py 1,703, validate-all.py 317,
+validate-linux.py 51 (plus gates.py 440, the sweep driver). Three
 layers live in each:
 
 - **LEG TABLES** — the roster of legs and their ORDER (201 `run_suite`
@@ -27,7 +27,7 @@ layers live in each:
 
 ## 2. Why the tables are the prize
 
-EIGHT gates parse deploy-win.sh's TEXT today — check-appearance,
+EIGHT gates parse deploy-win.py's TEXT today — check-appearance,
 check-app-identity, check-assets, check-build-id, check-gates,
 check-staging, check-stubs, check-steps — with regexes over shell
 assignments and `run_suite` lines, each needing its own anti-vacuity
@@ -106,8 +106,8 @@ tables but is NOT this tranche.
    ceiling comment intact, check-gates' six matrix negatives
    re-spelled to the python pins, matrix ALL PASS 1,390
    (docs/measurements/validate-all-conversion-2026-09-01.md). The
-   lane tier is fully python; gates.sh remains, last by design.
-4. **gates.sh** last: its census/EXCLUDED table is decision logic and
+   lane tier is fully python; gates.py remains, last by design.
+4. **gates.py** last: its census/EXCLUDED table is decision logic and
    moves to data; the loop is a launcher and converts with it.
    LANDED 2026-09-01, closing the tranche: the shell wrapper's
    python heredoc became tools/gates.py — GATES/EXCLUDED/BUILD as

@@ -11,7 +11,7 @@ so edits here are limited to fixing a path the tree no longer has.
 
 Every file here was once in some session's scratch directory, which
 dies on reboot; by the time the no-scratchpad-citations gate clause
-landed (2026-08-19, tools/check-doc-refs.sh), all of these were already
+landed (2026-08-19, tools/check-doc-refs.py), all of these were already
 dead and were replayed byte-for-byte out of the session transcripts
 under `~/.claude/projects/-Users-akhilindurti-Projects-kaya/` — each
 file's Write/Edit payloads re-applied in order. Replay lessons for the

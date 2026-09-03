@@ -602,7 +602,7 @@ So:
 
 So "use `TextFieldState.undoState`" is not a free change on Compose: it
 is either a material3 version bump (touching check-pins,
-tools/check-pins.sh per CLAUDE.md:172-176) or a move to
+tools/check-pins.py per CLAUDE.md:172-176) or a move to
 `BasicTextField` plus hand-rolled M3 decoration. Either way it is the
 one backend where reaching the platform's *good* undo API costs a
 dependency decision.

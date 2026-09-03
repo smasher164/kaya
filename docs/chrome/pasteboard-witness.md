@@ -90,7 +90,7 @@ Source restored from the saved copy: `shasum -a 256 -c` OK, file touched.
   — the leg's own write reported as a stranger's. That is the watched
   negative for the false positive.
 
-## Verdicts (final artifact, tools/build-id.sh --verify OK)
+## Verdicts (final artifact, tools/build-id.py --verify OK)
 
 - tools/swiftui/build-dylib.sh rc=0; tools/swift-typecheck.sh OK (6 passes,
   macOS + iphonesimulator).

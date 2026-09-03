@@ -28,7 +28,7 @@ import (
 // storage and iOS's picker cannot see its container, so each phone names
 // the place its own file browser reaches.
 //
-// kaya.Env AND NOT os.Getenv — tools/check-go-env.sh's header carries the
+// kaya.Env AND NOT os.Getenv — tools/check-go-env.py's header carries the
 // measurement and the rule.
 func sceneRoot() string {
 	switch runtime.GOOS {

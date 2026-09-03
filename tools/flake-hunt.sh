@@ -52,10 +52,10 @@ rm -f "$OUT/$LANE"-*.log
 # parsing below is uniform even though the runners are not.
 lane_cmd() { # jobs
     case "$LANE" in
-        mac) KAYA_JOBS="$1" "$ROOT/tools/validate-mac.sh" ;;
-        linux) KAYA_JOBS="$1" "$ROOT/tools/validate-linux.sh" ;;
+        mac) KAYA_JOBS="$1" "$ROOT/tools/validate-mac.py" ;;
+        linux) KAYA_JOBS="$1" "$ROOT/tools/validate-linux.py" ;;
         windows)
-            KAYA_WIN_JOBS="$1" "$ROOT/tools/deploy-win.sh" \
+            KAYA_WIN_JOBS="$1" "$ROOT/tools/deploy-win.py" \
                 "${KAYA_WIN_HOST:-akhil@192.168.64.2}" "${KAYA_WIN_SUITE:-all}"
             ;;
     esac

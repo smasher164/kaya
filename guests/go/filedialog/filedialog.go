@@ -29,7 +29,7 @@ import (
 // A GUEST ASKS KAYA FOR PLATFORM LOCATIONS, NEVER GO'S SNAPSHOT: in
 // kaya's Android artifact Go's copy of the environment is empty forever.
 // os.TempDir is legal only as the fallback of a function that branches on
-// runtime.GOOS and asks kaya.Env — tools/check-go-env.sh holds exactly
+// runtime.GOOS and asks kaya.Env — tools/check-go-env.py holds exactly
 // that shape, and its header carries the measurement.
 func sceneRoot() string {
 	switch runtime.GOOS {

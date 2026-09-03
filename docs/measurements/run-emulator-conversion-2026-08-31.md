@@ -1,4 +1,4 @@
-# run-emulator.sh -> python (runner conversion, stage 3)
+# run-emulator.py -> python (runner conversion, stage 3)
 
 The third runner crossing under docs/runner-conversion-plan.md §4 —
 the same shape deploy-win (stage 1) and run-sim (stage 2) landed the
@@ -35,12 +35,12 @@ tools/lib/scene-features.py, check-gates, check-build-id,
 check-assets, check-appearance, check-stubs. Plus the byte-readers
 (check-shell's >=40 census, check-pins' tools/**/*.sh sweeps,
 check-doc-refs' line-length clause), the path literals
-(validate-all.sh, bench-tables.sh), and the sourced shell library.
+(validate-all.py, bench-tables.sh), and the sourced shell library.
 
 Two findings outside the android runner itself:
 
-- tools/bench-tables.sh's MATRIX_RUNNERS still named deploy-win.sh
-  and run-sim.sh — a stage-1/2 miss. The shims exec python3, so a
+- tools/bench-tables.sh's MATRIX_RUNNERS still named deploy-win.py
+  and run-sim.py — a stage-1/2 miss. The shims exec python3, so a
   pgrep for the .sh basenames could no longer see a live lane (the
   running process's command line names the .py body) and the bench
   would have measured beside a running matrix without refusing. All

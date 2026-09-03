@@ -452,7 +452,7 @@ ONE BINDING. Three clauses follow, and the third is the one with teeth:
   keeps this a lane rather than a redesign.
 - **The layout is GENERATOR-EMITTED, never hand-copied.** A binary
   layout hand-written into eight bindings is the file-modes trap exactly
-  (`tools/check-file-modes.sh`: five hand-written sites decoding one
+  (`tools/check-file-modes.py`: five hand-written sites decoding one
   spec number, and a renumber that empties the user's file with no error
   anywhere). The offsets and widths come out of crates/kaya/src/spec.rs
   through the generators like every other wire surface, or the lane does
@@ -690,7 +690,7 @@ keeping:
   100pt each against a 120pt viewbox. `KayaCanvas` is a `GtkWidget`
   subclass whose natural size is the blit (content is the floor) and
   whose snapshot draws the blit at that size, centred, clipped —
-  tools/check-canvas-blit.sh holds both halves and refuses the
+  tools/check-canvas-blit.py holds both halves and refuses the
   `ContentFit` vocabulary by name.
 - **The track reader and the frame drive are ONE tick callback, on the
   WINDOW.** GTK has a frame clock per surface, so one callback per
@@ -828,7 +828,7 @@ sentence this ruling overturns and the first site to move. HOW a literal
 is spelled in the stream (a second operand form, a tagged value, its own
 op) is an encoding decision for the implementing slice, and whatever it
 picks lands in the same three hand-copied constant tables
-`tools/check-verbs.sh` already censuses at twenty-one canvas numbers.
+`tools/check-verbs.py` already censuses at twenty-one canvas numbers.
 
 ### §3.5 The core validates, and refuses before rasterizing
 
@@ -868,7 +868,7 @@ vocabulary" stays a refusal for a ROLE and stops being the whole rule:
 whatever spelling the literal floor takes, the operand admits two
 readable things and the refusal has to say which one it could not read.
 A single sentence covering both is a diagnostic that cannot
-discriminate, which is the shape `tools/check-diagnostics.sh` refuses.
+discriminate, which is the shape `tools/check-diagnostics.py` refuses.
 
 ### §3.6 What it costs
 
@@ -986,7 +986,7 @@ relative path under the asset root spelled with `/`, walled by
 crates/kaya/src/assets.rs's existing rules — so an app's own typeface is
 `fonts/whatever.ttf` and reaches every lane through machinery that
 already stages the root as a unit and verifies it by hash
-(docs/assets-plan.md, tools/check-assets.sh).
+(docs/assets-plan.md, tools/check-assets.py).
 
 **Unspecified means `kaya/default-font`.** That reserved name is
 answered by the resolver from bytes EMBEDDED in libkaya —
@@ -1001,8 +1001,8 @@ which removes a failure mode rather than adding one:
   is half of what §7's byte-hash needs. The other half is the shaper,
   which is also kaya's.
 - **Staleness is already guarded.** Embedded bytes are compiled into
-  libkaya, so they ride tools/build-id.sh's artifact id and
-  tools/check-build-id.sh's verification. A font swap that did not
+  libkaya, so they ride tools/build-id.py's artifact id and
+  tools/check-build-id.py's verification. A font swap that did not
   rebuild is a build-id refusal, which is the wall on the path nobody
   can avoid (invariant 3).
 - **check-assets' ONE RESOLVER clause is untouched.** Its C3 clause
@@ -1267,8 +1267,8 @@ rather than discovering on five lanes that its string will not freeze.
 **THE ONE THING THAT COULD FALSIFY THIS OBSERVABLE, and it is measured
 before the first hash is frozen.** ALL FIVE LANES ARE aarch64 TODAY:
 mac and iOS on Apple silicon, windows on `aarch64-pc-windows-msvc`
-(tools/deploy-win.sh), android on `arm64-v8a`
-(tools/android/run-emulator.sh), linux in a container on the same mac
+(tools/deploy-win.py), android on `arm64-v8a`
+(tools/android/run-emulator.py), linux in a container on the same mac
 host. So cross-ISA byte-identity of a SIMD raster pipeline was UNTESTED,
 and tiny-skia's "same results as Skia" claim is about a reference
 implementation, not about x86_64 versus aarch64. Phase 1 owed one
@@ -1417,7 +1417,7 @@ core against a real mac window in dark: ground `16181C` read back as
 `17181D`, fill `2B3B4F` read back as `2B3A4F` — both inside the same ±1
 the light mode needed. The tolerance is a number in three harnesses (harness.rs's
 `INK_TOLERANCE`, KayaSwiftUI.swift's `kayaInkTolerance`,
-KayaCompose.kt's `INK_TOLERANCE`) and `tools/check-verbs.sh` pins all
+KayaCompose.kt's `INK_TOLERANCE`) and `tools/check-verbs.py` pins all
 three at the ruled value — pinned rather than merely held equal, because
 three copies drifting APART would eventually redden a lane while three
 drifting TOGETHER just makes every ink assertion quieter, with nothing
@@ -1468,7 +1468,7 @@ That residue is held two ways, both established practice here:
   scene assertion was green through both. A canvas milestone that does
   not budget a capture round on all five platforms is planning to ship
   the same class of defect.
-- **A static gate over the four blits**, on tools/check-table-card.sh's
+- **A static gate over the four blits**, on tools/check-table-card.py's
   model. Under the buffer it is much smaller than the draft's version,
   because there are no per-backend op arms to hold level. What it holds:
   every backend's canvas arm is present, blits the core's buffer at the
@@ -1548,20 +1548,20 @@ this architecture produced on the packaging side.
 
 **The gate work that question uncovered stays landed** (c98e4c6, and it
 landed ahead of any ruling because the hole existed whether or not Win2D
-ever arrived). tools/check-pins.sh has its fifth clause: every `fetch`
+ever arrived). tools/check-pins.py has its fifth clause: every `fetch`
 in tools/fetch-winappsdk.sh names an exact version AND the sha256 of the
 `.nupkg` nuget.org serves, the script verifies on every run including
 the CACHED path, a second tools/ script curling the same flat container
 is refused by name, and the gate cuts `verify_sha256` out of the script
 and runs it against wrong bytes on every sweep. What is still unheld:
 `third_party/winappsdk/WindowsAppRuntimeInstall-arm64.exe`, the 108 MB
-installer tools/deploy-win.sh's `--provision` arm copies to the VM — no
+installer tools/deploy-win.py's `--provision` arm copies to the VM — no
 script fetches it, no package contains it, it was placed by hand, and
 pinning it means deciding what it is first.
 
 **And the GTK compile hole stands.** gtk-sys needs the distro's
 pkg-config world, so check-targets structurally cannot compile that
-backend; tools/check-gtk.sh is the compile check after any
+backend; tools/check-gtk.py is the compile check after any
 crates/kaya/src/gtk.rs change.
 
 ## §9 — Accessibility: a drawing is an image
@@ -1751,11 +1751,11 @@ supposed to stay red while half the work is outstanding.
    byte-shared canvas script under the override on all five lanes, so the
    half of `expect_ink`'s frozen string that only a dark host could reach
    is asserted on every one of them. Unset changes nothing, which is the
-   half no lane can see and tools/check-appearance.sh therefore holds
+   half no lane can see and tools/check-appearance.py therefore holds
    statically, with the guard required to DOMINATE each install site and
    no backend permitted to report the variable instead of reading its own
    toolkit back.
-5. **The matrix.** tools/validate-all.sh, all five lanes, before this is
+5. **The matrix.** tools/validate-all.py, all five lanes, before this is
    called done.
 
 Phases 1 and 2 are one worktree. Phase 3 is the fan-out the tables and

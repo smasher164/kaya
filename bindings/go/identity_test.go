@@ -242,7 +242,7 @@ func runIdentityTrap(t *testing.T, trap string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTheRootIsTheIdentityWall$")
-	// cmd.Environ() rather than os.Environ(): tools/check-go-env.sh.
+	// cmd.Environ() rather than os.Environ(): tools/check-go-env.py.
 	cmd.Env = append(cmd.Environ(), "KAYA_IDENTITY_TRAP="+trap)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {

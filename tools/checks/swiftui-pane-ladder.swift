@@ -1,5 +1,5 @@
 // The macOS pane ladder, measured for real — compiled INTO the
-// interpreter's own module by tools/check-pane-ladder.sh and run as an
+// interpreter's own module by tools/check-pane-ladder.py and run as an
 // executable. Two halves:
 //
 //   1  ARITHMETIC: kayaPaneRung / kayaPaneLadderCommand, including the

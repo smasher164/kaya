@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- The dynamic-table spelling, TYPECHECKED. tools/check-sugar-surface.sh
+{- The dynamic-table spelling, TYPECHECKED. tools/check-sugar-surface.py
    compiles this with `ghc -fno-code` and also compiles doctored copies
    that must be REFUSED — the Rust doc-tests' shape, in the only form
    this binding has: the zone, the copy's key path and the row's record

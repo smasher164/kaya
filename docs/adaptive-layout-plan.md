@@ -244,7 +244,7 @@ instrument read) collapsed back to constants, and the fold's interior
 speaks the same section grammar through the same renderer. Android and
 the desktops are UNCHANGED BY DESIGN — Material's bare headline on the
 background is the same semantics in that platform's spelling.
-tools/check-table-card.sh pins the screen ground, its two wearers and
+tools/check-table-card.py pins the screen ground, its two wearers and
 the card's one spelling; a side-by-side screen (two table-bearing
 children, e.g. the pad's unstacked row) grounds but does not section.
 

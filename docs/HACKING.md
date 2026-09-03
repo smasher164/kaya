@@ -22,7 +22,7 @@ architecture). This file is the how-to layer: the recipes that repeat.
   runtime + layer-3 surface.
 - `cmd/kaya-gen`, `tools/java-processor`, `tools/kaya-csgen`,
   `tools/kaya-swift-gen` — the KayaGen generators (record/sum surfaces
-  from guest type declarations), driven by `tools/gen-guests.sh`.
+  from guest type declarations), driven by `tools/gen-guests.py`.
 - `guests/<lang>/` — the example scenes, one project per language.
 - `tools/scenes/*.steps` — the shared scene scripts. TWO transports, no
   registry: `KAYA_SELFTEST_SCRIPT` carries the script's TEXT (the
@@ -32,7 +32,7 @@ architecture). This file is the how-to layer: the recipes that repeat.
   .steps file needs no rebuild; only the default directory is baked in.
   deploy-win ships tools/scenes to the VM and points KAYA_SCENES_DIR at
   it; the linux container points it at the mount.
-- `tools/checks/` + `tools/check-*.sh` — the gate layer.
+- `tools/checks/` + `tools/check-*.py` — the gate layer.
 
 ## Running one mac leg by hand
 
@@ -60,11 +60,11 @@ lanes collect it into the flight-recorder bundle themselves).
    protocol.rs / wire.rs / capi.rs carry matching arms and constants.
    The compiler's non-exhaustive-match errors are the checklist —
    follow them.
-3. `tools/gen-header.sh` (kaya.h via cbindgen), `tools/gen-bindings.sh`
+3. `tools/gen-header.py` (kaya.h via cbindgen), `tools/gen-bindings.py`
    (the 9 wire files). `cargo build --lib` so the dylib carries the new
    hash — every runtime asserts hash agreement at load, so stale
    artifacts fail loudly rather than decoding garbage.
-4. If guest-visible record/sum surfaces changed: `tools/gen-guests.sh`.
+4. If guest-visible record/sum surfaces changed: `tools/gen-guests.py`.
    Commit generators together with their outputs (the `--check` form
    diffs against git HEAD).
 
@@ -119,23 +119,23 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 
 ## Suites and platforms
 
-- The whole matrix: `tools/validate-all.sh` — all five platform lanes run
+- The whole matrix: `tools/validate-all.py` — all five platform lanes run
   CONCURRENTLY by default. When Android finishes, one `nice -n 10` gate
   sweep starts, so the wall is Android plus the sweep in series, not the
   slowest lane (the sweep's tail runs alone once the other lanes end);
   the per-lane ceilings below are the live budgets. `--serial` is for single-lane
   benchmarking, contention-free debugging, or recording mode. Per-lane
   logs print for any FAIL.
-- macOS: `tools/validate-mac.sh` (KAYA_JOBS=n for pool width, =1 for
+- macOS: `tools/validate-mac.py` (KAYA_JOBS=n for pool width, =1 for
   serial; KAYA_RECORD=1 for recording mode). Legs open real windows.
-- Linux: `tools/validate-linux.sh` (docker; X11 + Wayland rings;
+- Linux: `tools/validate-linux.py` (docker; X11 + Wayland rings;
   container builds use a separate target dir — never share mac build
   artifacts with the container). After touching `gtk.rs`, reach first
-  for `tools/check-gtk.sh` — a `cargo check` in the cached image, the
-  compile rung `check-targets.sh` cannot provide for GTK. Every bug in
+  for `tools/check-gtk.py` — a `cargo check` in the cached image, the
+  compile rung `check-targets.py` cannot provide for GTK. Every bug in
   the first flex-layout-manager cut needed the container to surface;
   this is the cheap version of that trip.
-- iOS: `tools/ios/run-sim.sh` (env reaches the app via SIMCTL_CHILD_*).
+- iOS: `tools/ios/run-sim.py` (env reaches the app via SIMCTL_CHILD_*).
   On every dedicated pool phone, preparation enumerates exact
   `dev.kaya.` bundle ids, uninstalls that finite list through `simctl`,
   then warms and probes LocalStorage before any leg. Do not keep an
@@ -158,11 +158,11 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   `KAYA_IOS_RESEED_TEST=<udid>` puts that healthy phone through erase,
   boot, driver restart, warm and probe once (fault injection, by hand).
   The `type` verb's keys on this lane are the driver's too.
-- Android: `tools/android/run-emulator.sh` (env via intent extras;
+- Android: `tools/android/run-emulator.py` (env via intent extras;
   scripts fold newlines to `;` for transport — comments are stripped
   first; verdicts read from logcat; on FAIL the runner dumps
   AndroidRuntime:E — crashes are otherwise hidden by the tag filter).
-- Windows: `tools/deploy-win.sh <user@host> [--provision]
+- Windows: `tools/deploy-win.py <user@host> [--provision]
   [rust|python|go|csharp|java|all|<scene>_<lang>]` — the
   UTM VM (default akhil@192.168.64.2; auto-starts it; the VM drops ICMP
   so probe via ssh, which `tools/probe-env.sh` does for every platform).
@@ -175,19 +175,19 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   never asked for accessibility. `tools/linux/atspi_probe.py` walks the
   bus by hand when a role or name needs measuring rather than guessing.
 - The matrix enforces PER-LANE DURATION CEILINGS, not just the doctrine
-  in CLAUDE.md's invariant 8: tools/validate-all.sh fails a lane that
+  in CLAUDE.md's invariant 8: tools/validate-all.py fails a lane that
   exceeds its budget with "DURATION ANOMALY" even when every leg passed
   (today gates 490s, mac 560s, linux 470s, windows 520s, ios 540s,
-  android 310s — the live numbers are validate-all.sh's per-lane
+  android 310s — the live numbers are validate-all.py's per-lane
   `case`, and each one carries the measurement that set it). A lane
   that slows by this much changed in KIND — look for work added to every
-  leg before assuming load. Raise a ceiling in validate-all.sh only with
+  leg before assuming load. Raise a ceiling in validate-all.py only with
   a reason.
 - `DEPTH_SCENES` is the tier for a scene wired RUST-ONLY during a depth
   slice: it builds and runs the rust example without demanding the other
   languages' guests, which SCENES membership does. check-steps enforces
   the difference (a scene in SCENES whose per-language guests do not
-  exist fails loudly). It is NOT empty today — validate-mac.sh carries
+  exist fails loudly). It is NOT empty today — validate-mac.py carries
   the current membership, and a scene graduates out of it into SCENES in
   the commit that gives every language a guest.
 - Traces, all env-gated and permanent: `KAYA_AX_TRACE` dumps the REAL
@@ -203,7 +203,7 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   --warm` boots the independent surfaces — the iOS simulator pool and
   the Windows VM — and refuses (exit 1) naming any surface it was asked
   to warm and did not; the coupled Android emulator pool is deliberately
-  not its job, tools/android/run-emulator.sh owns those boots.
+  not its job, tools/android/run-emulator.py owns those boots.
 - Scene selection everywhere: KAYA_SELFTEST=<scene> names the SCRIPT,
   never the app — two scenes can share one guest, and `split` and
   `listdetail` do. KAYA_SCENES_DIR overrides where the .steps files are
@@ -211,7 +211,7 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   away from the source tree). There is no
   backend selection — the roster is one backend per platform
   (KAYA_BACKEND is gone); what remains is locating the SwiftUI
-  interpreter dylib (KAYA_SWIFTUI_LIB — see validate-mac.sh for the
+  interpreter dylib (KAYA_SWIFTUI_LIB — see validate-mac.py for the
   exact pattern).
 
 ## Layout forensics (when a share assertion fails)
@@ -252,26 +252,26 @@ touching layout code:
 
 ## The fast inner loop (KAYA_FAST=1)
 
-    KAYA_FAST=1 tools/gates.sh             # the gate sweep alone, cached
-    tools/gates.sh                         # the gate sweep alone, always
-    KAYA_FAST=1 tools/validate-mac.sh      # gates + every leg, cached gates
-    tools/validate-mac.sh                  # everything, always — the ladder's rung 3
+    KAYA_FAST=1 tools/gates.py             # the gate sweep alone, cached
+    tools/gates.py                         # the gate sweep alone, always
+    KAYA_FAST=1 tools/validate-mac.py      # gates + every leg, cached gates
+    tools/validate-mac.py                  # everything, always — the ladder's rung 3
 
-`tools/gates.sh` is the sweep: it builds what the gates read and then
+`tools/gates.py` is the sweep: it builds what the gates read and then
 runs every one of them, refusing a verdict unless the number that ran
 equals the number it declared. validate-mac calls it and holds no gate
 list of its own.
 
 Most of those gates are keyed on a declared input set — which ones is
-the `keyed` field in tools/gates.sh's list, and the sets themselves are
-tools/build-id.sh's GATES table. (No count here on purpose: this
+the `keyed` field in tools/gates.py's list, and the sets themselves are
+tools/build-id.py's GATES table. (No count here on purpose: this
 paragraph said "sixteen" for long enough to be wrong by three, which is
-the same drift tools/check-gates.sh now refuses between the sweep and
+the same drift tools/check-gates.py now refuses between the sweep and
 CLAUDE.md.) Under KAYA_FAST=1 a gate whose inputs are unchanged since it
 last PASSED prints `CACHED (<key>)` and is skipped. Measured on a warm
 tree, 2026-08-20 at 41 gates: 148s cold, 23s warm with 28 gates keyed —
 the artifact gates joined the keyed set the same day, on sources plus
-the artifact's EMBEDDED build-id (build-id.sh's ARTIFACT_GATES), and
+the artifact's EMBEDDED build-id (build-id.py's ARTIFACT_GATES), and
 gen-guests' restore now hands byte-identical files their old mtimes
 back so a sweep no longer relinks libkaya for nothing.
 
@@ -305,21 +305,21 @@ answer. check-build-id alone must never be keyed: caching the staleness
 gate is the defect it exists to find. Other gates are unkeyed for their
 own reasons — check-case's inputs are every tracked path, check-keyed is
 the cache's own gate — and each states that reason beside itself in
-tools/gates.sh's list, where check-keyed also insists it be non-empty.
+tools/gates.py's list, where check-keyed also insists it be non-empty.
 
 Adding a gate to the cache means adding its input set to GATES. Name
 DIRECTORIES, not files. The asymmetry is the whole safety argument:
 naming too much costs a re-run nobody notices, naming too little hands
 back a PASS about code that changed.
 
-## "Is this artifact built from my tree?" (tools/build-id.sh)
+## "Is this artifact built from my tree?" (tools/build-id.py)
 
 libkaya carries a marker naming the sources it was compiled from — a
 hash over crates/, Cargo.toml and Cargo.lock, baked in by build.rs and
 readable straight out of the file.
 
-    tools/build-id.sh core                      # what this tree hashes to
-    tools/build-id.sh --verify target/debug/libkaya.dylib
+    tools/build-id.py core                      # what this tree hashes to
+    tools/build-id.py --verify target/debug/libkaya.dylib
 
 A STALE verdict names both ids and means the build that should have
 refreshed that file did not run, or failed with its exit status masked.
@@ -333,11 +333,11 @@ alternative, which historically was half a day.
 THREE COMPONENTS carry a marker, each keyed on its own sources plus the
 interface it compiles against:
 
-    tools/build-id.sh core                       # libkaya
-    tools/build-id.sh swiftui                    # swift/ + kaya.h
-    tools/build-id.sh compose                    # android/kaya/src + bindings/java
-    tools/build-id.sh --verify --component swiftui target/swiftui/libkaya_swiftui.dylib
-    tools/build-id.sh --verify --component compose  …/milestone2-debug.apk
+    tools/build-id.py core                       # libkaya
+    tools/build-id.py swiftui                    # swift/ + kaya.h
+    tools/build-id.py compose                    # android/kaya/src + bindings/java
+    tools/build-id.py --verify --component swiftui target/swiftui/libkaya_swiftui.dylib
+    tools/build-id.py --verify --component compose  …/milestone2-debug.apk
 
 `--component` defaults to `core`. The prefix is the same for all three
 on purpose: a file carrying the WRONG component's marker then reads as

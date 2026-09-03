@@ -5,7 +5,7 @@
 //! IT ASSERTS NO GEOMETRY, and must not start: it has TWO columns, and
 //! a container target indexes by creation order, which legitimately
 //! differs per language, so no column here can be named safely
-//! (tools/check-steps.sh). grow.rs asserts the contract instead.
+//! (tools/check-steps.py). grow.rs asserts the contract instead.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();

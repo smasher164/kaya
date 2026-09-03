@@ -37,7 +37,7 @@ if [ -z "$UDID" ]; then
         | grep -oE '[0-9A-F-]{36}') || true
 fi
 [ -n "$UDID" ] || {
-    echo "build.sh: no kaya-sim-0; run tools/ios/run-sim.sh once" >&2
+    echo "build.sh: no kaya-sim-0; run tools/ios/run-sim.py once" >&2
     exit 1
 }
 

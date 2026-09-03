@@ -460,8 +460,8 @@ def _selftest():  # noqa: PLR0915 — one flat list of watched properties
     # F8. walk() prunes. tools/ holds 323k entries and ~213 tracked files;
     # a walk that descended into target/ would cost seconds per gate.
     g8 = Gate("selftest")
-    scripts = g8.walk("*.sh", under="tools")
-    print(f"kaya_gate: F8 walk found {len(scripts)} tools/**/*.sh")
+    scripts = g8.walk("*.py", under="tools")
+    print(f"kaya_gate: F8 walk found {len(scripts)} tools/**/*.py")
     check("F8 walk finds the tools scripts", len(scripts) > 50)
     check("F8 walk prunes build directories",
           not any("target" in p.parts for p in scripts))

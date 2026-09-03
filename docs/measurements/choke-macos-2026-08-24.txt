@@ -96,7 +96,7 @@ N=20000   wall= 120.08s  script_start=0.18s  submit_done=0.81s  rc=-9   CAP-KILL
 
 ================================ SUMMARY ================================
 PLATFORM  macOS, SwiftUI interpreter.
-TIER      NATIVE. macOS always takes the NSTableView tier (tools/check-table-tier.sh
+TIER      NATIVE. macOS always takes the NSTableView tier (tools/check-table-tier.py
           holds the rule). Confirmed by measurement, not by reading: the sample of a
           100000-row leg shows KayaNativeTable.body.getter on the main thread.
 GUEST     Python. The lane runs the table scene in all eight languages; python is the

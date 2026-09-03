@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
         // THE C ENVIRONMENT: Os.setenv writes libc's live `environ`,
         // which a Go library loaded into a running process reads only
         // through C (kaya.Env). Go's os.Getenv is empty here forever —
-        // tools/check-go-env.sh.
+        // tools/check-go-env.py.
         intent.extras?.let { extras ->
             for (key in extras.keySet()) {
                 if (key.startsWith("KAYA_")) {

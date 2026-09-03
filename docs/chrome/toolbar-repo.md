@@ -163,7 +163,7 @@ Stance 3 is the one C2 would have to either honor or overturn.
 
 Worse than a stated no-op: an UNstated one. I probed every read of
 `.symbol` in the SwiftUI interpreter, tracking `#if` nesting the way
-check-verbs.sh's stamped-observation rule does
+check-verbs.py's stamped-observation rule does
 (probe: `.../docs/chrome/symprobe.py`):
 
 ```
@@ -625,7 +625,7 @@ of the five.
 
 ## 10. The four-layer interpreter discipline — what C2 owes
 
-**[REPO]** tools/check-verbs.sh, and it is mechanical:
+**[REPO]** tools/check-verbs.py, and it is mechanical:
 
 | layer | what the gate demands | line |
 |---|---|---|
@@ -644,20 +644,20 @@ arm rendered".
 
 Other gates C2 trips, all of them by design:
 
-- `check-sugar-surface.sh` — automatic for a prop, a hand-written
+- `check-sugar-surface.py` — automatic for a prop, a hand-written
   `check_styling_point` clause for a record (§5.4).
-- `check-stubs.sh` — a backend without the feature must call
+- `check-stubs.py` — a backend without the feature must call
   `depth_stub("toolbar")` / `depthStub` / `kayaDepthStub(_:on:)` and
   check-steps stops demanding those legs. This is the mid-milestone
   hold-open mechanism; the Swift stub names its platform because one
   file serves mac AND iOS.
-- `check-gates.sh` — no new gate needed if C2 is a record; a new gate
-  script must be in gates.sh's sweep or in EXCLUDED with a reason.
-- `check-roles.sh` is the closest ANALOGUE gate: written because
+- `check-gates.py` — no new gate needed if C2 is a record; a new gate
+  script must be in gates.py's sweep or in EXCLUDED with a reason.
+- `check-roles.py` is the closest ANALOGUE gate: written because
   `MENU_ROLES` *"is ONE LINE, it is not in the spec hash, and adding an
   entry to it regenerates nothing — so before this gate a role could ship
   with the root accepting it and all four backends ignoring it"*
-  (check-roles.sh:18-32). **[INFER]** if C2 rides `primary` (Option 1),
+  (check-roles.py:18-32). **[INFER]** if C2 rides `primary` (Option 1),
   the same failure shape applies — the bit is already in the spec hash,
   but "which backends read it" is not checked by anything, and today the
   answer is 2 of 5. A `check-promotion.sh` in that mold (every backend
@@ -688,7 +688,7 @@ Note the M3 caveat for whoever writes the Compose arm: the pinned BOM
 is **2024.10.01 / material3 1.7.5**, not a 2025 BOM. Any TopAppBar API
 newer than that (large/medium variants' newer overloads, the 2025
 `TopAppBarDefaults` additions) is not available here without moving the
-BOM, and moving it is a `check-pins.sh` matter.
+BOM, and moving it is a `check-pins.py` matter.
 
 ---
 
@@ -735,7 +735,7 @@ BOM, and moving it is a `check-pins.sh` matter.
 ### Probe left behind
 `/private/tmp/…/docs/chrome/symprobe.py` — reports every read and
 write of `.symbol` in KayaSwiftUI.swift with its `#if` nesting, the
-technique check-verbs.sh's stamped-observation rule uses. Re-run it after
+technique check-verbs.py's stamped-observation rule uses. Re-run it after
 any iOS symbol work to confirm a rendering read exists outside
 `#if os(macOS)`.
 

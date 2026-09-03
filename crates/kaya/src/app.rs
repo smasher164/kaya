@@ -1042,7 +1042,7 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// something about the drawing rather than providing a capability:
     /// the content is not a function of the assigned track. What that
     /// buys is exactly three things — an intrinsic size from the viewbox,
-    /// a blit that is strictly 1:1 (tools/check-canvas-blit.sh holds it),
+    /// a blit that is strictly 1:1 (tools/check-canvas-blit.py holds it),
     /// and NO promise of raster-once: a display-scale or appearance
     /// change re-runs the same display list like every other canvas.
     ///
@@ -1065,7 +1065,7 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// for the width instead of scaling its old pixels.
     ///
     /// THE BINDING OPENS THE TRANSACTION, not the guest
-    /// (tools/check-ambient-tx.sh): [`Messages::next`] answers the
+    /// (tools/check-ambient-tx.py): [`Messages::next`] answers the
     /// request and keeps looping, so this never surfaces as a message.
     ///
     /// LATEST-WINS: a size the guest never caught up with is dropped
@@ -1181,7 +1181,7 @@ impl<R> From<Widget<'_, '_, R>> for WidgetId {
 /// - **Read it yourself.** [`Asset::bytes`] and [`Asset::reader`].
 ///
 /// Reading is READ-ONLY structurally: no mode argument anywhere on this
-/// surface, so `tools/check-file-modes.sh`'s bug class cannot occur.
+/// surface, so `tools/check-file-modes.py`'s bug class cannot occur.
 pub struct Asset {
     bytes: Arc<[u8]>,
 }
@@ -4118,7 +4118,7 @@ impl<M> Messages<M> {
                 // registered a drawing-as-a-function-of-size, so this
                 // draws it, submits the one record, and keeps looping.
                 // A guest opening its own transaction inside a handler
-                // is the camouflage tools/check-ambient-tx.sh refuses;
+                // is the camouflage tools/check-ambient-tx.py refuses;
                 // the binding has already opened this one.
                 Occurrence::DrawRequested { id, size }
                 | Occurrence::Tick { id, size, .. } => {

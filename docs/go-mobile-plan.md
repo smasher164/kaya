@@ -24,7 +24,7 @@ measured/documented/assumed): docs/probes/mobilepkg-contract.md,
   six languages. Each mobile platform HAD already hosted a second guest
   language — evidence that the rest is tooling, not architecture.
   THIS MILESTONE CLOSED IT FOR GO: both phone lanes carry Go legs now
-  (tools/ios/run-sim.sh, and android/milestone2go on the emulator), so
+  (tools/ios/run-sim.py, and android/milestone2go on the emulator), so
   Go is the second language to run on all five.
 - **Threading is not the blocker for any candidate.** The guest has
   never run on the UI thread on any platform: it runs on its own
@@ -133,7 +133,7 @@ means anything or not.
 
 **The consequence for the test suite, stated plainly**: the matrix
 exercises the REGISTRATION path and cannot exercise the other one.
-`tools/check-targets.sh`'s go-android clause is what covers the
+`tools/check-targets.py`'s go-android clause is what covers the
 linkname — it cross-builds a single-main fixture as `-buildmode=c-shared`
 on every gate sweep and asserts the attach entry still references the
 app's own main.

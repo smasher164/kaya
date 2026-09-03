@@ -565,7 +565,7 @@ work" are the tiers kaya already has:
 - Cost: zero. Precedent exists. Uniform semantics preserved by the existing
   carve-out shape ("the carve-out itself stated uniformly").
 - Observability: nothing to assert on mobile; the mobile lanes simply do not
-  wire the scene's dirty legs. `tools/check-stubs.sh` already governs exactly
+  wire the scene's dirty legs. `tools/check-stubs.py` already governs exactly
   this — a `depth_stub("<scene>")` call, not a sentence — so the "wired iff the
   backend has the feature" rule covers it mechanically.
 - Honest? Yes, and it is the only option supported by *documented* platform

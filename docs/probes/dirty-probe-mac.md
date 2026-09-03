@@ -407,10 +407,10 @@ prop that makes a window non-closable today.
   dirty marker DOES alter close behavior, that divergence has to be stated
   in the carve-out, not absorbed.
 - A new harness verb (say `expect_dirty <window> <true|false>`) has to land in
-  BOTH interpreter backends or `tools/check-verbs.sh` fails — and it must fail
+  BOTH interpreter backends or `tools/check-verbs.py` fails — and it must fail
   loudly, not silently, when a backend lacks the feature: that is what
-  `depth_stub("<scene>")` is for, cross-checked by `tools/check-stubs.sh` and
-  `tools/check-steps.sh`.
+  `depth_stub("<scene>")` is for, cross-checked by `tools/check-stubs.py` and
+  `tools/check-steps.py`.
 
 ## 5. Reproducing this
 

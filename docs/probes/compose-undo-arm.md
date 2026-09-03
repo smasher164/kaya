@@ -24,7 +24,7 @@ android runner's undo legs, hold seven gates green, run the lane twice.
 - `scratchpad/undo-compose-jni-handoff.md (gone)` — the fan-out arm's written
   handoff: five declarations, five registration rows, five one-line
   bodies, two leg blocks.
-- `tools/check-jni.sh` in full — the gate that pins BOTH directions.
+- `tools/check-jni.py` in full — the gate that pins BOTH directions.
 - CLAUDE.md's four-layer rule for interpreter backends.
 
 Tree at start: HEAD `aadbe9e`, working tree DIRTY with sibling work
@@ -38,7 +38,7 @@ The charge names `crates/kaya/src/jvm.rs` as the JNI registration file.
 The `KayaPresent` natives are NOT registered there — `jvm.rs` owns the
 portable `KayaRing` transport (shared android+desktop) and the desktop
 list; `register_present_natives` lives in `crates/kaya/src/android.rs`
-(android.rs:124-230). `tools/check-jni.sh` reads all three files plus
+(android.rs:124-230). `tools/check-jni.py` reads all three files plus
 `KayaPresent.kt` and pins them against each other. So the JNI half of
 this arm is `crates/kaya/src/android.rs` +
 `android/kaya/src/main/kotlin/dev/kaya/KayaPresent.kt`, which is what
@@ -127,7 +127,7 @@ Grep-verified: zero remaining references anywhere in `android/`,
 function was, because `tools/lib/hand-rolled-stubs.py` requires the CALL
 spelling and a future slice must not invent a sentence.
 
-### 2.4 tools/android/run-emulator.sh — the two undo legs (DONE)
+### 2.4 tools/android/run-emulator.py — the two undo legs (DONE)
 
 `undo-compose` (rust guest) at the end of the compose block, `undo-jvm`
 (Java guest) at the end of the jvm block. Both guest selector arms
@@ -140,7 +140,7 @@ saying it was registered ahead of the arm on purpose.
 | state | check-steps |
 |---|---|
 | stub present, legs absent (start of this arm) | OK |
-| stub REMOVED, legs still absent | **FAIL** — `scene "undo" has no live legs in tools/android/run-emulator.sh (wanted "undo")` |
+| stub REMOVED, legs still absent | **FAIL** — `scene "undo" has no live legs in tools/android/run-emulator.py (wanted "undo")` |
 | stub removed, legs wired | OK |
 
 ---
@@ -148,7 +148,7 @@ saying it was registered ahead of the arm on purpose.
 ## 3. THE MEASUREMENTS — taken on the SHIPPED interpreter
 
 Everything below was measured on `KayaCompose.kt` itself, built and
-build-id VERIFIED the way `tools/android/run-emulator.sh` builds it. Only
+build-id VERIFIED the way `tools/android/run-emulator.py` builds it. Only
 the observation was temporary; every code path under test is the shipped
 one.
 
@@ -261,7 +261,7 @@ and the redo route is `Nothing`.
 "a backend that calls `note_native_undo` also marks the emission its own
 walk provokes ledger-quiet", and it is a two-line pairing in each of five
 backend files. That is a static cross-check of the shape
-`tools/check-roles.sh` and `tools/check-universal-props.sh` already
+`tools/check-roles.py` and `tools/check-universal-props.py` already
 have, and it belongs beside them. NOT WRITTEN HERE — gates are outside
 this charge — recorded for the coordinator with the reasoning, because
 the alternative is five backends each believing a guard they have never
@@ -334,7 +334,7 @@ invariant 6.
 ### 4.1 THE LANE — the charged runs, and then two more after every
 ### perturbation was reverted
 
-Every run below is `tools/android/run-emulator.sh all` (52 legs: 27
+Every run below is `tools/android/run-emulator.py all` (52 legs: 27
 compose incl. the tablet, 25 jvm), on the three-device warm pool.
 
 | run | source | rc | pass | fail | undo-compose | undo-jvm | todos-compose | todos-jvm |
@@ -379,19 +379,19 @@ directions, on both APKs.
 
 | gate | rc | verdict |
 |---|---|---|
-| `tools/check-jni.sh` | 0 | OK (KayaRing.kt 12, **KayaPresent.kt 23**, KayaRing.java 13 natives, all registered) — 18 → 23 |
-| `tools/check-stubs.sh` | 0 | OK |
-| `tools/check-steps.sh` | 0 | OK — and its demand WATCHED FIRING (§2.4) |
-| `tools/check-verbs.sh` | 0 | OK (48 verbs, 77 constants + the CLIP_* mirrors + spec hash against 2 interpreters) |
-| `tools/check-compose.sh` | 0 | the Kotlin COMPILES |
-| `tools/check-detekt.sh` | 0 | no dead Kotlin — the reason `kayaUndoSeamNote` and `depthStub` were deleted rather than parked |
-| `tools/check-roles.sh` | 0 | OK — "fanned out everywhere: settings cut copy paste undo redo" |
-| `tools/check-targets.sh` | 0 | native / ios / **android** / windows ALL OK, both feature configs — the gate that covers android.rs at all |
-| `tools/check-shell.sh` | 0 | the runner's two new leg blocks |
-| `tools/check-mirror.sh` | 0 | — |
-| `tools/check-keyed.sh` | 0 | OK (18 gates keyed) |
-| `tools/check-universal-props.sh` | 0 | — |
-| `tools/check-sugar-surface.sh` | 0 | — |
+| `tools/check-jni.py` | 0 | OK (KayaRing.kt 12, **KayaPresent.kt 23**, KayaRing.java 13 natives, all registered) — 18 → 23 |
+| `tools/check-stubs.py` | 0 | OK |
+| `tools/check-steps.py` | 0 | OK — and its demand WATCHED FIRING (§2.4) |
+| `tools/check-verbs.py` | 0 | OK (48 verbs, 77 constants + the CLIP_* mirrors + spec hash against 2 interpreters) |
+| `tools/check-compose.py` | 0 | the Kotlin COMPILES |
+| `tools/check-detekt.py` | 0 | no dead Kotlin — the reason `kayaUndoSeamNote` and `depthStub` were deleted rather than parked |
+| `tools/check-roles.py` | 0 | OK — "fanned out everywhere: settings cut copy paste undo redo" |
+| `tools/check-targets.py` | 0 | native / ios / **android** / windows ALL OK, both feature configs — the gate that covers android.rs at all |
+| `tools/check-shell.py` | 0 | the runner's two new leg blocks |
+| `tools/check-mirror.py` | 0 | — |
+| `tools/check-keyed.py` | 0 | OK (18 gates keyed) |
+| `tools/check-universal-props.py` | 0 | — |
+| `tools/check-sugar-surface.py` | 0 | — |
 
 ### 4.3 Negative tests, each with its substitution count asserted
 ### before the build, each file restored from a sha256-compared copy
@@ -403,8 +403,8 @@ directions, on both APKs.
 | N2 | KayaCompose.kt | `noteNativeUndo` silenced | 1 | **FAIL (42s)**, at the predicted step |
 | N3 | KayaCompose.kt | `kayaRouteCode` maps 1→CORE, 2→NATIVE | 1 | **FAIL** — undo-compose (62s) AND todos-compose (6s) |
 | N4 | KayaCompose.kt | `kayaClearUndoForGroup()` disabled | 1 | PASS — **the test failed as a test** (F2) |
-| N5 | run-emulator.sh | (inherited from the fan-out arm) legs wired with the stub present | 1 | check-stubs FAIL |
-| — | check-steps | stub removed, legs absent | n/a | **FAIL**: `scene "undo" has no live legs in tools/android/run-emulator.sh` |
+| N5 | run-emulator.py | (inherited from the fan-out arm) legs wired with the stub present | 1 | check-stubs FAIL |
+| — | check-steps | stub removed, legs absent | n/a | **FAIL**: `scene "undo" has no live legs in tools/android/run-emulator.py` |
 
 `KayaCompose.kt` restored to
 `b051225b70475fcccd2c6cb7dc3cd2340cb837de9d12d463ed7fc8060187225a`
@@ -434,11 +434,11 @@ winui/mod.rs, KayaSwiftUI.swift and KayaCompose.kt, and all five runners
 carry live undo legs —
 
 ```
-tools/validate-mac.sh       undo-{c,csharp,go,haskell,java,ocaml,python,rust,swift}
+tools/validate-mac.py       undo-{c,csharp,go,haskell,java,ocaml,python,rust,swift}
 tools/linux/run-suites.sh   undo-rust
-tools/deploy-win.sh         undo_rust
-tools/ios/run-sim.sh        undo-swiftui
-tools/android/run-emulator.sh  undo-compose undo-jvm
+tools/deploy-win.py         undo_rust
+tools/ios/run-sim.py        undo-swiftui
+tools/android/run-emulator.py  undo-compose undo-jvm
 ```
 
 Guest languages: no binding surface moved, so no per-language verdict is
@@ -526,7 +526,7 @@ runs of the shipped source, comment-only change or not.
 
 ## 7. Processes and disk
 
-- **Started and stopped by me:** nine `run-emulator.sh` suites (five
+- **Started and stopped by me:** nine `run-emulator.py` suites (five
   `all`, four `compose`) — 52 or 27 legs each, every leg self-terminating
   under KAYA_SELFTEST. PROVEN STOPPED:
   `pgrep -fl "run-emulator|milestone2|screenrecord|logcat|undoprobe|adb shell am"`
@@ -553,7 +553,7 @@ runs of the shipped source, comment-only change or not.
   rebuilt by every run of the runner, pre-existing, not mine to delete.
 - **Scratchpad: 128 KB kept, everything else deleted.** Deleted after
   their verdicts were in this file: four `KayaCompose.kt` /
-  `android.rs` / `run-emulator.sh` restore copies (626 KB) and four
+  `android.rs` / `run-emulator.py` restore copies (626 KB) and four
   superseded lane transcripts (289 KB). Kept because they are the
   evidence behind a claim here or a re-runnable instrument:
   `lane-ship-{1,2}.log` (the shipped runs), the four negative-test
@@ -575,7 +575,7 @@ runs of the shipped source, comment-only change or not.
 - `/Users/akhilindurti/Projects/kaya/crates/kaya/src/android.rs`
   — five registration rows and five thunks in `register_present_natives`
   (+98).
-- `/Users/akhilindurti/Projects/kaya/tools/android/run-emulator.sh`
+- `/Users/akhilindurti/Projects/kaya/tools/android/run-emulator.py`
   — the `undo-compose` and `undo-jvm` legs (+26).
 
 `crates/kaya/src/jvm.rs` is UNMODIFIED (see deviation 1).

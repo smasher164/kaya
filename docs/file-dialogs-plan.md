@@ -262,8 +262,8 @@ Model on the alert grammar, which is the same request/result shape
 Then the workflow in docs/HACKING.md §"The regeneration workflow":
 `cargo test -p kaya --features harness --locked` fails until
 protocol.rs / wire.rs / capi.rs carry matching arms; the compiler's
-non-exhaustive matches are the checklist. Then `tools/gen-header.sh`,
-`tools/gen-bindings.sh`, `cargo build --lib`, and `tools/gen-guests.sh`
+non-exhaustive matches are the checklist. Then `tools/gen-header.py`,
+`tools/gen-bindings.py`, `cargo build --lib`, and `tools/gen-guests.py`
 if guest-visible surfaces moved. Commit generators WITH their outputs.
 
 ## §2 — the core
@@ -405,12 +405,12 @@ is the usual mid-milestone red.
 
 ## §6 — green on mac, then fan out
 
-`cargo test`, the fast gates, `tools/validate-mac.sh`. Expect
+`cargo test`, the fast gates, `tools/validate-mac.py`. Expect
 check-verbs and check-sugar-surface to be RED between §1 and the
 sweep — they are designed to hold the remaining work open, and that is
 not a regression (CLAUDE.md, Sequencing). Only after mac is green:
 Compose, GTK, WinUI, then the seven remaining languages with an
-explicit do/can't/defer verdict each, then `tools/validate-all.sh`.
+explicit do/can't/defer verdict each, then `tools/validate-all.py`.
 
 ## §6d — Compose, and the source a content:// URI needs — DONE
 

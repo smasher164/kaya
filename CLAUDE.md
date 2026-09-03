@@ -38,12 +38,12 @@ in docs/deferred.md.
   a bare build may rewrite Cargo.lock mid-run, and the lane then goes
   green against a dependency graph nobody chose.
 - A built artifact carries the id of the sources it came from
-  (tools/build-id.sh). Anything a lane runs or ships gets
+  (tools/build-id.py). Anything a lane runs or ships gets
   `--verify`'d first — that is the mechanical version of "check the
   build's exit first", and it holds when nobody remembers to.
 - `KAYA_FAST=1` skips any gate whose declared inputs have not moved
-  since it last passed (tools/keyed.sh; input sets and the reasoning
-  live in tools/build-id.sh's GATES). For the INNER LOOP only — the
+  since it last passed (tools/keyed.py; input sets and the reasoning
+  live in tools/build-id.py's GATES). For the INNER LOOP only — the
   matrix never sets it, so the run that goes on the record consults no
   cache and cannot be wrong because of one.
 - A COMMENT SURVIVES ONLY IF A FUTURE SESSION NEEDS IT to avoid a
@@ -119,7 +119,7 @@ in docs/deferred.md.
    while the real cause was the panel's view mode. A DIAGNOSTIC MAY ONLY
    PRINT WHAT IT MEASURED; if it cannot tell two causes apart it says so
    and prints what it can see (docs/traps.md).
-   `tools/check-diagnostics.sh` holds the shape of that — one answer, or
+   `tools/check-diagnostics.py` holds the shape of that — one answer, or
    an answer on the failure path that interpolates nothing, is a
    sentence that cannot discriminate — but a branch that discriminates
    and is still wrong is caught only by the review question.
@@ -150,7 +150,7 @@ in docs/deferred.md.
    solved problem as the largest open one. So new entries carry a
    `KEY:` line naming the greppable nouns they will have to be swept
    for — the entry describes its own closing sweep, rather than leaving
-   the next person to guess what to search. `tools/check-ledger.sh`
+   the next person to guess what to search. `tools/check-ledger.py`
    holds the strike-and-note half; the sweep is yours.
 
 ## The validation ladder (in order; "done" means the top rung)
@@ -173,7 +173,7 @@ in docs/deferred.md.
    that matches nothing exits 0 saying "0 passed". The rest of the suite
    is 309/312 on that guest; the 3 are POSIX assumptions in harness
    tests, and fixing them is what widens the filter.
-2. Fast gates. `tools/gates.sh` runs ALL of them and is the only thing
+2. Fast gates. `tools/gates.py` runs ALL of them and is the only thing
    that should. It builds libkaya and the SwiftUI interpreter FIRST — a
    gate cannot verify an artifact the run has not built yet, and one
    that tried read the PREVIOUS run's dylib and called it stale, which
@@ -184,19 +184,19 @@ in docs/deferred.md.
    gates and reported a clean run. There is deliberately no subset flag,
    because a flag that runs part of the list and still prints a verdict
    is that same defect with an interface; to run one gate, run that gate
-   — each is standalone. `tools/check-gates.sh` holds this prose list,
-   gates.sh's list and validate-mac's delegation to ONE census and fails
+   — each is standalone. `tools/check-gates.py` holds this prose list,
+   gates.py's list and validate-mac's delegation to ONE census and fails
    naming both sides of any disagreement; the three had already drifted
    by four gates the day it landed. What each gate is for:
-   `tools/gen-header.sh --check`, `tools/gen-bindings.sh --check`,
-   `tools/gen-guests.sh --check` (compares what the generators produce
+   `tools/gen-header.py --check`, `tools/gen-bindings.py --check`,
+   `tools/gen-guests.py --check` (compares what the generators produce
    against the WORKING TREE and puts every byte back — snapshot,
    regenerate, diff, restore, and a refusal if the restore left the tree
    changed. It used to regenerate in place and diff against git, which
    silently reverted any hand-edit to a generated file and then called
    the tree clean),
-   `tools/check-steps.sh`, `tools/check-shell.sh`,
-   `tools/check-python.sh` (check-shell's opposite number, and the
+   `tools/check-steps.py`, `tools/check-shell.py`,
+   `tools/check-python.py` (check-shell's opposite number, and the
    gate the 2026-08-27 ruling asked for: the gate BODIES are python
    now, imported against tools/lib/kaya_gate.py — never a launcher,
    so every gate stays standalone-runnable. That retires the `$?`
@@ -222,27 +222,32 @@ in docs/deferred.md.
    from argv lists AND from embedded shell in strings, because the
    conversion moved twelve such invocations out of check-shell's
    *.sh population where they were policed by nothing (audit
-   2026-08-31). Rules 1, 2 and 4 come off `ruff` for free, which is why ruff
-   joined the flake. A CONVERTED GATE KEEPS ITS `.sh` NAME as a
-   two-line exec shim, because ~50 path-shaped citations in
-   docs/probes, docs/chrome, docs/traps.md and the plans name it and
-   check-doc-refs holds every one to a file that exists; the shim may
-   hold NOTHING BUT THE EXEC, pinned byte for byte here, so it can
-   never grow logic and there is nothing in it to drift. It also runs
+   2026-08-31), AND A SCRIPT A BODY NAMES EXISTS, with no `.sh` name
+   composed at run time — the shim removal's own guard: the word sweep
+   that renamed 1,405 citations could not see an f-string appending
+   `.sh` to a gate's name, and three lanes died at their first step on
+   the matrix that followed (2026-09-02); a self-test's deliberate fake
+   is exempt by name with its reason, and held to still being named
+   and still absent. Rules 1, 2 and 4 come off `ruff` for free, which
+   is why ruff joined the flake. A GATE IS ITS `.py` FILE, run
+   directly — executable, python shebang, the dev-shell check inside —
+   so `tools/check-steps.py` is the whole invocation; the two-line
+   `.sh` shims that bridged the docs' citations through the conversion
+   went on 2026-09-02, every citation renamed with them. It also runs
    the prelude's OWN negatives — the fingerprint against the real
    shell pipeline, both dev-shell sentences, a perturbation that
    applied nothing, the census floor, scratch surviving nothing —
    because the file every converted gate imports must prove its
-   refusals somewhere nobody can skip. Sixteen watched negatives,
+   refusals somewhere nobody can skip. Eighteen watched negatives,
    counts printed, red demanded on every run),
-   `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
+   `tools/check-mirror.py` (CLAUDE.md and AGENTS.md are true mirrors
    modulo the line-3 comment — they drifted once, silently, for two
    milestones),
-   `tools/check-gates.sh` (the drift sibling of the above, one file over:
-   the gates this paragraph names, the gates gates.sh runs and the ones
+   `tools/check-gates.py` (the drift sibling of the above, one file over:
+   the gates this paragraph names, the gates gates.py runs and the ones
    validate-mac reaches must be one list. Its census clause is the part
    that bites — every gate script on disk is either in the sweep or in
-   gates.sh's EXCLUDED table WITH A REASON — and it is what would have
+   gates.py's EXCLUDED table WITH A REASON — and it is what would have
    caught the four gates this paragraph was missing while the lane ran
    them. It also pins validate-all's launch order: ALL FIVE platform lanes
    start together before the runner waits for Android's recorded lane pid;
@@ -251,7 +256,7 @@ in docs/deferred.md.
    same four-phone pool; its self-tests watch lane count, pool width,
    concurrent platform launch, pid provenance, single-sweep shape and
    niceness red),
-   `tools/check-ledger.sh` (docs/deferred.md may not disagree with
+   `tools/check-ledger.py` (docs/deferred.md may not disagree with
    itself: an UNSTRUCK headline over an entry that records a terminal
    resolution, or a STRUCK one with no resolution note. Two entries
    headlined "GAP — … cannot / is not implemented" carried "COMPLETE …
@@ -262,7 +267,7 @@ in docs/deferred.md.
    is the only whole-entry word available and the gate says out loud
    what that means it cannot see. Takes a path argument, which is how it
    was calibrated against the stale revision),
-   `tools/check-doc-refs.sh` (the other half: every path-shaped
+   `tools/check-doc-refs.py` (the other half: every path-shaped
    reference in every tracked .md must exist. Globs are resolved and
    must match something, brace groups are expanded member by member, and
    a `<placeholder>` names a family rather than a file. A sentence that
@@ -270,12 +275,12 @@ in docs/deferred.md.
    quoted inside a fenced block, or marked `(gone)` — and the exemption
    counts are printed on every run, with a refusal if they ever
    outnumber the checks),
-   `tools/check-case.sh` (every tracked path matches the filesystem's
+   `tools/check-case.py` (every tracked path matches the filesystem's
    case exactly. macOS is case-insensitive and Linux is not, so a Haskell
    guest created as `Background.hs` against a cabal stanza reading
    `background.hs` built locally, went green on mac, and would have died
    on the lane furthest from the change, after a full matrix),
-   `tools/check-targets.sh` (cross-compiles every cfg'd backend, in BOTH
+   `tools/check-targets.py` (cross-compiles every cfg'd backend, in BOTH
    feature configurations — it once reported "windows OK" while the
    windows lane failed to build the WinUI accessibility read, which
    only the harness config compiles. LINUX IS ITS HOLE, since gtk-sys
@@ -283,7 +288,7 @@ in docs/deferred.md.
    backend's Stage impl names every required trait method: a trait method
    missed in gtk.rs alone used to survive every fast gate and die in the
    matrix),
-   `tools/check-sugar-surface.sh` (every widget kind has a constructor
+   `tools/check-sugar-surface.py` (every widget kind has a constructor
    in all 9 bindings IN BOTH CONSTRUCTION ZONES, AND every window prop
    has a sugar spelling in all 9 — the generic floor spells a prop
    without the sugar noticing, which is how Python shipped unable to
@@ -359,22 +364,22 @@ in docs/deferred.md.
    BYTE-FROZEN SENTENCE, compared FLATTENED, in the two whose single
    handle serves both zones. Sixteen watched census reds plus the
    sentence's own),
-   `tools/check-universal-props.sh` (the lowering-side sibling: every
+   `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
    still keyed on the prop alone),
-   `tools/check-roles.sh` (the role vocabulary reaches every backend:
+   `tools/check-roles.py` (the role vocabulary reaches every backend:
    `MENU_ROLES` is one line, it is not in the spec hash, and adding an
    entry regenerates nothing — so before this gate a role could ship with
    the root accepting it and all four backends ignoring it. RED BY DESIGN
    across a fan-out; the role joins the vocabulary first and the arms
    follow),
-   `tools/check-native-undo.sh` (the two native-tier undo guards that NO
+   `tools/check-native-undo.py` (the two native-tier undo guards that NO
    shared scene can fail — both sit inside a SECOND consecutive native
    walk, which the routing makes unreachable, and each was broken with
    the lane watched staying green. The scene cannot be fixed to reach
    them, so static pairing is the only wall available),
-   `tools/check-diagnostics.sh` (a why-not may not print a sentence it
+   `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
    after the early-out that interpolates nothing, is a sentence the
@@ -382,12 +387,12 @@ in docs/deferred.md.
    `kayaOpenPanelWhyNot` did for months, twice sending someone after
    macOS activation rules. Its self-test splices the pre-fix body back
    in from git and requires the red),
-   `tools/check-diagnostics.sh` (a why-not may not print a sentence it
+   `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot have measured — see invariant 3. The shape it can see is a
    failure path with ONE answer, or an answer that interpolates nothing:
    such a sentence is printed for every cause it does not name, and it is
    believed),
-   `tools/check-harness-ceiling.sh` (THE HARNESS LOSES LEGIBLY: every
+   `tools/check-harness-ceiling.py` (THE HARNESS LOSES LEGIBLY: every
    step is entered with a CEILING, and once a verdict is published the
    process leaves within the GRACE whether or not the platform's exit
    path runs — one rule, all three harnesses. A step's retry deadline is
@@ -412,7 +417,7 @@ in docs/deferred.md.
    silence. The Rust half's runtime proof is in the unit suite instead,
    where a wedged MockStage read leaves a child process under its own
    verdict),
-   `tools/check-empty-child.sh` (ONE NODE IS ONE WIDGET, even when its
+   `tools/check-empty-child.py` (ONE NODE IS ONE WIDGET, even when its
    content will not decode. The widget backends have that by
    construction — GTK keeps the GtkPicture and clears the paintable,
    WinUI keeps the Image and leaves Source unset — while a declarative
@@ -427,7 +432,7 @@ in docs/deferred.md.
    an unknown kind through the real KayaFlex/KayaCell; the static
    clauses hold all four backends' image arms present-and-empty and
    panic-free),
-   `tools/check-pane-ladder.sh` (the macOS pane ladder, live: macOS has
+   `tools/check-pane-ladder.py` (the macOS pane ladder, live: macOS has
    no compact mode to defer to, so kaya's own arithmetic decides how
    many of a three-pane window's columns fit — and the MIDDLE rung is
    observable nowhere else, because the platforms legitimately disagree
@@ -443,7 +448,7 @@ in docs/deferred.md.
    edge-triggered command rule the sidebar toggle depends on, and the
    REAL NSSplitView walked 1400 -> 700 -> 1400 counting visible
    columns),
-   `tools/check-table-tier.sh` (the table's TIER ROUTING, which no device
+   `tools/check-table-tier.py` (the table's TIER ROUTING, which no device
    can assert: decision 5 took the size class out of every table
    observable, so the native and the synthesized tier present identical
    bytes and a leg cannot name the one that drew it. The proof used to be
@@ -476,7 +481,7 @@ in docs/deferred.md.
    reason that must still match a real site. The watched shadows remove
    each link separately. What no gate holds is whether a PHYSICAL device
    reports the size class the simulator did),
-   `tools/check-canvas-blit.sh` (KAYA RASTERIZES, BACKENDS BLIT — the
+   `tools/check-canvas-blit.py` (KAYA RASTERIZES, BACKENDS BLIT — the
    canvas architecture's one rule (docs/canvas-plan.md §1.1), in the
    three places NO SCENE CAN FAIL. A backend that interpreted a draw op
    would draw THE SAME PICTURE, because the hash is taken of the core's
@@ -501,7 +506,7 @@ in docs/deferred.md.
    caught the gate's own first draft, whose comment-stripping shifted
    every line number and whose block reader stopped at the first bracket
    it found rather than the one at the block's indent),
-   `tools/check-appearance.sh` (THE APPEARANCE OVERRIDE IS INERT UNLESS
+   `tools/check-appearance.py` (THE APPEARANCE OVERRIDE IS INERT UNLESS
    ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
    PROCESS adopt an appearance through each platform's own supported
    override — NSApp.appearance, overrideUserInterfaceStyle, libadwaita's
@@ -555,9 +560,9 @@ in docs/deferred.md.
    Thirteen watched negatives, counts printed. The runtime halves are the legs:
    `canvas-*` is the unset proof and `canvasdark-*` the set proof, on all
    five lanes),
-   `tools/check-abort.sh` (uniform abort
+   `tools/check-abort.py` (uniform abort
    semantics, all languages),
-   `tools/check-tx-liveness.sh` (a transaction is usable only inside
+   `tools/check-tx-liveness.py` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
    bindings refuse a closed one at a single write chokepoint, the
    AMBIENT ones have no handle to invalidate and check the thread
@@ -577,7 +582,7 @@ in docs/deferred.md.
    grepping the name — `alive()` is also the ASSET handle's liveness
    check in Java and Swift and comes FIRST in both files. Four
    self-tests perturb copies, counts printed, red demanded on every
-   run), `tools/check-verbs.sh` (every harness verb
+   run), `tools/check-verbs.py` (every harness verb
    and wire constant present in BOTH interpreter backends — plus the
    spec hash pinned against bindings/c/kaya_wire.h, the
    byte-compared-verdict rule, the vtable rule, and the
@@ -628,7 +633,7 @@ in docs/deferred.md.
    the scenes hold it only to (560, 900]. Six watched negatives,
    counts printed, plus the wiring itself watched red once on the
    real file),
-   `tools/check-file-modes.sh` (the file-mode NUMBERS agree with the
+   `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five
    hand-written sites decode it: protocol.rs's `picked_mode_code` sends
@@ -643,7 +648,7 @@ in docs/deferred.md.
    the half that survives a new site: every file that redeems a picked
    file is in one of two tables, and the pass-through table's claim is
    itself checked, by refusing any bare mode number in those files),
-   `tools/check-app-identity.sh` (ONE declared identity, and every
+   `tools/check-app-identity.py` (ONE declared identity, and every
    hand-written copy of it agrees. guests/assets/identity.toml names the
    app and names its mark; a BUILD reads it (the APK's mipmap and
    `android:icon`/`android:label`, the iOS bundle's icon and
@@ -666,7 +671,7 @@ in docs/deferred.md.
    written into an artifact are checked by the packaging step itself,
    which is the path nobody can avoid, and a gate that reads a build
    directory has a red that the last watched negative can manufacture),
-   `tools/check-assets.sh` (ONE ASSET ROOT, ONE RESOLVER, and every
+   `tools/check-assets.py` (ONE ASSET ROOT, ONE RESOLVER, and every
    lane carrying all of it. `asset(name)` moved the "where are the
    bytes and what do I say when they are not there" rule out of eight
    guests into crates/kaya/src/assets.rs, and that is only true while
@@ -709,7 +714,7 @@ in docs/deferred.md.
    screen ties nothing (invariant 3, docs/portfolio-plan.md §6).
    Watched negatives doctor a shadow of the
    real tree with the substitution count printed),
-   `tools/check-staging.sh` (a wired leg's artifact is in the staging
+   `tools/check-staging.py` (a wired leg's artifact is in the staging
    derivation its own runner declares: a mac `$RUST_GUESTS` reference
    outside SCENES/DEPTH_SCENES, a windows suite with no launcher or a
    launcher naming an exe no list builds, a leg whose scene script or
@@ -718,7 +723,7 @@ in docs/deferred.md.
    and absent from the derivation, and the miss cost a full matrix to
    learn what this census says in seconds. Launchers are the artifact
    truth on windows — listdetail runs split.exe, two scenes one guest),
-   `tools/check-c-ids.sh` (ONE ID SPACE FOR WIDGETS AND TEMPLATE NODES,
+   `tools/check-c-ids.py` (ONE ID SPACE FOR WIDGETS AND TEMPLATE NODES,
    on the one tier with no allocator to hold it. Every binding mints
    both from one monotone counter; the eight template-declaring C
    guests hand-author their numbers, and crates/kaya/src/scene.rs keeps
@@ -735,7 +740,7 @@ in docs/deferred.md.
    guests/c/reorder.c today: their N_POSTS and N_ITEMS are row COUNTS
    whose numbers collide with real widget ids. An id it cannot fold to
    a number is a finding naming the site, never a skip),
-   `tools/check-c-bounds.sh` (THE C FLOOR REFUSES PAST ITS CAP INSTEAD OF
+   `tools/check-c-bounds.py` (THE C FLOOR REFUSES PAST ITS CAP INSTEAD OF
    SMASHING PAST IT (ruled 2026-08-26). `KayaTx` was `{buf, len}` — a Go
    slice header missing its third field — and every packer wrote through
    the bare pointer, so a long string was an unchecked memcpy into the
@@ -779,7 +784,7 @@ in docs/deferred.md.
    hexdumped under both headers and compared, 432 bytes identical.
    Four watched negatives, counts printed, each pointed at the mode its
    packer actually runs off the end in),
-   `tools/check-stubs.sh` (no runner wires a scene's legs while its
+   `tools/check-stubs.py` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,
    `depth_stub("<scene>")` / `depthStub` / `kayaDepthStub(_:on:)`, never
@@ -791,15 +796,15 @@ in docs/deferred.md.
    scene's legs are wired on a runner IF AND ONLY IF that runner's
    backend has the feature. The Swift declaration names its platform,
    because that one file serves mac AND iOS),
-   `tools/check-compose.sh` (KayaCompose.kt actually compiles — the
+   `tools/check-compose.py` (KayaCompose.kt actually compiles — the
    swift-typecheck sibling; the emulator must never be the first
    compiler to see the Kotlin layer),
-   `tools/check-detekt.sh` (dead code in the Kotlin sources; the
+   `tools/check-detekt.py` (dead code in the Kotlin sources; the
    COMPILER cannot serve here — K2 moved the UNUSED_* diagnostics into
    IDE inspections (KT-69698), so a computed-and-never-applied local
    compiles clean, which is how a dead lowering once shipped a false
    green),
-   `tools/check-compose-state.sh` (a KayaSceneModel field a composable
+   `tools/check-compose-state.py` (a KayaSceneModel field a composable
    DRAWS FROM must be composition state: Compose recomposes on a
    `mutableStateOf` it read and never on a plain field, so `windowTitle`
    shipped plain for a milestone with the bar composing once and only a
@@ -815,19 +820,19 @@ in docs/deferred.md.
    alert fields written BEFORE `alertId` in APPLY_PRESENT_ALERT, is read
    and held rather than assumed. Four watched negatives, counts printed,
    the first of them the shipped defect itself),
-   `tools/check-jni.sh` (every native a Kotlin or Java class declares is
+   `tools/check-jni.py` (every native a Kotlin or Java class declares is
    in a registration list. JNI's own check runs one way only: it fails
    loudly at attach for a registered native the class lacks, but a
    declared-and-unregistered one just waits, and the UnsatisfiedLinkError
    fires at FIRST USE — which is how `KayaRing.openPicked` sat in the
    desktop-only list for months, under a comment promising it was
    shared),
-   `tools/check-build-id.sh` (the stale-artifact guard is live: each of
+   `tools/check-build-id.py` (the stale-artifact guard is live: each of
    the three compiled artifacts — libkaya, the SwiftUI interpreter, the
    Compose interpreter — carries the id of the sources it came from,
    the verifier rejects one carrying any other, and every lane verifies
    what it runs or ships before it runs or ships it),
-   `tools/check-pins.sh` (every dependency resolved over the network
+   `tools/check-pins.py` (every dependency resolved over the network
    names an exact version — gradle, nuget, SwiftPM, and the container's
    opam index, none of which has a lockfile the way cargo and nix do;
    the SwiftPM clause is the one whose false green cost a debugging
@@ -850,7 +855,7 @@ in docs/deferred.md.
    verifier, so an ambiguous pattern is a failed test too. A second
    tools/ script curling the same flat container is refused BY NAME,
    because reading one file by name is how this hole existed),
-   `tools/check-design-generation.sh` (BOTH macOS design generations stay
+   `tools/check-design-generation.py` (BOTH macOS design generations stay
    on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
    flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the
    vendor-built hosts — python3, dotnet, the zulu JVM — hold the compat
@@ -858,13 +863,13 @@ in docs/deferred.md.
    nobody chose. It measures COMPILES rather than artifacts (two probes
    built on the spot, three hosts resolved off PATH the way the lane
    resolves them) and refuses a verdict unless all five stamps were read),
-   `tools/check-symbols.sh` (every SF name in the mac interpreter's
+   `tools/check-symbols.py` (every SF name in the mac interpreter's
    symbol table exists in Apple's own availability plist at or below
    kaya's floor — an SF Symbols 6 rename resolves on every machine the
    project has and renders BLANK on the floor, so NO scene can see it;
    its self-test perturbs doc.on.doc to the macOS-15 rename out of the
    real file, count printed, and demands the refusal on every run),
-   `tools/check-symbol-parity.sh` (its sibling: ONE symbol vocabulary,
+   `tools/check-symbol-parity.py` (its sibling: ONE symbol vocabulary,
    SIX files. wire::SYMBOLS owns the (value, name) set and is not in
    the spec hash; GTK and WinUI name the wire constants so the compiler
    holds their values and the gate holds coverage, while Swift, Compose
@@ -874,14 +879,14 @@ in docs/deferred.md.
    printed, red demanded on every run — the fifth (a drifted C-floor
    number) added 2026-08-31 when the python conversion's probing found
    that clause had never been watched firing),
-   `tools/check-accent.sh` (the Windows accent near-no-op has a fast
+   `tools/check-accent.py` (the Windows accent near-no-op has a fast
    wall: Fluent fills read six DERIVED stops, never bare
    SystemAccentColor, so writing the bare key moves the text-selection
    highlight and nothing else and no lane can see it — this holds the
    emitted markup to exactly the six stops, self-tested both directions
    on every run; winui::tests' brand test is its rendered-output sibling
    on the windows guest's unit phase),
-   `tools/check-table-card.sh` (A TABLE BOUNDS ITS OWN EXTENT — one
+   `tools/check-table-card.py` (A TABLE BOUNDS ITS OWN EXTENT — one
    semantics, four spellings (ruled 2026-08-25). The mac's NATIVE tier
    has it from the widget and is out of the rule; GTK and WinUI each draw
    a flat card; the iOS SYNTHESIZED tier draws the INSET-GROUPED one —
@@ -933,18 +938,18 @@ in docs/deferred.md.
    lambda, so the file's menu separators and the other three backends'
    native hairlines are untouched.
    59 watched negatives, counts printed, red demanded on every run),
-   `tools/check-keyed.sh` (the gate cache is honest: a change inside a
+   `tools/check-keyed.py` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing but RECORDS its
    passes, the gates that read a built artifact carry the artifact's
-   REAL BYTES in their key (build-id.sh's ARTIFACT_GATES; ratified
+   REAL BYTES in their key (build-id.py's ARTIFACT_GATES; ratified
    2026-08-20 — sources alone cannot vouch for target/), and
    check-build-id alone is never keyed, because caching the staleness
    gate's answer is the defect it exists to find),
    `tools/swift-typecheck.sh` (the guests, the Swift bindings AND the
    SwiftUI interpreter — a gate named after a layer it does not
    compile has burned someone here; docs/traps.md),
-   `tools/java-typecheck.sh` (the binding and every java guest compile —
+   `tools/java-typecheck.py` (the binding and every java guest compile —
    AND, since 2026-08-26, the one clause in that file that is RUN: a
    record LARGER THAN THE ENCODER'S FIRST BUFFER encodes and reads back.
    Java's encoder was a fixed `ByteBuffer.allocate(4096)`, which capped
@@ -954,19 +959,19 @@ in docs/deferred.md.
    negative removes the growth from a COPY, prints the substitution count
    and demands BufferOverflowException by name; six refusal branches,
    all six watched firing, docs/deferred.md's java-record-ceiling entry),
-   `tools/check-ambient-tx.sh` (no guest opens a transaction inside a
+   `tools/check-ambient-tx.py` (no guest opens a transaction inside a
    handler — the binding already did, and a guest that opens its own is
    CAMOUFLAGE: five of them hid a real Python defect behind green
    scenes for months),
-   `tools/check-go-env.sh` (a Go guest reads the HOST's environment
+   `tools/check-go-env.py` (a Go guest reads the HOST's environment
    through kaya.Env, never Go's copy of it: in a c-shared library — the
    Android artifact — os.Getenv is EMPTY FOREVER while C's getenv reads
    the live one, and the failure is silent because an empty
    KAYA_SELFTEST is not an unknown scene name, it is the default arm.
    A parser rather than a grep, because every file the rule protects
    documents the rule),
-   `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`,
-   `tools/js-typecheck.sh` (strict tsc over the JS binding and every
+   `tools/check-wheel.py`, `python3 bindings/python/kaya_app_checks.py`,
+   `tools/js-typecheck.py` (strict tsc over the JS binding and every
    JS guest — the compiler the guests never otherwise meet, since node
    strips their types and checks nothing; it also writes the workspace
    link the guests import through, and prints the census it compiled),
@@ -974,27 +979,27 @@ in docs/deferred.md.
    the python checks' twin, run in a worker because importing the
    binding on the main thread surrenders it to kaya_run;
    docs/js-plan.md §5).
-   One gate sits outside the sweep because it needs docker — gates.sh
+   One gate sits outside the sweep because it needs docker — gates.py
    carries it in EXCLUDED, with that reason, so it is excluded on the
    record rather than merely absent:
-   `tools/check-gtk.sh` compile-checks the GTK backend, which
+   `tools/check-gtk.py` compile-checks the GTK backend, which
    check-targets structurally cannot (gtk-sys needs the distro's
    pkg-config world). Run it after any gtk.rs change — a green
    check-targets does NOT mean every backend compiles.
-3. `tools/validate-mac.sh` — every scene × every language on the
+3. `tools/validate-mac.py` — every scene × every language on the
    SwiftUI interpreter, the one macOS backend (opens windows briefly;
    needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:
-   `tools/validate-all.sh` — ALL FIVE platform lanes run concurrently by
+   `tools/validate-all.py` — ALL FIVE platform lanes run concurrently by
    default (ratified 2026-07-22). After Android exits, the one
    `nice -n 10` gate sweep runs, so the wall is Android plus the sweep
    IN SERIES, not the slowest lane: on the accepted 2026-08-24 run the
    sweep's last ~83s ran with every lane already done (619s wall).
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
-   lanes remain individually runnable (`tools/validate-linux.sh`,
-   `tools/ios/run-sim.sh`, `tools/android/run-emulator.sh`,
-   `tools/deploy-win.sh akhil@192.168.64.2 all`;
+   lanes remain individually runnable (`tools/validate-linux.py`,
+   `tools/ios/run-sim.py`, `tools/android/run-emulator.py`,
+   `tools/deploy-win.py akhil@192.168.64.2 all`;
    `tools/probe-env.sh` checks all environments). Fix-forward if a
    platform fails.
 
@@ -1012,6 +1017,6 @@ remaining work open; that is not a regression.
 SwiftUI (swift/KayaSwiftUI.swift) and Compose
 (android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt) re-implement the
 harness verbs and carry private copies of wire constants, string-matched
-rather than compile-checked. tools/check-verbs.sh now enforces coverage,
+rather than compile-checked. tools/check-verbs.py now enforces coverage,
 but when adding anything new, verify all four layers in BOTH files:
 constants, apply arm, render/model, step-verb arm.

@@ -130,7 +130,7 @@ func Init() {
 // "" is not an unknown scene name, it is the DEFAULT arm, so the wrong
 // spelling fails every step for the wrong reason.
 //
-// tools/check-go-env.sh keeps os.Getenv/os.LookupEnv/os.Environ out of
+// tools/check-go-env.py keeps os.Getenv/os.LookupEnv/os.Environ out of
 // bindings/go and guests/go, because nothing at compile time or run
 // time can tell the two spellings apart.
 func Env(name string) string {
@@ -285,7 +285,7 @@ func Wake() {
 // assets/, which is not a directory and has no path at all. So a guest
 // reads no environment variable at all, and the trap that made
 // kaya.Env, because os.Getenv in a c-shared library reads an environment
-// that is empty forever (tools/check-go-env.sh), is unreachable here.
+// that is empty forever (tools/check-go-env.py), is unreachable here.
 //
 // Two redemptions: hand it to kaya (kaya.FontAsset, tx.AppIdentityAsset
 // — the bytes never enter Go, the core clones a refcount into the blob
@@ -336,7 +336,7 @@ func openAsset(name string) *Asset {
 // END, which is where the census of what IS there lives.
 //
 // NAMED FOR THE CARRYING, not for the answering, and deliberately not
-// `assetWhyNot`: tools/check-diagnostics.sh reads any *WhyNot by name
+// `assetWhyNot`: tools/check-diagnostics.py reads any *WhyNot by name
 // and holds it to the measured-branch rule, which the function that
 // EARNED the name satisfies (`asset_why_not` in
 // crates/kaya/src/assets.rs). This copies that sentence's bytes into a

@@ -4,7 +4,7 @@
 # MUST RUN IN THE INTERACTIVE SESSION (schtasks /it). An ssh session is
 # session 0 with its own window station and can neither see nor touch the
 # desktop, so GetForegroundWindow, UI Automation and PrintWindow all answer
-# nothing there. deploy-win.sh launches both modes as scheduled tasks with
+# nothing there. deploy-win.py launches both modes as scheduled tasks with
 # per-leg task names, because the lane runs up to KAYA_WIN_JOBS legs at once
 # and one shared task name would have them overwrite each other.
 #
@@ -23,7 +23,7 @@
 #       of the app window.
 #
 # THIS FILE IS ASCII ON ITS CODE LINES, and that is a rule with a
-# measurement behind it (tools/flightrec-selftest.sh N5): Windows
+# measurement behind it (tools/flightrec-selftest.py N5): Windows
 # PowerShell 5.1 reads a .ps1 in the machine's ANSI CODEPAGE, so an em-dash
 # in a string literal arrives as three bytes CONTAINING A DOUBLE QUOTE,
 # which closes the string and kills the parse before the first statement.

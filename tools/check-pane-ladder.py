@@ -92,7 +92,7 @@ if platform.system() != "Darwin":
 else:
     if not (ROOT / "target/debug/libkaya.dylib").is_file():
         print("check-pane-ladder: target/debug/libkaya.dylib is not built — "
-              "the probe links against it. Run tools/gates.sh, which builds "
+              "the probe links against it. Run tools/gates.py, which builds "
               "what its gates read.", file=sys.stderr)
         sys.exit(1)
     with scratch_dir("check-pane-ladder-") as tmp:

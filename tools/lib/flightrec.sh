@@ -38,7 +38,7 @@ flightrec_start() {
     # STDOUT ONLY. Merging stderr in with 2>&1 put the retention sentence
     # FIRST — stderr is unbuffered and stdout is not — so the run id
     # became that sentence and every leg record was filed under a path
-    # made of it. Caught by tools/flightrec-selftest.sh's N0.
+    # made of it. Caught by tools/flightrec-selftest.py's N0.
     out="$(python3 "$(flightrec_lib)" start "$lane" "$root")" || out=""
     if [ -z "$out" ]; then
         echo "flightrec: the journal could not be opened — this run is not recorded," \

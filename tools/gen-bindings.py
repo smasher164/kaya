@@ -10,7 +10,7 @@ dev_shell_or_die()
 # Regenerate bindings/<lang> from kaya::spec (kaya-bindgen) — the one
 # spelling of the invocation.
 #
-# Usage: tools/gen-bindings.sh [--check]   (--check fails on stale or
+# Usage: tools/gen-bindings.py [--check]   (--check fails on stale or
 # ungeneratable bindings and touches nothing)
 
 import hashlib

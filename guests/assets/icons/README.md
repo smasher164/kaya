@@ -5,7 +5,7 @@ repo, for this repo: there is no upstream and no licence to carry, which
 is the one hygiene question a vendored binary asks and the reason it is
 answered here rather than left to be looked up.
 
-THIS FAMILY IS THE MARK'S ALONE: tools/check-app-identity.sh reads any
+THIS FAMILY IS THE MARK'S ALONE: tools/check-app-identity.py reads any
 `icons/...` asset open as a reference to the declared mark and refuses
 a name that is not it. A picture that is not the mark lives in
 guests/assets/images/ (its README carries the a11y stand-in's story and
@@ -81,7 +81,7 @@ truecolour, no alpha, no ancillary chunks:
     PY
 
 Regenerating changes the file's BYTES if zlib's output differs, and the
-byte-equality rule (tools/check-app-identity.sh) holds every packaged
+byte-equality rule (tools/check-app-identity.py) holds every packaged
 copy identical to this one — so a regeneration is a tree-wide change and
 the gate will say so. The four colours themselves are frozen: they are
 `expect_app_icon`'s expectation in tools/scenes/identity.steps.
